@@ -1,0 +1,175 @@
+# NC-032 — Patient Grievance / Complaint & Feedback Engine (Complaint Register, Category/Priority Tagging, Auto-Assignment, Escalation Matrix, SLA Timer, RCA/CAPA, Feedback Loop, NABH PRE Indicators, Trend Analytics) — shared engine for EN-014
+
+| Field | Value |
+|---|---|
+| Domain | Non-Clinical / ERP (shared engine with Enablers EN-014 Complaint Management) |
+| Module ID | NC-032 |
+| Phase | 10 (core engine usable from Phase 7 for IP complaints) |
+| Priority | P1 |
+| Complexity | Medium |
+| Depends on | EN-014 (same engine — EN-014 is an alias entry; NC-032 is canonical), EN-030 (Patient Feedback & Survey: NPS/post-visit surveys → detractors auto-create tickets; satisfaction survey after resolution), OP-001/IP-001 (patient/visit/admission context, UHID; complainant may be non-patient), PE-001/OP-020 (patient portal/app complaint form & status), EN-034 (kiosk complaint/feedback), EN-012 (website complaint form; public portal), EN-033 (call centre/IVR complaint capture & callbacks), EN-009/EN-032 (WhatsApp/SMS/email intake & notifications; DLT templates), AI-001 (chatbot intake, later sentiment/NLP), NC-015 (quality: incident reporting linkage, RCA/CAPA engine, NABH PRE/CQI indicators), NC-018/NC-025/NC-033/NC-017/NC-019/NC-028/OP-005/NC-010 (assignment targets & action tasks: housekeeping/facility/food/linen/security/IT/billing/HR staff behaviour), NC-023 (legal escalation: consumer forum, medical negligence notices; legal hold), NC-026 (service recovery ↔ reputation; detractor management), TR-008 (MLC-linked complaints), IP-002 (discharge feedback), OP-006 (ER complaints), EN-038 (SLA/escalation engine), EN-037 (notifications), EN-039 (forms/templates), NC-004 (evidence docs), NC-014 (staff complaint app), NC-011/EN-001, EN-024, EN-041 (group-level view) |
+| Feature flag | `module.grievance.enabled` (sub: `grievance.public_portal`, `grievance.staff_complaints`, `grievance.sentiment_ai`, `grievance.capa_link`, `grievance.kiosk`) |
+| Primary roles | Patient Relations / Grievance Officer (PRO), Grievance Redressal Cell, Department heads (assignees), Quality Manager (54) |
+| Secondary roles | Front office (24; register walk-in complaints), Call centre (25), Nurses/ward in-charges (17; register & act), Hospital Admin/MS/Director (2/4; escalation levels), HR (47; staff behaviour), Legal (NC-023), Marketing (55; service recovery), Patients/Family (59/60; raise/track), Staff (complainants `grievance.staff_complaints`), Auditor (58) |
+| Regulatory | NABH 6th ed. PRE.1–PRE.7 (patient rights & education: complaint/grievance redressal mechanism, information to patients, response TAT documented), NABH CQI (indicators: complaints per 1000 patients, resolution TAT), Clinical Establishments (Central Govt) Rules — Patient Rights Charter (MoHFW 2019 charter: right to redressal; grievance officer display), Consumer Protection Act 2019 (patient as consumer; complaints → district/state/national commissions — evidence retention), Medical Council/NMC regs (professional misconduct complaints channel), Mental Healthcare Act 2017 §27–§28 (complaints for mental health patients), PC-PNDT/Clinical Establishment Acts (state grievance provisions), Sexual Harassment (POSH) for staff complaints (separate ICC channel — routing only), Whistleblower/vigilance policies (public hospitals: CPGRAMS integration), RTI (public hospitals), DPDP Act 2023/Rules 2025 (grievance officer for data principals — DSAR-type complaints routed to DPO; complainant data minimisation), Vulnerable groups (senior citizens/disability acts), Government scheme grievance portals (PMJAY 1800-111-565 / CGRMS — record scheme grievance ids), IRDAI/TPA complaint norms (billing/cashless denials) |
+
+## 1. Purpose
+NC-032 is the hospital's **grievance and complaint engine** for patients, families, visitors and (optionally) staff: omni-channel intake (walk-in, phone/IVR, WhatsApp/SMS/email, app/portal, kiosk, website public portal, QR at bedside/wards, feedback surveys, chatbot), structured **register** with category/sub-category (clinical, administrative, billing, facility/cleanliness, food, staff behaviour, delay/waiting, communication, safety/security, privacy, discharge, pharmacy/lab/radiology, ambulance…), **priority & SLA** (Low 72 h, Medium 48 h, High 24 h, Critical 4 h — configurable), **auto-assignment** to pre-mapped department/person with acknowledgement, **escalation matrix** (L1 dept head → L2 admin → L3 director) on SLA breach, investigation with evidence and **root cause/corrective action** (RCA/CAPA link to NC-015), resolution notes, complainant notification and **satisfaction survey**, reopen handling, legal/regulatory escalation, service recovery (goodwill gestures with approvals), and analytics (volume trend, category distribution, avg resolution time, repeat complaints, department TAT, NABH PRE/CQI indicators). Compliments and suggestions are captured too. Later: AI sentiment & NLP auto-categorisation.
+
+## 2. Users & Jobs-to-be-done
+- **Patient/family** (bedside QR/app/portal/kiosk/WhatsApp/phone/desk): lodge complaint in < 1 min (voice note allowed), get ticket no. & expected TAT, track status, receive resolution, rate satisfaction, reopen if unhappy.
+- **PRO/Grievance officer** (desktop; tablet on rounds): triage inbox, verify category/priority, assign/redirect, coordinate investigation across departments, talk to complainant, document actions, close with resolution letter, escalate to committee/legal, weekly review with management, NABH reports.
+- **Assignee (HOD/in-charge)**: acknowledge, investigate (statements, records with permission, CCTV via NC-019), action tasks to sub-modules (housekeeping task, facility WO, billing correction, staff counselling), root cause, propose resolution, update.
+- **Escalation authorities (Admin/MS/Director)**: view breached/critical, intervene, approve goodwill/refunds (OP-005/IP-005 via approval matrix), committee decisions.
+- **Quality**: link to incidents (NC-015), CAPA effectiveness, PRE indicators, trend analysis, patient rights audits.
+- **HR**: staff-behaviour complaints → disciplinary process (confidential); staff complaints (`grievance.staff_complaints`) about workplace issues (non-POSH; POSH routed to ICC outside system with only routing log).
+- **Marketing/CRM**: detractor recovery, reputation (NC-026).
+
+## 3. Core Workflows
+### 3.1 Complaint registration (all channels)
+1. **Source**: Patient/Family/Visitor/Staff/Doctor/Referrer/Anonymous → **Channel**: in-person (desk/PRO), phone/IVR (EN-033 screen-pop), app/portal (PE-001/OP-020), website public portal (`grievance.public_portal`, EN-012), kiosk (EN-034), WhatsApp/SMS/email (EN-009/EN-032 parsers), bedside/ward QR (per bed/ward with context), survey detractor (EN-030), chatbot (AI-001), social media (manual) → **Capture**: complainant details (name, phone, relation; UHID/visit/admission auto-linked when known; anonymous allowed with reduced follow-up), location (ward/OPD/department), date/time of incident, **category** enum(clinical_care/communication/staff_behaviour/administrative_process/billing_insurance/waiting_delay/facility_cleanliness/food_dietary/security_safety/privacy_confidentiality/discharge_process/pharmacy/laboratory/radiology/ambulance_transport/infrastructure_amenities/patient_rights/other; plus compliment/suggestion types), sub-category, description (text/voice/photo/video), persons involved (staff by name/role optional), **priority** enum(low/medium/high/critical) — auto-suggested by rules (e.g. safety/clinical harm/privacy breach/VIP/media/legal threat → critical/high; billing → medium) & adjustable by PRO → **System** assigns ticket no. (`GRV` series), computes SLA due, links to patient timeline (visible to care team only as "open grievance" flag, not content), acknowledges complainant (SMS/WhatsApp/email with ticket no. & TAT; printed acknowledgement at desk) → Event `grievance.ticket.created`.
+2. Duplicate detection (same complainant/subject within 7 days) → link/merge; **compliments** routed to staff recognition (NC-010 record) & displayed on dashboards; **suggestions** to improvement backlog.
+
+### 3.2 Auto-assignment & acknowledgement
+- Category × location → **assignment matrix** (pre-mapped department/person/role; e.g. cleanliness+Ward 5 → Housekeeping supervisor zone B; billing → Billing manager; clinical care+Cardiology → HOD Cardiology; staff behaviour → HR + department head; privacy → DPO) → assignee notified (push/WhatsApp/email) → **acknowledge** within ack SLA (e.g. 2 h; critical 15 min) → unacknowledged → auto-reassign to backup/PRO → PRO can reassign; multiple departments → sub-tasks with owners; action tasks spawn in operational modules (NC-018 task, NC-025 WO, OP-005 bill review, NC-033 diet issue, NC-019 incident) and completions reflect on the ticket → Event `grievance.ticket.assigned|acknowledged`.
+
+### 3.3 Escalation matrix & SLA timer
+- SLA (default Low 72 h, Medium 48 h, High 24 h, Critical 4 h; ack SLAs; business vs 24×7 per priority) with EN-038 timers: at 75 % → warning to assignee; breach → **Level 1** department head; +50 % → **Level 2** Hospital Admin/MS; +100 % or critical breach → **Level 3** Director/CEO; each level notified with summary & one-click view; clock pauses only for `awaiting_complainant` (max pause window) → escalations logged; complainant informed of delay with revised ETA where appropriate → Event `grievance.ticket.escalated`.
+
+### 3.4 Investigation & resolution
+1. **Assignee** investigates: fact-finding notes, statements (staff/patient), evidence (photos, documents, CCTV clip request NC-019, medical record review with `READ_PHI` justification, bill audit OP-005/IP-005), meets complainant (call log/visit), interim updates → **root cause** (category: process/people/system/communication/infrastructure/policy; 5-why optional) → **corrective action** (immediate fix) & **preventive action** (CAPA in NC-015 when systemic; `grievance.capa_link`) → **resolution**: description, outcome enum(resolved/partially_resolved/not_upheld/withdrawn/redirected/legal), goodwill gesture (apology letter template, waiver/refund → approval matrix in OP-005/IP-005 & finance; complimentary service) → PRO review for high/critical → **close** → complainant notified (resolution summary; letter PDF for formal complaints) → **satisfaction survey** (EN-030 1-click 1–5 + comment; WhatsApp/SMS/IVR) → low satisfaction or explicit reopen request within 15 days → **reopen** (same ticket, escalation level +1) → Event `grievance.ticket.resolved|closed|reopened`.
+2. **Clinical care complaints**: MS/medical director review; potential adverse event → NC-015 incident & mortality/morbidity review; medico-legal risk → NC-023 (legal hold on records/CCTV; insurer intimation); communication with patient per policy (open disclosure).
+3. **Staff behaviour**: HR confidential track; outcome to complainant limited ("action taken"); repeat staff flag.
+4. **Billing/insurance**: bill audit workflow, TPA denial explanations (EN-002), corrections via credit notes with approvals; scheme grievances (PMJAY CGRMS id capture).
+
+### 3.5 Grievance committee & regulatory
+- Weekly/monthly Grievance Redressal Committee (PRE requirement): agenda from open high/critical/repeat, minutes, decisions, action tracking; regulatory/external escalations (consumer forum notice, state grievance cell, CPGRAMS/PMJAY portal, NMC) logged with references and NC-023 case link; RTI/DPDP grievance officer routing (DSAR-type → DPO with statutory timelines).
+
+### 3.6 Feedback loop & service recovery
+- Detractors from EN-030 auto-tickets (category from survey question, priority medium) → PRO call within 24 h; recovery actions; NC-026 excludes from review invitations until resolved; **closed-loop metrics** (recovered %); compliments shared to staff & noticeboards (EN-018 with consent).
+
+### 3.7 Analytics & NABH
+- Complaint volume trend, per 1000 OP visits/IP discharges, category-wise distribution, avg/median resolution time & SLA compliance by department/priority, repeat complaints (same complainant/same category/same staff/location), escalation counts, satisfaction after resolution, top root causes & CAPA effectiveness, department-wise TAT league, PRE indicators (e.g. % complaints resolved within TAT, patient satisfaction index), heat maps by ward/time; management dashboards & monthly PRE report.
+
+### 3.8 Ticket state machine & channel specifics
+- States: `new → assigned → acknowledged → investigating ↔ awaiting_complainant → (awaiting_approval) → resolved → closed`; side states `reopened` (→ investigating at level+1), `redirected` (to POSH/ICC, DPO, external body — with reason & closure of internal ticket), `withdrawn` (complainant), `legal` (NC-023). Guards: acknowledge only by assignee/backup/PRO; resolve requires mandatory fields; close only after complainant informed or 3 logged attempts; reopen within window by complainant (token) or PRO.
+- **WhatsApp intake** (EN-009): keyword/menu bot collects category (buttons), description (text/voice), optional UHID/phone match; sends ticket no.; status queries by ticket no.; complainant replies attach to ticket (public notes) — bot supports 8 languages.
+- **IVR/phone** (EN-033): "press 4 for complaints" → agent screen-pop; voicemail transcription attached; callback tasks.
+- **Kiosk/QR** (EN-034/EN-013): bed/ward QR pre-fills location; anonymous allowed with printed token; smiley + issue chips + optional text/voice.
+- **Website public portal** (EN-012): captcha, OTP optional; status tracking; multilingual; accessible.
+- **Survey detractors** (EN-030): NPS ≤ 6 or specific low-scored dimensions → ticket with survey text; de-duplicated with same-visit tickets.
+- **Staff complaints** (`grievance.staff_complaints`): workplace issues (non-POSH) → HR/admin categories, confidential; POSH → routing record only; whistleblower → vigilance channel record.
+- **Bulk/incident-wide complaints** (e.g. AC failure ward-wide): PRO groups tickets under a parent; resolution cascades to children with individual complainant notifications.
+- **Sentiment/NLP (later, `grievance.sentiment_ai`)**: suggests category/priority & sentiment; human confirms; never auto-closes.
+
+## 4. Data Model (schema `engage`, prefix `grv_`)
+- **grv_categories** (id, hospital_id, code, name, parent_id?, default_priority, default_assignment_rule_id, sla_profile_id, is_clinical bool, is_confidential bool (staff behaviour/privacy), active).
+- **grv_assignment_rules** (id, hospital_id, branch_id?, category_id, location_scope jsonb {ward_ids/department_ids/opd}, assignee_type enum(user/role/department_head/queue), assignee_ref, backup_ref, ack_sla_min, active, priority_order).
+- **grv_sla_profiles** (priority → ack_minutes, resolve_hours, calendar enum(24x7/business), escalation_ladder jsonb [{after_pct, level, notify_roles}]).
+- **grv_tickets** (partitioned monthly): id, hospital_id, branch_id, ticket_no, kind enum(complaint/compliment/suggestion/enquiry_grievance/staff_complaint), channel enum(walk_in/phone/ivr/app/portal/website/kiosk/whatsapp/sms/email/qr_bedside/survey/chatbot/social/letter/other), source_type enum(patient/family/visitor/staff/doctor/referrer/corporate/anonymous), complainant jsonb {name, phone (encrypted), email?, relation, is_anonymous}, patient_id?, visit_id?/admission_id?, location jsonb {branch, department_id?, ward_id?, bed_id?, area}, incident_at?, category_id, subcategory_id?, description text, media_file_ids uuid[], persons_involved jsonb [{staff_id?, name?, role?}], priority enum, priority_reason, sla_ack_due_at, sla_resolve_due_at, acknowledged_at, first_response_at, paused_minutes, escalation_level smallint, escalations jsonb, assignee_user_id?, assignee_department_id?, backup_user_id?, sub_tasks jsonb [{module, ref_id, status}], status enum(new/assigned/acknowledged/investigating/awaiting_complainant/awaiting_approval/resolved/closed/reopened/redirected/withdrawn/legal), root_cause_category?, root_cause_text, corrective_action, preventive_action, capa_ref? (NC-015), incident_ref? (NC-015), outcome enum, resolution_text, goodwill jsonb {type, amount, approval_ref}, resolved_by, resolved_at, closed_by, closed_at, satisfaction_score smallint?, satisfaction_comment, reopen_count, linked_ticket_ids uuid[], legal_case_id? (NC-023), external_refs jsonb (CGRMS/consumer forum/NMC), is_confidential bool, sentiment? (`grievance.sentiment_ai`), tags text[], version. INDEX (hospital_id, branch_id, status, priority), (assignee_user_id, status), (patient_id), (category_id, created_at desc), (sla_resolve_due_at) WHERE status not in (resolved, closed, withdrawn), (complainant phone hash).
+- **grv_ticket_events** (ticket_id, at, by, kind enum(note_internal/note_public/status/assign/priority/escalation/contact_log/evidence/subtask/approval/survey), payload jsonb).
+- **grv_contacts_log** (ticket_id, at, by, mode enum(call/visit/whatsapp/email/letter), summary, outcome, next_follow_up_at).
+- **grv_committee_meetings** (id, branch_id, held_at, members jsonb, agenda_ticket_ids, minutes, decisions jsonb, action_items jsonb), **grv_letters** (ticket_id, kind enum(acknowledgement/interim/resolution/apology), template_id, file_id, sent_via, sent_at).
+- **grv_public_tokens** (ticket_id, token, expires_at) — for status tracking links.
+- **grv_staff_flags** (staff_id, ticket_ids, count_12m, last_at) — HR/PRO restricted.
+- **analytics.grievance_daily** (branch, date, department, category, priority: created, resolved, closed, sla_met, avg_resolution_hrs, escalations, reopens, satisfaction_avg, per_1000_visits, per_1000_discharges, repeat_count).
+- RLS; confidential tickets visible to PRO/HR/named; complainant contact encrypted; retention: tickets 5 years (Consumer Protection limitation 2 years + margin; NABH 3 cycles), legal-hold override (NC-023).
+
+## 5. Business Rules & Validations
+- Every ticket gets acknowledgement to complainant within 5 min (auto) with ticket no. & TAT (if contact available); anonymous tickets tracked via token/kiosk receipt.
+- Priority rules: safety/clinical harm/privacy breach/legal threat/media/VIP → high/critical default (PRO may downgrade with reason); SLA & escalation per profile; clock pauses only in `awaiting_complainant` (max 72 h) — beyond → auto-resume; escalations irreversible in log.
+- Assignment: rule match by category+location; ack SLA; unacknowledged → backup → PRO; reassign requires reason; multi-department sub-tasks must all complete before resolution unless PRO overrides.
+- Resolution requires: root cause category, corrective action, resolution text; high/critical need PRO review; clinical category needs MS/medical director sign-off; goodwill money requires approval via OP-005/IP-005 matrix (never inside NC-032); letter generation for formal/written complaints.
+- Closure only after complainant informed (or attempts logged ≥ 3 for unreachable) → survey sent; reopen window 15 days; reopened ticket escalates one level and cannot be closed by same assignee alone.
+- Confidentiality: staff-behaviour/privacy/POSH-flagged tickets restricted; POSH → route to ICC (record only routing & closure status); DSAR/privacy → DPO with statutory timeline; MLC/legal → NC-023 link & legal hold; content never on patient banner (flag only).
+- Repeat complaint detection: same complainant/category within 90 days or same staff ≥ 3/12 months → flag to Quality/HR.
+- Compliments: shared to staff only with complainant consent for name; suggestions tracked to improvement backlog (NC-015).
+- Numbering `GRV` per branch/FY; audit on all; PHI reads for investigation logged.
+
+## 6. API Surface (`/api/v1/grievance`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| POST | /tickets (staff/desk) ; POST /public/tickets (portal/kiosk/QR; captcha/OTP) ; POST /webhooks/(whatsapp|email|survey|ivr|chatbot) | intake | grievance.ticket.create (staff) / – (public, rate-limited) / integration.grievance.ingest | Y | – |
+| GET | /tickets?status=&priority=&category=&dept=&assignee=&sla= ; GET /tickets/{id} ; GET /public/track/{token} | lists/detail/track | grievance.ticket.read (ABAC dept/assignee/PRO) / public token | – | cursor |
+| POST | /tickets/{id}/(assign|acknowledge|note|contact-log|evidence|subtask|pause|resume|escalate|priority|category|redirect|resolve|review|close|reopen|withdraw|link|merge|legal-escalate) | lifecycle | grievance.ticket.manage (assignee/PRO) / grievance.ticket.review (PRO) / grievance.ticket.close | Y | – |
+| POST | /tickets/{id}/letters/{kind} ; POST /tickets/{id}/survey/send | letters/survey | grievance.ticket.manage | Y | – |
+| GET/POST/PATCH | /config/(categories|assignment-rules|sla-profiles|templates) | config | grievance.configure | Y | – |
+| POST/GET | /committee/meetings | committee | grievance.committee.manage | Y | cursor |
+| GET | /patients/{id}/grievances (flag & list for PRO) ; GET /staff-flags | context | grievance.ticket.read / grievance.staff_flag.read (HR/PRO) | – | – |
+| GET | /dashboard ; /reports/(volume-trend|category-distribution|resolution-tat|sla-compliance|repeat|escalations|satisfaction|department-league|pre-indicators|root-causes|capa-effectiveness|compliments) ; GET /export | analytics | grievance.report.read / .export | – | – |
+| WS | `grv:inbox:<branch>` | live inbox | grievance.ticket.read | – | – |
+
+## 7. Domain Events (outbox)
+- `grievance.ticket.created|assigned|acknowledged|escalated|paused|resumed|resolved|closed|reopened|withdrawn|redirected` {ticket_id, category, priority, department, patient_id?, sla_state} → EN-037 (assignees/escalation levels), EN-009/EN-032 (complainant messages), NC-015 (indicators/incidents), NC-026 (service recovery/reputation), PE-001 (status), NC-011.
+- `grievance.subtask.requested` {module, payload} → NC-018 (task), NC-025 (WO), NC-033, NC-019, OP-005/IP-005 (bill review), NC-028, NC-010 (HR case).
+- `grievance.capa.requested` → NC-015; `grievance.legal.escalated` → NC-023 (case + legal hold).
+- `grievance.satisfaction.recorded` {ticket_id, score} → analytics, NC-026.
+- `grievance.compliment.received` {staff_id?, department} → NC-010 recognition, EN-018 (with consent).
+- Consumes: `feedback.detractor` (EN-030), `patient.registered|ip.admitted|discharge.completed` (context), `housekeeping.task.completed|facility.workorder.closed|bill.credit_note.issued|security.incident.closed` (sub-task closure), `capa.closed` (NC-015), `legal.case.closed` (NC-023), `chatbot.complaint` (AI-001), `ivr.call.logged` (EN-033), `kiosk.feedback.submitted` (EN-034), `whatsapp.inbound|email.inbound` (EN-009/EN-032 parsers).
+
+## 8. Screens (UI)
+- **Public/Patient Complaint Form** (phone web via QR/app/kiosk; no login or OTP): language selector, category icons, description (text/voice), photo, contact (optional), consent note; ticket no. & TAT confirmation; **Track** page via token.
+- **PRO Inbox** (desktop, realtime): tabs New/Assigned/Breached/Critical/Awaiting/Resolved-for-review; SLA countdown colours; bulk assign; ticket drawer (complainant, patient context banner (limited), timeline, sub-tasks, evidence, contact log, letters); shortcuts `A` assign, `K` acknowledge, `E` escalate, `R` resolve, `L` letter, `J/K` navigate.
+- **Assignee View** (HOD; web/mobile): my tickets, acknowledge, investigate notes, spawn sub-task (pick module), root cause form, propose resolution.
+- **Escalation Dashboard** (Admin/MS/Director; mobile-friendly): breached & critical tickets, one-tap call complainant/assignee, intervene note.
+- **Desk Registration** (front office/PRO; tablet): quick form with UHID search, print acknowledgement slip.
+- **Committee Console**: agenda builder, minutes, decisions → tasks.
+- **Analytics** (desktop/TV for management): trend lines, category pies, department TAT league, heat map by ward, satisfaction, PRE indicator cards; drill-down.
+- **Config**: category tree, assignment matrix editor (category × location → assignee/backup), SLA/escalation ladder, templates.
+- Empty/error states; WCAG 2.2 AA; i18n (complainant-facing multi-language incl. voice prompts).
+
+## 9. Integrations
+- EN-030 surveys (detractor → ticket; post-resolution survey), EN-009 WhatsApp (intake bot flow, templates), EN-032 email parser, EN-033 IVR/CTI (complaint option, screen-pop, callbacks), EN-034 kiosk, EN-012 website form, AI-001 chatbot, PE-001/OP-020 portal/app, EN-013 QR per bed/ward, EN-018 compliments board, NC-015 incidents/CAPA/indicators, NC-023 legal, NC-026 reputation, OP-005/IP-005 bill audit & credit notes (approvals), NC-018/NC-025/NC-033/NC-019/NC-028/NC-010 sub-tasks, EN-038 SLA engine, EN-039 letters, NC-004 evidence, government portals (CPGRAMS/PMJAY CGRMS reference capture; API where available via EN-017), NC-011/EN-001 analytics, EN-041 group dashboards.
+
+## 10. Reports & Analytics
+- Complaint volume trend (daily/weekly/monthly; per 1000 OP visits & IP discharges), category & sub-category distribution, priority mix, SLA compliance (ack/resolution) by department/priority, average/median resolution time, escalation counts by level, repeat complaints (complainant/category/staff/location), department-wise TAT league & open ageing, root-cause Pareto & CAPA linkage/effectiveness, satisfaction after resolution & reopen rate, channel mix, compliments by staff/department, clinical complaints reviewed by MS, legal escalations, NABH PRE indicators pack (monthly), grievance committee minutes register. Read model `analytics.grievance_daily`.
+
+## 11. Notifications
+- Complainant: acknowledgement (ticket no., TAT), interim updates, resolution summary/letter, satisfaction survey, reopen confirmation (SMS/WhatsApp/email/IVR; language preference); Assignee: new ticket (push+WhatsApp), ack reminder, SLA 75 %/breach, complainant reply, sub-task closure; Backup/PRO: unacknowledged reassignment; Escalation levels: L1/L2/L3 alerts with summary; MS: clinical-care complaints; HR: staff behaviour tickets; DPO: privacy complaints; Legal: legal threats; Quality: repeat/critical, CAPA due; Management: weekly digest, committee agenda.
+
+## 12. Permissions (RBAC keys)
+`grievance.ticket.create` (staff), `grievance.ticket.read` (ABAC: assignee/department/PRO all; confidential restricted), `grievance.ticket.manage` (assignee/PRO), `grievance.ticket.review` (PRO for high/critical), `grievance.ticket.close`, `grievance.ticket.reopen` (PRO/complainant via token), `grievance.escalation.view` (admin/MS/director), `grievance.legal.escalate` (PRO/legal), `grievance.committee.manage`, `grievance.staff_flag.read` (HR/PRO), `grievance.configure`, `grievance.report.read`, `grievance.export` (audited); `integration.grievance.ingest`. Defaults: PRO/Grievance officer all; HOD (5) manage own department; Receptionist (24)/Call centre (25)/Nurses (17) create; Admin (2)/MS (4) escalation view & clinical review; Quality (54) reports/CAPA; HR (47) confidential staff behaviour; Patients via portal token.
+
+## 13. Non-functional
+- Volumes: 2000-bed hospital → 50–150 complaints/day + 200 survey detractors/day + compliments; inbox realtime; ticket create p95 < 200 ms; public form < 1 s load on 3G; acknowledgement message within 5 min (worker).
+- Availability: public intake works when staff modules degraded (static PWA form + queue).
+- Security/privacy: complainant PII encrypted, minimal; confidential tickets ACL; PHI reads logged; RLS; rate limits/captcha on public endpoints; export audited.
+- Offline: desk/tablet registration queues; PRO inbox online.
+- Printing: acknowledgement slips, resolution/apology letters (letterhead EN-039), PRE reports; i18n (patient-facing 8+ languages, voice); WCAG 2.2 AA.
+
+## 14. Acceptance Criteria
+1. Given a family member scans the bed QR in Ward 5 and submits "toilet not cleaned" with a photo, then a ticket is created with category facility_cleanliness, location Ward 5, priority medium (SLA 48 h), auto-assigned to housekeeping supervisor zone B, and an SMS/WhatsApp acknowledgement with ticket no. is sent within 5 min; a NC-018 task is spawned.
+2. Given the assignee does not acknowledge within 2 h, then the backup is assigned and PRO notified; the original assignee's ack SLA breach is recorded.
+3. Given a high-priority ticket (24 h) not resolved at 24 h, then L1 (dept head) is notified; at 36 h L2 (Admin); at 48 h L3 (Director), each logged with timestamps.
+4. Given a complaint of "wrong medication given" (clinical, potential harm), then priority critical (4 h) is suggested, MS is notified, and resolution requires an NC-015 incident link and MS sign-off.
+5. Given a billing complaint resolved with a ₹2,000 waiver, then the goodwill requires approval through OP-005's discount/credit-note matrix; the ticket shows the approval reference and cannot close until approved.
+6. Given a resolved ticket, then the complainant receives the resolution summary and a 1–5 survey; a score of 1 with "not resolved" reopens the ticket at escalation level +1.
+7. Given the same complainant raises a similar cleanliness complaint within 90 days, then the ticket is flagged repeat and Quality is notified.
+8. Given a staff-behaviour complaint, then only HR, PRO and named users can view content; department dashboards show only counts.
+9. Given an EN-030 NPS response of 3 with comment "long wait at billing", then a ticket is auto-created (waiting_delay, billing) and NC-026 suppresses review invitations for that patient until closure.
+10. Given the month closes, then the PRE indicator report shows complaints per 1000 visits/discharges, % resolved within TAT, avg resolution time by department, and satisfaction index, exportable to PDF.
+11. Given a legal-threat keyword or complainant states consumer forum, then PRO can legal-escalate → NC-023 case created with legal hold on records/CCTV; ticket status `legal`.
+12. Given a user from Cardiology with `grievance.ticket.read` (dept scope), then tickets of other departments are not visible (403).
+13. Given the public form is used 20 times in a minute from one IP, then rate limiting/captcha blocks abuse without affecting authenticated intake.
+14. Given a WhatsApp message "AC not working in room 512 since morning" from a registered attendant number, then the bot creates a facility ticket pre-linked to admission in bed 512, replies with ticket no., and later status queries by ticket no. return current status.
+15. Given 12 tickets about AC failure in Ward 5 within an hour, then PRO groups them under a parent; resolving the parent cascades resolution to children and each complainant is individually notified.
+16. Given a complainant withdraws via portal, then status `withdrawn`, reason captured, no survey sent, and the ticket still counts in volume analytics but not TAT.
+17. Given a POSH-flagged staff complaint, then only a routing record with closure status exists in NC-032; content is not stored, and ICC is notified via configured email.
+18. Given an anonymous kiosk complaint, then a printed token allows status lookup at the kiosk/portal without any personal data.
+
+### 14.1 Test data & golden path (for e2e)
+- Seed categories/assignment matrix for 5 departments, SLA profiles, 3 escalation levels, letter templates; run: QR intake → auto-assign → NC-018 sub-task → resolve → survey → reopen → escalate L1/L2 → close; billing complaint with goodwill approval; clinical complaint with MS sign-off; PRE report export.
+
+## 15. Enhancements / Later phases
+- From VIMS sheet row 56 enhancements: AI sentiment analysis on complaints (Phase 12 `grievance.sentiment_ai`), NLP auto-categorisation (Phase 12), repeat complaint correlation (Phase 10 core above), NABH quality indicator linkage (core), public complaint portal on website (core `grievance.public_portal`), complaint-to-improvement workflow (CAPA link core; improvement backlog with NC-015).
+- (market) Voice-of-patient dashboards blending NPS/reviews/complaints (NC-026/EN-030), WhatsApp conversational complaint bot with status queries, predictive risk of escalation/legal (AI-005), patient-rights e-learning nudges (PE-003), integration with government grievance portals (CPGRAMS/CGRMS APIs), staff recognition wall from compliments, real-time ward-level satisfaction pulse (bedside tablets), open-disclosure workflow templates, group-level benchmarking (EN-041).
+
+## 16. Open Questions for the Hospital
+1. Current grievance policy: categories, priorities, SLAs, escalation levels & names (PRO, admin, director), committee cadence?
+2. Intake channels to enable at go-live (QR per bed, WhatsApp number, kiosk, website, IVR option) and languages?
+3. Assignment matrix by category/location — who handles what today; backup persons?
+4. Goodwill/refund approval limits (finance) and letter templates/letterhead; formal written complaint process?
+5. Confidential categories & who may view (staff behaviour, POSH routing to ICC, privacy → DPO)?
+6. Public/government scheme grievance obligations (PMJAY CGRMS, CPGRAMS, RTI) applicable?
+7. NABH PRE indicator definitions & targets used by Quality; reporting formats?
+

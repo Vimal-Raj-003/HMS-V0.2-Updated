@@ -1,0 +1,217 @@
+# IP-014 — IP Pharmacy / Ward Stock (ward sub-stores, unit-dose & patient-specific dispensing, ward indents, floor-stock replenishment, returns & credit notes, narcotic/controlled substance double-check & NDPS register, pharmacist order verification, ADR capture, discharge take-home)
+
+| Field | Value |
+|---|---|
+| Domain | IP / Inpatient |
+| Module ID | IP-014 |
+| Phase | 7 |
+| Priority | P1 |
+| Complexity | Medium–High |
+| Depends on | OP-003 (drug master, pharmacy inventory, narcotic register engine, interaction/allergy checks, OP dispensing), NC-006 (stock ledger, batches, FEFO, sub-stores/locations, transfers, counts, ABC/VED), NC-005 (purchase indents from ward for non-stock), OP-002 (CPOE IP medication orders, e-Rx, stop/hold/renew), IP-003 (MAR schedule, administration events, omitted/unavailable doses, witness), IP-004 (bedside barcode scan of unit-dose label), IP-001 (admission, bed/ward, transfers → stock re-pointing), IP-002 (discharge medication reconciliation, take-home Rx, return of unused), IP-005 (charge posting per issue/administration, credit on returns, package inclusion), IP-009/IP-015 (ICU/NICU infusions, TPN, syringe pump drugs), IP-013 (crash cart replenishment), IP-023 (chemo compounding hand-off), OP-011 (TPN/enteral feeds if pharmacy compounds), EN-029 (CDSS: interaction, dose range, renal dosing, duplicate therapy, allergy), EN-013 (unit-dose labels, patient wristband, bin QR), EN-005 (label printers), EN-038 (approval matrix: non-formulary, narcotic issue, high-cost), EN-037 (notifications), NC-015 (ADR/medication error reporting, PvPI), EN-024 (audit), RC-002/EN-002 (payer formulary/non-payable items) |
+| Feature flag | `module.ip_pharmacy.enabled` (sub-flags: `ipp.unit_dose`, `ipp.pharmacist_verification`, `ipp.floor_stock_par`, `ipp.narcotic_cabinet`, `ipp.adr_pvpi`, `ipp.discharge_takehome`, `ipp.automated_cabinet` (ADC integration)) |
+| Primary roles | Pharmacist (IP / Ward stock) (31), Pharmacy In-charge (32), Nurse — Ward (17), Nurse — ICU (18), Nurse Supervisor (22), Ward Boy (23: transport of indents) |
+| Secondary roles | Doctor — IP (7), Intensivist (11), Anaesthetist (10), Resident (14), Billing IP (27), Insurance/TPA (28), Stores (44), Purchase (45), Quality (54), Infection control (21: antibiotic stewardship), MS (4), Auditor (58), Drug inspector (external, read via reports) |
+| Regulatory | NABH 5th ed. MOM.1–MOM.11 (medication management: formulary, storage, prescription, verification by pharmacist, dispensing, high-alert & LASA, narcotic control, ADR/medication error reporting, self-medication policy, medication reconciliation), NDPS Act 1985 & Rules (Schedule X / narcotics: locked storage, register Form 3F-style, two-person, wastage witness, monthly returns), Drugs & Cosmetics Act & Rules (Schedule H/H1 register, expiry, storage temp), PvPI (ADR reporting form to IPC/AMC), CDSCO (recall), GST (drug HSN, IP supply as composite/itemised per policy), DPDP (drug profile PHI), ISMP high-alert list & tall-man lettering, WHO AWaRe antibiotic classification |
+
+## 1. Purpose
+IP-014 is the inpatient arm of the pharmacy: it turns verified CPOE orders into unit-dose (or per-patient) issues to the ward, manages each ward's floor stock as a controlled sub-store with par levels and indents, executes the return/credit loop for unused medicines, enforces two-person control and a digital NDPS register for narcotics/controlled substances, gives the pharmacist a verification worklist with CDSS, captures ADRs (PvPI) and medication errors, and hands off discharge take-home medicines. Every issue and return posts stock movement (NC-006) and patient charges/credits (IP-005) atomically, so ward stock, MAR and the bill always agree.
+
+## 2. Users & Jobs-to-be-done
+- **IP pharmacist** (desktop, 24×7; 300–600 IP orders/day in a 2000-bed site): verify new/changed IP orders (allergy, interaction, dose, renal, duplicate, non-formulary), fill unit-dose carts per ward per round (e.g., 06:00/14:00/22:00), print patient-labelled unit-dose packs, fill ward indents (routine/urgent/STAT), process ward returns and issue credits, control narcotic issues with second person, answer nurse queries via task chat.
+- **Ward/ICU nurse** (nursing station desktop + IP-004 phone/tablet): raise indents (patient-specific or floor stock), receive & acknowledge unit-dose cassette per patient (scan), report unavailable/omitted doses, return unused/discontinued items, request narcotic doses & record witnessed wastage, count narcotic cupboard at handover.
+- **Pharmacy in-charge** (desktop): formulary & par levels per ward, non-formulary approvals, narcotic register oversight & monthly returns, stock audits/cycle counts, LASA/high-alert configuration, KPIs.
+- **Doctor** (desktop/IP-010): sees pharmacist interventions/queries, accepts substitutions, orders discharge medicines; antibiotic stewardship prompts (IP-012).
+- **Billing/TPA** (desktop): view itemised drug charges & credits, non-payable/consumables classification for insurer, package inclusions.
+- **Quality/ICN**: ADR/medication error trends, antibiotic consumption (DDD/1000 patient-days).
+
+## 3. Core Workflows
+
+### 3.1 Ward sub-store setup, formulary & par levels
+1. **In-charge** creates one **inventory location per ward/ICU/OT/crash cart/narcotic cupboard** (NC-006 sub-store, `type=ward_stock|narcotic_safe|crash_cart|adc`), assigns custodian (ward in-charge), storage conditions (room temp / 2–8 °C fridge with EN-042 sensor optional), and **par list** (`ipp.floor_stock_par`): item, min, max, reorder qty, VED class, LASA flag, high-alert flag, is_controlled, floor-stock allowed (yes/no — e.g., paracetamol yes, insulin patient-specific).
+2. **Formulary** (OP-003 master): IP-usable flag, restricted (needs approval: e.g., meropenem → ICN/consultant approval; non-formulary → in-charge), payer formularies (EN-002) mapped; substitution groups (generic/therapeutic) for pharmacist suggestions.
+3. Rounds schedule per ward (unit-dose fill times, cassette exchange), STAT SLA (default 30 min), routine indent SLA (2 h), night indent policy.
+
+### 3.2 Order verification (`ipp.pharmacist_verification`) → MAR release
+1. **Doctor** enters IP medication order in OP-002 CPOE (drug, dose, route, frequency, duration, PRN rules, infusion rate, weight-based dose, start/stop) → Event `rx.ip.ordered` (order enters `pending_verification` when flag on; else `active` directly and IP-003 builds MAR).
+2. **Pharmacist worklist** sorted by priority (STAT > ICU > high-alert > age < 12/> 65 > others; SLA timers): shows patient banner (weight, renal function eGFR/creatinine from OP-004, allergies, diagnoses, current meds, labs INR/K+/glucose), EN-029 alerts (allergy, interaction severity, dose range, renal/hepatic adjustment, duplicate therapy, IV compatibility, LASA), payer formulary status, stock availability (ward floor stock / main pharmacy / other branch), cost.
+3. **Pharmacist** action: `verify` (→ order `active`, Event `rx.ip.verified` → IP-003 MAR generation; unit-dose fill task created), `verify_with_note`, `query` (creates doctor task with structured reason: dose clarification, interaction, duplicate, unavailable → suggest alternative; doctor accepts/rejects in OP-002/IP-010; SLA 30 min ICU / 2 h ward), `substitute` (generic/therapeutic per policy with doctor auto-accept rules configured; else query), `reject` (reason). Every action = `pharmacy_interventions` row (type, severity, accepted bool, cost avoided) → NABH MOM indicators.
+4. Auto-verify rules configurable (e.g., ward floor-stock OTC drugs, continuation orders unchanged) to keep worklist manageable; high-alert, narcotic, chemo, paediatric weight-based never auto-verified.
+5. Order changes/stop/hold from CPOE → Event `rx.ip.changed|stopped` → un-issued unit doses cancelled, issued-but-unadministered doses flagged for return.
+
+### 3.3 Unit-dose / patient-specific dispensing (`ipp.unit_dose`)
+1. **Fill list generation** per ward per round: system computes doses due in the next window (e.g., 24 h or next 8 h) from MAR schedule (IP-003) minus doses already in ward stock/patient bin → **fill list** grouped by patient → bed → drug (with batch FEFO suggestion from main pharmacy stock).
+2. **Pharmacist** picks (barcode scan of item/batch), system prints **unit-dose labels** (EN-013/EN-005: patient name, UHID, IP no., bed, drug generic + brand, strength, dose, route, scheduled time, batch, expiry, barcode = `issue_line_id` GS1-style) per dose or per 24-h strip; high-alert red band, LASA tall-man; controlled items excluded (go via §3.5).
+3. **Issue** posts: NC-006 stock transfer main pharmacy → patient bin at ward location (`patient_id` dimension on stock: `patient_stock`), IP-005 charge line per issued unit (or per administration if hospital policy `charge_on_administration`), Event `pharmacy.ip.issued` {admission_id, lines}. Issue document (`ip_issues`, series `IPI/{BR}/{FY}/{SEQ}`) with cassette/tote id; ward boy transport task; **nurse receives** by scanning cassette QR + spot-scan of lines → `received_at`; discrepancies recorded → pharmacist task.
+4. **Bedside**: IP-004 scans wristband + unit-dose barcode → IP-003 MAR 5-Rights; administration Event `nursing.mar.administered` consumes patient stock (`patient_stock` → consumed) and, if `charge_on_administration`, posts charge; `held/refused/omitted` keeps stock in bin → auto-return list.
+5. **Infusions/compounded** (ICU): pharmacist prepares syringes/bags (IV admixture worksheet, concentration, diluent, stability/expiry hours, label with beyond-use time) → issue as compounded product with component batches (traceability); TPN via OP-011/IP-015 worksheet; chemo via IP-023 (separate hazardous workflow, this module records the issue).
+6. **STAT / first dose**: nurse or doctor marks STAT → pharmacist STAT queue → issue in ≤ 30 min else escalates; ward may take from floor stock (`floor_stock_borrow`) recorded against the patient (system reconciles: no double charge).
+
+### 3.4 Ward indents & floor-stock replenishment
+1. **Nurse** raises **indent** (`ip_indents`): type `patient_specific` (patient + drug list; used when unit-dose off, or for items outside cassette cycle), `floor_stock` (against par list; system pre-fills suggested qty = max − on-hand from ledger), `crash_cart_replenish` (from IP-013), `emergency` (STAT); attaches justification for restricted drugs; approval routing (EN-038) for restricted/non-formulary/high-cost.
+2. **Pharmacist** picks & issues (partial allowed → back-order tracked; substitution with reason & nurse acknowledgement; out-of-stock → NC-005 purchase indent / other-branch transfer suggestion EN-041), prints issue slip, transport task; **nurse receipt** scan; unreceived issue after 60 min → alert both sides.
+3. **Auto-replenishment** job (nightly or per shift): for each ward location, items below min → draft floor-stock indent for in-charge approval (one-tap approve); ABC/VED weighting from NC-006.
+4. **Consumption**: floor-stock items administered (IP-003 `nursing.mar.administered` with `source=floor_stock`) or consumables used (`nursing.consumable.used`) reduce ward ledger and post patient charge (item-wise or included per package/bed class policy IP-005/IP-008); unattributed shrinkage surfaces in cycle counts.
+5. **Patient transfer** (IP-001 `ip.transferred`): patient bin stock moves logically to the destination ward location (`patient_stock.location_id` update, movement row); unit-dose fill lists switch to the new ward from next round.
+
+### 3.5 Narcotic / controlled substance control (`ipp.narcotic_cabinet`, NDPS)
+1. Controlled items flagged in drug master (`schedule enum(X/H1/narcotic/psychotropic/other_controlled)`); stored only in `narcotic_safe` locations (main pharmacy vault, ward narcotic cupboard, OT/ICU safes) with **two-key custodians**.
+2. **Issue to ward** requires: verified order (or ward par for approved wards e.g. ICU/OT), pharmacist + witness (second authenticated user: pharmacist/nurse) both sign (PIN/biometric), qty in ampoules/tablets, batch; **NDPS register** entry auto-created (`narcotic_register` — running balance per drug per location, receipts/issues/administrations/wastage/returns/transfers, folio-style numbering, immutable, hash chain, printable in the state-prescribed format).
+3. **Administration**: IP-003 MAR requires witness for narcotic; partial ampoule → **wastage** record (qty wasted, method, witness) at the same time; register balance decremented; **daily/shift count** at handover (IP-003 §3.8) — both nurses count physical vs system, discrepancy → mandatory incident (NC-015) + in-charge/pharmacy in-charge alert, cannot close handover until acknowledged.
+4. **Return** of unused narcotics to pharmacy with witness; **discharge/death** with active narcotic order → auto-task to return remaining stock; **breakage/theft** → incident + register annotation + police intimation prompt per policy.
+5. **Reports**: daily balance statement per location, monthly consumption returns for Drugs Control (Form per state), Schedule H1 register (name/address of patient & prescriber, drug, qty) auto from issues, expiry of controlled stock (destruction under supervision — record with witnesses & authority).
+6. Automated dispensing cabinet (`ipp.automated_cabinet`, market): optional EN-042/vendor API — cabinet events (remove/return/waste per patient) ingested into the same tables.
+
+### 3.6 Returns & credit notes
+1. **Nurse** creates **return** (`ip_returns`): from patient bin (discontinued/discharged/refused/expired-in-ward), auto-suggested list from cancelled MAR doses & unadministered issued lines; scan each unit-dose barcode; condition (sealed/unopened/cold-chain intact) → returnable; opened/tampered/broken cold chain → non-returnable (waste record BMW NC-016).
+2. **Pharmacist** accepts (verifies barcode/batch, expiry, condition) → stock back to pharmacy (NC-006 return movement) → **credit** to patient bill (IP-005 reversal line referencing original charge; if bill already finalised → IP-005 supplementary credit/refund policy) → Event `pharmacy.ip.returned` {credit amount}. Rejected lines → nurse informed with reason; disputes to in-charge.
+3. **Floor-stock returns** (excess/near-expiry ≥ 3 months for redistribution) — stock-only, no patient credit; near-expiry redistribution suggestion across wards/branches.
+4. **Discharge**: IP-002 `ip.discharge.initiated` → auto "return unused" task with pre-filled list; discharge cannot complete (per IP-002 checklist) while unreturned narcotics exist; other unreturned items produce warning + charge stays.
+
+### 3.7 Discharge take-home (`ipp.discharge_takehome`)
+1. Discharge medication list (IP-002 reconciliation) → pharmacist prepares take-home pack (OP-003 OP dispensing engine, IP-linked bill or separate OP bill per policy), counsels (printed multilingual dosing schedule, pictograms), delivers to bedside or pharmacy counter pickup; PE-002 follow-up refill reminders.
+
+### 3.8 ADR & medication error capture (`ipp.adr_pvpi`)
+1. **Nurse/doctor/pharmacist** records **ADR** from MAR/patient chart: suspected drug(s) with batch, reaction (MedDRA/free text + SNOMED), onset, severity (mild/moderate/severe/life-threatening/fatal), seriousness criteria, causality (WHO-UMC / Naranjo auto-scored), action taken (withdrawn/dose reduced/continued), outcome, dechallenge/rechallenge → patient allergy list update prompt (OP-001/EN-029) → **PvPI suspected ADR form** PDF/CSV export for the AMC (Adverse Drug Reaction Monitoring Centre) → NC-015 record; Event `pharmacy.adr.recorded` → prescriber push, ICN if antimicrobial.
+2. **Medication error** (near miss/wrong drug/dose/patient/time/omission) from IP-003 or pharmacist → NCC MERP category, root cause, NC-015 incident; LASA/high-alert trending → in-charge review.
+
+### 3.9 Cycle counts, expiry & cold chain
+1. NC-006 cycle counts scheduled per ward (weekly A-class, monthly others); variance approval; expiry ≤ 90/60/30 d lists per ward; fridge temperature (EN-042) breach → ward + pharmacy alert with impacted stock list.
+
+### 3.10 Exceptions & offline
+- Pharmacy system down: ward uses floor stock + paper indent; backfill entries with `late_entry` flag; MAR continues (IP-003 offline).
+- Wrong ward delivery: cassette re-route with movement record; unit-dose label reprint requires reason (audit).
+- Patient dies/absconds: outstanding issues → return task; narcotic reconciliation forced.
+
+## 4. Data Model (schema `pharmacy` / `ip`)
+- **pharmacy.ip_order_verifications** (id, hospital_id, branch_id, order_id (CPOE), admission_id, patient_id, priority enum(stat/icu/high_alert/paed_geri/routine), status enum(pending/verified/queried/substituted/rejected/auto_verified), pharmacist_id, decided_at, cdss_alerts jsonb, sla_due_at, notes) — index (hospital_id, status, sla_due_at), (order_id).
+- **pharmacy.pharmacy_interventions** (id, verification_id?, admission_id, type enum(dose/interaction/allergy/duplicate/renal/hepatic/formulary/substitution/iv_compat/other), severity enum(minor/significant/major/catastrophic), proposal jsonb, doctor_response enum(accepted/rejected/modified/no_response), responded_at, cost_avoided numeric(14,2)).
+- **pharmacy.ward_par_levels** (hospital_id, branch_id, location_id (NC-006), item_id, min_qty, max_qty, reorder_qty, ved enum(V/E/D), floor_stock_allowed bool, high_alert bool, lasa_group?, active) — unique (location_id, item_id).
+- **pharmacy.ip_indents** (id, hospital_id, branch_id, indent_no (series `IND/{BR}/{FY}/{SEQ}`), type enum(patient_specific/floor_stock/crash_cart_replenish/emergency/narcotic), from_location_id (ward), to_location_id (pharmacy), admission_id?, priority enum(stat/urgent/routine), status enum(draft/pending_approval/approved/picking/partially_issued/issued/received/closed/cancelled), requested_by, requested_at, approval_ref?, sla_due_at, notes) + **pharmacy.ip_indent_lines** (indent_id, item_id, order_id?, qty_requested, qty_approved, qty_issued, substitute_item_id?, reason, backorder_qty).
+- **pharmacy.ip_issues** (id, issue_no series `IPI/…`, indent_id?, fill_round_id?, type enum(unit_dose/indent/stat/compounded/narcotic/floor_stock/crash_cart), from_location_id, to_location_id, admission_id?, cassette_id?, issued_by, witness_id? (narcotic), issued_at, transported_by?, received_by?, received_at, status enum(issued/in_transit/received/discrepancy/cancelled)) + **pharmacy.ip_issue_lines** (issue_id, item_id, batch_id, expiry, qty, unit, unit_dose_label_ids jsonb, mar_schedule_ids jsonb, charge_line_id?, price, status enum(issued/received/administered/returned/wasted/cancelled)) — partition monthly; index (admission_id, issued_at), (to_location_id, status).
+- **pharmacy.unit_dose_fill_rounds** (id, ward_location_id, round_at, window_from, window_to, generated_at, status, filled_by, line_count).
+- **pharmacy.unit_dose_labels** (id, issue_line_id, admission_id, drug_text, dose_text, scheduled_at, barcode, printed_at, reprint_count, reprint_reason) — index (barcode).
+- **pharmacy.patient_stock** (hospital_id, admission_id, location_id, item_id, batch_id, qty_on_hand, updated_at) — unique (admission_id, location_id, item_id, batch_id).
+- **pharmacy.ip_returns** (id, return_no series `IPR/…`, admission_id?, from_location_id, to_location_id, type enum(patient/floor_stock/narcotic/expiry), status enum(draft/submitted/accepted/partially_accepted/rejected), created_by, accepted_by, accepted_at, credit_note_id?) + **pharmacy.ip_return_lines** (return_id, issue_line_id?, item_id, batch_id, qty, condition enum(sealed/opened/damaged/cold_chain_broken/expired), accepted_qty, reject_reason, credit_amount, waste_record_id?).
+- **pharmacy.narcotic_register** (id, hospital_id, branch_id, location_id, item_id, folio_no, entry_seq, at, type enum(receipt/issue/administration/wastage/return/transfer/count/adjustment/destruction), qty_in, qty_out, balance, patient_id?, admission_id?, order_id?, prescriber_id?, by_user_id, witness_id, remarks, ref_table, ref_id, prev_hash, sha256) — append-only, index (location_id, item_id, at), unique (location_id, item_id, entry_seq).
+- **pharmacy.narcotic_counts** (location_id, shift_id, counted_at, nurse1_id, nurse2_id, lines jsonb [{item, system_qty, physical_qty, ok}], discrepancy bool, incident_id?, key_handover_ack bool).
+- **pharmacy.compounding_worksheets** (id, admission_id, order_id, product_desc, components jsonb [{item, batch, qty}], diluent, final_conc, volume, prepared_by, checked_by, prepared_at, beyond_use_at, label_id, hazardous bool).
+- **pharmacy.adr_reports** (id, hospital_id, patient_id, admission_id?, suspected_drugs jsonb [{item, batch, dose, route, start, stop}], reaction_text, meddra_code?, snomed_code?, onset_at, severity, serious_criteria jsonb, causality_who_umc, naranjo_score, action_taken, outcome, dechallenge, rechallenge, reporter_id, reported_at, pvpi_form_file_id?, sent_to_amc_at?, incident_id?, allergy_added bool).
+- **pharmacy.medication_errors** (id, admission_id?, stage enum(prescribing/transcribing/dispensing/administration/monitoring), ncc_merp_category enum(A–I), description, drugs jsonb, harm bool, reporter_id, incident_id, root_cause, actions).
+- Read models: `analytics.mv_ip_pharmacy_kpis_daily` (verification TAT, STAT TAT, fill accuracy, returns %, interventions), `analytics.mv_ward_stock_status` (par vs on-hand, expiry), `analytics.mv_antibiotic_ddd` (DDD/1000 patient-days by AWaRe class), `analytics.mv_narcotic_balances`.
+
+## 5. Business Rules & Validations
+- Order → MAR only after verification when `ipp.pharmacist_verification` on; STAT orders may release MAR immediately with retrospective verification ≤ 30 min (flagged).
+- Verification SLA: STAT 15 min, ICU 30 min, routine 60 min (configurable); breach → in-charge; unresolved query > 2 h → doctor escalation.
+- Never auto-verify: high-alert (ISMP list + hospital additions), narcotic/controlled, chemo, paediatric weight-based, non-formulary, restricted antimicrobials (AWaRe Reserve).
+- FEFO batch pick enforced with override reason; expiry < remaining course length blocks pick; recalled batches (CDSCO/OP-003) blocked and located across wards for quarantine.
+- Unit-dose label barcode is unique and single-use; reprint needs reason; scanning a returned/cancelled label at bedside hard-stops.
+- Charging: policy `charge_on_issue` (default) or `charge_on_administration`; returns credit only sealed/unopened within return window (default 24 h post-discharge); GST per HSN of drug; package-included drugs mapped by IP-008 → no separate charge; insurer non-payables tagged (EN-002 list) for claim.
+- Narcotics: two authenticated persons on every issue/return/wastage/count/destruction; register append-only with hash chain; balance can never go negative; discrepancy blocks handover close and creates incident; register printable per state Drug Control format; Schedule H1 register auto; controlled stock allowed only in `narcotic_safe` locations.
+- Floor-stock borrow for a patient must be reconciled to a patient charge or floor-stock consumption within 24 h (job flags).
+- Ward stock max = par max; issue exceeding max requires in-charge approval; restricted/non-formulary/high-cost (> configured ₹) approvals via EN-038.
+- Fridge breach > 30 min → items flagged `quarantine` until pharmacist review.
+- ADR serious/fatal → report to AMC ≤ 24 h task; allergy list update mandatory prompt for severe; medication error harm ≥ E → RCA task (NC-015).
+- Antibiotic stewardship: Reserve/restricted antimicrobial > 72 h without ICN/consultant review → alert (with IP-012).
+- Retention: narcotic register ≥ 5 y (or per state rule; default 5), issues/returns 8 y (financial), ADR permanent.
+
+## 6. API Surface (`/api/v1/ip-pharmacy`)
+| Method | Path | Purpose | Permission | Idem./Pag. |
+|---|---|---|---|---|
+| GET | `/verifications` (?status,priority,ward; cursor) | pharmacist worklist | `ipp.verification.read` | pag |
+| POST | `/verifications/{id}/verify|query|substitute|reject` | decisions | `ipp.verification.decide` | yes |
+| GET/POST | `/interventions` | list/record | `ipp.intervention.*` | pag |
+| GET/PUT | `/locations/{id}/par-levels` | par list | `ipp.par.manage` | – |
+| GET | `/locations/{id}/stock` (?belowMin, expiringDays) | ward stock | `ipp.stock.read` | pag |
+| POST | `/fill-rounds/generate` , GET `/fill-rounds/{id}` , POST `/fill-rounds/{id}/issue` | unit-dose | `ipp.unit_dose.fill` | yes |
+| POST | `/indents` , PATCH `/indents/{id}` , POST `/indents/{id}/submit|approve|cancel` | ward indents | `ipp.indent.create` / `ipp.indent.approve` | yes |
+| GET | `/indents` (?ward,status,priority; cursor) | queue | `ipp.indent.read` | pag |
+| POST | `/indents/{id}/issue` | pick & issue (partial) | `ipp.issue.create` | yes |
+| POST | `/issues/{id}/receive` | ward receipt (scan) | `ipp.issue.receive` | yes |
+| GET | `/issues` , `/issues/{id}` , `/issues/{id}/labels` (reprint w/ reason) | | `ipp.issue.read` | pag |
+| POST | `/returns` , `/returns/{id}/submit` , `/returns/{id}/accept` | returns/credit | `ipp.return.create` / `ipp.return.accept` | yes |
+| GET | `/admissions/{id}/drug-profile` | patient meds, stock in bin, charges | `ipp.profile.read` | – |
+| POST | `/narcotics/issue|return|wastage|adjust|destroy` (2-person payload) | controlled ops | `ipp.narcotic.operate` (+witness) | yes |
+| POST | `/narcotics/counts` | shift count | `ipp.narcotic.count` | yes |
+| GET | `/narcotics/register` (?location,item,from,to) , `/narcotics/register/print` | NDPS register | `ipp.narcotic.read` | pag |
+| POST/GET | `/compounding` | worksheets/labels | `ipp.compounding.write` | yes |
+| POST/GET | `/adr` , `/adr/{id}/pvpi-form` ; POST `/med-errors` | pharmacovigilance | `ipp.adr.write` / `ipp.adr.read` | – |
+| POST | `/discharge/{admissionId}/take-home` | prepare take-home via OP-003 | `ipp.takehome.create` | yes |
+| GET | `/reports/*` (kpis, ddd, ward-stock, returns) | | `ipp.report.read` | pag |
+
+## 7. Domain Events (outbox)
+- `rx.ip.verified|queried|substituted|rejected` {order_id, admission_id, pharmacist} → IP-003 (MAR build/hold), OP-002/IP-010 (doctor task), EN-037.
+- `pharmacy.ip.fill_round.generated` {ward, count} / `pharmacy.ip.issued` {issue_id, admission_id?, lines[{item,batch,qty,price}]} → NC-006 (ledger), IP-005 (charges), IP-003 (dose availability), ward boy transport (IP-001 transport tasks).
+- `pharmacy.ip.issue.received|discrepancy` → pharmacist, in-charge.
+- `pharmacy.ip.indent.created|approved|issued|backordered|sla_breached` → pharmacist queue, EN-038, NC-005 (purchase), EN-041 (branch transfer).
+- `pharmacy.ip.stock.below_min` {location, item} / `pharmacy.ip.stock.expiring` / `pharmacy.ip.coldchain.breach` → in-charge, pharmacy.
+- `pharmacy.ip.returned` {return_id, admission_id, credit} → NC-006, IP-005 (credit), IP-002 checklist.
+- `pharmacy.narcotic.issued|administered|wasted|returned|counted|discrepancy` {location, item, balance, witness} → register (internal), NC-015 (discrepancy), pharmacy in-charge; `pharmacy.narcotic.count_missing` (shift end without count).
+- `pharmacy.compounded.prepared` {beyond_use_at} → IP-009/IP-015 infusion tracking.
+- `pharmacy.adr.recorded` {severity, drugs} → prescriber, EN-029 (allergy prompt), NC-015, IP-012 (antimicrobial); `pharmacy.med_error.recorded`.
+- `pharmacy.antimicrobial.review_due` {admission_id, drug, day} → IP-012, doctor.
+- Consumed: `rx.ip.ordered|changed|stopped` (OP-002), `nursing.mar.administered|omitted|unavailable` (IP-003), `ip.admitted|transferred|discharge.initiated|discharge.completed` (IP-001/IP-002), `crashcart.replenishment.requested` (IP-013), `inventory.batch.recalled|expiry_approaching` (NC-006/OP-003), `device.temperature.breach` (EN-042), `bill.finalized` (IP-005; blocks late credit path).
+
+## 8. Screens (UI)
+- **Pharmacist Verification Worklist** (desktop, 3-pane): queue (priority chips, SLA countdown, ward filter) | patient context (banner, labs, meds, allergies) + order with CDSS alerts | actions (Verify `F2`, Query `F3`, Substitute `F4`, Reject `F5`, next `J/K`); real-time new-order toast; keyboard-first.
+- **Unit-Dose Fill Station** (desktop + scanner + label printer): round selector, patient/bed grouped picklist, scan-to-confirm, batch FEFO badge, print labels `Ctrl+P`, cassette QR; progress bar; error state when stock short → substitute/backorder.
+- **Ward Pharmacy Panel** (nursing station desktop; IP-004 phone): tabs Indents (new `N`, floor-stock auto-suggest), Receive (scan cassette), Returns (scan items), Narcotic (issue request, wastage, count), Stock (par vs on-hand, expiry), Patient drug profile; offline: drafts saved locally, submit on reconnect.
+- **Narcotic Cupboard Console** (tablet at safe / desktop): 2-person auth modal (user+PIN/biometric each), issue/waste/return/count flows, running balance, register view/print; count at handover with side-by-side.
+- **Indent Queue & Issue Screen** (pharmacy desktop): SLA-sorted, pick with scanner, partial issue, transport dispatch; TV variant for pharmacy back-office (pending STAT count).
+- **Returns & Credit Desk** (desktop): scan lines, condition, accept/reject, credit preview (IP-005), print credit note.
+- **Compounding Worksheet** (desktop/tablet): calc helpers (concentration, rate), double-check sign, label print with beyond-use.
+- **ADR / Med-Error Form** (desktop/tablet/phone): Naranjo auto-score, PvPI PDF export.
+- **In-charge Dashboard** (desktop): KPIs, ward stock heatmap, expiry, narcotic balances, interventions, DDD.
+
+## 9. Integrations
+- NC-006 stock ledger (single source), OP-003 drug master/dispensing engine, IP-003 MAR events, IP-005 charge/credit API, EN-029 CDSS, EN-013/EN-005 label print (ZPL 50×25 / 70×30 mm), EN-042 fridge sensors, optional ADC (Omnicell/BD Pyxis-style) via EN-017 connector (HL7 v2 or vendor API), NC-015 incident engine, PvPI export (PDF/CSV; no API), state Drug Control formats (print).
+- Retries: charge posting via outbox with idempotency; stock movement and charge in one DB transaction.
+
+## 10. Reports & Analytics
+- Verification TAT & SLA compliance; interventions by type/acceptance; STAT issue TAT; fill accuracy/discrepancies; unit-dose administered vs issued; returns % and credit value; ward stock value/turnover, stock-outs, expiry write-offs; narcotic balances & consumption; antibiotic DDD/1000 patient-days by AWaRe; ADR count/severity, med errors by NCC MERP; drug cost per patient-day by ward/speciality (with NC-011); Schedule H1/NDPS registers.
+- MVs listed in §4; NABH MOM indicator feed to NC-015.
+
+## 11. Notifications
+- Push: STAT issue ready/overdue, query on your order (doctor), indent issued/back-ordered, narcotic count due/discrepancy, fridge breach, ADR reported on your patient, unreturned narcotics at discharge.
+- Email digests: pharmacy in-charge daily (stock-outs, expiry, interventions), monthly narcotic returns reminder.
+- No SMS to patients from this module (take-home counselling via OP-003/PE-002).
+
+## 12. Permissions (RBAC keys)
+`ipp.verification.read/decide` (31, 32), `ipp.intervention.*` (31, 32), `ipp.par.manage` (32, 22), `ipp.stock.read` (17, 18, 22, 31, 32, 44), `ipp.unit_dose.fill` (31), `ipp.indent.create` (17, 18, 19, 20, 22), `ipp.indent.approve` (22, 32; restricted → 5/21 via EN-038), `ipp.indent.read` (17–22, 31, 32), `ipp.issue.create` (31, 32), `ipp.issue.receive` (17–22), `ipp.issue.read` (clinical, 27, 58), `ipp.return.create` (17–22), `ipp.return.accept` (31, 32), `ipp.profile.read` (7–14, 17–22, 31, 27), `ipp.narcotic.operate` (31, 32, 17/18/20 for ward ops with witness), `ipp.narcotic.count` (17, 18, 20, 22), `ipp.narcotic.read` (32, 4, 58, 54), `ipp.compounding.write` (31, 32), `ipp.adr.write` (7–14, 17–22, 31), `ipp.adr.read` (54, 21, 4, 31, 32), `ipp.takehome.create` (31, 30), `ipp.report.read` (32, 22, 54, 4, 3, 58).
+
+## 13. Non-functional
+- Volumes: 2000 beds → ~1500 active IP orders/day, 25k unit doses/day, 400 indents/day, 300 returns/day, ~50 narcotic transactions/day/ICU; worklist query p95 < 200 ms; fill list generation for a 40-bed ward < 2 s; label print burst 200 labels/round.
+- Barcode scan resolve < 100 ms (indexed barcode); offline drafts on ward devices; ledger consistency via single transaction + outbox.
+- Print: unit-dose ZPL, issue slips A5, NDPS register A4 landscape (state format), PvPI form A4.
+- i18n labels (generic names never translated; instructions multilingual for take-home). Accessibility: keyboard flows for pharmacist; large tap targets in ward panel.
+
+## 14. Acceptance Criteria
+1. Given a new IP order for meropenem 1 g q8h on a patient with eGFR 25, when it lands in the verification worklist, then EN-029 renal-adjustment alert is shown and the order is not released to MAR until the pharmacist verifies or queries.
+2. Given the pharmacist verifies, then Event `rx.ip.verified` is emitted and IP-003 builds the MAR within 5 s; given the pharmacist queries, then the doctor gets a task with SLA and the order stays `pending_verification`.
+3. Given a 22:00 fill round for Ward 3, when generated, then all MAR doses due 22:00–06:00 for all patients (excluding narcotics and floor-stock-allowed items) appear grouped by bed with FEFO batches; issuing prints one label per dose with a unique barcode and posts stock transfer + charges atomically.
+4. Given the nurse scans a unit-dose barcode that belongs to another patient at bedside, then IP-003 hard-stops (wrong patient) and no consumption/charge occurs.
+5. Given a dose is cancelled after issue but before administration, then it appears in the auto-return list; when returned sealed and accepted, then stock is restored and the patient bill shows a credit line referencing the original charge.
+6. Given a narcotic issue for morphine 10 mg to ICU, when only one user authenticates, then the API rejects with 422 `witness_required`; when two authenticate, then the NDPS register gains an entry with correct running balance and hash chain.
+7. Given a shift narcotic count with physical 9 vs system 10, then the handover cannot close until the discrepancy is acknowledged, an NC-015 incident is created and pharmacy in-charge is notified.
+8. Given the ward stock of paracetamol IV falls below min, then the nightly job drafts a floor-stock indent for the in-charge, who approves in one tap and the pharmacist sees it in the queue with routine SLA.
+9. Given a STAT indent raised at 10:00 and not issued by 10:30, then SLA breach event fires and pharmacy in-charge is notified.
+10. Given a patient transferred from Ward 3 to ICU-2, then their patient bin stock is re-pointed to ICU-2 location and the next fill round for ICU-2 includes them.
+11. Given a discharge initiated with an open narcotic order and 2 ampoules in the ward bin, then IP-002 checklist shows a blocking item until the return is accepted.
+12. Given a severe ADR to ceftriaxone recorded, then the prescriber receives a push, an allergy-add prompt appears, a PvPI form PDF is generated, and NC-015 receives the record.
+13. Given a recalled batch, then all ward locations holding it are listed, issues are blocked, and quarantine tasks are created.
+14. Given a user with `ipp.issue.read` only, when calling POST /narcotics/issue, then 403 and audit.
+15. Given the monthly NDPS report, then per location/drug opening balance + receipts − issues − wastage = closing balance and matches the register entries exactly.
+
+## 15. Enhancements / Later phases
+- Automated dispensing cabinets & smart narcotic safes; robotic unit-dose packaging (strip packs) (market); IV workflow with gravimetric verification & camera; TPN calculator; antimicrobial stewardship dashboard with auto-stop; AI drug-cost optimisation & substitution suggestions (AI-002); patient-portal medication list & refill (PE-001); barcode-verified compounding; e-prescription of narcotics under state e-NDPS portals when available; DDD benchmarking across branches (EN-041).
+
+## 16. Open Questions for the Hospital
+1. Is unit-dose dispensing in scope for all wards or ICU only? Round times per ward? Any strip-packaging machine?
+2. Is pharmacist verification mandatory before first dose (NABH MOM.6) for all orders, or auto-verify categories acceptable?
+3. Charge on issue or on administration? Return window and credit rules after final bill? Insurer non-payable list source?
+4. Narcotic storage locations, custodians and the state Drug Control register format/monthly return; do you keep Schedule H1 register electronically already?
+5. Which drugs are floor stock per ward (par lists) and who approves restricted antimicrobials?
+6. Existing label printers per ward/pharmacy (ZPL?) and barcode format preference (GS1 DataMatrix vs Code128)?
+7. ADR reporting: hospital is an AMC under PvPI? Who is the pharmacovigilance officer?
+8. Compounding/IV admixture done by pharmacy or nurses? TPN prepared in-house?
+9. Automated dispensing cabinets or smart fridges present/planned (vendor/API)?
+10. Take-home medicines billed to the IP bill or a separate OP pharmacy bill?

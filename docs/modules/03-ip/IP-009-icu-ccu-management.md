@@ -1,0 +1,222 @@
+# IP-009 — ICU / CCU Management (ICU bed pool, hourly flowsheet with device integration, ventilator tracking, APACHE II / SOFA / RASS / CAM-ICU / GCS, sedation, infusions, bundles, alert cascade, multi-organ dashboard, step-down)
+
+| Field | Value |
+|---|---|
+| Domain | IP / Inpatient |
+| Module ID | IP-009 |
+| Phase | 7 |
+| Priority | P0 |
+| Complexity | Very High |
+| Depends on | IP-001 (ICU beds/holds/transfers), IP-003 (nursing engine: MAR, notes, assessments, tasks, handover — IP-009 extends with hourly flowsheet), OP-002 (CPOE, order sets), EN-029 (rules: sepsis, deterioration, dose range), EN-042 (device gateway: monitors, ventilators, infusion pumps, dialysis machines), OP-004 (ABG/labs, cultures), OP-008/EN-008 (portable imaging), IP-007 (blood/MTP), IP-014 (ICU pharmacy, infusions, narcotics), IP-012 (VAP/CLABSI/CAUTI device-days), IP-013 (code blue), IP-016 (HDU step-down), IP-017 (death), IP-018 (transfer), IP-019 (organ donation/NOTTO), IP-022 (IP dialysis/CRRT), IP-024 (anaesthesia hand-off), OP-011 (nutrition), OP-015 (early mobilisation), TR-006 (trauma ICU overlay — same tables), IP-005 (ICU charges), NC-030 (ratios), NC-020 (equipment), EN-018 (ICU TV board), EN-037 (alerts), EN-039 (forms), EN-028 (consents/DNR), EN-024 (audit), NC-015 (quality) |
+| Feature flag | `module.icu.enabled` (sub: `icu.device_integration`, `icu.scores_auto`, `icu.multi_organ_board`, `icu.family_updates`, `icu.tele_icu`) |
+| Primary roles | Intensivist (11), Nurse — ICU (18), Resident/ICU registrar (14), Respiratory therapist |
+| Secondary roles | Anaesthetist (10), Cardiologist (CCU), Surgeons (9), Clinical pharmacist (31/32), Dietician (39), Physio (40), ICN (21), Blood bank (37), Biomedical (48), Nurse supervisor (22), Quality (54), Family (60), MS (4), Auditor (58) |
+| Regulatory | NABH 5th ed. COP.8 (ICU/HDU: admission/discharge criteria, staffing, infection control, monitoring), COP.9 (ventilated patients), COP.7 (restraints), COP.13 (end-of-life/DNR per hospital policy & Supreme Court 2023 guidance on advance directives), ISCCM ICU planning/staffing & guidelines, ICMR AMR & VAP/CLABSI/CAUTI bundles, IHI ventilator bundle, Surviving Sepsis Campaign 2021, ABCDEF liberation bundle, KDIGO AKI, Berlin ARDS, APACHE II (Knaus 1985)/SOFA (Vincent 1996)/qSOFA/RASS/CPOT/CAM-ICU, NDPS (ICU narcotics), THOA (brain death), AERB (portable X-ray), BMW 2016, DPDP |
+
+## 1. Purpose
+IP-009 is the general critical-care engine for all ICUs (MICU, SICU, CCU, neuro ICU, paediatric where PICU not separate; NICU/PICU specifics in IP-015; trauma overlay in TR-006): a dedicated ICU bed pool with admission/discharge criteria, an hourly flowsheet fed by monitors/ventilators/pumps and validated by nurses, ventilator episode tracking with lung-protective checks and SAT/SBT weaning, drips with dose calculations, I/O with hourly urine output, neuro-observations, sedation/analgesia/delirium scoring, automatic severity scores (APACHE II at 24 h, daily SOFA, qSOFA), care bundles with compliance, an alert cascade with acknowledgement and escalation, a multi-organ dashboard for rounds, and structured step-down/transfer/death pathways. It measures ventilator days, device days, bundle compliance and standardised mortality ratio.
+
+## 2. Users & Jobs-to-be-done
+- **ICU nurse** (bedside wall PC/tablet; 1:1–1:2): validate device-proposed hourly values in ≤ 20 s, chart drips/titrations, I/O, GCS/pupils, RASS/CPOT/CAM-ICU, positioning/HOB, skin/turns, lines/tubes days, bundle checklists, glucose/insulin protocol; MAR & tasks via IP-003; respond to alarms/alerts; handover.
+- **Intensivist / registrar** (rounds cart + phone): daily plan by system, ventilator strategy, sedation targets, SAT/SBT, fluids/vasopressors, transfusion targets, nutrition, antibiotics with cultures/de-escalation, procedures, prognosis & family communication, admission/discharge decisions, scores review.
+- **Respiratory therapist**: vent checks, SBT execution, airway care, chest physio.
+- **Clinical pharmacist**: infusion concentrations/rates, renal dosing, antibiotic days, sedation stewardship.
+- **Family**: consented daily updates, visiting slots (EN-015), counselling notes.
+- **Bed manager**: ICU occupancy, expected step-downs, waiting list (IP-001/IP-025).
+- **Quality/ICN**: HAI rates per device-days, bundle compliance, unplanned extubation, ICU readmission < 48 h, SMR.
+
+## 3. Core Workflows
+
+### 3.1 ICU admission, criteria & baseline
+1. Request from ER/OT/ward/other ICU (IP-001 transfer request to ICU class) → **Intensivist** accepts against **admission criteria** checklist (configurable: physiological thresholds, organ support need, post-op monitoring, priority 1–4 per SCCM) or declines with alternative (HDU IP-016) → bed allocated (IP-001) → `icu_stays` created (unit, bed, source, admitting diagnosis, referring team, code status/DNR from EN-028 if any, weight/height → PBW/BSA, allergies, isolation) → **arrival checklist**: lines/tubes inventory with insertion dates, devices paired (monitor/vent/pumps via EN-042 QR pairing), Braden/Morse (IP-003), restraints, sedation baseline, family contact & consent for updates → Event `icu.admitted`.
+2. Baseline scores: **APACHE II** at 24 h from worst values (auto-pull labs/vitals; nurse/doctor can correct source with audit; incomplete flag), diagnostic category coefficient → predicted mortality; **SOFA** on admission & daily 06:00 (delta ≥ 2 with suspected infection → sepsis flag); qSOFA on step-down; GCS; RASS target set by doctor; CAM-ICU per shift; ARDS Berlin, AKI KDIGO auto-classification; nutrition risk (NUTRIC/mNUTRIC).
+
+### 3.2 Hourly flowsheet & device integration (`icu.device_integration`)
+1. EN-042 streams 1-min data: monitor (HR, ABP/NIBP, MAP, SpO2, RR, temp, EtCO2, CVP, ICP), ventilator (mode, set/measured Vt, RR set/total, PEEP, FiO2, Pplat, Ppeak, mean Paw, I:E, compliance, MV, alarms), pumps (drug, concentration, rate → dose µg/kg/min or U/h), CRRT/dialysis machine (IP-022) → stored in `icu_device_streams`; **System** proposes hourly row → **Nurse** validates (accept/edit with reason) → charted; unvalidated cells shaded.
+2. Flowsheet rows: vitals; ventilation; oxygen therapy (NIV/HFNC/mask with FiO2/flow); infusions with dose calc; vasopressor equivalent (NEE); fluids in (crystalloid/colloid/blood/products/enteral/parenteral/flush) & out (urine mL/kg/h, drains by site, NG, stool, dialysis UF, insensible est.), cumulative balance; labs auto (ABG, lactate, Hb, K, Na, glucose, INR, creatinine, cultures status); neuro (GCS E/V/M, pupils size/reaction, ICP/CPP, sedation RASS, CPOT, CAM-ICU); positioning (HOB angle, turn side, prone start/end); skin; glucose/insulin protocol; temperature management; restraints (IP-003).
+3. Manual mode when gateway down; back-fill tagged `device_backfill`, never overwriting validated cells; device mis-pairing quarantine flow.
+4. Alarm management: device alarms (disconnect, high pressure, apnoea, asystole) tiered; alarm fatigue controls (delay/priority tiers, acknowledged-by; ack SLA 5 min critical / 15 min high); patient-specific thresholds set by doctor; suppression only by doctor with reason & duration.
+
+### 3.3 Ventilator tracking & weaning
+- **Ventilation episode**: intubation (date/time, tube size/depth, operator, difficulty grade, cuff pressure q shift 20–30 cmH2O), NIV/HFNC episodes, tracheostomy (date, type), mode changes with reason, **lung-protective daily check** (Vt/PBW ≤ 6–8 mL/kg, Pplat ≤ 30, driving pressure ≤ 15, FiO2/PEEP table), ABG-linked adjustments, **daily SAT/SBT screen** (criteria auto-evaluated: FiO2 ≤ 0.4, PEEP ≤ 8, haemodynamically stable, cough, RASS −1..+1, no neuromuscular blockade) → SBT trial (mode, duration, RSBI, outcome) → extubation record → post-extubation monitoring; re-intubation < 48 h flagged; unplanned extubation incident; trach prompt day 7–10; **ventilator days** & device-days for IP-012; ventilator bundle (HOB 30–45°, SAT/SBT, oral CHG, PUD & DVT prophylaxis, cuff pressure, subglottic suction) daily compliance.
+
+### 3.4 Haemodynamics, infusions & protocols
+- Vasopressor/inotrope dose calc from pump (rate × conc / weight), NEE display, MAP targets & alerts; fluid responsiveness notes (PLR, PPV/SVV if monitored); titration orders (target MAP; nurse titrates within bounds — pump limits) with every change logged; **insulin protocol** (target 140–180 mg/dL; sliding/computerised algorithm with double check); electrolyte replacement protocols (K, Mg, PO4) with lab-triggered suggestions (EN-029) requiring doctor sign; sedation protocol (RASS target, daily SAT), analgesia-first; delirium bundle (ABCDEF); VTE/PUD prophylaxis prompts; nutrition (start ≤ 24–48 h; calorie/protein targets vs delivered from enteral pump volumes; OP-011); glucose; transfusion triggers (Hb < 7); antibiotic timeline (day count, cultures, de-escalation prompt at 48–72 h) with ICN.
+
+### 3.5 Bundles, lines & infection prevention
+- CLABSI bundle (line necessity daily, dressing date/integrity, hub scrub, chlorhexidine bathing), CAUTI (catheter necessity daily; remove ≤ 48 h post-op prompt), VAP (above), pressure injury (turn q2h, Braden), falls, sepsis bundle timers (Hour-1: lactate, cultures before antibiotics, broad-spectrum antibiotics ≤ 1 h, 30 mL/kg crystalloid for hypotension/lactate ≥ 4, vasopressors for MAP < 65), hand hygiene audits (IP-012); line register (type, site, insertion date/operator/US-guided/full barrier, removal) with days & alerts (CVC > 7 d, PIV > 96 h, urinary catheter > 3 d without documented need) → IP-012 device-days & infection linkage.
+
+### 3.6 Alert cascade
+- Sources: physiological thresholds (per patient), trends (MAP falling, rising lactate, UO < 0.5 mL/kg/h × 2 h, ICP > 22 for 5 min, SpO2 < 90, Pplat > 30, cuff leak, glucose < 70/> 250), device alarms, missed hourly charting, bundle misses, sepsis flag, SOFA Δ ≥ 2, delirium positive, restraint monitoring missed, lab criticals (OP-004), culture positive (IP-012), score incomplete → **cascade**: bedside nurse → ICU registrar → intensivist → HOD/on-call consultant with acknowledgement tracking & auto-escalation (5/15 min), rapid response link (IP-013), TV board indicators; alarm storm throttling for low tier.
+
+### 3.7 Rounds & multi-organ dashboard (`icu.multi_organ_board`)
+- Board per unit (desktop wall + EN-018 TV): bed cards with organ tiles (Neuro: GCS/RASS/ICP; Resp: mode/FiO2/PEEP/P-F; CVS: MAP/vasopressor dose/lactate; Renal: UO/creatinine/RRT; Haem: Hb/plt/INR; GI/Hepatic: feeds/bilirubin; ID: temp/WBC/cultures/antibiotic day; MSK/Skin: mobility level/Braden), SOFA total & delta, APACHE II, ventilator day, line days, bundle compliance %, open alerts, isolation, code status, family update due, expected step-down; sort by acuity; drill into flowsheet.
+- **Rounds mode**: system-by-system daily plan (FAST-HUGS-BID checklist), goals with live targets, orders via CPOE, tasks to nurses, consults, family communication note; signed by intensivist; residents co-signed. **Tele-ICU** (`icu.tele_icu`, later): remote intensivist view/annotation.
+
+### 3.8 Procedures, restraints, sedation, end-of-life
+- Bedside procedures (CVC/arterial line/ICD/trach/bronchoscopy/lumbar puncture) via OP-010 record with checklist/consent/time-out; line register auto-updated.
+- Restraints (IP-003 rules; ≤ 24 h orders, q2h monitoring); sedation targets & SAT; narcotic infusions (IP-014 double-check).
+- **Code status / DNR / advance directive** documented (EN-028) with policy per hospital & law; end-of-life care plan (comfort measures, family conference notes); **brain death** protocol (THOA: panel, two exams ≥ 6 h apart, apnoea test, Form 10) → IP-019 organ donation coordination; death → IP-017.
+
+### 3.9 Step-down, transfer, discharge from ICU
+- **Discharge criteria** checklist (stable haemodynamics off/low support, adequate oxygenation, airway secure, no active bleeding, etc.), medication reconciliation (infusions → enteral), lines/tubes reconciliation (remove unnecessary), SBAR handover with receiving nurse & doctor, tele-follow-up 24 h (ICU outreach), readmission < 48 h flagged; **transfer to HDU** (IP-016) or ward via IP-001; **ICU LOS**, expected step-down date to bed manager; ICU outreach/liaison list.
+
+### 3.10 Exceptions
+1. ICU full → IP-001 waitlist/priority; intensivist triage decisions logged (KPI: refusals, delays).
+2. Gateway/monitor outage → manual charting; back-fill rules; biomedical ticket (NC-020).
+3. Weight unknown → estimated with flag; dose calcs badge "estimate".
+4. Score correction after M&M → versioned correction with reason; SMR restated & flagged.
+5. Alarm storm > 30/h/bed → low tier collapse; in-charge review task.
+6. Patient becomes MLC (assault disclosed) → TR-008 case; banner.
+7. Family refuses updates/absent → documented; social worker task.
+
+## 4. Data Model (schema `ip`; shared with TR-006)
+- **ip.icu_units** (id, hospital_id, branch_id, ward_id (IP-001), type enum(micu/sicu/ccu/neuro/paeds/mixed/hdu), beds, ratio_target, admission_criteria jsonb, discharge_criteria jsonb, tv_board_id).
+- **ip.icu_stays** (id, hospital_id, branch_id, admission_id, unit_id, bed_id, admitted_at, source enum(er/ot/ward/transfer_in/other_icu), admitting_diagnosis_icd, referring_team, priority int, code_status enum(full/dnr/dni/comfort), weight_kg, weight_estimated bool, height_cm, pbw_kg, bsa, isolation, discharged_at, disposition enum(ward/hdu/other_icu/transfer_out/death/dama), readmission_within_48h bool, los_hours, version) — index (hospital_id, unit_id, discharged_at null).
+- **ip.icu_flowsheet_hours** (id, stay_id, hour_at, vitals jsonb, vent jsonb, oxygen jsonb, infusions jsonb[], intake jsonb, output jsonb, balance_ml, cumulative_balance_ml, labs jsonb, neuro jsonb, sedation jsonb, positioning jsonb, skin jsonb, glucose jsonb, temp_mgmt jsonb, source enum(device/manual/backfill/mixed), validated_by, validated_at, notes) — unique (stay_id, hour_at); monthly partitioned.
+- **ip.icu_device_streams** (stay_id, device_id, at, metrics jsonb) — 1-min; partitioned daily/monthly; retention 30 d raw → hourly aggregates.
+- **ip.icu_device_pairings** (stay_id, device_id, type enum(monitor/ventilator/pump/crrt/other), paired_at, unpaired_at, by, quarantined bool).
+- **ip.ventilation_episodes** (stay_id, started_at, airway enum(ett/tracheostomy/niv/hfnc), tube_size, depth_cm, operator, difficulty_grade, ended_at, end_reason enum(extubated/trach/death/transfer/niv_stop), reintubated_within_48h, unplanned bool, vent_days numeric(6,2)); **ip.vent_settings_log** (episode_id, at, mode, set_vt, measured_vt, vt_per_pbw, rr_set, rr_total, peep, fio2, pplat, ppeak, mean_paw, ie_ratio, driving_pressure, compliance, mv, cuff_pressure, source, changed_by, reason); **ip.sat_sbt_screens** (stay_id, date, sat_eligible, sat_done, sat_result, sbt_eligible, sbt_done, sbt_mode, duration_min, rsbi, outcome enum(pass/fail), failure_reason, extubated_at?, by).
+- **ip.icu_infusions** (stay_id, drug_id, name, concentration, diluent, rate_ml_h, dose, dose_unit, weight_used, started_at, stopped_at, titration_order_id?, pump_id?, changes jsonb[]).
+- **ip.icu_scores** (stay_id, type enum(apache2/sofa/qsofa/rass/cpot/bps/cam_icu/gcs/ards_berlin/kdigo/nutric/nee/other), at, value, components jsonb, inputs jsonb, predicted_mortality?, incomplete bool, computed_by enum(system/user), version, corrected_of?).
+- **ip.icu_bundles** (stay_id, bundle enum(ventilator/clabsi/cauti/sepsis/pressure_injury/delirium_abcdef/nutrition/mobility/vte_pud/glucose), date, shift, items jsonb, compliance_pct, misses text[]).
+- **ip.icu_lines_tubes** (stay_id, type, site, inserted_at, by, us_guided, full_barrier, removed_at, removal_reason, days, necessity_reviews jsonb, infection_case_id?) — shared with IP-003 `ip.lines_tubes` (view).
+- **ip.icu_alerts** (stay_id, at, type, severity enum(critical/high/medium/low), value, threshold, source enum(rule/device/lab/bundle), acknowledged_by, acknowledged_at, escalations jsonb, suppressed_by?, suppressed_until?, resolved_at, action) — partitioned; index (stay_id, resolved_at null).
+- **ip.icu_daily_plans** (stay_id, date, systems jsonb, goals jsonb, tasks jsonb, consults jsonb, signed_by, signed_at, cosigned_by?, version).
+- **ip.icu_titration_orders** (stay_id, order_id, drug, target_param, target_range, min_rate, max_rate, step, ordered_by, active).
+- **ip.icu_protocols** (stay_id, protocol enum(insulin/electrolyte/sedation/weaning/nutrition), params jsonb, started_at, stopped_at); **ip.icu_glucose_log** (stay_id, at, value, insulin_dose, by, witness).
+- **ip.icu_family_updates** (stay_id, at, author, summary_text, prognosis_category, delivered_via, consent_ref); **ip.icu_conferences** (stay_id, at, attendees, decisions, code_status_change).
+- **ip.brain_death_assessments** (stay_id, exam_no, at, panel jsonb, clinical_tests jsonb, apnoea_test jsonb, forms file ids, notto_notified_at).
+- **ip.icu_discharge_checklists** (stay_id, items jsonb, completed_by, at, handover_doc_id, outreach_due_at).
+- **ip.icu_admission_decisions** (request_id, decision enum(accepted/declined/deferred), reason, by, at, alternative).
+- Read models: `analytics.mv_icu_board` (Redis), `analytics.mv_icu_daily`, `analytics.mv_icu_vent`, `analytics.mv_icu_scores`, `analytics.mv_icu_bundles`, `analytics.mv_icu_alerts`.
+
+## 5. Business Rules & Validations
+- ICU admission requires intensivist acceptance (or on-call rule); decisions logged; nurse:patient ratio breach (NC-030) warns, supervisor override.
+- Hourly row required every hour; > 15 min late reminder, > 60 min in-charge alert; device values must be validated to count as charted.
+- APACHE II once at 24 h from worst values (correction versioned); SOFA daily 06:00 + on demand; missing component → incomplete (never zero); vasopressor dose requires weight; category coefficients configurable.
+- Lung-protective warnings (Vt/PBW > 8, Pplat > 30, driving pressure > 15); SAT/SBT screen daily for ventilated (bundle miss otherwise); cuff pressure q shift.
+- Sepsis flag (SOFA Δ ≥ 2 or qSOFA ≥ 2 + suspected infection) → Hour-1 bundle timers; antibiotic > 60 min → breach event.
+- Titration within ordered bounds only; changes logged; out-of-bounds needs doctor order; insulin double-check; narcotic concentration changes double-checked (IP-014).
+- Line necessity daily; thresholds → alerts; device-days computed nightly for IP-012.
+- Alerts: ack SLA 5 min critical/15 min high then escalate; suppression by doctor with reason/duration; alarm storm throttling excludes critical.
+- Restraint ≤ 24 h; sedation infusions require RASS target; DNR requires documented consent/policy; brain-death panel & timing validated (THOA), MLC → police before retrieval.
+- Family updates only to consented contacts; no prognosis via SMS.
+- ICU discharge requires checklist + handover; readmission < 48 h flagged; step-down bed via IP-001.
+- ICU charges (daily/hourly monitoring, ventilator, equipment) posted via `icu.charge.daily` to IP-005 based on stay/vent/device records.
+- Raw device streams retained 30 d (config); flowsheet ≥ 10 y; all edits audited.
+
+## 6. API Surface (`/api/v1/icu`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| GET/POST/PATCH | /units | ICU units & criteria | icu.configure | Y | – |
+| POST | /admission-decisions | accept/decline request | icu.stay.admit | Y | – |
+| POST | /stays | create stay (on bed allocation) | icu.stay.admit | Y | – |
+| GET | /stays/{id} | stay summary | icu.stay.read | – | – |
+| PATCH | /stays/{id} | weight/height/code status/isolation | icu.stay.update | Y | – |
+| POST | /stays/{id}/devices/pair|unpair | device pairing (QR) | icu.device.pair | Y | – |
+| GET | /stays/{id}/flowsheet?from=&to= | hourly rows | icu.flowsheet.read | – | cursor |
+| POST | /stays/{id}/flowsheet/{hour}/validate | accept/edit proposed hour | icu.flowsheet.write | Y | – |
+| POST | /stays/{id}/flowsheet/{hour}/manual | manual row (gateway down) | icu.flowsheet.write | Y | – |
+| POST | /stays/{id}/ventilation, /ventilation/{id}/settings, /extubate, /sat-sbt | ventilator | icu.vent.write | Y | – |
+| POST/PATCH | /stays/{id}/infusions[/{id}] | drips & titration changes | icu.infusion.write | Y | cursor |
+| POST | /stays/{id}/titration-orders, /protocols | orders/protocols | icu.order.write | Y | – |
+| POST | /stays/{id}/scores/{type}/compute, PATCH /scores/{id} | scores & corrections | icu.score.compute / correct | Y | – |
+| GET | /stays/{id}/scores?type= | trends | icu.stay.read | – | cursor |
+| POST/GET | /stays/{id}/bundles/{bundle} | bundle checklists | icu.bundle.write | Y | – |
+| POST/PATCH | /stays/{id}/lines[/{id}] | line register | icu.line.write | Y | – |
+| GET | /alerts?unit=&open= ; POST /alerts/{id}/ack|escalate|suppress | alerts | icu.alert.respond / suppress | Y | cursor |
+| POST | /stays/{id}/daily-plan (draft/sign) | rounds plan | icu.plan.write / sign | Y | – |
+| GET | /board?unit= | multi-organ board | icu.board.read | – | – |
+| POST | /stays/{id}/family-updates, /conferences | family communication | icu.family.update | Y | – |
+| POST | /stays/{id}/brain-death/assessments | THOA exams | icu.braindeath.write | Y | – |
+| POST | /stays/{id}/discharge-checklist, /discharge | step-down/transfer | icu.stay.discharge | Y | – |
+| GET | /reports/kpi?unit=&from= | vent days, bundles, SMR, HAI feeds | icu.report.read | – | – |
+| GET/PUT | /config/thresholds, /config/bundles, /config/apache-categories, /config/alert-ladder | config | icu.configure | Y | – |
+| POST | /ingest/streams | device gateway ingest (EN-042 → internal) | integration.icu.ingest | Y | – |
+| Consumes | `ip.transfer.approved` (ICU), `lab.result.available|critical`, `micro.culture.positive` (IP-012/OP-004), `pump.rate.changed`/`vent.alarm`/`monitor.alarm` (EN-042), `code_blue.called`, `roster.ratio.breached`, `ot.case.completed` (post-op ICU), `dialysis.session.*` (IP-022) | | | | |
+
+## 7. Domain Events (outbox)
+- `icu.admission.decided` {accepted, reason}; `icu.admitted` {stay_id, unit, bed, source} → IP-001, EN-018, IP-005, IP-025.
+- `icu.flowsheet.hour_validated|hour_missing`; `icu.device.paired|unpaired|quarantined`.
+- `icu.vent.started|settings_changed|sbt_result|extubated|reintubated|unplanned_extubation` → IP-012, NC-015, board.
+- `icu.infusion.started|changed|stopped`; `icu.protocol.started|stopped`.
+- `icu.score.computed|corrected` {type, value, predicted_mortality?} → TR-006/TR-007, board, quality.
+- `icu.sepsis.flagged`, `icu.bundle.recorded|breached` → EN-037, IP-012, NC-015.
+- `icu.alert.raised|acknowledged|escalated|suppressed|resolved` → EN-037, IP-010, IP-013 (optional RRT).
+- `icu.line.inserted|removed|overdue_review` → IP-012 device-days.
+- `icu.plan.signed` → IP-003 tasks, consults.
+- `icu.family_update.sent`; `icu.code_status.changed`; `icu.brain_death.confirmed` → IP-019, IP-017, TR-008.
+- `icu.charge.daily` {stay_id, date, items} → IP-005.
+- `icu.discharged` {disposition, readmission_flag, los} → IP-001, IP-016, IP-002, quality.
+
+## 8. Screens (UI)
+- **Multi-organ ICU board** (desktop wall + EN-018 TV dark): bed cards with organ tiles, SOFA/APACHE chips, vent day, alerts badge, isolation, code status; sort/filter; real-time; TV masks names.
+- **Bedside flowsheet** (wall PC/tablet landscape): hour columns × parameter rows; device-proposed cells shaded until validated; drips panel with dose calc; I/O with running balance; neuro/sedation rows; bundle drawer; keyboard `→` next hour, `V` validate, `D` drip change, `L` pull labs, `Ctrl+M` manual mode; offline queue; stale-gateway banner (> 5 min).
+- **Ventilator panel**: settings vs lung-protective targets, waveform snapshot if provided, SAT/SBT wizard, extubation checklist, trach prompt, cuff pressure log.
+- **Scores tab**: APACHE II worksheet (worst-value pickers with source links), SOFA grid & delta chart, RASS/CPOT/CAM-ICU per shift, GCS/pupils trend, KDIGO/ARDS badges.
+- **Alerts console** (desktop/phone): active by severity with timers, ack/escalate/suppress with reason; on-call view; alarm storm summaries.
+- **Rounds / daily plan** (rounds cart/tablet): system-by-system template, goals live status, tasks, consults, sign (`Ctrl+Enter`).
+- **Lines & tubes register**, **protocol panels** (insulin/electrolyte with suggested doses & double-check), **family update composer** (consent check, delivery log), **brain-death wizard**, **discharge checklist**, **unit config**.
+- Prints: 24-h ICU chart, ventilator record, scores summary, family update sheet, THOA forms.
+
+## 9. Integrations
+- EN-042 device gateway: monitors (Philips/GE/Mindray/Nihon Kohden/Draeger — HL7 ORU or vendor SDK), ventilators (Draeger/Hamilton/Getinge/Medtronic), pumps (B.Braun/Fresenius/Baxter), CRRT machines, with NTP time sync & QR bed-device pairing, buffering/back-fill; OP-004/EN-004 (ABG analysers, labs), OP-008/EN-008 portable imaging, IP-007, IP-014, IP-012, IP-013, IP-019 (NOTTO), IP-022, EN-029 rules, EN-037 alerts, EN-018 TV, EN-015 visitor slots, EN-009 family messages, NC-020 equipment status, NC-030 ratios, IP-005 charges, TR-006 overlay.
+- Fallbacks: gateway down → manual + back-fill; lab interface down → manual score inputs flagged; TV offline → desktop board.
+
+## 10. Reports & Analytics
+- ICU census/occupancy/LOS, admissions declined/delayed, ventilator days & VAP/CLABSI/CAUTI per 1000 device-days (IP-012), SAT/SBT compliance, extubation success, re-intubation < 48 h, unplanned extubations, trach timing, bundle compliance by bundle/shift, APACHE II SMR (observed/predicted), SOFA trends, sepsis Hour-1 timeliness, restraint use, delirium incidence, glucose control (time in range, hypoglycaemia events), nutrition adequacy, alert volumes/ack latency/suppressions, ICU readmission < 48 h, mortality (crude/48 h), family update compliance, device uptime.
+- Read models in §4.
+
+## 11. Notifications
+- Nurses: missing hour, alarms/alerts, bundle items due, turning reminders, restraint renewal, protocol prompts; Registrar/intensivist: critical alerts with ladder, sepsis flag, SAT/SBT eligible, lab criticals, culture positive, admission requests, readmission flag; Pharmacist: infusion concentration/dose alerts, antibiotic day 3 review; ICN: device/infection flags; Family: consented daily update link/visiting slot; Bed manager: expected step-down; Quality: unplanned extubation, breaches; Biomedical: device offline.
+
+## 12. Permissions (RBAC keys)
+`icu.configure`, `icu.stay.admit|read|update|discharge`, `icu.device.pair`, `icu.flowsheet.read|write`, `icu.vent.write`, `icu.infusion.write`, `icu.order.write`, `icu.score.compute|correct`, `icu.bundle.write`, `icu.line.write`, `icu.alert.respond|suppress`, `icu.plan.write|sign`, `icu.board.read`, `icu.family.update`, `icu.braindeath.write`, `icu.report.read|export`.
+Defaults: ICU nurse (18): flowsheet.*, device.pair, vent.write (log), infusion.write (within titration), bundle.write, line.write, alert.respond, board.read, stay.read; Intensivist (11): all clinical incl. admit/discharge, plan.sign, alert.suppress, score.correct, braindeath.write, family.update, order.write; Registrar/resident (14): write with co-sign; Anaesthetist (10): vent.write, plan.write; RT/physio: vent.write (SBT), bundle.write (mobility); Clinical pharmacist: infusion read, order suggest; Surgeons/consultants: stay.read, board.read, plan.write (consult); ICN/Quality: reports, line/bundle read; Family: none (portal delivery); TV: board.read masked.
+
+## 13. Non-functional
+- Volumes: 200+ ICU beds hospital-wide; 1-min streams ≈ 300k rows/h (partitioned/time-series), 4.8k validated hourly rows/day; 40 concurrent board viewers per unit; alerts ≤ 3 s from breach.
+- p95: flowsheet hour load < 200 ms, validate < 150 ms, board < 300 ms, score compute < 100 ms.
+- Storage: raw streams 30 d then downsample; flowsheet monthly partitions; ≥ 10 y retention.
+- Offline: bedside tablets queue manual entries ≥ 2 h; gateway buffers 24 h.
+- Accessibility: dark high-contrast board; colour + icons; large touch; tiered audio; i18n family updates.
+- Security: device pairing tokens; PHI-free TV; audit score corrections, suppressions, restraints, code status changes; family delivery consent enforced.
+
+## 14. Acceptance Criteria
+1. Given an ICU transfer request, when the intensivist declines with reason "no organ support need", then the decision is logged, IP-001 offers HDU, and the refusal appears in the ICU access KPI.
+2. Given monitor & ventilator paired to bed 3, then hourly rows are proposed with device values shaded; after nurse validation cells become charted and `icu.flowsheet.hour_validated` fires; unvalidated hours after 60 min alert the in-charge.
+3. Given 24 h data (temp 39.2, MAP 55, HR 130, RR 32, PaO2/FiO2, pH 7.22, Na 150, K 5.6, Cr 2.1 with ARF, Hct 25, WBC 22, GCS 7, age 62, emergency post-op), then APACHE II points and predicted mortality compute per the published table/category; missing WBC marks incomplete.
+4. Given norepinephrine 8 mL/h of 4 mg/50 mL in 70 kg, then dose = 0.19 µg/kg/min and SOFA CVS = 4; MAP < 70 without vasopressor → CVS 1.
+5. Given SOFA rises 4 → 7 with suspected infection, then sepsis flag raises, Hour-1 timers start, and antibiotics not charted in 60 min emit `icu.bundle.breached`.
+6. Given Vt 560 mL with PBW 60 kg, then Vt/PBW 9.3 alerts the registrar; Pplat 32 alerts; a daily SAT/SBT screen missing for a ventilated patient marks a bundle miss.
+7. Given SBT eligible & passed (RSBI 70) and extubation at 10:00, then a re-intubation at 30 h flags `reintubated_within_48h`; an unplanned extubation creates an NC-015 incident.
+8. Given a titration order MAP 65–75 with norepinephrine 0.02–0.5 µg/kg/min, when a nurse sets 0.6, then the change is refused pending doctor order; within range it logs the change.
+9. Given glucose 62 mg/dL, then a hypoglycaemia alert and protocol suggestion appear; insulin dose entry requires a witness.
+10. Given ICP 25 mmHg sustained 5 min, then a critical alert fires; unacknowledged after 5 min escalates to intensivist and after 15 min to HOD; suppression requires doctor reason and duration.
+11. Given a CVC at day 8 without necessity documented, then an alert appears and IP-012 device-days include the line; removal updates days.
+12. Given gateway offline 40 min, then manual rows are accepted; back-fill data lands as `device_backfill` without overwriting validated cells.
+13. Given a monitor paired to the wrong bed is unpaired, then subsequent streams stop, cells since pairing are flagged for re-validation, and an incident opens if any were charted.
+14. Given restraint order at 08:00 yesterday, then renewal is due at 08:00 today; missing q2h monitoring alerts.
+15. Given brain-death protocol, then two exams ≥ 6 h apart by a valid panel are required before `icu.brain_death.confirmed`; MLC requires police intimation before NOTTO notification.
+16. Given family contact consented, then the daily update is delivered via portal/WhatsApp link without prognosis text in SMS; without consent delivery is blocked and logged.
+17. Given ICU discharge to ward, then criteria checklist, lines reconciliation and SBAR handover are mandatory; readmission within 48 h flags the stay and quality report.
+18. Given month-end, then VAP rate = VAP cases / ventilator-days × 1000 from `ventilation_episodes` & IP-012 cases and matches manual recomputation on test data.
+19. Given a bed with 40 alerts/hour, then low-priority alerts collapse to 15-min summaries, critical continue individually, and a threshold-review task is created.
+20. Given the ICU TV board, then only bed numbers, initials and organ tiles render.
+
+## 15. Enhancements / Later phases
+- From VIMS sheet row 80 / costed proposal IP-009: ventilator tracking, hourly vitals, APACHE/SOFA, sedation scale, multi-organ dashboard, alert cascade (all here).
+- (market) dedicated ICU bed pool, transfer-to-ward workflow, GCS/pain/vent settings, bed-deletion safety (here/IP-001). Later: predictive deterioration ML (AI-005), ventilator waveform analytics (EN-042), closed-loop advisories, tele-ICU hub-and-spoke (`icu.tele_icu`/OP-018), ICU capacity forecasting (IP-025), PICS follow-up clinic, ECMO module, automated ISCCM/NABH indicator submissions, family app updates (PE-001).
+
+## 16. Open Questions for the Hospital
+1. ICU units, beds, types (MICU/SICU/CCU/neuro/paeds), staffing ratios, RTs available?
+2. Monitor/ventilator/pump makes & interface capability; central station? NTP policy?
+3. Score set (APACHE II only or IV/SAPS III), SOFA time, RASS/CPOT/CAM-ICU frequency; category coefficients?
+4. Admission/discharge criteria & priority scheme; who accepts at night?
+5. Bundles audited (NABH/ISCCM), sepsis thresholds; insulin/electrolyte protocols in use?
+6. Alert ladder tiers/contacts, ack SLAs, alarm policy; central alarm station?
+7. Restraint, DNR/end-of-life and family communication policies; visiting hours; counsellor?
+8. Brain-death panel per state; organ donation programme (NOTTO)?
+9. Device data retention (30 d default) & storage; TV boards per unit?
+10. ICU charge composition (daily/hourly monitoring, ventilator per day, equipment) for IP-005?

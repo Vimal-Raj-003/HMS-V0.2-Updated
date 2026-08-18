@@ -1,0 +1,246 @@
+# EN-028 — Consent Management (Treatment, Procedure, Anaesthesia, Blood, HIV, Research, Photography, Telemedicine, Data-Sharing/ABDM, DPDP Processing Consent; Template Builder with Multilingual & Read-Aloud, E-Sign, Witness, Withdrawal, Consent Ledger & Audit, Minors/Guardian, Emergency Implied Consent, DPDP Rules 2025 Notices & DSAR, Consent Artefact Export)
+
+| Field | Value |
+|---|---|
+| Domain | Enabler |
+| Module ID | EN-028 |
+| Phase | 1 |
+| Priority | P0 |
+| Complexity | Very High |
+| Depends on | EN-016 (E-Sign — Aadhaar eSign/DSC/electronic signature on consent documents), EN-039 (Forms & Template Builder — consent template rendering, letterheads), EN-024 (Audit — immutable consent ledger, PHI access logging), EN-013 (QR on printed consent for verification), EN-005 (bedside/OT printing), EN-009/EN-032 (consent links, OTP, withdrawal confirmations), EN-011 (ABDM consent manager — HIP/HIU consent artefacts), EN-019 (FHIR `Consent` resource, SMART app authorisations), EN-026 (partner API consent gating), EN-017 (data-flow register), EN-007 (roles, step-up auth), EN-027 (consent-type master, multilingual terms), EN-023 (breach notification to data principals), OP-001 (patient registration — first consents), IP-001/IP-006/IP-007 (admission, surgery, transfusion), OP-018 (telemedicine), TR-008 (MLC/forensic consent nuances), NC-003 (MRD — consent as part of the record), PE-001 (patient portal — view/withdraw) |
+| Feature flag | `module.consent.enabled` (always on); sub-flags `consent.esign`, `consent.read_aloud`, `consent.video_consent`, `consent.abdm_artefacts`, `consent.dsar_portal` |
+| Primary roles | Nurse — Ward/OT (17/20 — obtain and witness), Doctor / Surgeon / Anaesthetist (6/9/10 — explain and counter-sign), Receptionist (24 — registration-time consents), Privacy Officer / DPO (57 — DPDP consent ledger, DSAR), Counsellor (42 — HIV/research counselling) |
+| Secondary roles | Patient / Guardian (59 — the consenting party), Family/Attendant (60), MRD Officer (43 — completeness audit), Blood Bank (37), Legal/Compliance (NC-023), Quality Manager (54 — NABH consent audits), Auditor (58) |
+| Regulatory | **DPDP Act 2023 & DPDP Rules 2025** — free, specific, informed, unconditional and unambiguous consent with clear affirmative action; **itemised notice** in English + the Eighth Schedule languages; easy withdrawal (as easy as giving); consent manager framework; **verifiable parental consent for children < 18**; guardian consent for persons with disabilities; data-principal rights (access, correction, erasure, grievance, nomination) with response timelines (**grievance redressal and DSAR response within the prescribed period — 90 days for certain retention/erasure obligations**); **Indian Medical Council (Professional Conduct) Regulations 2002 §7.16** (written informed consent for operations, and consent of both spouses for sterilisation); **Indian Contract Act §11 & Majority Act** (18 years for valid consent; but MTP Act, POCSO and HIV Act carry their own age rules); **HIV/AIDS (Prevention and Control) Act 2017 §§8-10** (specific informed consent for HIV testing, mandatory pre/post-test counselling, confidentiality, no disclosure without consent); **MTP Act 1971 (amended 2021)** (consent of the woman alone if ≥ 18; guardian if < 18 or mentally ill); **Transplantation of Human Organs Act 1994**; **PCPNDT Act 1994** (consent + Form F for prenatal diagnostics, no sex determination); **NDPS/Mental Healthcare Act 2017** (advance directive, nominated representative, supported decision-making); **Telemedicine Practice Guidelines 2020** (patient-initiated consent implied, explicit for tele-consult recordings); **NABH PRE/COP** (informed consent policy, list of procedures requiring consent, consent in a language the patient understands); IT Act §3A/§5 (e-signature validity); ABDM Health Data Management Policy (consent artefact structure, purpose codes, expiry) |
+
+## 1. Purpose
+EN-028 is the hospital's single consent authority. It manages **clinical consents** (general treatment, surgery/procedure, anaesthesia, blood transfusion, HIV testing, high-risk consent, sterilisation, MTP, transplant, photography/video, research participation, telemedicine) and **data consents** (DPDP processing and notice, ABDM data sharing, marketing/communication opt-ins, third-party/API data sharing) through one lifecycle: a versioned multilingual template → an explained, comprehension-checked conversation → a signed artefact (EN-016) with witness where required → an immutable ledger entry → enforcement at every point where the consented action is attempted → withdrawal that actually takes effect → export as a consent artefact or DSAR response. Nothing that requires consent should be possible in the system without a valid consent record, and nothing consented should be hard to withdraw.
+
+## 2. Users & Jobs-to-be-done
+- **Nurse (ward/OT)** (tablet at the bedside, 3–5 minutes): pull up the right consent form in the patient's language, hand the tablet over, capture signature and witness, print a copy for the file, and see instantly which consents are still missing before the patient goes to theatre.
+- **Surgeon / Anaesthetist** (tablet/desktop): record that risks, benefits and alternatives were explained; counter-sign; confirm site/side and procedure name match the surgical booking.
+- **Receptionist** (desktop, at registration): capture the general treatment consent and the **DPDP notice acknowledgement** with communication preferences — quickly, without turning registration into a legal seminar.
+- **Counsellor** (HIV, research, genetics): run the mandated pre-test counselling, record it, and obtain specific consent with the confidentiality assurances the HIV Act requires.
+- **Patient / Guardian** (bedside tablet, own phone, kiosk): read or **listen to** the consent in their own language, ask questions, sign or refuse without pressure, and later view or withdraw consents from the portal.
+- **Privacy Officer / DPO** (desktop): maintain the DPDP consent ledger, answer DSARs (access/correction/erasure/nomination), evidence the lawful basis for every processing purpose, handle withdrawal cascades and grievances.
+- **MRD / Quality**: audit consent completeness before the file is coded and closed; produce NABH evidence that every listed procedure had a valid, timely, language-appropriate consent.
+
+## 3. Core Workflows
+
+### 3.1 Consent template design & governance
+1. A **consent type** is defined in the master (EN-027): key, category (clinical/data/administrative), statutory basis, whether a witness is mandatory, whether counselling is mandatory, whether it can be given by a guardian/nominee, whether emergency override is permissible, validity period, renewal rules, and the **enforcement points** it gates (e.g. `ot.case.start`, `blood.component.issue`, `lab.hiv.test.order`, `abdm.data.share`, `messaging.marketing.send`).
+2. The **template builder** (on EN-039) composes the document from blocks: header/letterhead, patient banner tokens, procedure/purpose description, **risks, benefits and alternatives** (structured lists that can be procedure-specific), anaesthesia notes, blood-product specifics, financial implications where relevant, statutory clauses, declaration text, signature blocks (patient/guardian, witness, doctor, interpreter), and a verification QR (EN-013).
+3. **Multilingual by design**: every template has language variants (`en, hi, ta, te, ml, kn, mr, bn` + hospital-specific), with translation review status per language. A consent cannot be presented in a language whose variant is not approved.
+4. **Read-aloud** (`consent.read_aloud`): each language variant carries a generated or recorded audio track (TTS cache shared with EN-018), so illiterate and visually impaired patients hear the full text; playback is logged as evidence.
+5. **Versioning & approval**: templates are versioned with effective dates and require approval by the clinical owner (HOD/Medical Superintendent) plus Legal/DPO for statutory clauses. A signed consent always stores the **exact template version and language** used — later template edits never alter what a patient actually signed.
+6. **Procedure ↔ consent mapping**: the master maps procedures/services (EN-027) to required consent types, so booking a laparoscopic cholecystectomy automatically demands surgical + anaesthesia consent, and ordering an HIV ELISA demands HIV-specific consent with counselling.
+
+### 3.2 Obtaining a clinical consent (the bedside flow)
+1. **Trigger**: a surgical booking (IP-006), an admission (IP-001), an order (OP-002/OP-004), a transfusion request (IP-007), a telemedicine session (OP-018) or a manual request creates a **consent requirement** on the patient's task list and on the ward/OT dashboards.
+2. **Identify the consenting party**: patient (≥ 18, competent) → self; minor (< 18) → parent/legal guardian with relationship and ID captured; person lacking capacity → legal guardian/nominated representative (Mental Healthcare Act) with the basis recorded; unconscious emergency → §3.6.
+3. **Explain**: the clinician/nurse selects the language, opens the document, and works through it with the patient. The UI enforces meaningful engagement without being theatrical: scroll-to-end, an optional **comprehension check** (2–3 teach-back questions for high-risk consents), and a mandatory "questions answered" tick by the explaining clinician with their name and time.
+4. **Capture procedure-specific details**: procedure name (from the master, not free text), site/side/level with a body-map picker for laterality (a WHO surgical-safety requirement, and the single most common consent defect), planned anaesthesia type, blood products anticipated, implants (TR-003), estimated cost band where the hospital includes it.
+5. **Sign** (EN-016): patient/guardian signs — drawn signature on the tablet, Aadhaar eSign, OTP acknowledgement, or **thumb impression with a mandatory witness** for illiterate patients; witness signs (staff not part of the treating team where policy requires, or a family member per hospital policy); the explaining doctor counter-signs; an **interpreter** signs when one was used.
+6. **Finalise**: PDF rendered, hashed, signed, stored immutably; a copy is printed for the physical file if the hospital keeps one and offered to the patient (WhatsApp/portal link); the consent becomes `active` → Event `consent.granted`.
+7. **Refusal** is a first-class outcome, not an error: "consent refused" is recorded with reason, the clinician's counselling note, and — where clinically significant — a **refusal/DAMA-style acknowledgement** signed by the patient. Refusal blocks the gated action just as firmly as a missing consent.
+
+### 3.3 Data consents (DPDP, ABDM, communications)
+1. **DPDP notice & processing consent at registration**: the patient is shown an **itemised notice** (what data, for what purposes, for how long, with whom it is shared, how to withdraw, how to complain, the DPO's contact) in their chosen language, and gives consent by clear affirmative action per purpose — never a pre-ticked box, never bundled. Purposes are itemised: care delivery (often a legitimate/necessary use rather than consent — recorded with its correct legal basis), billing and insurance, communications (transactional vs marketing), research (opt-in only), quality audits, third-party sharing.
+2. **ABDM data sharing** (`consent.abdm_artefacts`, EN-011): consent artefacts carry purpose code, HI types, date range, expiry and the HIU identity; EN-028 stores the artefact, mirrors it in the ledger, and enforces it whenever an ABDM data request arrives.
+3. **API/partner sharing** (EN-026/EN-019): each partner data flow is bound to a consent type; a PHI API call without a covering consent is refused (§5).
+4. **Communication preferences** (EN-009): transactional messages need no marketing consent; service-explicit and promotional classes require recorded opt-in with source evidence, and STOP/withdrawal flows back into the ledger within minutes.
+5. **Minors**: for patients < 18, **verifiable parental consent** is required for data processing under DPDP Rules 2025 — guardian identity is verified (ID + relationship, or DigiLocker/ABHA-based verification where available), behavioural tracking and targeted advertising to children are switched off structurally (not by policy alone), and the record carries a **majority date** that triggers re-consent when the child turns 18.
+
+### 3.4 Enforcement (consent as a gate, not a filing cabinet)
+- Every gated action calls `Consent.check({patientId, consentType, purpose, context})` before proceeding. The check returns `granted` (with the consent id and expiry), `missing`, `expired`, `withdrawn`, `refused`, or `emergency_override_available`.
+- Hard gates (cannot proceed without consent or a recorded override): OT case start, anaesthesia administration, blood component issue, HIV test order, research enrolment, photography/video capture, ABDM/partner data release, marketing messaging, telemedicine recording.
+- Soft gates (warn and require a documented reason): non-urgent invasive procedures where the consent exists but is nearing expiry or was taken in a language the patient does not speak.
+- The check result is displayed inline where work happens — the OT board shows a red "consent incomplete" chip, the transfusion screen refuses to issue, the surgical safety checklist (IP-006) fails at "consent confirmed".
+- Every check is logged (lightweight) so the DPO can demonstrate that enforcement actually runs, and every **denial** is auditable.
+
+### 3.5 Withdrawal, expiry and renewal
+1. **Withdrawal must be as easy as consent**: from the patient portal (one tap per purpose), by SMS/WhatsApp reply, at the front desk, or by phone with identity verification. No dark patterns, no "contact us in writing", no retention of the toggle in an obscure menu.
+2. On withdrawal: the consent becomes `withdrawn` with timestamp, channel, actor and reason (optional — a patient is not obliged to justify); a **withdrawal cascade** runs: stop future processing for that purpose, revoke dependent authorisations (SMART app tokens EN-019, partner API access EN-026, ABDM artefacts EN-011, marketing segments EN-009), and notify the affected consumers. Processing already lawfully performed is not undone, and the patient is told so plainly.
+3. **Clinical consequences of withdrawing a clinical consent** (e.g. withdrawing surgical consent) trigger an immediate clinical alert to the treating team — this is a safety event, not just a data event.
+4. **Expiry & renewal**: consents with validity (episode-scoped, 30-day, annual, ABDM artefact expiry) auto-expire; renewal prompts appear ahead of expiry; consents scoped to an episode close when the episode closes.
+5. **Re-consent triggers**: template version change with material clauses, purpose change, new data recipient, the child reaching 18, or a change in the patient's capacity status.
+
+### 3.6 Emergency and implied consent
+1. When a patient is unconscious, incapacitated, or a minor without a reachable guardian and treatment is **life-saving or limb-saving**, the treating doctor records an **emergency implied consent** with: clinical justification, the specific procedure, why waiting was not possible, attempts to reach the guardian (with timestamps), and — where policy requires — a second doctor's concurrence.
+2. This never blocks care: the override is granted immediately and the documentation is completed concurrently or immediately after.
+3. **Retrospective consent** is obtained from the patient or guardian as soon as they are able, linked to the emergency record; the emergency record is never overwritten.
+4. Every emergency override is reported daily to the Medical Superintendent and reviewed monthly by Quality (NABH expects this trail), with a specific review of any override that later looked avoidable.
+5. MLC/forensic contexts (TR-008): examination for police purposes, sample collection and photography carry their own consent rules (the patient's consent is still required for examination; refusal is documented and communicated to the investigating officer).
+
+### 3.7 DSAR & data-principal rights (`consent.dsar_portal`)
+1. A patient (or guardian/nominee) raises a request through the portal, the front desk, or the grievance channel: **access** (what data do you hold, who processed it), **correction**, **erasure**, **nomination** (who exercises rights on their behalf after death/incapacity), or **grievance**.
+2. Identity verification proportionate to the request (portal login/ABHA/OTP for access; in-person or stronger verification for erasure).
+3. **Fulfilment**: access requests assemble the processing-and-access report (EN-024) plus a machine-readable data export; correction requests route to the owning module's amendment workflow (clinical records are amended, never overwritten); erasure requests are assessed against retention obligations — **clinical and financial records under statutory retention cannot be erased**, and the response says so explicitly with the legal basis rather than pretending compliance.
+4. **Timelines are tracked with countdowns** against the statutory period (including the DPDP Rules' 90-day-class obligations for retention/erasure and grievance response), with escalation as deadlines approach. Every request, decision and dispatch is logged.
+5. Deceased patients and nominees: the nomination record determines who may act; requests without a valid nomination follow the legal-heir process with documentation.
+
+### 3.8 Exceptions
+- **Language unavailable**: if no approved variant exists in the patient's language, an interpreter must be used and recorded (name, relationship/employment, signature) — the consent is valid, but the system captures how comprehension was achieved.
+- **Patient cannot sign** (paralysis, IV lines, plaster): thumb impression or a nominated attorney; witness mandatory; the physical limitation is recorded.
+- **Consent obtained on paper** during downtime: scanned and attached with the original date/time, marked `paper_origin`, and reconciled into the ledger; the scan's hash is stored.
+- **Template changed after signing**: irrelevant to the signed artefact — the stored version is what was agreed; reports always reference the signed version.
+- **Sterilisation, MTP, transplant, PCPNDT, HIV**: each carries statutory specifics (spousal consent for sterilisation per MCI regulations, MTP consent rules by age and capacity, THOTA authorisation-committee documents, PCPNDT Form F, HIV counselling records) — these are modelled as consent-type-specific required fields and attachments, validated before the consent can be finalised.
+
+## 4. Data Model (schema `patient`, prefix `consent_`)
+- `consent_types` (master, EN-027-governed) — id, hospital_id?, key, name, category enum(clinical/data/administrative/research), statutory_basis text, requires_witness bool, requires_counselling bool, requires_second_doctor bool, guardian_allowed bool, emergency_override_allowed bool, validity enum(episode/duration/permanent), validity_days int?, renewal_rule, gates text[] (enforcement point keys), required_fields jsonb (e.g. site/side, product type, purpose code), required_attachments jsonb, min_age_self_consent int default 18, exceptions jsonb (MTP/HIV/POCSO age rules), dpdp_purpose_code?, abdm_purpose_code?, active, version.
+- `consent_templates` / `consent_template_versions` — template: id, hospital_id, consent_type_id, name, owner_role, status; version: template_id, version, language, body_blocks jsonb (EN-039), risks jsonb, benefits jsonb, alternatives jsonb, declaration_text, signature_blocks jsonb, audio_file_id (read-aloud), translation_status enum(draft/translated/reviewed/approved), approved_by (clinical + legal), effective_from, effective_to, status; UNIQUE(template_id, version, language).
+- `consent_requirements` — id, hospital_id, patient_id, encounter_id?, consent_type_id, source enum(booking/admission/order/transfusion/registration/manual/api), source_ref, due_by, status enum(pending/satisfied/refused/overridden/waived/expired), created_at, satisfied_by_consent_id?; drives worklists and gates.
+- `consents` (the artefact record) — id, hospital_id, branch_id, patient_id, encounter_id?, consent_type_id, template_version_id, language, **status enum(draft/active/refused/withdrawn/expired/superseded/void)**, granted_by enum(patient/guardian/nominee/emergency_doctor), grantor_name, grantor_relationship, grantor_id_type, grantor_id_last4, capacity_basis text?, purpose_codes text[], scope jsonb (procedures, sites/laterality, products, data categories, recipients, date range), granted_at, valid_from, valid_to, explained_by_user_id, explanation_at, comprehension_check jsonb?, interpreter jsonb?, witness_user_id?/witness_name, second_doctor_user_id?, esign_envelope_id (EN-016), document_file_id, document_sha256, paper_origin bool, scan_file_id?, withdrawn_at, withdrawn_channel, withdrawal_reason, withdrawn_by, superseded_by_consent_id?, emergency_override_id?, created_by/at; indexes (hospital_id, patient_id, consent_type_id, status), (valid_to) partial where status='active'.
+- `consent_ledger` (append-only, hash-chained with EN-024 primitives) — id, hospital_id, patient_id, consent_id, event enum(requested/notice_shown/explained/granted/refused/signed/witnessed/renewed/expired/withdrawn/overridden/superseded/exported/enforced_allow/enforced_deny), purpose_code, actor_type, actor_id, channel enum(bedside/desk/portal/app/kiosk/sms/whatsapp/ivr/api), language, evidence jsonb (ip, device, template version, audio played, scroll completed), prev_hash, row_hash, at; **partitioned monthly**; this is the DPDP "record of consent" and the DPO's primary evidence.
+- `consent_notices` — id, hospital_id, version, language, itemised_purposes jsonb, retention_statement, recipients jsonb, dpo_contact, grievance_process, rights_summary, effective_from, approved_by; `consent_notice_acknowledgements` (patient_id, notice_version_id, language, channel, at, evidence).
+- `consent_emergency_overrides` — id, hospital_id, patient_id, encounter_id, consent_type_id, procedure_ref, clinical_justification text not null, guardian_contact_attempts jsonb, doctor_user_id, second_doctor_user_id?, at, retrospective_consent_id?, review_status enum(pending/justified/questioned), reviewed_by, reviewed_at.
+- `consent_withdrawal_cascades` — id, consent_id, target enum(smart_app/partner_api/abdm_artefact/marketing_segment/research_study/module), target_ref, action enum(revoked/suppressed/notified), status, executed_at, error.
+- `consent_dsar_requests` — id, hospital_id, patient_id, requester_type enum(self/guardian/nominee/legal_heir), request_type enum(access/correction/erasure/nomination/grievance/portability), channel, received_at, verified_at, verification_method, statutory_due_at, status enum(received/verifying/in_progress/fulfilled/partially_fulfilled/refused/withdrawn), decision_rationale, retention_conflict jsonb, response_file_id, responded_at, escalated_at, grievance_ref.
+- `consent_nominations` — patient_id, nominee_name, relationship, contact, id_last4, scope jsonb, effective_from, revoked_at, evidence_file_id.
+- `consent_guardians` — patient_id, guardian_name, relationship, id_type/last4, verification_method enum(id_document/abha/digilocker/in_person), verified_by, verified_at, valid_until (majority date for minors), basis enum(parent/legal_guardian/mhca_nominated_rep/court_order), document_file_id.
+- `consent_research_enrolments` — patient_id, study_ref, ec_irb_approval_ref, icf_version, enrolled_at, withdrawn_at, pi_user_id (links to research governance; ICF = informed consent form).
+- Retention: consents and the ledger are retained with the clinical record (8 years; minors until 3 years past majority; MLC longer per NC-003) and are **never** deleted by a DPDP erasure request — they are the evidence of lawfulness.
+
+## 5. Business Rules & Validations
+- **No gated action without a valid consent.** `Consent.check` is called server-side (never only in the UI) at every enforcement point; a `missing/expired/withdrawn/refused` result blocks the action, with the emergency-override path as the only exception where the consent type permits it.
+- Consent must be **specific and unbundled**: one consent per purpose. A single "I agree to everything" tick is rejected at template review; pre-ticked boxes are structurally impossible in the builder.
+- The **signed artefact is immutable**. Template edits never alter existing consents; each consent stores its template version, language and audio evidence.
+- Age and capacity: self-consent requires ≥ 18 and recorded competence; below 18, a verified guardian consents (with statutory exceptions for MTP/HIV/POCSO handled per consent type); on the patient's 18th birthday, data consents are flagged for **re-consent** and children's behavioural-tracking/marketing flags remain hard-off until then.
+- Witness rules: mandatory for thumb impressions, illiterate patients, high-risk consents and where the consent type demands it; the witness must not be the treating clinician for that procedure (configurable per hospital policy, defaulted to the safer rule).
+- Laterality/site is captured from a structured picker for any procedure with sides — free text is not accepted; the consent's site must match the OT booking or the surgical safety checklist fails (IP-006).
+- HIV testing requires recorded pre-test counselling and specific consent; results disclosure follows the HIV Act's confidentiality rules and the consent's disclosure scope.
+- Sterilisation requires the consents mandated by MCI regulations; MTP follows the MTP Act's age/capacity rules; transplant requires THOTA documentation — each enforced as required fields/attachments before finalisation.
+- **Withdrawal is always available and takes effect within 5 minutes** across dependent systems; the UI for withdrawal must be at least as easy to reach as the UI that captured consent (a design rule, tested in QA).
+- Emergency overrides are always permitted for life/limb-saving care, always require justification, always notify the Medical Superintendent within the hour, and are always reviewed.
+- DPDP notices must be itemised, available in English plus the requested Eighth Schedule language, and acknowledged with evidence; a notice version change requires re-acknowledgement for new processing purposes only (not a blanket re-consent).
+- Erasure requests cannot delete records under statutory retention; the refusal must state the specific legal basis and the date after which erasure becomes possible.
+- Every consent event is written to the append-only ledger with a hash chain; the ledger cannot be edited or deleted by any role.
+- Consent checks and denials are logged; the DPO can produce, for any patient and any purpose, the complete history of what was consented, when, in which language, by whom, and what was done under it.
+
+## 6. API Surface (`/api/v1/consent`)
+| Method | Path | Purpose | Permission | Notes |
+|---|---|---|---|---|
+| GET/POST/PATCH | /types ; /types/:id | consent-type master | `consent.type.configure` (Admin + Legal/DPO) | EN-027-governed |
+| GET/POST/PATCH | /templates ; /templates/:id/versions ; POST /versions/:id/approve\|retire ; POST /versions/:id/generate-audio | template builder | `consent.template.manage` / `.approve` | per language |
+| GET | /requirements?patient&encounter&status | pending consents worklist | `consent.read` | drives ward/OT chips |
+| POST | /requirements | raise a consent requirement | `consent.request` (modules, clinicians) | from bookings/orders |
+| POST | /consents | create & finalise a consent (with signature envelope) | `consent.capture` (Nurse, Doctor, Reception) | Idempotency-Key |
+| GET | /consents?patient&type&status&from&to ; GET /consents/:id | list/detail | `consent.read` | PHI-audited |
+| GET | /consents/:id/document.pdf | signed artefact | `consent.read` / patient scope | immutable bytes |
+| POST | /consents/:id/withdraw | withdrawal | `consent.withdraw` (patient scope, DPO, front desk) | cascade within 5 min |
+| POST | /consents/:id/renew ; POST /consents/:id/supersede | renewal | `consent.capture` | new artefact |
+| POST | /consents/refuse | record refusal with reason | `consent.capture` | blocks gate |
+| POST | /check | enforcement check `{patientId, type, purpose, context}` | service-internal + `consent.read` | < 30 ms, cached ≤ 60 s |
+| POST | /emergency-override | implied/emergency consent | `consent.emergency_override` (Doctor) | justification mandatory |
+| GET/POST | /emergency-overrides/review ; POST /:id/review | override review | `consent.override.review` (Medical Superintendent, Quality) | monthly |
+| GET/POST | /notices ; POST /notices/:id/acknowledge ; GET /notices/current?lang | DPDP notice | `consent.notice.manage` / public-patient | itemised |
+| GET/POST | /preferences?patient | communication & data preferences | `consent.read` / patient scope | feeds EN-009 |
+| GET/POST | /guardians ; POST /guardians/:id/verify | guardian records | `consent.guardian.manage` | verifiable parental consent |
+| GET/POST | /nominations | data-principal nomination | patient scope, `consent.read` | DPDP right |
+| POST/GET | /dsar ; PATCH /dsar/:id ; POST /dsar/:id/fulfil\|refuse | data-principal requests | `consent.dsar.manage` (DPO) | statutory countdown |
+| GET | /ledger?patient&from&to ; GET /ledger/verify | consent ledger & integrity | `consent.ledger.read` (DPO, Auditor) | hash-chain verify |
+| GET | /artefacts/:id/export ; POST /artefacts/import (ABDM) | consent artefact exchange | `consent.artefact.manage` | FHIR `Consent`, ABDM format |
+| GET | /reports/completeness ; /reports/withdrawals ; /reports/overrides ; /reports/dsar-sla ; /reports/language-mix | reports | `consent.report.read` | NABH/DPDP evidence |
+
+## 7. Domain Events (outbox)
+- `consent.requirement.created|satisfied|overdue` → ward/OT dashboards (IP-003/IP-006), MRD deficiency list (NC-003).
+- `consent.granted|refused|renewed|superseded` → gating modules, EN-024 audit, patient copy dispatch (EN-009).
+- `consent.withdrawn` → **cascade**: EN-019 (revoke SMART app tokens), EN-026 (suspend partner access for that patient), EN-011 (revoke ABDM artefact), EN-009 (remove from marketing segments), research module (withdraw enrolment), plus a clinical alert if a clinical consent was withdrawn.
+- `consent.expired|expiring_soon` → renewal prompts to the care team and patient.
+- `consent.emergency_override.recorded` → Medical Superintendent (within the hour), Quality review queue, EN-024.
+- `consent.notice.version_published` → re-acknowledgement prompts for affected purposes.
+- `consent.dsar.received|fulfilled|refused|overdue` → DPO, Legal (NC-023), escalation.
+- `consent.enforcement.denied` (aggregated) → EN-023 (unusual denial spikes), DPO.
+- `consent.ledger.integrity_mismatch` → P1 to EN-023.
+- Consumes: `ot.case.booked`, `ip.admission.completed`, `lab.order.created` (HIV/genetic tests), `blood.crossmatch.completed`, `telemedicine.session.started`, `abdm.consent.request_received`, `patient.turned_18` (birthday job), `patient.death.recorded` (nominee activation), `esign.envelope.completed` (finalise consent).
+
+## 8. Screens (UI)
+- **Consent Capture** (tablet at the bedside — the flagship screen; also kiosk and patient phone): full-screen document in the chosen language with a language switcher, **font-size control** and a prominent **▶ Listen** button (read-aloud with a progress bar); scroll-progress indicator; procedure/site confirmation card with a body-map laterality picker; "questions answered" tick by the clinician; large signature canvas with Clear/Redo; witness and interpreter panels; **Refuse** button of equal visual weight to Sign (no dark patterns); offline-capable with an encrypted local queue. Shortcuts on desktop: `Ctrl+L` language, `Ctrl+P` play audio, `Ctrl+S` sign.
+- **Patient Consent Summary** (patient banner component, all clinical screens): chips per consent type — green (active, with expiry), amber (expiring/needs renewal), red (missing/withdrawn/refused), grey (not applicable) — clicking opens the artefact. The OT board and transfusion screen surface the same chips.
+- **Consent Worklist** (ward/OT desktop + tablet): pending requirements by patient with due times, "capture now" action, filters for today's OT list, and a pre-theatre checklist view that a nurse can clear in one pass.
+- **Template Builder** (desktop, Admin/Legal): block editor with risk/benefit/alternative libraries per procedure, language tabs with translation status, audio generation, preview at print size, version history with diffs, approval workflow, and a "used by N consents" impact indicator before retiring a version.
+- **DPDP Notice & Preferences** (registration desktop; patient portal/phone): itemised purpose list with individual toggles, plain-language descriptions, retention and recipients, DPO contact, "withdraw" always visible; the same component is reused in the portal so withdrawal is exactly as easy as consent.
+- **Consent Ledger** (desktop, DPO): per-patient chronological ledger with event type, purpose, channel, language and evidence; hash-chain integrity status; filters and export; used verbatim to answer "prove this patient consented".
+- **Emergency Override** (tablet/desktop, doctor): a deliberately short form — procedure, clinical justification, guardian-contact attempts, second doctor — that never blocks the clinician, plus a banner on the patient record until retrospective consent is obtained.
+- **DSAR Console** (desktop, DPO): request queue with statutory countdown chips, identity-verification step, fulfilment builder (access report from EN-024, data export, correction routing, erasure assessment with retention conflicts listed), response letter generator in the requester's language, dispatch and acknowledgement tracking.
+- **Consent Compliance Dashboard** (desktop, Quality/MRD): completeness by department/procedure, consents taken in a language the patient does not speak (a real audit finding), witness-missing rate, time-from-booking-to-consent, emergency overrides with review status, withdrawal trends.
+- Empty/error states: "No consent template approved in Tamil for this procedure — use an interpreter and record their details", "Consent withdrawn on 12-Mar — this action is blocked; discuss with the patient", "Signature pad not detected — capture thumb impression with witness".
+
+## 9. Integrations
+- **EN-016** for all signature mechanisms (Aadhaar eSign, DSC for clinicians, drawn/OTP/thumb with witness) and the immutability guarantees; **EN-039** for template rendering and letterheads; **EN-005** for bedside/OT printing; **EN-013** for the verification QR on printed consents.
+- **EN-011 (ABDM)**: consent artefacts in the ABDM format (purpose codes, HI types, date ranges, expiry), consent-manager notifications, and revocation propagation; **EN-019** maps consents to the FHIR `Consent` resource and gates every API read; **EN-026** enforces consent on partner APIs; **EN-017** records the resulting data flows.
+- **EN-009/EN-032** for consent copies, withdrawal confirmations, renewal reminders and STOP handling; **PE-001/OP-020** for the patient-facing consent centre.
+- **Clinical modules**: IP-006 (surgical safety checklist consent verification), IP-007 (transfusion), OP-004 (HIV/genetic testing), OP-018 (telemedicine), TR-008 (MLC/forensic), IP-011 (MTP/labour), IP-019 (transplant/THOTA), research/EC-IRB systems for study ICFs.
+- **Video consent** (`consent.video_consent`, market — SmartHospital India): recorded patient-stated consent for high-risk procedures, stored as an evidence artefact linked to the consent record with the same retention and access controls.
+
+## 10. Reports & Analytics
+- **Consent completeness** by procedure/department/surgeon (the core NABH audit), time from booking to consent, consents taken < 2 h before surgery (a quality flag), language-appropriateness rate (consent language vs patient's recorded language), interpreter usage, witness compliance, refusal rate by procedure with reasons, **emergency override register** with review outcomes, withdrawal volumes and reasons by purpose, DPDP notice acknowledgement coverage, marketing opt-in/opt-out trends, **DSAR SLA compliance** (received → fulfilled, breaches), guardian-verification coverage for minors, re-consent-at-18 pipeline, consent-ledger integrity status. MV `analytics.mv_consent_daily`, `analytics.mv_dsar_sla`.
+
+## 11. Notifications
+- Care team: consent pending for tomorrow's OT list (evening digest), consent missing at 2 h before surgery (escalating), consent withdrawn (immediate clinical alert), emergency override recorded on your patient.
+- Patient/guardian: consent copy link after signing, renewal due, "your consent for X was withdrawn — confirmed", DSAR acknowledgement and fulfilment, notice version update.
+- DPO/Legal: DSAR received with countdown, DSAR approaching deadline, withdrawal cascade failure, ledger integrity mismatch, unusual denial patterns, notice re-acknowledgement coverage falling.
+- Medical Superintendent: emergency overrides within the hour; monthly override review pack.
+- Quality/MRD: weekly consent-completeness deficiency list.
+
+## 12. Permissions (RBAC keys)
+`consent.read` (clinical staff for their patients via ABAC; patient for own) · `consent.request` (clinicians, modules) · `consent.capture` (Nurse, Doctor, Receptionist, Counsellor) · `consent.withdraw` (patient scope, DPO, Front Office with verification) · `consent.emergency_override` (Doctor — Medical Superintendent notified) · `consent.override.review` (Medical Superintendent, Quality Manager) · `consent.template.manage` (Admin, Clinical owner) · `consent.template.approve` (Medical Superintendent + Legal/DPO) · `consent.type.configure` (Hospital Admin + DPO) · `consent.notice.manage` (DPO) · `consent.guardian.manage` (Front Office, MRD) · `consent.dsar.manage` (DPO only) · `consent.ledger.read` (DPO, Auditor, MRD for own patients) · `consent.artefact.manage` (DPO, ABDM operator) · `consent.report.read` (Quality, Admin, DPO, Auditor). **No role may edit or delete a finalised consent or a ledger entry.**
+
+## 13. Non-functional
+- Volumes for a 2000-bed hospital: ~5000 OP registrations/day (each with a DPDP notice acknowledgement), ~300 admissions/day, ~80 surgeries/day (3–4 consents each), ~120 transfusions/day, plus data consents → **~10 000 consent events/day**; ledger grows ~4 M rows/year.
+- `Consent.check` p95 **< 30 ms** (Redis-cached active-consent set per patient, invalidated on any consent event); the check must never be the reason a clinical screen feels slow.
+- Consent capture end-to-end (open → explain → sign → PDF stored) ≤ 3 minutes for a standard surgical consent; PDF render + sign + store p95 < 3 s.
+- Withdrawal cascade completes within **5 minutes** across all dependent systems, with per-target status visible to the DPO.
+- Offline: the bedside tablet can present, capture and store a consent offline (encrypted queue) for ≥ 8 h; the artefact is finalised and hashed on sync with both the capture time and sync time recorded.
+- Accessibility (this module more than any other): WCAG 2.2 **AA minimum, AAA targeted for text contrast**; minimum 16 pt body text with a large-text mode; read-aloud in `en, hi, ta, te, ml, kn, mr, bn`; screen-reader-friendly document structure; signature canvas usable with a finger or stylus; no time limits on reading; no dark patterns (Refuse is as prominent as Sign, withdrawal is as easy as consent — verified in QA).
+- Security: consent PDFs stored immutably (object-lock) and encrypted; ledger hash-chained and append-only; access to another patient's consent requires the same care-relationship checks as the chart; every consent read is a PHI access in EN-024.
+- Legal robustness: the artefact must be reproducible byte-identically years later, with the template version, language, audio track reference and signature evidence intact.
+
+## 14. Acceptance Criteria
+1. Given a surgery is booked, when the booking is confirmed, then surgical and anaesthesia consent requirements appear on the ward worklist and as red chips on the OT board until satisfied.
+2. Given a patient speaks Tamil, when the nurse opens the consent, then the approved Tamil variant is presented by default with a working read-aloud track, and the language used is stored on the consent record.
+3. Given no approved template variant exists in the patient's language, when consent is captured, then the system requires an interpreter's details and signature, and the consent is flagged as interpreter-assisted in the compliance report.
+4. Given an illiterate patient, when a thumb impression is captured, then a witness signature is mandatory in the same session, and finalisation is blocked without it.
+5. Given a left-knee procedure, when consent is captured, then the site/side is chosen from a structured picker, and if it does not match the OT booking, the surgical safety checklist fails with an explicit mismatch message.
+6. Given a patient is 15 years old, when consent is captured, then a verified guardian must consent, the guardian's identity and relationship are recorded, and the consent carries a majority date that triggers re-consent at 18.
+7. Given a patient turns 18, when the birthday job runs, then data consents are flagged for re-consent, and children's marketing/behavioural flags remain off until re-consent is recorded.
+8. Given an unconscious trauma patient needing immediate surgery, when the surgeon records an emergency override with justification, then the procedure is never blocked, the Medical Superintendent is notified within the hour, and retrospective consent is prompted once the patient or guardian is available.
+9. Given a blood transfusion is requested without an active transfusion consent, when issue is attempted, then the system refuses the issue and states which consent is missing.
+10. Given an HIV test is ordered, when consent is captured, then pre-test counselling is recorded, specific consent is obtained, and the result's disclosure follows the consent's disclosure scope.
+11. Given a patient withdraws ABDM data-sharing consent from the portal, when they confirm, then the artefact is revoked, dependent partner/API access for that patient stops within 5 minutes, and the patient sees a plain-language confirmation of what stops and what cannot be undone.
+12. Given a patient withdraws marketing consent by replying STOP, when the reply is processed, then they are removed from all marketing segments within 5 minutes while transactional messages continue.
+13. Given a consent template is edited after a patient signed version 3, when that patient's consent is reprinted, then version 3 in the original language is reproduced byte-identically.
+14. Given a DSAR access request, when the DPO fulfils it, then the response includes the processing-and-access report, is delivered within the statutory timeline, and the countdown, decision and dispatch are all logged.
+15. Given an erasure request for a patient with clinical records under 8-year retention, when assessed, then erasure is refused with the specific legal basis and the date after which it becomes possible, and the refusal is communicated in writing.
+16. Given the consent ledger, when integrity verification runs, then the hash chain validates; any mismatch raises a P1 security incident and blocks certification of that period.
+17. Given a bedside tablet is offline, when a consent is captured, then it is stored encrypted locally, finalised on reconnect with both capture and sync times recorded, and no duplicate consent is created.
+18. Given any gated action, when the consent check is bypassed in the UI, then the server-side check still blocks it — enforcement never depends on the client.
+19. Given the withdrawal UI, when measured in QA, then withdrawing a consent takes no more taps than granting it did, and Refuse/Withdraw controls are visually equal to Accept controls.
+
+## 15. Enhancements / Later phases
+- **Video consent** recording for high-risk procedures with speech-to-text transcript, linked as evidence (market gap — SmartHospital India).
+- Comprehension analytics: track time spent, replays of the audio, and teach-back answers to identify consents that patients routinely do not understand — then improve those templates (a genuine patient-safety and legal-defence win).
+- Dynamic, procedure-specific risk libraries populated from clinical evidence and the hospital's own complication rates.
+- ABDM **consent manager** integration at full breadth (linking, notifications, granular HI-type consent, auto-expiry) and DEPA-style consent for financial/insurance data.
+- Consent artefact portability: export as a signed FHIR `Consent` bundle the patient can carry to another provider.
+- Advance directives and living wills (Mental Healthcare Act nominated representative, end-of-life preferences) surfaced at admission and in the ICU (IP-009).
+- Research consent module with EC/IRB workflow, protocol versioning, re-consent on protocol amendment, and withdrawal handling per GCP.
+- Biometric/face-verified consent for high-value or remote scenarios (EN-020), and remote consent for telemedicine with identity assurance.
+- Consent "receipt" standard (Kantara-style) so the patient receives a machine-readable record of what they agreed to.
+- Automated DPDP compliance reporting for a Significant Data Fiduciary (annual DPIA, audit, consent metrics) and blockchain anchoring of the consent ledger root (source enhancement).
+- Multilingual expansion to all Eighth Schedule languages with professional translation review, plus regional dialect audio.
+
+## 16. Open Questions for the Hospital
+1. Which procedures require written informed consent at this hospital (the NABH-mandated list), and who maintains it?
+2. Existing consent forms — can they be shared for conversion, and who is the legal owner of their wording (in-house counsel? empanelled advocate)?
+3. Which languages are mandatory at go-live, and who will review the translations for legal accuracy (not just linguistic accuracy)?
+4. Witness policy: must the witness be a hospital employee not involved in the procedure, or is a family member acceptable?
+5. Is Aadhaar eSign acceptable for patient consents, or should drawn signature + witness remain the default (EN-016 question repeated here because it is a legal decision, not a technical one)?
+6. Emergency override policy: is a second doctor's concurrence required, and who reviews overrides (Medical Superintendent? Ethics committee)?
+7. Guardian verification for minors: what documents are acceptable, and is DigiLocker/ABHA-based verification available in practice?
+8. Who is the Data Protection Officer, what is the grievance channel, and what internal SLA (ahead of the statutory limit) should DSARs target?
+9. Does the hospital conduct research requiring EC/IRB-approved informed consent forms? If so, who governs versioning and re-consent?
+10. Photography/video: current practice for clinical images, teaching use, and social media — is a separate consent already in use?
+11. Retention: how long are consent artefacts kept, and are paper originals still required alongside the digital record?
+12. For multi-branch groups: is a consent given at one branch valid at another, and for which consent types?
+13. Should patients be able to view and withdraw every data consent from the portal at go-live, or is a phased rollout preferred?

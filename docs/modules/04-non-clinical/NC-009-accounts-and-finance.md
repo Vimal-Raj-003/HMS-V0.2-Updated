@@ -1,0 +1,229 @@
+# NC-009 — Accounts & Finance (GL, AP, AR, Bank Reconciliation, TDS/GST, TB/P&L/BS, Budget vs Actual, Tally/SAP Export)
+
+| Field | Value |
+|---|---|
+| Domain | Non-Clinical / ERP |
+| Module ID | NC-009 |
+| Phase | 9 (GL mapping & posting hooks are consumed from Phase 5 billing/Phase 4 purchase via outbox and replayed when NC-009 goes live; Tally export available from Phase 5) |
+| Priority | P1 |
+| Complexity | Very High |
+| Depends on | OP-005/IP-005 (revenue, receipts, GST, refunds, advances), NC-001 (day book, cash/bank/clearing), EN-010 (gateway settlements), NC-005 (AP invoices, GRN-IR), NC-006 (inventory valuation, COGS), NC-007 (consignment liabilities), NC-008 (cost centres, allocations), NC-002 (fixed assets, depreciation), NC-010 (payroll journals, statutory dues), NC-012 (B2B invoices/receivables), EN-002/RC-001/RC-005 (payer receivables, settlements, TDS by payers), NC-034 (doctor payouts, TDS 194J), NC-022 (budgets), NC-021 (vendors, MSME), NC-013 (ambulance revenue/fuel), NC-031/NC-023 (contracts/compliance), EN-041 (multi-branch consolidation), EN-038 (approvals), EN-016 (e-sign), EN-024 (audit), NC-011 (MIS), EN-017 (bank/GSP connectors) |
+| Feature flag | `module.finance.enabled` (sub: `finance.bank_recon`, `finance.gst_returns`, `finance.tds`, `finance.indas`, `finance.consolidation`, `finance.tally_export`, `finance.sap_export`, `finance.internal_audit`) |
+| Primary roles | Accountant (46), Finance Manager / CFO (46), Accounts Payable clerk, Accounts Receivable clerk, Tax officer |
+| Secondary roles | Hospital/Group Admin (2), Head Cashier (26), Purchase (45), HR/Payroll (47), Insurance desk (28, AR), Corporate billing (29), Auditor (58, statutory/internal), Vendors (63, payment advices), Management (dashboards) |
+| Regulatory | Companies Act 2013 (books of account §128, Schedule III financial statements, audit trail rule — accounting software must have edit log/audit trail per Companies (Accounts) Rules 2014 r.3(1) proviso effective 1 Apr 2023, cost records if applicable), IndAS/AS (revenue recognition IndAS 115/AS 9, IndAS 116 leases, IndAS 2 inventory, IndAS 16 PPE, IndAS 109 receivables ECL), Income-tax Act (TDS 192/194C/194J/194Q/194H/194I/195, TCS 206C, Form 26Q/24Q/27Q, Form 16/16A, §269ST/40A(3), advance tax), GST (CGST/SGST/IGST/UTGST Acts: GSTR-1/3B/9/9C, ITC rules 36(4)/42/43, RCM, e-invoice, credit/debit notes, HSN summary, place of supply, exempt healthcare SAC 9993), Professional Tax (state slabs), PF/ESI/LWF remittance, MSMED Act §15 (45-day payment; Form MSME-1), Banking (NEFT/RTGS/IMPS bulk files, cheque printing MICR, positive pay), Charitable trust hospitals: §12A/80G, FCRA (if foreign donations), Form 10B audit; RBI (forex), DPDP (financial data of patients minimal) |
+
+## 1. Purpose
+NC-009 is the hospital's **general ledger and statutory finance backbone**: chart of accounts with cost centres and branches, automatic journals from every money-moving module (billing/receipts/refunds/advances, cash day book, purchase & AP, inventory & consumption, payroll, fixed assets, consignment, B2B, doctor payouts, gateway settlements), manual journals with maker-checker, accounts payable (vendor bills → payment runs → advices) and receivable (patient/payer/corporate ledgers, ageing, dunning), bank reconciliation from MT940/CSV/API, tax compliance (TDS, GST returns data GSTR-1/3B, PT/PF/ESI tracking), period close, trial balance/P&L/balance sheet/cash flow, department & cost-centre P&L, budget vs actual, IndAS hooks, multi-branch consolidation and Tally/SAP/Excel exports. Every posting is traceable to the source document and immutable after posting (audit-trail rule).
+
+## 2. Users & Jobs-to-be-done
+- **Accountant** (desktop): review/post auto journals daily, enter manual JVs, vendor bills not from purchase (utilities, rent, professional fees), expense claims, prepaid/accrual schedules, month-end close checklist.
+- **AP clerk**: vendor bill queue (from NC-005 match), due-date planning, payment runs (NEFT/RTGS bulk file, cheque), TDS deduction, MSME compliance, payment advices, vendor ledger reconciliation.
+- **AR clerk**: patient/payer/corporate receivables, receipts application against invoices, ageing follow-up (RC-005/NC-012), TDS receivable from payers (Form 26AS match), write-offs with approval, credit-limit views.
+- **Tax officer**: TDS computation & return data (26Q/24Q), challan tracking, GST registers/returns (GSTR-1/3B/9), ITC reconciliation with GSTR-2B, e-invoice status, PT/PF/ESI remittance tracking.
+- **Finance manager/CFO**: approve JVs/payments above limits, bank recon sign-off, period lock, financial statements, budget vs actual, department P&L, cash-flow forecast, consolidation, auditor packs.
+- **Auditor**: read-only ledgers, drill-down to source documents, edit-log report, sampling (`finance.internal_audit`).
+- **Cashier/Purchase/HR/Insurance**: source-module users whose events post here; see posting status of their documents.
+
+## 3. Core Workflows
+
+### 3.1 Setup: books, chart of accounts, mappings
+1. **Finance** configures: company/legal entities per hospital (PAN, GSTINs per branch/state, CIN, trust registration), financial year (Apr–Mar default; configurable), books (statutory; optional management), base currency, **chart of accounts** (Schedule III-aligned groups: Equity, Non-current/Current liabilities, Non-current/Current assets, Revenue from operations (department-wise sub-ledgers), Other income, Expenses (employee benefits, consumables/COGS, finance cost, depreciation, other expenses)), account types, control accounts (patient receivable, payer receivable, corporate receivable, vendor payable, GST output/input by rate & type, TDS payable by section, salary payable, PF/ESI/PT payable, advances from patients, wallet liability, cash-in-hand per counter, bank accounts, card/UPI clearing, GRN-IR clearing, consignment payable, doctor payout payable), cost centres (NC-008), branch dimensions, **posting rules** (event → journal template: e.g. `bill.finalized` → Dr Patient AR / Cr Revenue-dept & GST output; `payment.received` → Dr Cash/clearing / Cr Patient AR (or Advance)), numbering series (`JV`, `PAY`, `RCT`, `CN`, `DN`, `CONTRA`), approval limits, period calendar → Event `finance.setup.updated`.
+2. Opening balances (EN-036 import) with trial-balance check.
+
+### 3.2 Automatic journals from modules (event-driven)
+1. Worker consumes outbox events and creates **journal batches** per source/day (configurable granularity: per document for AR/AP; daily summary for revenue/receipts by department & mode) → posting rule resolves accounts by dimensions (branch, department/cost centre, payer type, GST rate, payment mode) → journal `draft` (auto-post if rule `auto_post=true`; else accountant review) → **post** → ledger balances updated → source document gets `gl_status=posted` and journal reference (drill-down both ways) → Event `finance.journal.posted`. Sources: OP-005/IP-005 (invoices, credit notes, receipts, refunds, advances, wallet, discounts, write-offs), NC-001 (day close: cash/bank/clearing/variance), EN-010 (settlements: clearing → bank, gateway charges & GST on charges), NC-005 (GRN-IR accrual, vendor bill, purchase returns), NC-006 (consumption/COGS, adjustments, period valuation), NC-007 (consignment usage liability), NC-002 (capitalisation, depreciation, disposal), NC-010 (salary JV, employer PF/ESI, PT, TDS, loans, F&F), NC-034 (doctor payout accrual, TDS 194J), NC-012 (corporate invoices/receipts/TDS receivable), EN-002/RC-001 (payer receivable, settlement, short-payment/denial write-off), NC-013 (ambulance revenue/fuel), NC-033 (canteen POS), NC-022 (budgets, no journal), NC-008 (allocations — management book).
+2. Failed mapping (no rule/account) → `unposted` queue with reason; nothing silently dropped; replay after fix; idempotent by (event id).
+3. Reversals in source create reversing journals linked to originals (never edits).
+
+### 3.3 Manual journals & recurring entries
+- Maker creates JV (lines: account, cost centre, branch, debit/credit, narration, attachments) → balanced check → checker approves (limits by amount, EN-038) → post; recurring/prepaid/accrual schedules (rent, insurance, AMC amortisation) auto-generate monthly JVs; contra (bank ↔ cash), inter-branch JVs (auto-balancing via inter-branch control accounts).
+
+### 3.4 Accounts payable
+1. Vendor bills arrive from NC-005 (`approved_for_payment` after 3-way match) or direct entry (non-PO expenses: utilities, rent, professional fees, contractors) with GST/TDS details → **TDS engine** (`finance.tds`): section (194C/194J/194Q/194I/194H/195), threshold tracking per vendor per FY, rate (PAN available/lower deduction certificate/no PAN 20 %), amount → bill posted (Dr Expense/GRN-IR + ITC / Cr Vendor, Cr TDS payable) → due date per terms; MSME flag (45-day rule) → **payment run**: select due bills (filters: vendor, due, MSME priority, discount for early payment), approvals by amount, hold/dispute, advance adjustments, debit notes offset → generate bank file (bulk NEFT/RTGS/IMPS per bank format: ICICI/HDFC/SBI/Axis templates or H2H API via EN-017), cheque printing (MICR layout, positive pay file), UPI for small vendors → payment posted (Dr Vendor / Cr Bank) → **payment advice** to vendor (email/WhatsApp/portal NC-021) with TDS details → bank confirmation/return handling → Event `finance.payment.made`.
+2. Vendor ledger, statement reconciliation (vendor SoA upload → auto-match), advances to vendors (capital advances), retention money, credit notes.
+
+### 3.5 Accounts receivable
+1. Sub-ledgers auto-maintained: **patient** (from OP-005/IP-005 outstanding, advances, wallets), **payer/TPA/insurer** (EN-002/RC-001 claims: receivable on submission, settlement receipts, short payments, denials → RC-004 write-off/appeal), **corporate** (NC-012 invoices), **others** (rent, canteen, referral). Receipt application: settlement file/UTR → allocate to invoices/claims (auto by claim no.; manual for lump-sum), TDS deducted by payer → TDS receivable (match Form 26AS quarterly), bank charges → Event `finance.receipt.applied`.
+2. Ageing 0-30/31-60/61-90/91-180/180+ per bucket & payer; dunning letters/reminders (RC-005/NC-012 escalation matrix); write-off with approval (bad debt, expected credit loss provisioning IndAS 109 hook); credit-limit feed to EN-002/NC-012.
+
+### 3.6 Bank & cash books, reconciliation (`finance.bank_recon`)
+1. Bank accounts master (per branch, purpose: collections/payments/payroll/statutory); cash books per counter (NC-001) and petty cash; **statement import**: MT940/CAMT.053, CSV/XLS templates per bank, or API (EN-017 H2H/aggregators) → **auto-match** rules: amount + reference (UTR/cheque no./receipt no./gateway batch id/salary batch), date window ±3 days, many-to-one (gateway settlements vs many receipts via EN-010 batch), one-to-many (bulk payment vs bills) → matched/unmatched → manual match, create entries for bank charges/interest/unidentified credits (suspense) → BRS report (book vs bank with reconciling items) → sign-off monthly → Event `finance.bank.reconciled`.
+2. Cheque management: issued/received registers, PDC tracking, bounce handling (reverse receipt, charge patient/payer), positive pay.
+
+### 3.7 Tax compliance
+- **GST** (`finance.gst_returns`): registers from OP-005/IP-005/NC-012 (outward: B2C small/large, B2B, exempt, credit/debit notes, HSN/SAC summary, advances) and NC-005/AP (inward: ITC eligible/ineligible/blocked §17(5), RCM self-invoices, ITC reversal rules 42/43 for exempt supplies (healthcare) — proportionate reversal computation), GSTR-1 & 3B JSON export/GSP filing (EN-017), GSTR-2B reconciliation (upload/API → match invoices, mismatch list to vendors), e-invoice register, GSTR-9/9C data pack, multi-GSTIN per branch/state.
+- **TDS**: deduction ledger by section/deductee, challan (281) payment tracking, quarterly 26Q/27Q/24Q (payroll from NC-010) data export (FVU-ready CSV/TXT via RPU/GSP), Form 16A/16 generation & distribution (vendor portal/email, NC-010 ESS), lower-deduction certificates, TDS receivable (26AS reconciliation).
+- **PT/PF/ESI/LWF**: dues from NC-010 payroll → payable ledgers → remittance tracking (challan refs, due dates 15th/15th) → compliance calendar (NC-023 link).
+- **Income-tax**: advance tax schedule, tax audit data (3CD clause helpers: 40A(3) cash payments, 269ST, TDS defaults, MSME dues), trust hospitals 12A/80G receipts (donation receipts with 80G number, Form 10BD data).
+
+### 3.8 Period close & financial statements
+1. Month-end checklist: all auto journals posted/unposted queue empty; NC-006 valuation closed; depreciation run (NC-002) posted; payroll JV posted; consignment/payer accruals; bank recon signed; GST/TDS ledgers reconciled; suspense cleared; **soft lock** (only finance manager posts) → **hard lock** period (no postings; adjustments in next period with references) → Event `finance.period.closed`.
+2. Reports: Trial balance (branch/consolidated, cost-centre), P&L (Schedule III format & management format by department), Balance sheet, Cash flow (indirect), Fund flow, notes schedules (fixed assets from NC-002, receivables ageing, payables, loans), **department & cost-centre P&L** (revenue from billing by department; direct costs consumption/payroll/depreciation; allocated support costs NC-008), branch P&L, budget vs actual (NC-022) with variance commentary, ratio dashboard (EBITDA, ARPOB, collection efficiency, DSO, DPO), IndAS pack (`finance.indas`: revenue recognition schedules for packages/unbilled IP revenue (WIP), ECL provisioning, lease schedules).
+3. **Consolidation** (`finance.consolidation`, EN-041): group-level TB with inter-branch/inter-company eliminations; branch as dimension or separate entity.
+
+### 3.9 Exports & external accounting (`finance.tally_export` / `finance.sap_export`)
+- Hospitals keeping statutory books in Tally/SAP/Oracle: NC-009 acts as sub-ledger and exports vouchers (Tally XML/ODBC-compatible XML for sales/receipt/payment/journal/purchase vouchers with ledgers & cost centres mapped; SAP IDoc/CSV templates; generic CSV) per day/period, with export log & re-export; mapping UI (HMS account → Tally ledger name/group); reconciliation report (exported vs posted).
+
+### 3.10 Internal audit & controls (`finance.internal_audit`)
+- Sampling tool: random/stratified samples of journals/receipts/refunds/discounts/payments by risk rules; auditor worksheets; findings → CAPA (NC-015); **edit log** (Companies Act audit trail): every create/modify/delete on accounting entries with user/time/before-after, non-disable-able, exportable.
+
+### 3.11 Exceptions & edge cases
+1. Posting rule changed mid-period → applies to new events only; historical journals unchanged; rule versions retained.
+2. Source document cancelled after journal posted → reversing journal auto (linked); never delete.
+3. Vendor invoice received before GRN (advance shipping) → parked as `on_hold` until GRN; TDS still due on payment if advance paid.
+4. Bank statement duplicates (re-import overlapping dates) → dedupe by (account, date, amount, ref, running balance) hash.
+5. Multi-GSTIN patient invoice mis-tagged → correction only via credit note + fresh invoice (OP-005), journals follow.
+6. Payment file rejected by bank (format/limit) → run back to `approved`, error captured, no journals posted until confirmation.
+7. Year-end: closing entries (P&L to reserves) auto-generated; opening balances for next FY; period 13 adjustments allowed for auditors (config) with hard lock after audit sign-off.
+8. Negative TDS (credit note after TDS deducted) → adjustment in next payment or refund flag to tax officer.
+
+### 3.12 Configuration defaults (seed)
+- Schedule III COA template for hospitals (revenue by department groups, expense heads), posting rules for all listed events, TDS sections/rates table (FY-wise), GST rates/HSN-SAC (from EN-027), PT slabs (state), payment terms (net 30/45), JV approval bands (≤ ₹1 lakh accountant+manager, above CFO), bank recon rules (UTR/cheque/receipt no./gateway batch; ± 3 days), period lock rules (soft on day 5, hard on day 10 of next month), series `JV`, `PAY`, `RCT`, `CN`, `DN`, `CONTRA`, `APB` per entity/FY.
+
+## 4. Data Model (schema `finance`)
+- **fin_entities**: id, hospital_id, legal_name, pan, cin, trust_reg, gstins jsonb [{branch_id, gstin, state}], fy_start_month, base_currency, books enum[] (statutory/management), audit_trail_enabled bool (always true).
+- **fin_periods**: id, hospital_id, entity_id, fy, period (YYYY-MM), status enum(open/soft_locked/hard_locked), locked_by, locked_at.
+- **fin_accounts** (COA): id, hospital_id, entity_id, code, name, group_id (Schedule III tree via parent), account_type enum(asset/liability/equity/income/expense), sub_type (bank/cash/receivable_control/payable_control/gst_output/gst_input/tds_payable/…), is_control bool, control_of enum(patient/payer/corporate/vendor/employee/doctor/other), currency, cost_centre_required bool, branch_required bool, is_active, tally_ledger_name?, sap_gl?. UNIQUE (entity_id, code).
+- **fin_posting_rules**: id, hospital_id, event_type, condition jsonb (dimensions), lines_template jsonb [{side, account_resolver (fixed/by_department/by_gst_rate/by_mode/by_payer_type/by_cost_centre), amount_field}], auto_post bool, granularity enum(per_document/daily_summary), active, version.
+- **fin_journals**: id, hospital_id, entity_id, branch_id, journal_no, journal_type enum(auto/manual/recurring/reversal/opening/closing/allocation/contra/interbranch), source_module, source_event_id?, source_doc_type?, source_doc_id?, period_id, date, narration, currency, fx_rate, total_debit, total_credit, status enum(draft/pending_approval/posted/reversed/rejected), created_by, approved_by, posted_by, posted_at, reversal_of?, reversed_by_id?, attachments uuid[], version. UNIQUE (entity_id, journal_no); INDEX (hospital_id, period_id, status), (source_doc_type, source_doc_id), (source_event_id) UNIQUE partial (idempotency).
+- **fin_journal_lines**: id, journal_id, line_no, account_id, cost_centre_id?, branch_id, debit numeric(16,2), credit numeric(16,2), sub_ledger_type enum(none/patient/payer/corporate/vendor/employee/doctor/asset/bank), sub_ledger_id?, narration, tax jsonb {gstin, rate, hsn, type}, tds jsonb {section, rate}, reference (invoice/receipt no.), reconciled bool, bank_stmt_line_id?. INDEX (account_id, journal_id), (sub_ledger_type, sub_ledger_id), (cost_centre_id).
+- **fin_balances** (read model, per account × cost centre × branch × period): opening_dr/cr, period_dr/cr, closing; refreshed by posting trigger/job.
+- **fin_recurring_templates**: schedule, template lines, next_run, end_date, generated_journal_ids.
+- **fin_ap_bills**: id, hospital_id, entity_id, branch_id, vendor_id, bill_no (internal), vendor_invoice_no, invoice_date, received_date, due_date, purchase_invoice_id? (NC-005), po_id?, gross, gst jsonb (cgst/sgst/igst, itc_eligible bool, itc_blocked_reason), rcm bool, tds_section?, tds_rate, tds_amount, other_deductions, net_payable, paid_amount, status enum(draft/approved/partially_paid/paid/on_hold/disputed/cancelled), hold_reason, msme bool, msme_due_date, journal_id, expense_lines jsonb (account, cost_centre, amount) for non-PO. UNIQUE (vendor_id, vendor_invoice_no, fy).
+- **fin_payment_runs**: id, hospital_id, entity_id, bank_account_id, run_no, run_date, mode enum(neft/rtgs/imps/cheque/upi/dd), status enum(draft/pending_approval/approved/file_generated/sent/confirmed/partially_failed/cancelled), total, approved_by[], bank_file_id, bank_ref; **fin_payments**: id, run_id?, payee_type enum(vendor/employee/doctor/patient_refund/statutory/other), payee_id, amount, tds_amount, mode, cheque_no?, utr?, status enum(pending/sent/confirmed/returned/cancelled), advice_sent_at, journal_id; **fin_payment_allocations** (payment_id, bill_id/refund_id, amount).
+- **fin_ar_invoices** (mirror/read model of OP-005/IP-005/NC-012/claims): id, source_type, source_id, party_type enum(patient/payer/corporate/other), party_id, invoice_no, date, due_date, amount, received, tds_receivable, written_off, balance, status, ageing_bucket; **fin_ar_receipts**: id, party_type, party_id, amount, mode, utr, received_at, bank_stmt_line_id?, journal_id; **fin_ar_allocations** (receipt_id, invoice_id, amount, tds, short_payment_reason?); **fin_ar_writeoffs** (invoice_id, amount, reason enum(bad_debt/denial/short_payment/rounding/policy), approved_by, journal_id); **fin_dunning** (party_id, level, sent_at, channel).
+- **fin_bank_accounts**: id, hospital_id, entity_id, branch_id?, bank, account_no (masked), ifsc, purpose enum, gl_account_id, statement_format enum(mt940/camt053/csv_template_x/api), positive_pay bool; **fin_bank_statements**: id, bank_account_id, imported_at, file_id, from_date, to_date, opening, closing, status; **fin_bank_stmt_lines**: statement_id, date, value_date, description, ref, debit, credit, balance, match_status enum(unmatched/auto_matched/manual_matched/created_entry/ignored), matched_journal_line_ids uuid[], rule_id?; **fin_bank_recon_reports** (bank_account_id, period, book_balance, bank_balance, reconciling_items jsonb, signed_by, signed_at).
+- **fin_cheques**: type enum(issued/received/pdc), number, date, party, amount, bank_account_id, status enum(printed/presented/cleared/bounced/cancelled/stale), bounce_reason, journal_ids.
+- **fin_tds_ledger**: id, deductee_type enum(vendor/doctor/employee/other), deductee_id, pan, section, fy, quarter, base_amount, rate, tds_amount, bill_id/payment_id, deducted_on, challan_id?, certificate_no?, lower_cert_id?; **fin_tds_challans** (section, period, amount, bsr, challan_no, paid_on, file_id); **fin_tds_returns** (form enum(24Q/26Q/27Q), quarter, status, ack_no, file_id); **fin_tds_receivable** (payer_id, fy, amount, invoice refs, form26as_matched bool).
+- **fin_gst_registers** (read model per GSTIN/period): outward jsonb sections, inward jsonb, itc_reversal jsonb (rule 42/43 computation), status; **fin_gst_returns** (gstin, period, type enum(gstr1/gstr3b/gstr9), json_file_id, filed_at, ack_no, status); **fin_gst_2b_recon** (period, invoice matches/mismatches).
+- **fin_statutory_dues**: type enum(pf/esi/pt/lwf/tds/gst/advance_tax), period, amount, due_date, paid_on, challan_ref, status enum(due/paid/late).
+- **fin_export_batches**: target enum(tally/sap/csv), period/date range, voucher_count, file_id, status, exported_by, mapping_version; **fin_external_mappings** (account_id/cost_centre_id → external name/code).
+- **fin_audit_samples**, **fin_audit_findings** (with NC-015 CAPA link); **fin_edit_log** (append-only: table, row_id, action, before, after, user, at) — in addition to EN-024 core audit, kept in finance schema for Companies Act audit-trail export.
+- Money numeric(16,2); RLS by hospital; posted journals immutable (trigger); `fin_journal_lines` never updated except `reconciled` flags.
+
+## 5. Business Rules & Validations
+- Every journal balanced (Σdebit = Σcredit) per currency; date within an open (or soft-locked for finance manager) period; account active; control accounts only via sub-ledger postings (no manual JV to patient/vendor control without sub-ledger reference); cost centre mandatory for expense/revenue accounts flagged.
+- Auto-journals idempotent by source event id; unmapped → unposted queue; source documents cannot be modified after posting (source modules use reversal/credit notes).
+- Maker-checker: creator ≠ approver ≠ poster for manual JVs above threshold; payment run approver ≠ preparer; period lock/unlock by finance manager with reason (audited); hard-locked periods immutable.
+- AP: bill from NC-005 requires match `approved_for_payment`; TDS computed at bill or payment (whichever earlier) per section rules & thresholds (e.g. 194C ₹30k single/₹1 lakh aggregate, 194J ₹30k, 194Q ₹50 lakh); no PAN → 20 %; lower deduction certificate honoured with limits; MSME bills flagged when > 45 days unpaid (interest computation report); duplicate vendor invoice blocked; payment ≤ outstanding; payment file formats validated; advice after bank confirmation.
+- AR: receipts allocate FIFO by default (configurable); TDS by payer recorded as receivable requiring 26AS match; write-offs need approval by amount; credit-limit breaches feed source modules.
+- Bank recon: statement lines immutable; auto-match rules ordered; a book entry matches once; unmatched > 30 days escalated; month sign-off requires zero unexplained items or documented reconciling items.
+- GST: healthcare exempt supplies tracked for ITC reversal (rules 42/43) monthly; output tax from OP-005/IP-005 registers only (NC-009 never recomputes invoice tax); credit notes linked to invoices; RCM self-invoices generated for notified services; multi-GSTIN separation strict.
+- Financial statements only from posted journals; department P&L uses cost-centre dimension; management allocations in management book do not alter statutory TB.
+- Edit log immutable and always on (Companies Act); exports audited; retention 8 years minimum (10 for audit trail per rule).
+- FY numbering resets per series; opening balances locked after first close.
+
+## 6. API Surface (`/api/v1/finance`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| GET/POST/PATCH | /entities, /periods ; POST /periods/{id}/(soft-lock|hard-lock|unlock) | setup | finance.setup.manage / finance.period.lock | Y | – |
+| GET/POST/PATCH | /accounts ; GET /accounts/tree | COA | finance.coa.manage / .read | Y | cursor |
+| GET/POST/PUT | /posting-rules ; POST /posting-rules/{id}/test | rules | finance.rules.manage | Y | – |
+| GET | /journals?period=&status=&source=&account= ; GET /journals/{id} | ledgers | finance.journal.read | – | cursor |
+| POST | /journals ; POST /journals/{id}/(submit|approve|post|reverse|reject) | manual JV | finance.journal.create / .approve / .post / .reverse | Y | – |
+| GET | /unposted ; POST /unposted/{id}/replay | auto-journal exceptions | finance.journal.post | Y | cursor |
+| GET/POST | /recurring | schedules | finance.journal.create | Y | cursor |
+| GET | /ledger/{accountId}?from=&to=&cost_centre= ; /subledger/{type}/{id} | account & party ledgers | finance.ledger.read | – | cursor |
+| GET/POST/PATCH | /ap/bills ; POST /ap/bills/{id}/(approve|hold|release|cancel) | AP | finance.ap.bill.create / .approve | Y | cursor |
+| POST | /ap/payment-runs ; POST /ap/payment-runs/{id}/(approve|generate-file|mark-sent|confirm|import-return) | payments | finance.ap.payment.create / .approve / .execute | Y | cursor |
+| POST | /ap/payments/{id}/advice ; GET /ap/vendors/{id}/statement | advices/ledger | finance.ap.read | Y | – |
+| GET | /ar/invoices?party=&ageing= ; POST /ar/receipts ; POST /ar/receipts/{id}/allocate ; POST /ar/writeoffs ; POST /ar/dunning/run | AR | finance.ar.read / .receipt / .writeoff.approve / .dunning | Y | cursor |
+| GET/POST | /bank/accounts ; POST /bank/statements/import ; GET /bank/statements/{id}/lines ; POST /bank/lines/{id}/(match|unmatch|create-entry|ignore) ; POST /bank/auto-match ; POST /bank/recon/{account}/{period}/sign | bank recon | finance.bank.manage / finance.bank.recon.sign | Y | cursor |
+| GET/POST | /cheques ; POST /cheques/{id}/(present|clear|bounce|cancel) ; POST /cheques/print | cheques | finance.cheque.manage | Y | cursor |
+| GET | /tax/tds/ledger?section=&quarter= ; POST /tax/tds/challans ; GET /tax/tds/returns/{form}/{quarter}/export ; POST /tax/tds/certificates/generate | TDS | finance.tds.manage | Y | cursor |
+| GET | /tax/gst/registers?gstin=&period= ; POST /tax/gst/returns/{type}/{period}/generate ; POST /tax/gst/2b/import ; GET /tax/gst/itc-reversal?period= | GST | finance.gst.manage | Y | – |
+| GET/POST | /tax/statutory-dues | PF/ESI/PT | finance.statutory.manage | Y | cursor |
+| GET | /reports/(trial-balance|pl|balance-sheet|cash-flow|fund-flow|dept-pl|costcentre-pl|budget-vs-actual|ageing|brs|ratios|schedule-iii|indas-pack)?entity=&period=&branch=&consolidated= | statements | finance.report.read | – | – |
+| POST | /close/checklist/{period} ; GET /close/status/{period} | period close | finance.period.lock | Y | – |
+| POST | /exports/(tally|sap|csv) ; GET /exports ; GET /exports/{id}/file | external export | finance.export.run | Y | cursor |
+| GET | /audit/edit-log?from=&to= ; POST /audit/samples ; POST /audit/findings | internal audit | finance.audit.read / finance.audit.manage | Y | cursor |
+| POST | /import/opening-balances | migration | finance.import | Y | – |
+
+## 7. Domain Events (outbox)
+- `finance.journal.posted|reversed` {journal_id, source, lines summary} → source modules (gl_status), NC-011, NC-022 (actuals), fin_balances refresh.
+- `finance.journal.unposted` {event, reason} → finance queue.
+- `finance.ap.bill.approved`, `finance.payment.run.approved`, `finance.payment.made|returned` {payment_id, payee, amount, utr, tds} → NC-005 (invoice paid), NC-021 vendor portal/advice, NC-034 (doctor payout paid), NC-010 (F&F/loan/salary paid), OP-005 (refund by NEFT processed), NC-013.
+- `finance.receipt.applied` {party, invoices, amounts, tds} → EN-002/RC-001/RC-005 (claim settled), NC-012 (corporate SoA), OP-005 (patient outstanding).
+- `finance.ar.writeoff.approved` → RC-004/RC-005, NC-012.
+- `finance.bank.statement.imported|reconciled` → NC-001 (deposit confirmation), EN-010 (settlement confirmation), dashboards.
+- `finance.tds.deducted|certificate.issued` → NC-021/NC-034/NC-010 portals.
+- `finance.gst.return.generated`, `finance.statutory.due|paid` → NC-023 compliance calendar.
+- `finance.period.closed` {period} → NC-006/NC-002/NC-010 (lock), NC-011 (final MIS), NC-022.
+- `finance.export.completed` {target, batch} → admin.
+- Consumes: `bill.finalized`, `payment.received|refunded`, `credit_note.issued`, `advance.collected|adjusted` (OP-005/IP-005), `cash.day.closed`, `cash.shift.closed` (NC-001), `payment.settlement.imported` (EN-010), `purchase.grn.accepted|reversed`, `purchase.invoice.approved_for_payment`, `purchase.return.dispatched` (NC-005), `inventory.stock.moved` (summaries), `inventory.valuation.period_closed`, `inventory.count.completed` (NC-006), `consignment.usage.recorded|reconciliation.signed` (NC-007), `consumption.recorded|allocation.posted` (NC-008), `asset.capitalised|depreciation.posted|disposed` (NC-002), `payroll.posted|statutory.computed|fnf.settled|loan.disbursed` (NC-010), `payout.approved` (NC-034), `corporate.invoice.issued|receipt` (NC-012), `claim.submitted|settled|denied` (EN-002/RC-001), `ambulance.trip.billed|fuel.logged` (NC-013), `budget.published` (NC-022), `canteen.sale` (NC-033).
+
+## 8. Screens (UI)
+- **Finance home** — desktop (dark analytics theme): cash & bank position, unposted queue, AP due this week, AR ageing, GST/TDS calendar, close checklist status; realtime tiles.
+- **Journal workbench** — desktop: filters, batch review/post, drill-down to source document (opens OP-005/NC-005 doc), reversal; keyboard `A` approve, `P` post, `R` reverse.
+- **Manual JV editor** — desktop: lines grid (account type-ahead with code/name, cost centre, branch), balance indicator, attachments, templates; `Ctrl+Enter` submit.
+- **Ledger explorer** — desktop: account/sub-ledger ledger with running balance, period filters, export (audited).
+- **AP console** — desktop: bill queue (from purchase/direct), TDS preview, due calendar, payment run wizard (select → approve → file → confirm), advice preview, vendor statement recon.
+- **AR console** — desktop: party ledgers, receipt allocation (drag amounts to invoices), ageing heatmap, dunning, write-off requests, TDS receivable matching.
+- **Bank reconciliation** — desktop: statement lines vs book entries side-by-side, auto-match results, rule builder, create-entry dialog, BRS report & sign-off.
+- **Tax centre** — desktop: TDS ledger/challans/returns export, GST registers, GSTR-1/3B preview & JSON, 2B recon, ITC reversal worksheet, statutory dues calendar.
+- **Period close** — desktop: checklist with links, soft/hard lock, exceptions.
+- **Financial statements** — desktop: TB/P&L/BS/cash flow with drill-down, department & cost-centre P&L, budget vs actual, consolidation toggle, export PDF/Excel.
+- **Export centre** — Tally/SAP mapping & batches.
+- **Audit workspace** (auditor role) — read-only ledgers, edit log, sampling.
+- All screens: skeletons, empty states, error states with retry; WCAG 2.2 AA; number formatting per locale (Indian grouping).
+
+## 9. Integrations
+- Banks: statement import (MT940/CAMT.053/CSV per bank), H2H/API via EN-017 (payments & statements), bulk payment file templates, positive pay, cheque MICR printing (EN-005).
+- GSP/ASP for GST (GSTR-1/3B JSON upload/filing, 2B download, e-invoice status), TRACES/RPU-ready TDS files, Form 16/16A PDFs; EPFO/ESIC challan data (from NC-010).
+- Tally (XML import via Tally Prime/ODBC), SAP (IDoc/CSV), Excel; EN-010 settlements; NC-001 day books; NC-005/NC-006/NC-007/NC-008/NC-002/NC-010/NC-012/NC-034/EN-002 sources; NC-022 budgets; EN-016 e-sign on payment approvals; EN-032/EN-009 advices; NC-021 vendor portal; NC-011 read models; EN-036 import.
+
+## 10. Reports & Analytics
+- Statutory: TB, P&L, BS (Schedule III), cash flow, notes/schedules, fixed asset schedule (NC-002), GST registers/returns, TDS returns/certificates, MSME ageing, cash payments > limits, related-party (if configured), 80G donation register.
+- Management: department & cost-centre P&L, branch P&L, budget vs actual with variance %, revenue by payer/department (from billing), collection efficiency, DSO/DPO, ARPOB, EBITDA, cash-flow forecast (AP due, AR expected, payroll, capex), unposted/exception ageing, bank recon status, vendor spend & TDS, doctor payout accruals, insurance receivable ageing by TPA, write-off analysis, internal audit findings.
+- Read models: `analytics.fin_balances_daily`, `analytics.fin_ar_ageing`, `analytics.fin_ap_ageing`, `analytics.fin_dept_pl_monthly`, `analytics.fin_cash_position`.
+
+## 11. Notifications
+- Finance: unposted journal exceptions (daily digest), payment run approvals (push), bank file failures/returns, unmatched bank items > 7 days, statutory due dates (T-7/T-3/T-1), MSME 45-day breaches, period close reminders, budget variance (with NC-022).
+- Vendors: payment advice with TDS (email/WhatsApp/portal); doctors: payout credit (NC-034); employees: salary credit (NC-010).
+- Management: monthly financial pack email (PDF), cash position daily.
+
+## 12. Permissions (RBAC keys)
+`finance.setup.manage`, `finance.coa.manage/read`, `finance.rules.manage`, `finance.journal.read/create/approve/post/reverse`, `finance.ledger.read`, `finance.ap.bill.create/approve`, `finance.ap.payment.create/approve/execute`, `finance.ap.read`, `finance.ar.read/receipt/dunning`, `finance.ar.writeoff.approve`, `finance.bank.manage`, `finance.bank.recon.sign`, `finance.cheque.manage`, `finance.tds.manage`, `finance.gst.manage`, `finance.statutory.manage`, `finance.report.read`, `finance.period.lock`, `finance.export.run`, `finance.audit.read/manage`, `finance.import`, `finance.export` (data). ABAC: `amount_limit` (JV/payment approvals), branch scope, SoD (maker ≠ checker ≠ poster; payment preparer ≠ approver ≠ bank file releaser). Auditor: read + edit-log only.
+
+## 13. Non-functional
+- Volumes: 60k–120k journal lines/day (per-document AR/AP + daily summaries), 5k AP bills/month, 20k AR invoices/day mirrored, 50k bank statement lines/month; posting worker throughput ≥ 500 journals/s; TB for 12 months over 5M lines < 5 s from `fin_balances`; ledger queries cursor-paginated with covering indexes; reports on read replica.
+- Bank auto-match 50k lines < 60 s; GST register generation per GSTIN/month < 2 min; Tally export 100k vouchers < 5 min.
+- Availability: posting worker with DLQ; no data loss (outbox); period lock enforced at DB level (trigger).
+- Security: financial data class; 2FA for finance roles; edit log immutable; exports watermarked/audited; RLS; no PHI beyond patient name/UHID in sub-ledger.
+- Printing: cheques (MICR), payment advices, statements, financial packs (Playwright PDF); Excel exports.
+- i18n: INR formatting (lakh/crore), multi-currency ready (fx per journal), locale numbers; WCAG 2.2 AA; keyboard-first grids.
+
+## 14. Acceptance Criteria
+1. Given `bill.finalized` for an OP invoice ₹2,360 (₹2,000 exempt consult + ₹360 pharmacy incl. GST 12 %), then a journal is created per posting rule: Dr Patient AR 2,360 / Cr Consult revenue-dept 2,000, Cr Pharmacy revenue 321.43, Cr CGST 19.29, Cr SGST 19.28 (rounded per invoice), and the invoice shows `gl_status=posted` with journal link.
+2. Given a `payment.received` event replayed twice, then only one journal exists (idempotent by event id).
+3. Given an event whose department has no revenue account mapping, then it lands in the unposted queue with reason; after mapping fix and replay it posts and the queue clears.
+4. Given a manual JV of ₹5 lakh created by accountant A, when A tries to approve, then blocked; when finance manager B approves and posts, then journal immutable and edit log shows create/approve/post entries.
+5. Given a vendor bill ₹1,18,000 (incl. GST) for a contractor under 194C with PAN, then TDS ₹2,000 (2 % on ₹1,00,000 taxable) is computed, journal posts Dr Expense 1,00,000, Dr ITC 18,000 / Cr Vendor 1,16,000, Cr TDS payable 2,000; without PAN, TDS = 20 %.
+6. Given a payment run of 40 bills approved, then a bank NEFT file in the bank's template is generated, and after confirmation import, payments are marked confirmed and advices emailed with TDS details; a returned payment reverses to vendor outstanding.
+7. Given an MSME vendor bill unpaid for 46 days, then it appears in the MSME breach report with interest computation and the payment run prioritises it.
+8. Given an MT940 statement with a UPI settlement credit ₹4,52,300 matching an EN-010 batch of 312 receipts, then auto-match links the line to the clearing journal and the BRS shows no reconciling item for it.
+9. Given a TPA settlement of ₹9,50,000 against 25 claims with TDS ₹50,000, then allocation posts receipts per claim, TDS receivable ₹50,000, short-payments flagged to RC-004, and claims show settled.
+10. Given a hard-locked March period, when any module attempts a journal dated 31 March, then it is refused (DB trigger) and routed to April with a reference.
+11. Given exempt healthcare revenue and taxable pharmacy revenue in a month, then the ITC reversal worksheet computes rule 42 proportionate reversal and the 3B draft reflects it.
+12. Given the department P&L for Ortho for a month, then revenue equals billing revenue by department, direct costs include consumption (NC-008), payroll (NC-010) and depreciation (NC-002), and allocated support costs match NC-008 allocation run.
+13. Given a Tally export for a day, then XML vouchers import into Tally Prime without ledger errors using the mapping and the export log records counts and hash.
+14. Given an auditor, when viewing ledgers, then read-only access works, exports are audited, and the edit-log report lists all modifications with before/after values.
+15. Given consolidation across 3 branches with inter-branch transfers, then group TB eliminates inter-branch control balances to zero.
+16. Given a bounced patient cheque, then the receipt is reversed, patient outstanding restored, bounce charges posted, and OP-005 patient ledger updated via event.
+
+## 15. Enhancements / Later phases
+- From VIMS sheet: IndAS revenue recognition automation (`finance.indas`, Phase 11: package/IP WIP unbilled revenue, ECL provisioning), multi-branch consolidation (`finance.consolidation`, Phase 9/11), fixed asset accounting integration (NC-002, Phase 9), internal audit with sampling (`finance.internal_audit`, Phase 11), cost centre P&L / management accounting (NC-008 + Phase 9).
+- (market) Direct Tally/SAP/ACCPAC/Microsoft ERP integration (export/ODBC — Phase 5 export, Phase 11 API), cash-flow forecasting with AI (AI-005), e-invoicing for B2B (OP-005/NC-012), auto bank feeds via account aggregators, vendor self-service statements (NC-021), donation & grant accounting for trust hospitals, budget-linked PO controls (NC-022), treasury (FD tracking, loan schedules), XBRL export for MCA filing.
+
+## 16. Open Questions for the Hospital
+1. Will statutory books be kept in Vim's HMS (full GL) or in Tally/SAP with HMS as sub-ledger (export only)? Which Tally version/ledger structure?
+2. Legal entities/GSTINs per branch; trust vs company; IndAS applicability; FY and audit timelines?
+3. Chart of accounts (existing) and mapping of departments/services/payment modes to ledgers?
+4. Journal granularity preference (per document vs daily summaries) for revenue/receipts?
+5. Banks, statement formats/H2H availability, payment file templates, cheque printing needs, positive pay?
+6. TDS sections & vendor classes; who owns TDS/GST filing (in-house/CA firm) and preferred file formats (RPU/GSP)?
+7. AR policies: write-off approval limits, dunning schedules, TDS receivable tracking practice?
+8. Period close cadence and lock policy; who can unlock?
+9. Management reporting needs: department P&L definitions, allocation bases, budget owners (NC-022)?
+10. Opening balances/migration date and historical data to import (ledgers, open AP/AR, bank recon items)?

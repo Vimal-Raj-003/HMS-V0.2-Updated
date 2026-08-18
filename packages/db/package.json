@@ -1,0 +1,46 @@
+{
+  "name": "@vims/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prisma schema, hand-written RLS/partition/index SQL, Kysely types and idempotent seeds for PostgreSQL 17.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./kysely": "./src/kysely/index.ts",
+    "./tenancy": "./src/tenancy.ts"
+  },
+  "scripts": {
+    "generate": "prisma generate",
+    "build": "prisma generate && tsc --noEmit",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "migrate:dev": "dotenv -e ../../.env -- prisma migrate dev",
+    "migrate:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
+    "migrate:status": "dotenv -e ../../.env -- prisma migrate status",
+    "reset": "dotenv -e ../../.env -- prisma migrate reset --force",
+    "studio": "dotenv -e ../../.env -- prisma studio",
+    "seed": "pnpm seed:minimal",
+    "seed:minimal": "dotenv -e ../../.env -- tsx src/seed/run.ts --tier=minimal",
+    "seed:demo": "dotenv -e ../../.env -- tsx src/seed/run.ts --tier=demo",
+    "seed:hospital": "dotenv -e ../../.env -- tsx src/seed/run.ts --tier=hospital",
+    "seed:volume": "dotenv -e ../../.env -- tsx src/seed/run.ts --tier=volume"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@vims/contracts": "workspace:*",
+    "kysely": "^0.29.5",
+    "pg": "^8.13.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10",
+    "dotenv-cli": "^8.0.0",
+    "prisma": "6.19.3",
+    "tsx": "^4.19.2",
+    "vitest": "^4.1.10"
+  }
+}

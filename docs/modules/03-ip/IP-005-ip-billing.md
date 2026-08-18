@@ -1,0 +1,232 @@
+# IP-005 — IP Billing (running master bill, auto room-rent posting, class-change proration, package vs itemised, interim bills, deposits, TPA credit limits, auto-posting via events, bill hold & discharge clearance, final bill)
+
+| Field | Value |
+|---|---|
+| Domain | IP / Inpatient |
+| Module ID | IP-005 |
+| Phase | 7 |
+| Priority | P0 |
+| Complexity | Very High |
+| Depends on | OP-005 (billing engine core: bill/receipt/GST/discount/refund/credit-note primitives, numbering, cash counter link), RC-003 (tariff engine, payer/class-wise rates, effective dates), IP-001 (admission, occupancy timeline, deposits, transfers), IP-002 (discharge initiation/completion), IP-008/OP-023 (packages), EN-002/RC-002 (payer master, pre-auth, credit limits, TPA rules), RC-001 (claims), RC-006 (charge capture audit), RC-007 (schemes PMJAY/CGHS/ECHS/ESIC), NC-001 (cash counter/receipts/refunds), EN-010 (payment links/UPI/QR), NC-012 (corporate credit), NC-009 (GL posting), NC-034 (doctor payouts), OP-003/IP-014 (pharmacy postings), OP-004/OP-008 (lab/radiology postings), IP-006 (OT charges, consumables, implants TR-003/NC-007), IP-007 (blood charges), IP-003 (nursing charges, consumables), IP-009 (ICU charges), OP-011 (diet), NC-006 (consumables), EN-038 (approvals), EN-009/EN-032 (messages), PE-001 (family view), EN-016 (e-sign), EN-024 (audit), NC-011/EN-001 (MIS) |
+| Feature flag | `module.ip_billing.enabled` (sub: `ipbill.auto_room_rent`, `ipbill.interim_bills`, `ipbill.family_view`, `ipbill.multi_currency`, `ipbill.bill_explainer`, `ipbill.dynamic_pricing`) |
+| Primary roles | Billing Executive IP (27), Insurance/TPA desk (28), Cashier (26), Billing Manager/Finance (46) |
+| Secondary roles | Receptionist (24, deposits), Ward nurse (17, consumable posting, visit charges), Doctors (7/9/11, visit charges visibility, estimate), Pharmacist (30/31), Corporate billing (29), Accountant (46), MS (4), Patient/Family (59/60), Auditor (58), Bed manager (IP-025) |
+| Regulatory | GST (health-care services exempt SAC 9993 except room > ₹5,000/day taxable @5 % w/o ITC per Notification 03/2022 (excluding ICU/CCU/ICCU/NICU); medicines/consumables/implants taxable at applicable HSN rates; composite vs mixed supply rules; e-invoice if applicable for B2B/corporate), Income-tax (TDS on TPA payments 194J at payer end; PAN capture ≥ ₹2 lakh cash restriction 269ST — cash receipt cap ₹2 lakh per patient/bill), IRDAI cashless & discharge TAT (final bill/authorisation ≤ 3 h), NABH ROM/PRE (transparent tariff display, estimate at admission, itemised bill), Clinical Establishments (Central Govt) Rules (display of rates), PMJAY/NHCX package rules, Consumer Protection Act (itemised bill on request), CGHS/ECHS rate lists, DPDP |
+
+## 1. Purpose
+IP-005 keeps one **running IP master bill** per admission that is always current: room rent and nursing/service charges auto-post from the occupancy timeline (midnight or hourly rules with proration on class change), and every service — pharmacy issue, lab, imaging, procedure, OT, blood, consumables, implants, doctor visits, diet, physio, ICU — lands on the bill via domain events with the correct payer-wise tariff, package inclusion, GST/HSN and cost centre. It manages deposits and top-ups, insurance credit limits with approach alerts, package vs itemised billing with excess tracking, interim bills, bill holds, discounts/approvals, discharge clearance and the final bill with payer splits (TPA/scheme/corporate/self co-pay), then hands over to claims (RC-001), GL (NC-009) and doctor payouts (NC-034).
+
+## 2. Users & Jobs-to-be-done
+- **IP billing executive** (desktop; 300 discharges/day, ~2,000 active bills): monitor running bills, resolve unposted/held items, generate interim bills on request, prepare final bills within 60 min of nursing clearance, apply approved discounts, settle multi-mode payments, print/e-mail bill & receipts, handle disputes.
+- **TPA/insurance desk** (desktop): pre-auth linkage, credit limit set/enhancement, room-class eligibility, non-payables (as per payer/IRDAI list) tagging, final authorisation, patient share computation, claim documents.
+- **Cashier**: deposits, top-ups, settlements, refunds (NC-001 shift & denominations).
+- **Ward nurse**: post consumables/procedures at bedside (barcode), doctor visit entries (or auto from rounds IP-010), see running bill summary.
+- **Doctors/surgeons**: estimate & package awareness, package exhaustion alerts, visit charge auto-capture from signed rounds notes.
+- **Finance/billing manager**: discount approvals (EN-038), write-offs, MIS (revenue by department/doctor/payer), unbilled/aging, price revisions (RC-003), audit exceptions.
+- **Family/patient** (portal/kiosk/phone `ipbill.family_view`): running bill (summary + itemised), deposit balance, "why this charge" explainer, pay top-up online, download interim/final bill.
+- **Auditor/RC-006**: charge capture leakage, manual adjustments, voids.
+
+## 3. Core Workflows
+
+### 3.1 Bill opening & payer setup
+1. `ip.admitted` → **System** creates `billing.ip_bills` (status `open`, bill_no reserved from `BILL_IP` series at finalisation; interim number series `IP_INTERIM`), payer profile (self/insurance-TPA/scheme/corporate/mixed with split rules), tariff plan resolution (RC-003: payer + bed class + admission type + effective date), package attach if admitted under a package (IP-008), estimated cost (RC-008 quote or class × LOS heuristic), deposit posted from IP-001; credit limit = 0 for insurance until pre-auth approval; scheme patients (PMJAY) → package-based, patient share 0.
+2. Payer change mid-stay (e.g. self → insurance after policy found; corporate letter received) → **Billing** edits payer with effective date → **System** re-rates postings from that date under approval (`ipbill.rerate` job), keeps history; Event `ip.bill.payer_changed`.
+
+### 3.2 Automatic room-rent & recurring charge posting (`ipbill.auto_room_rent`)
+1. **Scheduler** (pg_cron/BullMQ) runs the **room-rent posting job** at the hospital's cut-off (default 00:00; configurable checkout-hour policy e.g. 12:00) and on every `ip.transferred`/`ip.discharge.completed`: reads `ip.bed_occupancies` timeline for each open admission and posts/adjusts lines: room rent (per class tariff), nursing charge, service/facility charge, RMO/duty doctor charge, ICU/HDU monitoring charges, equipment per-day charges (ventilator, monitor, syringe pump — from active device orders), diet (if charged), attendant bed — each as a `bill_line` with `charge_date`, `source=auto_room`, `occupancy_id`, quantity (days/hours), rate snapshot, tax.
+2. **Rules** (configured per hospital in `billing.ip_charge_policies`): (a) **Day-boundary**: each calendar day (or 24-h block from admission time — "hotel rule") charged once; class occupied at cut-off decides the day; (b) **Higher-class rule**: highest class occupied during the day; (c) **Hourly proration**: minutes per class × hourly rate (ICU commonly hourly ≤ 24 h then daily); admission grace (e.g. admitted after 20:00 → half day / no charge per policy), discharge grace (left ≤ 2 h after checkout hour → no extra day; else half/full day), minimum 1 day, day-care flat charge; ICU/HDU/NICU excluded from GST; room > ₹5,000/day → GST 5 % line (excluding ICU) with HSN/SAC on the room line only.
+3. Class change → **System** closes the day's provisional line and re-posts per rule; **proration preview** shown in the transfer dialog (IP-001) before confirmation; upgrades beyond insurance room eligibility → `proportionate_deduction_flag` on affected lines (all charges linked to class factor re-rated for patient share).
+4. Every auto line is idempotent on (admission_id, charge_date, charge_code, occupancy_id) — reruns never duplicate; corrections create reversal + new line (no in-place edits after interim/final).
+
+### 3.3 Event-driven service posting (auto-charge capture)
+- Consumers post lines from domain events with tariff resolution (RC-003 by payer/class/effective date; package check IP-008; scheme package rules RC-007):
+  - `pharmacy.issued|returned` (OP-003/IP-014): drug lines by batch with HSN/GST/MRP or contracted rate; returns credit; narcotics flagged.
+  - `lab.order.accessioned|cancelled`, `rad.study.performed|cancelled` (OP-004/OP-008): test/study lines; cancelled before processing → reversal; repeat due to hospital error → non-chargeable flag (RC-006).
+  - `ot.case.completed` (IP-006): OT charges (theatre time slabs, anaesthesia, surgeon/assistant/anaesthetist fees by grade, equipment C-arm/laparoscopy, consumables scanned, implants with UDI/serial from TR-003/NC-007 consignment price), recovery.
+  - `blood.issued|transfused` (IP-007): component processing charges, cross-match, reactions non-chargeable per policy.
+  - `nursing.consumable.used`, `procedure.performed` (IP-003/OP-010): ward consumables/procedures (dressing, catheterisation, nebulisation) by barcode.
+  - `doctor.visit.recorded` (IP-010/OP-002 signed rounds note or manual): visit charges by consultant grade & class multiplier; caps (e.g. max 2 visits/day per doctor) with override; cross-consult charges.
+  - `icu.charge.daily` (IP-009), `diet.served` (OP-011/NC-033), `physio.session.completed` (OP-015), `dialysis.session.completed` (IP-022), `ambulance.trip.completed` (NC-013), `equipment.usage` (NC-002).
+- Each line: service_code, description, qty, rate, gross, discount, taxable, CGST/SGST/IGST, HSN/SAC, cost centre, ordering/performing doctor, `source_event_id` (dedupe), package_component flag, payer split flags (payable/non-payable/patient share), status (posted/held/reversed).
+- **Failed tariff resolution** (no rate for payer/class) → line posted with `rate_pending=true` in a **held items** worklist for billing to fix (never silently dropped) → RC-006 metric.
+
+### 3.4 Deposits, top-ups & credit limits
+1. Deposits (IP-001/NC-001/EN-010) sit in the patient ledger; running **balance = charges − discounts − deposits − payer credit** shown live; **top-up threshold**: when balance due (self share) exceeds deposit by X % or projected 24-h charges (based on last 3 days average + scheduled OT) exceed remaining deposit → **auto top-up notification** to attendant (WhatsApp/SMS with payment link, `EN-010`) + billing task; family kiosk/portal shows amount.
+2. Insurance: `preauth.approved` sets `credit_limit`; alerts at 70/85/95 % utilisation to TPA desk & treating doctor → enhancement request via RC-002; beyond limit → charges continue but flagged "above authorised" (patient undertaking / enhancement) — TPA desk sees exposure; non-payables (registration, consumables list per payer, attendant charges) auto-tagged patient share.
+3. Corporate credit (NC-012): limit per employee/entitlement; excess → patient share; scheme (PMJAY): package amount = credit, extras blocked/approved per RC-007 rules.
+4. Deposit refund on discharge via NC-001 (mode = original where possible); over-collection interest not applicable.
+
+### 3.5 Package vs itemised billing (with IP-008)
+- Package attached (surgery bundle/maternity/health package): included components (OT, surgeon, anaesthesia, room class × N days, drugs/consumables list or cap, investigations list) auto-mapped: postings matching components are `covered_by_package` (zero patient charge, tracked at cost/standard price for variance), **exclusions** (higher room class differential, extra days, non-listed drugs, implants, blood, ICU beyond included) billed as itemised **excess** with alerts at 80 %/100 % of caps; package price posted as one line (or split into components for insurer format); conversion package ↔ itemised allowed with approval; variance analytics in IP-008.
+
+### 3.6 Interim bill, bill hold, disputes (`ipbill.interim_bills`)
+- **Interim bill** anytime (family/TPA/insurer request): snapshot of running bill (numbered `IP_INTERIM`, watermark "INTERIM — not for payment except deposits"), itemised & summary formats, GST provisional; used for enhancement requests; count logged.
+- **Bill hold** reasons: pending pre-auth/enhancement, MLC/legal, dispute, unposted items, awaiting doctor's fee, package conversion, VIP; hold blocks finalisation, shows in worklist with owner & SLA.
+- **Dispute**: family raises (portal/desk) → line-level query → billing responds; disputed lines can be discounted/reversed with approval; audit.
+- **Discounts**: line/bill/category level, % or amount, reason codes (staff, poor patient, camp, corporate, doctor request), approval matrix EN-038 with amount limits, doctor-fee discount only against doctor's share (NC-034), scheme/insurance discounts per contract; sponsor/charity fund allocation.
+
+### 3.7 Discharge clearance & final bill
+1. `ip.discharge.initiated` → bill enters **pre-final review**: pending events check (unbilled OT/pharmacy/lab; RC-006 unbilled-services scan against orders), late-charge window (default 60 min after nursing clearance for wards to post consumables), room rent till expected exit per policy, doctor visits confirmed, package settlement, TPA final authorisation request (auto-generate final bill draft + discharge summary link to RC-002), patient-share estimate shown to family (portal notification).
+2. **Finalise**: billing executive clicks Finalise → validations (no `rate_pending`, no held items, deposits reconciled, TPA authorised amount captured, discounts approved, GST computed, cash cap ₹2 lakh) → **final bill number** (gapless `BILL_IP` per branch/FY), immutable; payer split: insurer payable, non-payable → patient, co-pay %, deductible, room-rent proportionate deduction, patient share; scheme bill; corporate invoice (NC-012) → receipts for patient share (cash/card/UPI/link/cheque/NEFT; multi-tender), refund of excess deposit (NC-001), credit note for approved write-offs → Event `ip.bill.finalized`; **clearance** when patient share settled or credit approved (billing manager for outstanding with undertaking) → Event `ip.bill.cleared` (IP-002 shows ✓, gate pass) → e-mail/WhatsApp PDF, e-invoice (if B2B applicable) → RC-001 claim record auto-created with documents; NC-009 GL journal (revenue by cost centre, receivables by payer, deposits liability reversal); NC-034 doctor share computed.
+3. **Post-final adjustments**: supplementary bill (late charges > window, needs approval, separate number), credit note (reversal with reason), reopen bill (billing manager + MS approval, audit; only if not yet claimed).
+4. **Death/DAMA/absconded**: same flow; absconded → bill finalised to AR (RC-005) with follow-up; compassionate discount flows.
+
+### 3.8 Family cost visibility & explainer (`ipbill.family_view`, `ipbill.bill_explainer`)
+- Portal/kiosk/WhatsApp: running summary by category, deposit vs balance, projected next-24 h, pre-auth status, request interim bill/top-up link, itemised view with plain-language "what is this?" per line (from service master descriptions & category glossary, multilingual), dispute button.
+
+### 3.9 Multi-currency & dynamic pricing (`ipbill.multi_currency`, `ipbill.dynamic_pricing` — later)
+- International patients: bill in INR with display currency & FX rate snapshot (RBI reference/hospital rate table), foreign-currency receipts recorded with conversion, FEMA/GST notes; dynamic pricing = seasonal/occupancy-based room tariffs via RC-003 effective-dated plans (no ad-hoc rates).
+
+### 3.10 Exceptions
+1. Transfer entered late (backdated) → re-run posting for affected days; reversals + new lines; approval if bill interim already issued.
+2. Event replay/duplicate → dedupe by `source_event_id`; unique index.
+3. Pharmacy return after final bill → credit note path.
+4. Payer rejects claim later → RC-004; patient share revision through supplementary bill only with MS approval.
+5. Tariff revision effective mid-stay → new rates only from effective date (line-level rate snapshot).
+6. Offline: billing desk PWA read-only cached bill; postings resume on reconnect (events queue in outbox).
+
+## 4. Data Model (schema `billing`)
+- **billing.ip_bills** (id, hospital_id, branch_id, admission_id unique, patient_id, status enum(open/pre_final/held/finalized/cleared/reopened/cancelled), payer_profile jsonb (primary payer type/id, policy, secondary), tariff_plan_id, package_id?, estimate_amount, credit_limit, credit_used, deposit_total, charges_gross, discount_total, tax_total, net_payable, payer_share, patient_share, balance_due, bill_no?, finalized_at, finalized_by, cleared_at, hold_reasons jsonb, currency char(3), fx_rate numeric(12,6)?, version, audit cols). Index (hospital_id, status), (hospital_id, admission_id).
+- **billing.ip_bill_lines** (id, bill_id, admission_id, line_no, charge_date, service_id, service_code, description, category enum(room/nursing/consultation/procedure/ot/anaesthesia/pharmacy/consumable/implant/lab/radiology/blood/icu/diet/physio/equipment/ambulance/misc/package), qty numeric(12,3), unit, rate, gross, discount_amt, discount_reason, taxable_amt, gst_rate, cgst, sgst, igst, hsn_sac, net, cost_centre_id, ordering_doctor_id, performing_doctor_id, source enum(auto_room/event/manual/package/adjustment), source_event_id unique nullable, source_ref (order/issue/case id), occupancy_id?, package_component bool, covered_by_package bool, payer_split enum(payable/non_payable/patient/co_pay), preauth_flag, rate_pending bool, status enum(posted/held/reversed/cancelled), reversed_by_line_id?, posted_at, posted_by, version) — partitioned by month of charge_date; unique (bill_id, source_event_id) where not null; index (bill_id, category), (bill_id, status).
+- **billing.ip_charge_policies** (hospital_id, branch_id?, key (day_rule/cutoff_time/checkout_hour/admission_grace/discharge_grace/min_days/icu_hourly/gst_room_threshold/late_charge_window/topup_threshold_pct/visit_cap), value jsonb, effective_from).
+- **billing.ip_recurring_charges** (admission_id, charge_code, basis enum(per_day/per_hour), rate_ref, start_at, end_at, source (bed_class/device_order/nursing_level), active).
+- **billing.ip_deposits_ledger** (admission_id, receipt_id, amount, kind enum(deposit/top_up/refund/adjust), at) — mirrors NC-001 receipts.
+- **billing.credit_limits** (admission_id, payer_id, preauth_case_id, approved_amount, enhancements jsonb, utilised, alerts_sent jsonb).
+- **billing.ip_interim_bills** (bill_id, interim_no, generated_at, by, snapshot jsonb, pdf_file_id, purpose).
+- **billing.ip_bill_holds** (bill_id, reason, owner_id, sla_due, released_at, released_by).
+- **billing.ip_disputes** (bill_id, line_id?, raised_by, channel, text, status, resolution, resolved_by).
+- **billing.discount_requests** (bill_id, scope, amount/pct, reason_code, requested_by, approver_id, status, approved_at) — EN-038.
+- **billing.ip_final_settlements** (bill_id, payer_breakup jsonb, receipts uuid[], refunds uuid[], credit_notes uuid[], undertaking_doc?, cleared_by).
+- **billing.ip_supplementary_bills** (bill_id, supp_no, lines, reason, approved_by).
+- Reuse OP-005: `billing.receipts`, `billing.payments`, `billing.refunds`, `billing.credit_notes`, `billing.tax_lines`, `billing.numbering`.
+- Read models: `analytics.mv_ip_running_bills` (per admission summary refreshed on line events), `analytics.mv_ip_revenue_daily` (by category/department/doctor/payer), `analytics.mv_ip_unbilled` (orders vs lines), `analytics.mv_credit_exposure`.
+
+## 5. Business Rules & Validations
+- One open bill per admission; lines immutable after posting — corrections by reversal lines; after finalisation only supplementary/credit-note paths.
+- Auto room-rent idempotent per (admission, date, code, occupancy); rules per §3.2 configurable and effective-dated; ICU/CCU/NICU/HDU exempt from room GST; room > ₹5,000/day taxable 5 % (threshold configurable for law changes); package supply treated per GST composite-supply configuration.
+- Tariff resolution order: payer contract rate → payer plan → hospital class rate → base; missing → `rate_pending` hold; rate snapshot stored per line.
+- Doctor visit caps and grades configurable; auto-visit from signed rounds notes only; manual visits need doctor/nurse entry with time.
+- Credit-limit alerts at 70/85/95 % (configurable); above-limit charges flagged; enhancement request auto-drafted with interim bill.
+- Top-up trigger: balance_due > deposit × threshold or projected 24-h > remaining deposit; message max 2/day.
+- Discount approvals by EN-038 matrix (role + amount + category); creator ≠ approver; doctor-fee discount reduces doctor share unless hospital bears (config).
+- Final bill: gapless number per branch/FY; requires zero held items, no rate_pending, TPA authorised amount (if payer insurance) or "settle as self" override; **§269ST cash limit enforced on the correct aggregate — not per bill.** A cash receipt is refused when it would push *any* of the following ≥ ₹2,00,000: (a) the single receipt; (b) total cash received from one person **in one day** across all counters, branches, bills and admissions (checked against NC-001's receipt ledger keyed on the payer's PAN/identity, not the bill id); (c) total cash received **in respect of one event/occasion — i.e. one admission/episode** — across its deposits, interim collections, final settlement and any supplementary bill. Splitting a payment across bills, days or counters must not defeat the check; the ledger is queried, not the bill. Attempted structuring (multiple sub-limit cash receipts from one payer inside the same admission/day) raises a compliance alert to Finance and appears in the 3CD 269ST report (NC-009 §3.7). Penalty exposure under §271DA is 100 % of the amount received, so this is a hard block with no role-based override — the counter must take a non-cash mode. PAN/Form 60 captured per Rule 114B thresholds; e-invoice for eligible B2B.
+- Clearance = patient share settled or approved credit/undertaking; emits `ip.bill.cleared`; late charges after clearance → supplementary bill (approval) not edits.
+- Estimate variance > 20 % vs running bill → family notification (configurable) and doctor awareness.
+- Every manual line/discount/reversal/reopen audited with reason; PHI on printed bill limited to name/UHID/IP no./age/sex; itemised bill mandatory on request.
+- Retention: bills 8 years min (GST), longer per policy.
+
+## 6. API Surface (`/api/v1/billing/ip`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| GET | /bills?status=&ward=&payer=&hold= | worklist | billing.ip.list | – | cursor |
+| GET | /bills/{admissionId} | running bill summary + lines (paged) | billing.ip.read | – | cursor |
+| PATCH | /bills/{id}/payer | change payer/policy (effective date) | billing.ip.payer.update | Y | – |
+| POST | /bills/{id}/lines | manual charge line | billing.ip.line.post | Y | – |
+| POST | /bills/{id}/lines/{lineId}/reverse | reversal with reason | billing.ip.line.reverse | Y | – |
+| GET | /bills/{id}/held-items | rate_pending/held lines | billing.ip.read | – | cursor |
+| POST | /bills/{id}/held-items/{lineId}/resolve | set rate/cancel | billing.ip.line.post | Y | – |
+| POST | /bills/{id}/recompute-room-rent?from= | rerun posting for period | billing.ip.room.recompute | Y | – |
+| GET | /bills/{id}/room-rent/preview?transferTo=&at= | proration preview | billing.ip.read | – | – |
+| POST | /bills/{id}/deposits | record deposit/top-up (via NC-001) | billing.ip.deposit | Y | – |
+| POST | /bills/{id}/topup-request | send payment link | billing.ip.deposit | Y | – |
+| PUT | /bills/{id}/credit-limit | set/enhance (from RC-002 or manual) | billing.ip.credit.update | Y | – |
+| POST | /bills/{id}/package/attach|detach|convert | package ops | billing.ip.package | Y | – |
+| POST | /bills/{id}/interim | generate interim bill PDF | billing.ip.interim | Y | – |
+| POST | /bills/{id}/holds, DELETE /holds/{holdId} | hold/release | billing.ip.hold | Y | – |
+| POST | /bills/{id}/discounts | request/apply discount | billing.ip.discount.request / approve | Y | – |
+| POST | /bills/{id}/disputes, PATCH /disputes/{id} | disputes | billing.ip.dispute | Y | cursor |
+| GET | /bills/{id}/pre-final-check | validations & unbilled scan | billing.ip.read | – | – |
+| POST | /bills/{id}/finalize | final bill (gapless no.) | billing.ip.finalize | Y | – |
+| POST | /bills/{id}/settle | receipts/refunds/credit → clearance | billing.ip.settle | Y | – |
+| POST | /bills/{id}/supplementary, /credit-notes, /reopen | post-final ops | billing.ip.supplementary / credit_note / reopen | Y | – |
+| GET | /bills/{id}/pdf?type=summary|itemised|payer|patient_share&lang= | PDFs | billing.ip.print | – | – |
+| GET | /family/{admissionId}/summary | family view (portal token) | billing.ip.family.read | – | – |
+| GET | /reports/revenue, /reports/unbilled, /reports/credit-exposure, /reports/discounts | MIS | billing.report.read | – | – |
+| GET/PUT | /config/charge-policies, /config/visit-rules, /config/topup-rules | config | billing.ip.configure | Y | – |
+| Consumes | all events in §3.3, `ip.admitted|transferred|discharge.*`, `preauth.*`, `package.*`, `payment.received` (EN-010), `receipt.created` (NC-001) | | | | |
+
+## 7. Domain Events (outbox)
+- `ip.bill.opened` {bill_id, admission_id, payer} → RC-006, IP-008.
+- `ip.bill.line.posted|reversed|held` {line_id, category, amount, source} → family view, RC-006, IP-008 (package utilisation), NC-034.
+- `ip.bill.room_rent.posted` {date, class, amount, rule}.
+- `ip.bill.rate_pending` {service_code, payer} → billing worklist, RC-003.
+- `ip.bill.topup_required` {amount} → EN-009/PE-001; `ip.bill.credit_threshold` {pct} → TPA desk, doctor, RC-002; `ip.bill.above_credit_limit`.
+- `ip.bill.package_threshold` {pct 80/100} → doctor, IP-008.
+- `ip.bill.payer_changed`, `ip.bill.held|released`, `ip.bill.interim_generated`, `ip.bill.dispute.raised|resolved`.
+- `ip.bill.discount.requested|approved|rejected` → EN-038.
+- `ip.bill.finalized` {bill_no, totals, payer_split} → RC-001 (claim), NC-009 (GL), NC-034 (payouts), NC-012 (corporate invoice), EN-009 (PDF link).
+- `ip.bill.cleared` {mode} → IP-002, IP-001, EN-015 gate pass.
+- `ip.bill.supplementary_created`, `ip.bill.credit_note_created`, `ip.bill.reopened`.
+
+## 8. Screens (UI)
+- **IP Billing Worklist** (desktop): tabs Running / Pre-final / Held / Finalised today / Disputes; columns patient, ward/bed, payer, LOS, charges, deposit, balance, credit used %, holds, discharge stage; filters; `Enter` open, `F` finalise, `I` interim, `H` hold, `D` deposit.
+- **Running Bill** (desktop 3-pane): left categories with subtotals, centre lines table (virtualised, group by day/category, colour for held/reversed/package-covered), right rail: payer & credit gauge, deposit ledger, alerts, holds, actions; keyboard `A` add line, `R` reverse, `P` print, `Ctrl+F` find service; real-time line updates (Socket.IO).
+- **Room-rent timeline** view: occupancy bars per class with charge chips per day; recompute button; proration preview.
+- **Final Bill Wizard**: pre-final checks (unbilled scan, held, TPA auth), discount summary, payer split editor (non-payables, co-pay), settlement (multi-tender, links), refund, print set (summary/itemised/payer copy/patient-share copy/GST invoice), clearance.
+- **TPA Desk panel**: credit limit, enhancement, non-payables tagging, final authorisation upload, timers (3 h).
+- **Family/Kiosk view** (phone/kiosk/portal): summary cards, itemised list with explainers, deposit/pay button, request interim, dispute.
+- **Bedside posting** (tablet/phone via IP-004): scan consumable/procedure → post to bill.
+- **Config**: charge policies, visit rules, top-up thresholds, non-payables lists per payer.
+- Empty/error states: "No lines yet — room rent posts at 00:00"; "Tariff missing for X — resolve in RC-003".
+
+## 9. Integrations
+- RC-003 tariffs (Redis-cached), EN-002/RC-002 (pre-auth/credit/final auth; NHCX later), RC-001 claims, RC-007 schemes (PMJAY TMS package codes), NC-001 receipts/refunds, EN-010 payment links/UPI QR & webhooks, NC-009 GL export/Tally, NC-034 payouts, NC-012 corporate invoices/e-invoice (IRP) if applicable, EN-009/EN-032 PDF delivery, PE-001 family view, EN-016 e-sign on final bill (optional), GST e-invoice API (B2B), FX rate source (config).
+- Fallbacks: tariff service down → lines held rate_pending; payment gateway down → cash/card manual; PDF worker down → HTML print.
+
+## 10. Reports & Analytics
+- Daily IP revenue by category/department/doctor/payer/ward, running-bill census (charges/deposits/exposure), unbilled services (orders without lines), rate_pending backlog, credit-limit exposure & above-limit, deposit shortfall list, package variance (with IP-008), discount register & approvals, discharge billing TAT (nursing cleared → finalised → cleared), interim bills issued, disputes, GST liability by rate/HSN, cash cap compliance, doctor visit charge audit, refunds, AR hand-off (RC-005).
+- Read models listed in §4.
+
+## 11. Notifications
+- Family: deposit receipt, top-up request with link (max 2/day), estimate variance, interim bill ready, final bill/receipt PDF, refund processed; TPA desk: credit thresholds, final auth timer; Billing: held items, rate pending, discharge initiated, disputes, approvals; Doctors: package threshold, credit near limit (with treating context), visit charge captured summary; Finance: daily revenue digest, discount approvals over limit.
+
+## 12. Permissions (RBAC keys)
+`billing.ip.list|read|print`, `billing.ip.line.post|reverse`, `billing.ip.room.recompute`, `billing.ip.deposit`, `billing.ip.credit.update`, `billing.ip.package`, `billing.ip.interim`, `billing.ip.hold`, `billing.ip.discount.request|approve` (ABAC amount_limit), `billing.ip.dispute`, `billing.ip.finalize`, `billing.ip.settle`, `billing.ip.supplementary`, `billing.ip.credit_note`, `billing.ip.reopen`, `billing.ip.payer.update`, `billing.ip.family.read`, `billing.ip.configure`, `billing.report.read|export`.
+Defaults: Billing exec IP (27): list/read/print/line.post/reverse/interim/hold/discount.request/dispute/finalize/settle/payer.update/deposit; Billing manager (46): + discount.approve, supplementary, credit_note, reopen (with MS), room.recompute, configure; TPA desk (28): credit.update, read, interim, payer.update; Cashier (26): deposit, settle (receipts); Ward nurse (17): line.post (consumables/procedures within own ward), read summary; Doctors: read summary of own patients; Pharmacist: read; Patient/Family (59/60): family.read; Auditor: read/report.
+
+## 13. Non-functional
+- Volumes: 2,000 open bills, ~150k lines/day (pharmacy heavy), room-rent job posts 2,000 admissions in < 2 min; line ingestion p95 < 100 ms per event; running bill screen < 300 ms with 5,000 lines (paged/virtualised); final bill computation < 2 s.
+- Consistency: line posting transactional with outbox; unique source_event_id; monetary numeric(14,2); rounding per line then bill (configurable ₹ rounding on final).
+- Availability: posting consumers resilient (DLQ + replay); reconciliation job compares orders vs lines nightly (RC-006).
+- Printing: A4 bill/itemised (multi-page, GST format), thermal receipts, multilingual patient-share summary; PDF archived (S3) with hash.
+- Security: PHI-minimal bill; family view via OTP/portal token; audit all money moves; 2FA for finalize/reopen roles.
+
+## 14. Acceptance Criteria
+1. Given an admission at 22:30 into a Private bed with day-boundary rule (cut-off 00:00) and admission grace "after 20:00 = half day", then the 00:00 job posts 0.5 day for admission day and 1 day thereafter, each line idempotent on rerun.
+2. Given a transfer Private → ICU at 14:20 with "higher-class-for-day" rule, then that day's Private line is reversed and an ICU line posted; with hourly ICU rule, ICU hours × hourly rate are posted and Private prorated per policy; preview matches posted amounts.
+3. Given a room tariff ₹6,000/day (non-ICU), then the room line carries GST 5 % (SAC 9993) and an ICU line at ₹15,000/day carries no GST.
+4. Given `pharmacy.issued` for 3 batches with different GST rates, then three lines post with HSN and tax; a return event creates negative lines referencing the originals; a duplicate event is ignored.
+5. Given a lab order for a payer without a contracted rate, then the line posts `rate_pending` and appears in Held items; finalisation is blocked until resolved.
+6. Given a package "Lap Chole ₹60,000" including 2 days Semi-Private, when the patient stays 3 days in Private, then the excess (1 extra day + class differential) is itemised, package threshold events fire at 80 % and 100 % of the consumable cap, and the package line remains ₹60,000.
+7. Given pre-auth approved ₹1,50,000, when charges reach ₹1,27,500 (85 %), then the TPA desk and treating doctor are alerted and an enhancement draft with interim bill is created; charges above ₹1,50,000 are flagged.
+8. Given deposit ₹20,000 and running self-share ₹24,000 with top-up threshold 100 %, then a WhatsApp payment link is sent (max 2/day) and the family view shows the amount due.
+9. Given discharge initiated with 2 unbilled OT consumables (orders exist, no lines), then the pre-final check lists them and finalisation is blocked until posted or waived with reason.
+10. Given finalisation, then a gapless BILL_IP number is issued in sequence per branch/FY, the bill is immutable, `ip.bill.finalized` reaches RC-001, NC-009 and NC-034, and PDFs (summary, itemised, payer, patient share) render with GST breakup.
+11. Given patient share ₹2,40,000, when cashier attempts ₹2,40,000 cash, then the system blocks cash ≥ ₹2,00,000 and requires another mode; and given the same payer has already paid ₹1,50,000 cash today against the deposit and now tenders ₹60,000 cash at another counter for the final bill, then that second receipt is also blocked (day + admission aggregate ≥ ₹2,00,000), a structuring alert is raised to Finance, and no role can override.
+12. Given a discount request of ₹15,000 by a billing exec whose limit is ₹5,000, then it routes to the billing manager; the same user cannot approve; the approved discount appears with reason on the bill.
+13. Given final bill cleared with credit approval (undertaking), then `ip.bill.cleared` emits, IP-002 shows Billing ✓ and a gate pass is generated; the balance moves to AR (RC-005).
+14. Given a late pharmacy return after clearance, then a credit note is created (not a bill edit) with approval and reflected in the claim adjustments.
+15. Given a payer change from self to TPA effective admission date, then all lines are re-rated under approval with history preserved and non-payables tagged.
+16. Given a doctor's signed rounds note, then a visit charge is auto-posted once/day/doctor per cap; a second note the same day requires override.
+17. Given the family opens the portal bill, then lines show plain-language explainers in the chosen language, and a dispute on a line creates a billing task.
+18. Given the room-rent job fails midway, then rerun completes without duplicates and the job log shows processed/failed admissions.
+19. Given a supplementary bill for ₹3,000 late charges, then it carries its own number, references the final bill and appears in claims/GL correctly.
+
+## 15. Enhancements / Later phases
+- From VIMS sheet row 24: real-time cost visibility for family (here), auto deposit top-up notification (here), package exhaustion alert to doctor (here/IP-008), patient-friendly bill explainer (here), multi-currency (flagged), dynamic pricing engine (via RC-003 effective plans; ML later).
+- (market) package vs daily charge types with auto-detection, itemised billing, automated co-payment calculation, secondary insurance coverage (payer split supports secondary; full COB rules later), cost estimation for treatment (RC-008), credit party billing/aging (NC-012/RC-005), relief fund/CGHS billing (RC-007), effective-date tariff (RC-003).
+- Later: NHCX real-time claim adjudication, ABDM-linked e-billing, DRG-based pricing (AI-006), predictive bill trajectory (AI-005), automated non-payables per IRDAI standard list updates, patient financing/EMI partners.
+
+## 16. Open Questions for the Hospital
+1. Room-rent rule (day-boundary/hotel 24-h/higher-class/hourly ICU), cut-off & checkout hours, admission/discharge grace, minimum days?
+2. Which recurring charges exist (nursing, RMO, service, equipment) and are they class-linked?
+3. Payer mix and contracts (TPA list, corporate, PMJAY/CGHS/ECHS/ESIC); non-payables lists per payer; co-pay rules?
+4. Doctor visit charge rules (grades, caps, auto from rounds?), cross-consult charges, surgeon/anaesthetist fee grades?
+5. Discount approval matrix (roles/limits/reasons); charity/sponsor funds?
+6. GST positions (room threshold, composite supply for packages), e-invoice applicability, PAN/cash policy?
+7. Interim bill format & who may request; family view opt-in?
+8. Late-charge window after nursing clearance; supplementary bill approval chain?
+9. Deposit top-up thresholds; payment gateway/UPI QR at counters; refund modes?
+10. Existing bill formats/letterheads/languages; itemised vs summary defaults for payers?
+11. Tally/ERP GL mapping (cost centres, ledgers), doctor payout model?
+12. International patients: currencies, FX source, FRRO requirements?

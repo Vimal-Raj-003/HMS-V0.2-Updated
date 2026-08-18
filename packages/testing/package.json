@@ -1,0 +1,35 @@
+{
+  "name": "@vims/testing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Testcontainers harness, factories, and the synthetic Indian patient generator. No production PHI ever reaches a lower environment (docs/09 §11).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./containers": "./src/containers/index.ts",
+    "./factories": "./src/factories/index.ts",
+    "./generators": "./src/generators/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@vims/contracts": "workspace:*",
+    "@vims/db": "workspace:*",
+    "ioredis": "^6.0.0",
+    "pg": "^8.13.1",
+    "testcontainers": "^12.1.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "vitest": "^4.1.10"
+  }
+}

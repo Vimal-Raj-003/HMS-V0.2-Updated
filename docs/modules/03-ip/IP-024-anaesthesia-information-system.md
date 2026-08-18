@@ -1,0 +1,179 @@
+# IP-024 — Anaesthesia Information System (pre-anaesthesia check-up & ASA/airway/risk scores, anaesthesia plan & consent, anaesthesia worklist, intra-operative electronic record with monitor/ventilator/pump feed via EN-042, drugs & fluids & events timeline, blood loss, PACU/recovery with Aldrete & discharge criteria, post-op visit & complications, quality indicators)
+
+| Field | Value |
+|---|---|
+| Domain | IP / Inpatient |
+| Module ID | IP-024 |
+| Phase | 7 |
+| Priority | P1 |
+| Complexity | High |
+| Depends on | IP-006 (OT scheduling/case, WHO checklist, timings, team, PACU bed; IP-024 owns the anaesthesia record that IP-006 links), TR-004 (trauma OT emergency cases), OP-010/OP-039 (procedure sedation outside OT), OP-002 (CPOE: pre-op orders, PAC advice, post-op orders), IP-001 (admission, pre-op ward, ICU booking), IP-003 (pre-op nursing checklist, NPO times, post-op vitals & pain, MAR), IP-009/IP-016 (post-op ICU/HDU handover), IP-014/OP-003 (anaesthesia drug kits, narcotics NDPS register with witness, controlled drug wastage), IP-013 (crash cart/code in OT), IP-007 (blood products intra-op), OP-004/OP-008 (pre-op investigations, ABG intra-op, imaging), EN-042 (device gateway: patient monitors, anaesthesia workstations/ventilators, infusion pumps, BIS/TOF/entropy, cardiac output — HL7/serial/vendor SDK), EN-029 (rules: drug allergy/interaction, MH triggers, difficult airway alert, dose ranges by weight, hypotension/hypoxia alarms), EN-028 (anaesthesia consent incl. specific risks, blood consent), EN-039 (forms: PAC, anaesthesia record print layout, PACU chart), EN-013 (drug syringe labels ISO 26825 colour codes, patient scan), EN-005 (syringe label printer), IP-005 (anaesthesia charges: type/duration/drugs/consumables/anaesthetist fees NC-034), IP-012 (SSI antibiotic prophylaxis timing, device days), NC-020 (anaesthesia machine checks/PM), NC-015 (anaesthesia incidents/indicators), IP-020 (ERAS pathways), IP-018 (transfer to PACU/ICU handover), IP-011 (obstetric anaesthesia/labour epidural), IP-015/OP-033 (paediatric dosing), IP-002 (discharge day-care criteria PADSS), EN-037, EN-024, NC-030 (anaesthetist roster) |
+| Feature flag | `module.anaesthesia.enabled` (sub-flags: `ais.device_feed`, `ais.syringe_labels`, `ais.pacu`, `ais.pain_service`, `ais.sedation_outside_ot`, `ais.pac_clinic`) |
+| Primary roles | Anaesthetist (10), Anaesthesia resident (14), Nurse — OT/PACU (20), Anaesthesia technician (custom under 20/48) |
+| Secondary roles | Surgeon (9), Intensivist (11), Nurse — Ward (17: pre-op checklist), Pharmacist (31: drug kits), Blood bank (37), Billing (27), Biomedical (48), Quality (54), MS (4), Patient/Family (59/60), Auditor (58) |
+| Regulatory | NABH 5th ed. COP.15 (anaesthesia services: PAC & re-evaluation immediately before induction, informed consent, monitoring during anaesthesia (SpO2, ECG, NIBP, EtCO2, temp), anaesthesia record, post-anaesthesia monitoring & discharge criteria, adverse events), COP.14 (sedation: pre-sedation assessment, monitoring, discharge criteria), ISA (Indian Society of Anaesthesiologists) minimum monitoring standards & PAC guidelines, ASA Physical Status classification, WHO Surgical Safety Checklist (with IP-006), Mallampati/airway assessment, difficult airway (DAS) documentation, NDPS Act (opioids in OT), ISO 26825 (syringe label colours), Aldrete/modified Aldrete & PADSS discharge scores, Apfel PONV, RCRI (Lee) cardiac risk, STOP-BANG (OSA), Cormack-Lehane, MH (malignant hyperthermia) protocol, DPDP |
+
+## 1. Purpose
+IP-024 is the anaesthetist's system of record from clinic to ward: pre-anaesthesia check-up (PAC) with structured airway/comorbidity assessment, ASA class and risk scores, investigations gating and optimisation advice, anaesthesia plan and consent; the pre-induction re-evaluation and machine check; a real-time intra-operative record that captures vitals and ventilator/pump data automatically from devices, with drugs (barcode syringe labels), fluids, blood, airway management, regional blocks, events and timings on one timeline; PACU with Aldrete/PADSS scoring, pain/PONV management and discharge criteria; post-op visits and complication capture; and quality indicators, drug/narcotic reconciliation and billing.
+
+## 2. Users & Jobs-to-be-done
+- **Anaesthetist** (desktop in PAC clinic; tablet/desktop at anaesthesia workstation; phone via IP-010): PAC (10–20/day per anaesthetist), plan (GA/RA/MAC/combined), consent, pre-induction check, intra-op documentation (≥ 90 % auto-captured; manual drugs/events), PACU orders & discharge, post-op visit at 24 h, incident reporting.
+- **Anaesthesia resident/technician**: machine check, drug drawing with labels, device connection/pairing, assist documentation (co-sign by consultant).
+- **PACU nurse** (tablet/desktop; `ais.pacu`): admission to PACU, vitals q15 min (device feed), Aldrete q15–30 min, pain (NRS)/PONV, warming, drains/lines, discharge readiness, handover to ward/ICU (IP-018).
+- **Ward nurse**: pre-op checklist (NPO, consent, site marking, dentures, jewellery, pre-meds), post-op orders execution (IP-003).
+- **Surgeon**: sees PAC status/fitness, ASA, blood requirement, plan; participates in WHO checklist (IP-006).
+- **Pharmacist**: anaesthesia drug kits per case, narcotic issue/return/wastage witness (IP-014).
+- **Billing**: anaesthesia charges by type & duration & drugs; anaesthetist fees (NC-034).
+- **Quality**: PAC compliance, monitoring compliance, adverse events (awareness, dental injury, aspiration, MH, cardiac arrest, unplanned ICU, reintubation), PONV rates, PACU LOS, temperature on arrival (hypothermia).
+
+## 3. Core Workflows
+
+### 3.1 Pre-anaesthesia check-up (PAC) (`ais.pac_clinic`)
+1. **Trigger**: IP-006 OT request/booking (`ot.case.requested`) or OP-002 "PAC advice" order (market: PAC advice/checkup as in competitor OT modules) or OP-010 sedation booking → **PAC worklist** (clinic/bedside; scheduled elective vs emergency same-day) with priority (surgery date, ASA expected, urgency).
+2. **Anaesthetist** PAC form (EN-039 template; structured): demographics/weight/height/BMI, procedure & surgeon, urgency, previous anaesthesia & complications (family history MH, pseudocholinesterase deficiency), allergies (from OP-001 + verify), medications (anticoagulants/antiplatelets stop plan, insulin, steroids, ACEi), comorbidities by system (CVS: functional capacity METs, HTN, IHD, valvular; RS: asthma/COPD, smoking pack-years, OSA STOP-BANG; endocrine: DM HbA1c, thyroid; renal/hepatic; neuro; haem: bleeding history; obstetric), examination (vitals, airway: **Mallampati** class, mouth opening (inter-incisor), thyromental distance, neck movement, dentition (loose/caps), beard, prior difficult airway, predicted difficult mask/intubation/FONA — DAS flags), spine (for neuraxial), veins, **ASA class** (I–VI, E suffix), risk scores auto: **RCRI/Lee**, **Apfel** PONV, **STOP-BANG**, **Caprini** (with IP-003), frailty (geriatric), paediatric considerations, **NPO instructions** (2/4/6/8 h rules by age & food type), investigations review (OP-004/OP-008 pulled: Hb, platelets, INR, creatinine, electrolytes, ECG, echo, PFT, chest X-ray as per age/comorbidity/procedure matrix — configurable "required investigations" rules) with **gating** (missing/abnormal flagged; order directly), specialist optimisation referrals (cardio/pulmo/endocrine — OP-021), pre-medication orders (anxiolytic, aspiration prophylaxis, continue/hold meds), **anaesthesia plan** (technique GA/RSI/TIVA/RA-spinal/epidural/CSE/nerve block (which)/MAC/sedation, airway device plan (ETT/SGA/videolaryngoscope/awake fibreoptic), monitoring beyond standard (arterial line, CVP, cardiac output, BIS, TOF, temperature), post-op destination (ward/HDU/ICU booking IP-001/IP-016), blood products (IP-007 request), post-op analgesia plan (PCA/epidural/blocks), PONV prophylaxis by Apfel), fitness decision: `fit`, `fit_with_optimisation`, `deferred` (reason, re-PAC date), `high_risk_counselled`; **consent** (EN-028 anaesthesia consent: technique, risks specific (dental, awareness, PONV, sore throat, nerve injury, blood transfusion), signature by patient/guardian, anaesthetist, witness; language) → sign (co-sign for residents) → Event `anaesthesia.pac.completed` {asa, fitness, plan, destination_icu} → IP-006 readiness (PAC done/ASA), IP-003 pre-op tasks (NPO time from surgery slot, pre-meds), IP-001 (ICU booking), IP-007.
+3. PAC validity (default 30 days elective if unchanged; re-evaluation always day-of), reminders for deferred/optimisation follow-ups; PAC clinic scheduling via OP-001 appointments (`ais.pac_clinic`).
+
+### 3.2 Day of surgery: pre-induction re-evaluation & machine check
+1. **Anaesthesia technician/resident**: **machine checklist** (per machine, per day & between cases: gas supply, cylinders, vaporisers, breathing circuit leak test, ventilator function, suction, monitors, emergency drugs, difficult airway cart, MH kit location, defibrillator — NC-020 asset link) signed → `machine_checks`; failed item → BME + case delay flag to IP-006.
+2. **Anaesthetist** at induction: **re-evaluation** (changes since PAC, NPO confirmed (times from IP-003), consent verified, allergies, airway re-check, vitals baseline, labs day-of (glucose), pregnancy test if applicable, site marking (surgeon), blood availability, ICU bed confirmed, antibiotic prophylaxis timing plan (IP-012 SSI: within 60 min pre-incision) → participates in **WHO Sign In** (IP-006; anaesthesia items: pulse oximeter on, allergy, difficult airway/aspiration risk, blood loss risk > 500 ml/7 ml/kg) → **anaesthesia record opened** (`anaesthesia_records` `status=in_progress`) → Event `anaesthesia.record.started`.
+
+### 3.3 Intra-operative record (`ais.device_feed`)
+1. **Device pairing**: room/anaesthesia workstation devices pre-mapped to OT (EN-042: monitor (Philips/GE/Mindray/Nihon Kohden), anaesthesia workstation/ventilator (Dräger/GE/Mindray), infusion pumps (B. Braun/Fresenius/Baxter), depth-of-anaesthesia (BIS/entropy), TOF, cardiac output, temperature); patient association by scanning wristband at the workstation tablet → streams (HR, SpO2, NIBP/IBP, EtCO2, FiO2/EtAA (agent %), MAC, RR, TV, PEEP, Paw, ST segments, temp, BIS, TOF, pump rates/drug names) recorded every 1 min (configurable 15 s–5 min) into `anaesthesia_obs` with artefact handling (nurse/anaesthetist can mark artefact; raw retained). Manual entry fallback (grid) when no feed; feed loss > 2 min → banner + manual mode.
+2. **Timeline** (single screen): auto vitals graph (classic anaesthesia chart: HR/BP symbols per ISA/AAGBI convention), ventilation strip, agent/gas strip, **drugs** (bolus/infusion: select from anaesthesia formulary favourites; dose auto by weight; time-stamped; barcode syringe scan when `ais.syringe_labels` — labels printed at drawing time with ISO 26825 colour, drug/concentration/prepared time/by), **fluids** (crystalloid/colloid volumes with running total), **blood products** (IP-007 unit scan → transfusion record link), **airway** (induction technique RSI/inhalational, laryngoscopy grade Cormack-Lehane, device/size/depth/cuff pressure, attempts, difficult airway details & DAS algorithm steps, adjuncts, extubation), **regional** (block type, landmark/USG/nerve stimulator, needle, LA drug/volume, level achieved, test dose, catheter), **positioning** & pressure-point care, **temperature management** (warming devices), **eye care**, **tourniquet** times, **antibiotic** time vs incision (auto from IP-006 incision event), **events/complications** (hypotension, bradycardia, desaturation, bronchospasm, laryngospasm, anaphylaxis (protocol), aspiration, awareness suspicion, MH (protocol timer & dantrolene), cardiac arrest → IP-013 code record link, difficult airway, dental injury, drug error), **blood loss** (suction canister minus irrigation, sponge weights) & urine output, **ABG** results (OP-004) inline, **notes**, **times** (anaesthesia start, induction, intubation, incision (from IP-006), closure, extubation, anaesthesia end, PACU in) auto-synced with IP-006 timings; multi-anaesthetist handover in-theatre (relief) recorded with sign; emergency case mode (minimal mandatory fields, backfill later flagged).
+3. **Rules** (EN-029): allergy match on drug pick (hard-stop unless override), max dose per weight (LA toxicity, paracetamol), MH trigger warning if MH history/family history and volatile/succinylcholine chosen, hypotension/hypoxia/hypercapnia thresholds prompt event capture, antibiotic not given by incision − 0 → alert, temperature < 36 °C prompt warming, TOF < 0.9 before extubation warning.
+4. **Sign Out** (IP-006) → **anaesthesia record close**: summary auto-generated (technique, airway, drugs totals, fluids, blood, EBL, urine, events, complications), narcotic reconciliation (issued vs given vs wasted with witness → IP-014 register), consumables (kits/CVP/epidural sets/circuits) → IP-005 charges (anaesthesia type × duration bands + drugs + consumables + monitoring lines; anaesthetist fee NC-034), post-op orders (analgesia, antiemetics, O2, monitoring, fluids, DVT, ICU handover) → sign (consultant co-sign for residents) → immutable version → Event `anaesthesia.record.signed`; **handover to PACU/ICU** via IP-018 (ISBAR with anaesthesia summary auto-filled).
+
+### 3.4 PACU / recovery (`ais.pacu`)
+1. **PACU admission**: bed/bay (IP-006 PACU beds), arrival vitals (device feed continues via PACU monitors), airway status, O2, pain, PONV, temperature, drains, lines, IV fluids, handover acknowledged; **monitoring** q15 min ×1 h then q30 min (auto with feed); **Aldrete/modified Aldrete** (activity, respiration, circulation, consciousness, SpO2) at arrival and per schedule; **pain** NRS with rescue analgesia (MAR; PCA settings), **PONV** rescue, shivering, urinary retention, block regression (Bromage/sensory level for spinal), warming; complications (airway obstruction, desaturation, hypotension, bleeding, delayed emergence, delirium) with anaesthetist call.
+2. **Discharge criteria**: Aldrete ≥ 9 (or per policy), pain ≤ 3–4, no active PONV, stable vitals, temp ≥ 36 °C, block regression as required, surgical site check; day-care → **PADSS** ≥ 9 & escort/instructions (IP-002 day-care discharge) → anaesthetist/PACU nurse (per policy) authorises → destination ward/HDU/ICU/home → IP-018 handover; PACU LOS & bypass (fast-track) captured; Event `anaesthesia.pacu.discharged`.
+
+### 3.5 Post-op follow-up, acute pain service, sedation outside OT
+- **Post-op visit** (24 h; ward tablet/IP-010): pain, PONV, sore throat, awareness screening (Brice questionnaire), nerve injury, dental, satisfaction; complications register; epidural/PCA rounds (`ais.pain_service`: catheter site, level, motor block, infusion settings, side-effects, daily until removal); Event `anaesthesia.postop_visit.recorded`.
+- **Sedation outside OT** (`ais.sedation_outside_ot`: endoscopy, radiology MRI/CT, cath lab, ECT, dental — OP-010/OP-029/OP-030): pre-sedation assessment (ASA, airway, NPO), monitoring record (SpO2/EtCO2/HR/BP), drugs, recovery & discharge criteria; same tables with `setting=out_of_ot`.
+
+### 3.6 Obstetric, paediatric & special settings
+- **Obstetric** (IP-011): labour epidural record (insertion, test dose, top-ups/PCEA, sensory level, motor block, hypotension, FHR events shared with partograph), category-1 CS decision-to-delivery timer, GA for CS with aspiration prophylaxis checklist; neonatal resuscitation attendance (IP-015/IP-011).
+- **Paediatric** (OP-033/IP-015): weight-based drug defaults & max doses, age-appropriate NPO rules, ETT size formulae, parental presence at induction, temperature vigilance; PICU handover.
+- **Cardiac/neuro/trauma** (TR-004/TR-006): additional monitoring lines (TEE, ICP), massive transfusion protocol link (IP-007), cell salvage volumes, damage-control timings.
+- **Remote/emergency**: emergency case template auto-selects minimal mandatory fields; night-time OT device pairing preset per theatre.
+
+### 3.7 Exceptions
+- PAC not done for emergency → `emergency_pac` minimal form allowed with justification (NABH exception log).
+- Device feed mismatch (wrong patient association) → hard-stop by wristband re-scan; data quarantined and re-associated with audit.
+- Case cancelled after induction → record closed with reason & charges policy.
+- Narcotic discrepancy at reconciliation → IP-014 incident; record cannot be signed until resolved or incident linked.
+- Offline: workstation tablet stores obs/drugs locally (IndexedDB) and syncs; server clock offset applied; feed continues via local gateway buffer (EN-042 edge).
+
+## 4. Data Model (schema `ot`; extends IP-006)
+- **ot.pac_assessments** (id, hospital_id, branch_id, patient_id, admission_id?, ot_case_id?, procedure_text, surgeon_id, urgency, setting enum(elective/emergency/day_care/out_of_ot), weight_kg, height_cm, bmi, history jsonb, medications jsonb, comorbidities jsonb, airway jsonb {mallampati, mouth_opening_cm, tmd_cm, neck_movement, dentition, beard, prior_difficult, predicted_difficult jsonb}, spine jsonb, veins, asa_class enum(1..6), asa_emergency bool, scores jsonb {rcri, apfel, stop_bang, caprini, frailty}, investigations jsonb [{test, value, at, ok}], required_tests_missing jsonb, referrals jsonb, npo jsonb {solids_h, clear_h, instructions_at}, premeds jsonb, plan jsonb {technique[], airway_plan, monitoring[], destination, blood_request, analgesia, ponv_prophylaxis}, fitness enum(fit/fit_with_optimisation/deferred/high_risk_counselled), deferred_reason?, re_pac_due?, consent_id?, valid_till, assessed_by, cosigned_by?, signed_at, version, sha256) — index (patient_id, signed_at desc), (ot_case_id).
+- **ot.machine_checks** (id, theatre_id, machine_asset_id, type enum(daily/between_cases), items jsonb, passed bool, failed_items jsonb, by, at, case_id?).
+- **ot.anaesthesia_records** (id, hospital_id, branch_id, ot_case_id (or procedure_id for out_of_ot), pac_id, admission_id?, patient_id, setting, technique jsonb, asa, primary_anaesthetist_id, team jsonb [{user, role, from, to}], re_evaluation jsonb, sign_in_ok bool, times jsonb {anaesthesia_start, induction, airway_secured, incision, closure, extubation, anaesthesia_end, pacu_in}, airway jsonb, regional jsonb, positioning jsonb, temperature_mgmt jsonb, lines jsonb, fluids_total jsonb, blood jsonb, ebl_ml, urine_ml, antibiotic jsonb {drug, at, incision_delta_min}, complications jsonb, summary_text, postop_orders_ref, narcotic_reconciliation jsonb {issued, given, wasted, witness, ok}, consumables jsonb, charges_posted bool, status enum(in_progress/closed/signed/cancelled), signed_by, cosigned_by?, signed_at, version, sha256) — index (ot_case_id), (patient_id, signed_at desc).
+- **ot.anaesthesia_obs** (record_id, at, source enum(device/manual/artefact_flagged), device_id?, params jsonb {hr, spo2, nibp_s/d/m, ibp_s/d/m, etco2, fio2, et_agent, mac, rr, tv, peep, paw, temp, bis, tof, co, st}, artefact bool, by?) — partition monthly; index (record_id, at). Retention full-fidelity 10 y (configurable), raw device packets in object storage.
+- **ot.anaesthesia_drugs** (record_id, at, drug_id, name, dose, unit, route enum(iv/im/inh/epidural/intrathecal/perineural/po/other), type enum(bolus/infusion_start/infusion_rate_change/infusion_stop/inhalational_pct), concentration?, rate?, syringe_label_id?, pump_id?, given_by, is_controlled bool, witness_id?, batch?) — index (record_id, at).
+- **ot.syringe_labels** (id, record_id?, drug_id, concentration, prepared_by, prepared_at, expiry_at, colour_class (ISO 26825), barcode unique, printed_at).
+- **ot.anaesthesia_fluids** (record_id, at, type enum(crystalloid/colloid/blood_product/other), product, volume_ml, unit_id? (IP-007)).
+- **ot.anaesthesia_events** (record_id, at, type enum(hypotension/bradycardia/tachycardia/desaturation/bronchospasm/laryngospasm/anaphylaxis/aspiration/difficult_airway/failed_intubation/awareness_suspected/mh/cardiac_arrest/dental_injury/drug_error/equipment_failure/other/note), severity, detail jsonb, action_taken, by, incident_id?, code_id? (IP-013)).
+- **ot.pacu_records** — **IP-024 owns the definition and the migration** (IP-006 §4 defers to this row; IP-006 only reads it and stamps `case_id`/`arrival_at`): case_id, anaesthesia_record_id, admission_id, patient_id, arrival_at, aldrete_scores jsonb [{at, activity, respiration, circulation, consciousness, spo2, total}], pain jsonb, ponv jsonb, temp jsonb, block_regression jsonb, padss jsonb?, complications jsonb, discharge_criteria_met bool, discharged_by, discharged_at, destination, pacu_los_min, bypass bool).
+- **ot.postop_visits** (record_id, at, by, pain, ponv, sore_throat, awareness_screen jsonb, nerve_injury, dental, satisfaction, complications jsonb, notes); **ot.acute_pain_rounds** (record_id/catheter_id, at, site_ok, level, motor_block, infusion jsonb, side_effects, action, by).
+- **ot.anaesthesia_formulary_favourites** (hospital_id, anaesthetist_id?, drug_id, default_dose_rule jsonb, concentration, colour_class).
+- Read models: `analytics.mv_anaesthesia_kpis_monthly` (PAC compliance, ASA mix, monitoring completeness (% cases with SpO2/ECG/NIBP/EtCO2 continuous), antibiotic timing %, hypothermia on arrival %, PONV %, PACU LOS, unplanned ICU, reintubation, adverse events per 1000 anaesthetics, difficult airway rate, awareness reports, cancellations for unfitness), `analytics.mv_anaesthesia_worklist`.
+
+## 5. Business Rules & Validations
+- Elective case cannot reach IP-006 "ready" without signed PAC (valid) + anaesthesia consent; emergency exception documented; PAC re-evaluation mandatory day-of (Sign In blocked otherwise).
+- Required-investigation matrix (age/ASA/comorbidity/procedure) configurable; missing mandatory → PAC `fit_with_optimisation` cannot be `fit` (override with reason).
+- ASA class mandatory; residents' PAC/records need consultant co-sign ≤ 24 h.
+- Machine check must be passed for the theatre/day before record start (override with reason → BME).
+- Device data association requires wristband scan; obs stored every ≤ 1 min when feed on; feed gap > 2 min flagged; manual obs at least q5 min during GA (NABH/ISA) — completeness check on close.
+- Drug entries: allergy hard-stop; controlled drugs need witness at wastage; total narcotics reconcile with IP-014 issue before sign; syringe labels expire per stability (default 24 h; propofol 12 h).
+- Antibiotic prophylaxis timing computed vs incision (IP-006) → SSI indicator (IP-012); alert if not given by incision.
+- Anaesthesia record immutable after sign; amendments as addenda; late entries flagged; hash chain.
+- PACU discharge only when criteria met (Aldrete ≥ 9 or configured; PADSS ≥ 9 for day-care) or anaesthetist override with reason; PACU LOS & bypass reasons recorded.
+- Charges: anaesthesia type × duration bands from `times` (start→end), drugs (issued/given policy), consumables, monitoring; day-care packages (IP-008); anaesthetist fee (NC-034).
+- Retention: records permanent; obs 10 y full-fidelity then downsampled (policy).
+
+## 6. API Surface (`/api/v1/anaesthesia`)
+| Method | Path | Purpose | Permission |
+|---|---|---|---|
+| GET | `/pac/worklist` (?date,anaesthetist,status; cursor) | PAC queue | `ais.pac.read` |
+| POST/PATCH/GET | `/pac` , `/pac/{id}` ; POST `/pac/{id}/sign|cosign` ; GET `/pac/{id}.pdf` | PAC | `ais.pac.write` / `.sign` |
+| GET | `/pac/required-tests?patientId&procedure&asa` | matrix evaluation | `ais.pac.write` |
+| POST/GET | `/machine-checks` | machine checklist | `ais.machine.check` |
+| POST | `/records` (open from case) ; PATCH `/records/{id}` (sections) ; POST `/records/{id}/re-evaluation` ; POST `/records/{id}/close` ; POST `/records/{id}/sign|cosign` ; GET `/records/{id}` , `/records/{id}.pdf` | intra-op record | `ais.record.write` / `.sign` / `.read` |
+| POST | `/records/{id}/obs` (batch; device gateway or manual) ; GET `/records/{id}/obs?from&to&res=` | observations | `ais.obs.write` (device token) / `ais.record.read` |
+| POST | `/records/{id}/drugs` , `/fluids` , `/events` , `/airway` , `/regional` , `/blood` , `/times` | timeline entries | `ais.record.write` |
+| POST | `/records/{id}/associate-device` (wristband scan, device ids) ; POST `/records/{id}/feed-mode` | pairing | `ais.record.write` |
+| POST/GET | `/syringe-labels` (print) | labels | `ais.label.print` |
+| POST | `/records/{id}/narcotic-reconciliation` | reconcile with IP-014 | `ais.record.write` |
+| POST/PATCH/GET | `/pacu` , `/pacu/{id}` ; POST `/pacu/{id}/aldrete` , `/pain` , `/discharge` | PACU | `ais.pacu.write` / `ais.pacu.discharge` |
+| POST/GET | `/records/{id}/postop-visits` , `/pain-rounds` | follow-up | `ais.postop.write` |
+| GET/PUT | `/favourites` | formulary favourites | `ais.pac.write` |
+| GET | `/reports/kpis` , `/reports/adverse-events` | | `ais.report.read` |
+
+## 7. Domain Events (outbox)
+- `anaesthesia.pac.completed` {pac_id, case_id, asa, fitness, plan, destination_icu, blood_request} → IP-006 (readiness), IP-003 (NPO/pre-med tasks), IP-001 (ICU booking), IP-007, OP-021 (referrals), IP-005 (PAC charge).
+- `anaesthesia.pac.deferred` {reason, re_pac_due} → surgeon, IP-006 (reschedule), patient message.
+- `anaesthesia.machine_check.failed` {theatre, items} → NC-020, IP-006 delay flag.
+- `anaesthesia.record.started|closed|signed` {case_id, technique, times, ebl, complications, narcotics} → IP-006 (timings/summary), IP-005 (charges), IP-014 (narcotic reconciliation), NC-034 (fee), NC-015 (indicators), IP-018 (handover), IP-012 (antibiotic timing).
+- `anaesthesia.event.recorded` {type, severity} → surgeon/OT in-charge push (severe), NC-015 incident (severity ≥ major), IP-013 (cardiac arrest link).
+- `anaesthesia.device_feed.lost|restored` {record_id} → workstation banner, BME if persistent.
+- `anaesthesia.antibiotic.timing` {delta_min, ok} → IP-012.
+- `anaesthesia.pacu.admitted|discharged` {aldrete, los_min, destination, bypass} → IP-006, IP-018, IP-001 (bed), IP-016/IP-009, IP-002 (day-care).
+- `anaesthesia.postop_visit.recorded` {complications} → NC-015; `anaesthesia.pain_round.recorded`.
+- Consumed: `ot.case.requested|scheduled|cancelled|incision|closure|sign_out` (IP-006), `procedure.booked` (OP-010), `device.vitals.received|device.state` (EN-042), `lab.result.final` (OP-004), `bloodbank.unit.issued` (IP-007), `pharmacy.narcotic.issued` (IP-014), `nursing.preop.checklist.completed` (IP-003), `ip.admitted` (ICU booking status).
+
+## 8. Screens (UI)
+- **PAC Worklist & Form** (desktop; tablet bedside): worklist with surgery date/urgency chips; form in sections with sticky summary rail (ASA, scores, missing tests, plan); airway diagram inputs; investigation panel auto-pulled with order buttons; consent capture launch (EN-028 tablet); `Ctrl+S` save, `Ctrl+Enter` sign; print PAC (EN-039).
+- **Anaesthesia Workstation Record** (large tablet/desktop at machine; landscape): top strip patient banner + timers (anaesthesia time, since induction, tourniquet, antibiotic countdown), left device status/pairing, centre live chart (auto vitals symbols; zoom 5/15/60 min), drug bar (favourites grid; `D` drug, `F` fluid, `E` event, `A` airway, `R` regional, `B` blood, `N` note), right timeline list; touch-first, glove-friendly; artefact mark by tap; feed-loss banner → manual grid; offline buffer indicator; MH/anaphylaxis protocol wizards; close/sign wizard with completeness checklist.
+- **Syringe Label Printer Panel** (workstation/prep room): pick drug/concentration → prints ISO colour label with barcode; batch print for case kit.
+- **PACU Board** (desktop/TV): bays with Aldrete trend, pain, time in PACU, discharge readiness colour, alerts; nurse tablet form for scores/vitals; discharge wizard.
+- **Post-op Visit / Pain Service** (phone/tablet via IP-010): list of yesterday's cases, quick forms.
+- **Anaesthesia Dashboard** (desktop; HOD/quality): KPIs, adverse events, PAC compliance, monitoring completeness.
+
+## 9. Integrations
+- EN-042 device gateway (HL7 v2 ORU/vendor protocols: Philips IntelliVue, GE Carescape/Aisys, Dräger Perseus/Primus, Mindray, Nihon Kohden; pumps via B. Braun Space/Fresenius Agilia; BIS/TOF) with edge buffering; IP-006 case & timings; IP-014 narcotics/kits; IP-007 blood; OP-004 ABG; EN-028 consent; EN-039 print templates (anaesthesia chart PDF replicating standard layout); EN-005 label printers (ISO 26825 colours); IP-018 handover; NC-034 fees; NC-020 machine assets; NC-015 incidents; IP-020 ERAS.
+
+## 10. Reports & Analytics
+- PAC compliance & TAT, cancellations for unfitness, ASA distribution, technique mix, monitoring completeness, device-feed coverage %, antibiotic prophylaxis timing %, intra-op hypotension/hypoxia minutes, hypothermia on PACU arrival %, PONV %, PACU LOS & bypass, unplanned ICU admission, reintubation, adverse events per 1000 (awareness, dental, aspiration, MH, arrest, difficult airway/failed intubation), narcotic reconciliation exceptions, anaesthesia charges & fee payouts, per-anaesthetist dashboards (governance policy).
+- MVs: `analytics.mv_anaesthesia_kpis_monthly`, `analytics.mv_anaesthesia_worklist`; NABH COP.15 indicator feed to NC-015.
+
+## 11. Notifications
+- Push: PAC assigned/pending for tomorrow's list, PAC deferred (surgeon), machine check failed (BME/OT in-charge), device feed lost (workstation), severe intra-op event (OT in-charge/surgeon), PACU discharge criteria met/pending anaesthetist review, post-op visit due, co-sign due, narcotic reconciliation pending.
+- Patient (EN-009/PE-001): NPO instructions & pre-med reminders (from PAC), PAC appointment reminders; no clinical details in SMS.
+
+## 12. Permissions (RBAC keys)
+`ais.pac.read` (10, 14, 9, 20, 17, 27), `ais.pac.write` (10, 14), `ais.pac.sign` (10; 14 co-sign required), `ais.machine.check` (anaesthesia technician, 14, 10, 48), `ais.record.write` (10, 14, technician limited sections), `ais.record.sign` (10), `ais.record.read` (10, 14, 9, 11, 20, 18, 54, 4, 27 summary, 58), `ais.obs.write` (device tokens 64, 10, 14, 20), `ais.label.print` (10, 14, 20, technician), `ais.pacu.write` (20, 10, 14), `ais.pacu.discharge` (10; 20 if policy allows criteria-based), `ais.postop.write` (10, 14, 20), `ais.report.read` (10 HOD, 54, 4, 58).
+
+## 13. Non-functional
+- 2000-bed site: 25–40 theatres, 150–250 anaesthetics/day, 100–150 PACs/day; device obs ~40 params/min/theatre (≈ 2M rows/day; monthly partitions, compression, downsampling for charts); chart render p95 < 1 s for 6-h case; write path via gateway batch ≤ 5 s latency; workstation tablet offline buffer ≥ 12 h.
+- Reliability: record must survive network loss (local-first), clock sync (NTP + server offset), duplicate suppression by (device, at).
+- Print: anaesthesia chart PDF (A4 landscape standard layout), PAC, PACU chart, syringe labels; accessibility: high-contrast OT theme, large touch targets; i18n labels (clinical English default).
+
+## 14. Acceptance Criteria
+1. Given an OT booking for elective lap cholecystectomy, then a PAC worklist item appears; when the anaesthetist signs PAC with ASA II, Mallampati 2, Apfel 3 and plan GA/ETT, then IP-006 readiness shows PAC done and IP-003 receives NPO/pre-med tasks; a PONV prophylaxis suggestion appears in the plan.
+2. Given the required-investigation matrix demands ECG for age > 50 and it is missing, then fitness cannot be `fit` without override, and the anaesthetist can order the ECG from the form.
+3. Given a resident signs the PAC, then consultant co-sign task is created; case readiness shows "PAC pending co-sign" until done (policy: block or warn configurable).
+4. Given the theatre's daily machine check failed on "leak test", then the record cannot start without override, and BME gets a task.
+5. Given wristband scan and paired monitor/ventilator, then observations stream every 60 s into the record and the chart updates within 5 s; if feed stops for 2 min, a banner appears and manual grid entry is enabled.
+6. Given the anaesthetist taps "propofol 120 mg" from favourites for a patient with documented propofol allergy, then a hard-stop is shown; override requires reason and is audited.
+7. Given incision at 10:05 (IP-006) and cefazolin recorded at 09:20, then antibiotic timing delta = 45 min, marked OK and sent to IP-012; if no antibiotic by 10:05, an alert fires at incision.
+8. Given fentanyl 100 mcg issued and 80 mcg given, when closing, then reconciliation demands 20 mcg wastage with witness before sign; without it, sign is blocked.
+9. Given the record is signed, then a PDF chart is generated, charges post to IP-005 (anaesthesia duration band, drugs, consumables), fee entry to NC-034, and the record is immutable (addenda only).
+10. Given PACU Aldrete 8 at 30 min and 9 at 45 min with pain 3 and no PONV, then discharge readiness turns green at 45 min; discharge to ward triggers IP-018 handover and bed move.
+11. Given a day-care patient with PADSS 7, then discharge home is blocked until PADSS ≥ 9 or anaesthetist override.
+12. Given a cardiac arrest event recorded intra-op, then an IP-013 code record link is offered and NC-015 incident is created.
+13. Given a workstation goes offline for 20 minutes mid-case, then all entries/obs continue locally and sync in order without duplicates on reconnect.
+14. Given a surgeon user, when calling POST /records/{id}/sign, then 403 and audit.
+
+## 15. Enhancements / Later phases
+- Closed-loop pump programming & auto drug capture from smart pumps (EN-042), AI intra-op hypotension prediction & decision support (AI-005/AI-002), voice-driven documentation (AI-004), automatic PACU discharge suggestions, integration with anaesthesia machine checklists (electronic self-test import), difficult-airway registry & patient alert card/QR (PE-001), PAC tele-consult (OP-018), ERAS compliance analytics (IP-020), national anaesthesia quality registries.
+
+## 16. Open Questions for the Hospital
+1. Theatres/monitor/anaesthesia machine/pump models and available data ports/protocols; PACU monitor models; network in OT?
+2. PAC clinic model (dedicated clinic vs bedside), validity period, required-investigation matrix, and who co-signs residents?
+3. Standard monitoring policy & obs interval; manual charting fallback interval?
+4. Syringe labelling practice (ISO colours), label printers in OT; drug kits per case from pharmacy?
+5. Narcotic reconciliation & wastage witness policy in OT (IP-014)?
+6. PACU discharge authority (nurse criteria-based vs anaesthetist), Aldrete/PADSS thresholds, PACU bypass policy?
+7. Sedation outside OT locations to cover (endoscopy, radiology, cath lab, ECT)?
+8. Charging model for anaesthesia (duration bands, type multipliers, ICU handover) and anaesthetist fee rules?
+9. Adverse-event definitions to report (NABH/ISA) and per-anaesthetist metric visibility?

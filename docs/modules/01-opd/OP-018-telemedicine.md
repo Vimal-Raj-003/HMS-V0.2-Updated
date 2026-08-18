@@ -1,0 +1,145 @@
+# OP-018 — Telemedicine (WebRTC video consult, Waiting room, Tele-Rx, Lab orders, Recording, Consent, Follow-up)
+
+| Field | Value |
+|---|---|
+| Domain | OPD Clinical |
+| Module ID | OP-018 |
+| Phase | 8 |
+| Priority | P2 |
+| Complexity | High |
+| Depends on | OP-001 (tele-appointment type/slots, patient identity), OP-002 (consultation workspace reused in "video mode": notes, ICD-10, e-Rx, orders), OP-020/PE-001 (patient app/portal join flow), OP-019 (doctor app join), EN-010 (online payment/refund), EN-028 (tele-consent), EN-016 (digital signature on tele-Rx), OP-003 (Rx to pharmacy/e-pharmacy), OP-004/OP-008 (orders → visit for sample/scan), EN-009 (SMS/WhatsApp links), EN-037 (push), EN-006 (virtual queue), EN-011 (ABDM OPConsultRecord/tele context), OP-021 (referral/second opinion), OP-036 (second opinion), OP-016/OP-011/OP-012/OP-015 (specialty tele follow-ups), EN-042 (home vitals devices), AI-001 (pre-consult symptom bot), NC-034 (doctor payout for tele), EN-017 (video provider adapters), EN-024 (audit), EN-022 (recording backup) |
+| Feature flag | `module.telemedicine.enabled` (sub: `tele.recording`, `tele.group_sessions`, `tele.home_devices`, `tele.provider=livekit|mediasoup|twilio`) |
+| Primary roles | Doctor — Consultant (6), Patient (59), Family (60) |
+| Secondary roles | Receptionist/Call centre (24/25, scheduling, tech support), Nurse (16, tele-triage/vitals), Pharmacist (30), Billing (27), IT admin (56, media servers), Privacy officer (57), Auditor |
+| Regulatory | **Telemedicine Practice Guidelines 2020** (MoHFW/MCI, Appendix 5 of IMC Regulations 2002 — RMP identity display & registration no., patient identity & age verification, explicit/implied consent, first consult vs follow-up rules, List O/A/B/prohibited drugs, no Schedule X/narcotics via tele, prescription format with RMP signature, record keeping, right to refuse/refer to in-person, emergency limits, doctor to be within India for Indian patients), NMC RMP Regulations 2023, DPDP Act/Rules 2025 (recording consent, purpose, retention), IT Act §43A/SPDI, ABDM (tele context), Drugs & Cosmetics Rules (e-Rx dispensing), Consumer Protection Act (e-commerce), TRAI DLT (links), GST on tele consult (exempt healthcare), WebRTC security (DTLS-SRTP), NABH digital health standards |
+
+## 1. Purpose
+OP-018 lets patients book and pay for a video/audio/chat consultation, wait in a virtual waiting room, and consult with a doctor over encrypted WebRTC with screen-share, chat, file exchange and optional consented recording; the doctor uses the standard OP-002 workspace to write notes, ICD-10, e-prescriptions (with tele-specific drug-list rules) and lab/radiology orders that convert into hospital visits; tele-Rx is digitally signed and pushed to pharmacy/portal; follow-up appointments, referrals and payouts flow as for in-person visits. Media is served by a self-hosted SFU (LiveKit or mediasoup) with a Twilio Video/Programmable Video adapter as alternative, behind a provider-agnostic interface.
+
+## 2. Users & Jobs-to-be-done
+- **Patient/family** (phone app/PWA/web link, low bandwidth 3G/4G): book slot, pay, verify identity, consent, test camera/mic, join waiting room, consult, receive Rx/orders, rate.
+- **Doctor** (desktop 3-pane or OP-019 phone; 4–8 tele consults/hour): see tele queue, admit patient, video + workspace side-by-side, prescribe with tele rules, order, schedule follow-up, end/record notes; handle no-shows/dropped calls.
+- **Receptionist/call centre**: create tele appointments, help patients join (send link/OTP), reschedule, tech-support chat.
+- **Nurse (tele-triage)**: pre-call vitals collection prompt (home devices/self-reported), symptom questionnaire, escalate to in-person/ER.
+- **IT admin**: media server health, TURN, recording storage.
+- **Privacy officer**: recording access logs, consent ledger.
+
+## 3. Core Workflows
+### 3.1 Booking & payment
+1. Patient (app/portal/website widget/call centre) selects tele-enabled doctor & slot (`appointment.mode=video|audio|chat`, first-consult vs follow-up auto-detected from prior visits within 6 months per TPG 2020) → fee (tele tariff) → online payment (EN-010; counter/corporate credit allowed) → confirmation with **join link** (deep link app / web `https://<tenant>/tele/join/<token>`), pre-consult checklist (ID proof, previous reports upload, vitals if devices, symptom form via AI-001/EN-039), consent preview → reminders D-1/1 h/10 min with link.
+2. Doctor tele-availability configured in OP-001 schedule (mixed or dedicated tele slots, buffer, max concurrent waiting).
+### 3.2 Pre-call & waiting room
+1. Patient opens link 15 min before → identity check (OTP to registered mobile; ABHA optional; for minors/incapacitated → attendant identity + relationship recorded per TPG) → **consent** (EN-028 tele-consent template: nature/limitations of tele, data use, recording opt-in separate; stored with timestamp/IP/device) → device test (camera/mic/network quality; fallback to audio-only/phone call) → upload documents/photos → self-reported vitals or **home devices** (`tele.home_devices`: BLE BP/SpO2/glucometer via Web Bluetooth in PWA / native later, EN-042 → `clinical.vitals` context `telemed_self`) → enters **waiting room** (virtual queue EN-006 kind `tele`): position, ETA, doctor running late banner, chat with reception; auto-admit when doctor clicks "Start" (or manual admit).
+2. Doctor tele queue card: patient banner, reason, uploaded files, vitals, consent status, network quality, payment status.
+### 3.3 Consultation
+1. Doctor clicks **Start call** → room created via provider adapter (LiveKit/mediasoup/Twilio) → tokens (short-lived JWT, room-scoped) → both join; **HD video/audio** (adaptive simulcast; auto-downgrade to audio on poor network), **screen share** (doctor shares reports/images from OP-002/EN-008 viewer), **in-call chat** (persisted to encounter), **file upload** both ways (images/PDF → encounter documents), invite third participant (family, interpreter, specialist for joint consult; `tele.group_sessions` for group therapy/education classes), mute/camera controls, network stats, call timer; **doctor identity** shown to patient (name, photo, qualification, NMC/State registration no. — TPG requirement); patient identity/age confirmed & documented.
+2. Clinical: OP-002 workspace in "video mode" (video tile docked; `Ctrl+Shift+V` toggle) — notes, ICD-10, e-Rx, orders, templates, history — identical to in-person; **tele-Rx rules**: TPG drug lists (List O OTC; List A first consult video only; List B follow-up add-ons; **prohibited**: Schedule X, narcotics/psychotropics per NDPS, other listed) enforced by EN-029 with mode (video/audio/chat) & first/follow-up context → hard block/override per list; e-Rx digitally signed (EN-016) with RMP reg no. → PDF to patient portal/app/WhatsApp, pushed to hospital pharmacy (OP-003) for home delivery/pickup or e-pharmacy partner (later); lab/radiology orders create pending hospital visit/home-collection request (OP-004) with instructions & payment link.
+3. **Recording** (`tele.recording`; only if both consented): SFU egress → encrypted MP4/WebM to S3 (SSE-KMS), linked to encounter, retention per policy, access restricted (`tele.recording.read` + reason → READ_PHI audit); patient may withdraw consent → recording stops (prior segment retained per legal policy) ; chat transcript stored.
+4. End call → post-call summary to patient (notes summary, Rx, orders, follow-up), feedback (EN-030), doctor marks outcome (completed/needs in-person/referred/emergency advised) → encounter finalised (OP-002 sign) → ABDM OPConsultRecord; billing settled (payment already captured; refund if doctor no-show/technical failure per policy) → NC-034 payout.
+### 3.4 Exceptions
+- Patient no-show (not joined within 10 min after doctor ready) → mark no-show, refund/credit per policy, rebook offer; doctor no-show/late → auto-notify patients, offer reschedule/refund; call drop → auto-reconnect 60 s, "resume" both sides, PSTN fallback (call centre EN-033) for audio; poor bandwidth → audio only; emergency red flags (chest pain, stroke signs, SpO2 < 92 self-reported) → doctor advises ER/108 (TR-009 link) and documents; patient outside India/doctor outside India → TPG note (block for Indian tele if doctor abroad per policy); prohibited drug attempt → blocked with reason; consent refused → cannot start; provider outage → failover provider (config) or reschedule.
+- Offline: doctor notes cached (OP-002 offline); media requires connectivity.
+
+## 4. Data Model (schema `clinical` + `engage`)
+- **tele_appointments** (extends OP-001 `appointments` with mode): appointment_id, hospital_id, branch_id, patient_id, doctor_id, mode enum(video/audio/chat), consult_type enum(first/follow_up), fee, payment_id, join_token_patient (hashed), join_token_doctor, join_link_sent_at, pre_consult jsonb ({symptom_form_id, files[], vitals_ids[]}), status enum(booked/paid/waiting/in_call/completed/no_show_patient/no_show_doctor/cancelled/failed_technical), waiting_since, admitted_at, ended_at, outcome enum(completed/in_person_advised/referred/emergency_advised/dropped), refund_id?; index (hospital_id, doctor_id, scheduled_at), (status).
+- **tele_sessions**: id, appointment_id, provider enum(livekit/mediasoup/twilio), room_name, started_at, ended_at, participants jsonb ([{user_id/patient_id/guest, role, joined_at, left_at, device, ip_hash}]), quality_stats jsonb (avg bitrate, packet loss, reconnects), recording_id?, chat_transcript_doc_id, screen_share_events jsonb, fallback_used enum(none/audio_only/pstn), version.
+- **tele_recordings**: id, session_id, hospital_id, patient_id, s3_key (encrypted), duration_s, size, consent_ids uuid[], started_at, stopped_at, stop_reason, retention_until, access_log via EN-024; index (patient_id).
+- **tele_consents** (EN-028 rows with type tele/recording): appointment_id, patient_id (or attendant identity jsonb), type, given bool, at, ip_hash, device, text_version.
+- **tele_identity_checks**: appointment_id, method enum(otp/abha/id_doc/attendant), verified_at, attendant jsonb ({name, relation, id_type_last4}), age_confirmed bool.
+- **tele_chat_messages** (partitioned): session_id, at, sender, text, file_doc_id?; **tele_files**: session_id, uploaded_by, document_id (clinical.documents), kind.
+- **tele_drug_lists** (mdm; EN-029 seed): list enum(O/A/B/prohibited), drug_id/class, conditions jsonb (mode, consult_type), source_version (TPG 2020), effective_from.
+- **tele_provider_config** (per hospital): provider, endpoints (secrets in vault), turn_servers, region, recording_bucket, failover_provider, max_participants, simulcast, bandwidth_profiles.
+- **tele_waiting_room** (read model/EN-006 queue kind tele): appointment_id, doctor_id, position, eta_min, status.
+
+## 5. Business Rules & Validations
+- TPG 2020: doctor's name, qualification, registration number displayed and on Rx; patient identity (name, age, address, phone, email/ID) verified & recorded; consent explicit for tele (implied if patient initiates — still logged) and separate for recording; first consult by video preferred (audio/chat allowed with restrictions on List A prescribing); follow-up (same condition within 6 months) allows List B; **no Schedule X/narcotic/psychotropic** via tele — hard block; doctor may refuse/redirect to in-person; emergency situations → advise first-aid & referral, document; records kept as any consultation (≥ 3 years minimum per IMC; hospital policy ≥ 10 y).
+- Media: DTLS-SRTP end-to-end between clients and SFU; TURN over TLS 443 for restrictive networks; tokens ≤ 15 min, room-scoped, single-use join; recording only with both consents & flag; recordings encrypted, presigned ≤ 5 min, access reasons audited; no PHI in room names (use opaque IDs).
+- Payment before join (retail); refund automatic on doctor no-show/technical failure (config); patient no-show refund policy configurable (default: no refund, one free reschedule).
+- Waiting room admits FIFO by slot time; late doctor > 15 min → auto message; concurrency ≤ configured.
+- Chat/files become part of encounter documents (immutable after sign); auto-summary sent only after doctor sign.
+- Doctor location check (self-declared / IP geo) for cross-border rules; patient minors need attendant consent.
+- Numbering: uses OP visit numbering with `mode=tele`; encounter type `tele` for analytics.
+
+## 6. API Surface (`/api/v1/tele`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| POST | /appointments (delegates OP-001 with mode) | book tele slot + payment intent | appointment.create (patient scope/staff) | Y | – |
+| GET | /appointments/{id}/join-info | link/token/status (patient/doctor) | tele.session.join (scoped) | – | – |
+| POST | /appointments/{id}/identity-check, /consents | pre-call | patient scope | Y | – |
+| POST | /appointments/{id}/pre-consult (files, vitals, symptom form) | pre-call data | patient scope | Y | – |
+| POST | /appointments/{id}/waiting-room/enter | join queue | patient scope | Y | – |
+| GET | /queue?doctor= | tele queue (socket) | tele.queue.read | – | – |
+| POST | /appointments/{id}/start | doctor creates room, tokens | tele.session.start | Y | – |
+| POST | /sessions/{id}/token (participant) | short-lived provider token | tele.session.join | Y | – |
+| POST | /sessions/{id}/invite | add participant (family/specialist/interpreter) | tele.session.start | Y | – |
+| POST | /sessions/{id}/recording/start|stop | recording (consent verified) | tele.recording.manage | Y | – |
+| POST | /sessions/{id}/chat, /files | persisted chat/files | tele.session.join | Y | cursor |
+| POST | /sessions/{id}/end (outcome) | end call | tele.session.start | Y | – |
+| POST | /appointments/{id}/no-show (patient/doctor), /reschedule, /refund | exceptions | tele.appointment.manage | Y | – |
+| GET | /recordings/{id}/url (reason) | presigned (audited) | tele.recording.read | – | – |
+| POST | /webhooks/{provider} | provider events (participant joined/left, egress done) | provider secret | Y | – |
+| GET/PUT | /config/provider, /drug-lists | admin | tele.configure | Y | – |
+| GET | /stats/dashboard | KPIs | tele.report.read | – | – |
+Rx/order/notes endpoints are OP-002's with `mode=tele` context (rules applied by EN-029).
+
+## 7. Domain Events (outbox)
+- `tele.appointment.booked|paid|reminded`, `tele.patient.waiting` → doctor push (OP-019), queue; `tele.session.started|participant.joined|left|reconnected|ended` {duration, quality} → analytics; `tele.recording.started|stopped|available` → privacy log; `tele.consult.completed` {outcome} → OP-002 sign flow, EN-011, NC-034 payout, EN-030 feedback; `tele.no_show.patient|doctor` → EN-010 refund, PE-002; `tele.rx.blocked_drug_attempt` → audit/quality; `tele.emergency_advised` → PE-002 follow-up call.
+- Consumes: `payment.received|refunded`, `appointment.cancelled`, `rx.signed`, `order.created`, `vitals.recorded` (home devices), `consent.signed`.
+
+## 8. Screens (UI)
+1. **Patient tele flow** (phone PWA/app; also web): booking → payment → pre-call checklist (identity OTP, consent toggles, device test with preview & bandwidth meter, uploads) → waiting room (position, ETA, chat, "doctor is ready" banner) → in-call (video, PIP self, mute/cam/switch camera, chat, share file, "reconnecting…" overlay, audio-only toggle) → post-call summary/Rx/orders/feedback. Low-data mode; accessible controls; landscape/portrait.
+2. **Doctor tele console** (desktop 3-pane: queue left, video centre-top + OP-002 workspace centre, right rail files/vitals/chat; OP-019 phone: video + quick notes/Rx): `Ctrl+Shift+S` start next, `Ctrl+Shift+V` video dock toggle, `Ctrl+Shift+R` recording (if consented), `Ctrl+Shift+E` end; identity/consent badges must be green before start; network indicator; late-running banner.
+3. **Reception tele desk** (desktop): today's tele appointments, link resend (`L`), payment status, tech-support chat, no-show/refund actions.
+4. **Admin: provider & TURN health** (desktop): rooms live, participants, quality, egress status, failover toggle.
+5. **Privacy: recording access log** (desktop): who/why/when.
+
+## 9. Integrations
+- **Media (adapter interface `TeleProvider`: createRoom, mintToken, startEgress, stopEgress, endRoom, webhooks)**: default **LiveKit** self-hosted (Docker/K8s, Redis for multi-node, LiveKit Egress for recording, LiveKit TURN/coturn on 443/TLS, simulcast/SVC); alternative **mediasoup** (Node SFU inside `services/realtime`-adjacent `services/media`, own recording via GStreamer/FFmpeg pipeline); **Twilio Video** adapter (rooms, compositions for recording, tokens) for cloud tenants without media ops; PSTN dial-in/out via Twilio/Exotel (EN-033) fallback.
+- Client: `livekit-client` / mediasoup-client / twilio-video wrapped in `packages/tele-client`; WebRTC in PWA (Chrome/Safari iOS ≥ 14.3), RN (Phase 13) via react-native-webrtc.
+- EN-010 payments/refunds; EN-009 links (DLT templates), EN-037 push; EN-028 consents; EN-016 signature; EN-011 ABDM; EN-042 home devices; AI-001 pre-consult bot; e-pharmacy delivery partner API (later, EN-017); interpreter services (later).
+- Reliability: room creation retried; provider health-check → failover; recordings uploaded via egress with retries; webhook idempotency.
+
+## 10. Reports & Analytics
+- Tele volumes by doctor/specialty/mode, first vs follow-up mix, conversion booked→completed, no-show rates (patient/doctor), average waiting time, call duration, quality (packet loss, reconnects, audio-only fallbacks), technical failure rate & refunds, Rx per consult & blocked-drug attempts, orders converted to visits, in-person referral rate, emergency advice rate, revenue & payouts, patient CSAT/NPS (EN-030), recording counts & access audits. Read model `analytics.tele_daily`.
+
+## 11. Notifications
+- Patient: booking + link, payment receipt, reminders (D-1, 1 h, 10 min) with link, "doctor ready — join now" push/SMS, doctor running late, post-call summary/Rx/orders, refund notice, feedback request, follow-up due.
+- Doctor: patient waiting (push, OP-019), patient no-show, technical failure, recording ready; Reception: patient stuck in device test > 5 min, payment failed; IT: provider/TURN down, egress failures; Privacy officer: recording accessed outside care team.
+
+## 12. Permissions (RBAC keys)
+`tele.queue.read`, `tele.session.start|join`, `tele.recording.manage|read`, `tele.appointment.manage`, `tele.configure`, `tele.report.read`, plus OP-002 keys (`opd.*`, `rx.*`, `order.*`) with tele context, `appointment.create`. Defaults: Doctor — queue, session start/join, recording manage (if enabled); Patient — session join (own), consents; Reception/Call centre — appointment manage, join-info resend; IT admin — configure; Privacy officer — recording read (audited); Auditor — report.
+
+## 13. Non-functional
+- Capacity: 200 concurrent tele calls enterprise-wide (SFU sized ~ 1 vCPU per 25 participants at 720p simulcast; horizontal scaling with Redis), room create p95 < 500 ms, join-to-first-frame < 3 s on 4G, audio-only usable at 64 kbps; recordings available ≤ 10 min after call.
+- Availability: media cluster HA (multi-node), TURN in each region; on-prem tenants may run LiveKit on-prem with public TURN; failover provider.
+- Security: DTLS-SRTP, TURN TLS, tokens short-lived, recordings SSE-KMS, chat/files as clinical documents; no PHI in provider metadata; rate limits on join endpoints; DPDP retention config (default recordings 3 y, transcripts with record).
+- Accessibility/i18n: captions (later), interpreter invite, high-contrast controls, screen-reader labels; UI in patient language; RTL.
+- Offline: not applicable to media; notes cached by OP-002.
+
+## 14. Acceptance Criteria
+1. Given a paid tele appointment, when the patient opens the link 15 min early, then OTP identity check and tele consent are required before the waiting room; recording consent is a separate toggle defaulting off.
+2. Given the doctor clicks Start, then a room is created (LiveKit default), both receive room-scoped tokens valid ≤ 15 min, and video connects with first frame < 3 s on a 4G profile in test.
+3. Given a first consult over **audio** mode, when the doctor prescribes a List A drug, then EN-029 blocks with TPG rule reference; over video it is allowed; a Schedule X/narcotic is blocked in every mode without override.
+4. Given both parties consented, when the doctor starts recording, then egress writes an encrypted file to S3, linked to the session; if the patient withdraws consent mid-call, recording stops within 5 s and the event is logged.
+5. Given network degradation (packet loss > 15 %), then the client downgrades to audio-only automatically and the session records `fallback_used=audio_only`.
+6. Given the patient does not join within 10 min after doctor admits, then the appointment can be marked no-show, policy applied (no refund/one free reschedule) and the patient notified.
+7. Given the doctor does not start within 15 min of slot, then waiting patients get a "running late" message; if the doctor never joins, a technical/doctor no-show refund is auto-initiated via EN-010.
+8. Given the call ends and the doctor signs, then the patient receives summary + signed Rx PDF (with RMP reg no.) + order instructions on app/WhatsApp within 1 min and ABDM OPConsultRecord is pushed (if linked).
+9. Given a lab order during tele consult, then a pending sample-collection visit/home-collection request is created with payment link and appears in OP-004 worklist when the patient checks in.
+10. Given a privacy officer opens a recording, then a reason is required and a READ_PHI audit row is written; a doctor outside the care team is denied.
+11. Given provider = twilio configured for a tenant, then the same flows work via the adapter without UI change (contract tests pass for all three adapters).
+12. Given a minor patient, then attendant identity/relationship must be recorded before consent; the encounter shows the attendant.
+
+## 15. Enhancements / Later phases
+- Sheet row 15 enhancements: AI symptom checker pre-consultation (AI-001, Phase 12), multi-language teleconsult support (interpreter invite Phase 8; live captions/translation Phase 12 AI-004), e-pharmacy integration for delivery (Phase 10 via OP-003 home delivery + partner API), remote vitals from patient home devices (`tele.home_devices` Phase 8/12 EN-042), second-opinion workflow (OP-036, Phase 10), group therapy session support (`tele.group_sessions` Phase 8/10 with OP-032/OP-015 classes).
+- Costed proposal line 1573 (WebRTC video, waiting room, e-Rx, lab orders, recording, consent, follow-up) — core.
+- Later: RN apps (Phase 13) with CallKit/ConnectionService, tele-ICU/tele-radiology (EN-008), tele-dermatology async store-and-forward (OP-027), kiosk tele-booths (EN-034), ambient scribe (AI-004), NHCX/insurance for tele.
+
+## 16. Open Questions for the Hospital
+1. Media hosting preference: self-hosted LiveKit (cloud/on-prem) vs Twilio; expected concurrent calls; regions?
+2. Recording policy: enabled? retention years? who may access?
+3. Tele fees per doctor/mode, refund/no-show policies, corporate/insurance tele coverage?
+4. First-consult vs follow-up definitions and TPG drug-list customisation; will audio/chat consults be offered?
+5. Home-delivery pharmacy or e-pharmacy partner? Home sample collection?
+6. Languages/interpreters; family/attendant participation; group sessions needed?
+7. Doctor identity display fields (registration numbers) and e-sign method (DSC/eSign) for tele-Rx.

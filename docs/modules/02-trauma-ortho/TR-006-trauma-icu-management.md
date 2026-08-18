@@ -1,0 +1,220 @@
+# TR-006 — Trauma ICU Management (ventilator tracking, hourly flowsheet, APACHE II / SOFA / RASS, sedation, multi-organ dashboard, alerts)
+
+| Field | Value |
+|---|---|
+| Domain | Trauma & Orthopaedics |
+| Module ID | TR-006 |
+| Phase | 7 |
+| Priority | P0 |
+| Complexity | Very High |
+| Depends on | IP-009 (ICU/CCU Management — the general ICU engine: ICU beds, hourly vitals flowsheet, ventilator record, scores, alerts; TR-006 is the **trauma-ICU overlay**: injury-specific bundles, trauma scores continuity, multi-organ trauma board, damage-control/relook coordination, tertiary survey), IP-003 (nursing station, MAR, NEWS2), IP-001 (ICU bed board/holds), TR-001 (arrival GCS/RTS/ISS/TRISS), TR-004 (post-op hand-off, relook), TR-007 (polytrauma board), TR-002/TR-003 (fractures/implants), IP-007 (blood/MTP), OP-004 (ABG, lactate, coag, cultures), OP-008/EN-008 (portable X-ray/CT/USG), IP-024 (anaesthesia), IP-012 (VAP/CLABSI/CAUTI surveillance), IP-013 (code blue), IP-014 (ICU pharmacy/infusions), IP-017 (death), IP-018 (transfer), EN-042 (device gateway: ventilators, monitors, pumps), EN-029 (rules: sepsis, deterioration), EN-037 (alerts), EN-018 (ICU TV), OP-011 (nutrition), OP-015/TR-010 (early mobilisation), TR-011 (registry), NC-020 (equipment), NC-030 (nurse ratios), EN-039 (forms) |
+| Feature flag | `module.trauma_icu.enabled` (sub: `ticu.device_integration`, `ticu.tertiary_survey`, `ticu.multi_organ_board`, `ticu.family_updates`) |
+| Primary roles | Intensivist (11), Nurse — ICU (18), Resident/ICU registrar (14), Anaesthetist (10) |
+| Secondary roles | Trauma/ortho/neuro/general surgeon (9, rounds & relook), Respiratory therapist (40-type role or nurse ICU), Physiotherapist (40), Dietician (39), Clinical pharmacist (31/32), Infection control nurse (21), Blood bank (37), Radiology (12/36 portable), Biomedical (48, ventilators), Nurse supervisor (22, ratios), Quality (54), Family (60, updates), MS (4), Auditor (58) |
+| Regulatory | NABH 5th ed. COP.8/COP.9 (critical care, ventilated patient care, restraint/sedation policies), ISCCM (Indian Society of Critical Care Medicine) ICU planning & staffing guidelines, ICMR AMR/VAP prevention bundles, IHI ventilator bundle (HOB 30–45°, SAT/SBT, oral chlorhexidine, PUD/DVT prophylaxis), APACHE II (Knaus 1985), SOFA (Vincent 1996)/qSOFA, RASS (Sessler), CPOT/BPS pain, CAM-ICU delirium, GCS, ABCDEF liberation bundle, Brain Trauma Foundation guidelines (ICP/CPP targets), Surviving Sepsis 2021, NDPS (ICU narcotics), Transplantation of Human Organs Act (brain-death certification, NOTTO), MTP/CrPC MLC duties, DPDP, BMW 2016 |
+
+## 1. Purpose
+TR-006 turns the general ICU module (IP-009) into a trauma ICU: patients arrive with TR-001 scores and TR-004 operative status; nurses chart hourly vitals, ventilator settings, drips, I/O and neuro-obs on a device-fed flowsheet; APACHE II (24 h), SOFA (daily, delta), RASS/CPOT/CAM-ICU (per shift), GCS/ICP/CPP (hourly for TBI) auto-compute; ventilator days, bundle compliance and weaning readiness (SAT/SBT) are tracked; a **multi-organ trauma board** shows each patient's organ-system status, injuries, pending relooks/damage-control conversions, blood, and consults; a **tertiary survey** at 24–72 h catches missed injuries; alerts escalate physiology deterioration, device alarms and bundle misses. Everything feeds TR-007 (coordination), TR-011 (registry: ventilator days, ICU LOS, complications) and family updates.
+
+## 2. Users & Jobs-to-be-done
+- **ICU nurse** (bedside tablet/wall PC + monitor/ventilator integration; 1:1 or 1:2 ratio): validate auto-captured hourly vitals/vent settings in ≤ 20 s per hour, chart drips/titrations, I/O, GCS/pupils, RASS/CPOT, positioning/HOB, bundle checklist, lines/tubes days, wound/drain output; respond to alerts; SBAR handover.
+- **Intensivist / registrar** (desktop rounds cart + phone): daily plan by organ system, ventilator strategy (lung-protective: Vt 6 mL/kg PBW, plateau ≤ 30), sedation targets, SAT/SBT decisions, scores review (SOFA trend), fluids/vasopressors, transfusion targets, nutrition, VTE/PUD prophylaxis, antibiotics/de-escalation with cultures, relook coordination with surgeons, family communication, brain-death protocol when applicable, discharge/step-down (IP-016) criteria.
+- **Surgeons** (phone/tablet): see physiology snapshot before deciding definitive fixation (lactate < 2.5, temp > 35 °C, INR < 1.5, platelets > 100k, pH > 7.25 → "window for surgery"), relook reminders, wound/drain data.
+- **Respiratory therapist / physio**: ventilator checks, SBT execution, chest physio, early mobilisation levels.
+- **Clinical pharmacist**: infusion concentrations, renal dosing, sedation/analgesia stewardship, antibiotic days.
+- **Family** (phone/portal or ICU family board): scheduled daily update summary (plain language, consented), visiting slots.
+- **Quality/ICN**: VAP/CLABSI/CAUTI device-days, bundle compliance, restraint use, unplanned extubation, ICU mortality vs APACHE II SMR.
+
+## 3. Core Workflows
+
+### 3.1 ICU admission & baseline scores
+1. **Bed hold** created by TR-001 activation/TR-004/ER disposition → **ICU nurse** admits (IP-001 ADT to ICU bed) → **System** pulls trauma episode (mechanism, injuries/AIS/ISS, RTS, TRISS Ps, interventions, tourniquet/binder, blood given, operative summary from TR-004 incl. damage-control flags & relook due, MLC), allergies, weight/height (PBW computed), pre-ICU vitals → creates `icu_stays` (IP-009) with `trauma_episode_id` → arrival checklist (lines/tubes inventory with insertion dates, ventilator hooked to gateway, monitors mapped, pressure-injury Braden, falls, restraints, isolation) → Event `icu.admitted`.
+2. **APACHE II** at 24 h: worst values in first 24 h auto-pulled (temp, MAP, HR, RR, oxygenation A-aDO2/PaO2 by FiO2, arterial pH, Na, K, creatinine (×2 if ARF), Hct, WBC, GCS) + age points + chronic health (post-emergency surgery/non-operative flags) → score + predicted mortality (diagnostic category coefficient — trauma categories: multiple trauma, head trauma, post-op trauma) → stored with inputs; nurse/doctor can correct source values (audit); computed at 24 h automatically with "incomplete" flag if labs missing.
+3. **SOFA** on admission and daily 06:00 (respiration PaO2/FiO2 with ventilation flag, coagulation platelets, liver bilirubin, cardiovascular MAP/vasopressor dose µg/kg/min, CNS GCS, renal creatinine/urine output) → total, per-organ, delta vs admission (Δ ≥ 2 → sepsis flag with EN-029), trend sparkline; qSOFA on ward step-down.
+4. Other: RASS target/actual per shift, CPOT/BPS pain, CAM-ICU delirium, GCS/pupils hourly (TBI: ICP/CPP if monitored, target CPP 60–70), Murray/LIS optional, ARDS Berlin classification from P/F ratio + PEEP, AKI KDIGO staging from creatinine/UO, TBSA-driven fluid targets for burns.
+
+### 3.2 Hourly flowsheet & device integration (`ticu.device_integration`)
+1. **Gateway (EN-042)** streams monitor vitals (HR, ABP/NIBP, SpO2, RR, temp, EtCO2, ICP, CVP), **ventilator** parameters (mode, set/measured Vt, RR, PEEP, FiO2, Pplat, Ppeak, MAP, I:E, compliance, minute ventilation, alarms) and infusion pump rates (drug, concentration, mL/h → dose µg/kg/min) at 1-min resolution to `analytics`/time-series store; **System** proposes hourly rows; **Nurse** validates each hour (accept/edit with reason) → **flowsheet** columns: vitals, vent, sedation/analgesia infusions with RASS, vasopressors (dose auto-calc), fluids in (crystalloid/colloid/blood/products/enteral/parenteral) and out (urine mL/kg/h, drains by site, NG, stool, insensible estimate), balance cumulative, labs (ABG/lactate/Hb/coag auto-populated from OP-004), GCS/pupils, positioning (HOB angle, prone start/end), skin checks, restraints, glucose/insulin protocol, temperature management.
+2. Ventilator record: intubation details (date/time, tube size, depth, operator, cuff pressure q shift), mode changes with reason, daily lung-protective check (Vt/PBW ≤ 8 → warn > 6.5, Pplat ≤ 30, driving pressure), ABG-linked adjustments, **SAT/SBT screen** daily (criteria auto-evaluated: FiO2 ≤ 0.4, PEEP ≤ 8, haemodynamically stable, cough, RASS −1..+1) → SBT trial log (mode, duration, RSBI, outcome) → extubation record → post-extubation monitoring; re-intubation < 48 h flagged; tracheostomy timing prompt at day 7–10; **ventilator days** & device-days for IP-012.
+3. Alerts (EN-029/EN-037): physiological thresholds per patient (doctor-set), trend alerts (MAP falling, rising lactate, UO < 0.5 mL/kg/h × 2 h, ICP > 22 for 5 min, SpO2 < 90, Pplat > 30, cuff leak), device alarms (disconnect, high pressure, apnoea) with **alarm fatigue controls** (delay/priority tiers, acknowledged-by), missed-hour charting reminder, sepsis screen (SIRS/SOFA delta + suspected infection → sepsis bundle timers: cultures, antibiotics ≤ 1 h, lactate, fluids 30 mL/kg, vasopressors), delirium/RASS deviation, glucose out of range → escalation to registrar → intensivist → HOD with ack tracking.
+4. **Offline / gateway failure**: nurse manual entry mode; device data buffered at gateway and back-filled with `source=device_backfill`; flowsheet works on tablet with local queue.
+
+### 3.3 Trauma-specific bundles & tertiary survey (`ticu.tertiary_survey`)
+- **Bundles** with daily checklists & compliance: ventilator bundle (HOB, SAT/SBT, oral care CHG, PUD & DVT prophylaxis, cuff pressure), CLABSI (line necessity, dressing date, hub scrub), CAUTI (catheter necessity daily), TBI bundle (CPP target, Na, temp, glucose, seizure prophylaxis 7 days, avoid hypotension/hypoxia — automatic count of SBP < 90/SpO2 < 90 minutes), spinal-cord (MAP ≥ 85 × 7 d, pressure care), chest trauma (analgesia incl. epidural/blocks, incentive spirometry, ICD output/air leak), pelvic/long-bone (VTE prophylaxis timing, fat embolism watch), burns (fluid titration to UO, escharotomy check), rhabdomyolysis (CK trend, UO targets), massive transfusion follow-up (Ca, K, temp, coag targets), early enteral nutrition ≤ 24–48 h (OP-011), early mobilisation level (0–5), pressure-injury (Braden, turning q2h), MLC evidence preservation.
+- **Tertiary survey** at 24 h and again pre-discharge/when awake: structured head-to-toe re-examination + review of all imaging reports and labs → **missed injuries** recorded to TR-001 injuries/TR-002 fractures with `source=tertiary_survey`, ISS recomputed (provisional→locked cycle) → KPI: tertiary survey completed within 72 h %.
+- **Definitive-surgery window** indicator for surgeons (lactate, temp, INR, platelets, pH, vasopressor dose, ICP) → shows on TR-007 board with "ready/not ready" and trend; relook/damage-control conversion reminders from TR-004.
+
+### 3.4 Multi-organ trauma board & rounds (`ticu.multi_organ_board`)
+- Board per ICU (desktop wall + EN-018 TV): one card per bed with organ-system tiles (Neuro: GCS/ICP/sedation; Resp: mode/FiO2/PEEP/P/F; CVS: MAP/vasopressor dose/lactate; Renal: UO/creatinine/RRT; Haem: Hb/platelets/INR/blood in 24 h; Hepatic/GI: bilirubin/feeds; ID: temp/WBC/cultures/antibiotic day; MSK: pending fixations/relooks; Skin: Braden/wounds), SOFA total & delta, APACHE II, ventilator day, line days, bundle compliance %, alerts, isolation, MLC, code status/consent, family update due; sort by acuity; drill into flowsheet.
+- **Rounds mode**: system-by-system daily plan template (FAST-HUGS-BID style checklist), goals for the day (targets auto-monitored), orders via IP-003/OP-002 CPOE, task list to nurses, consult requests (TR-007), family update note; plan signed by intensivist; residents' notes co-signed.
+
+### 3.5 Procedures, sedation & restraints
+- Bedside procedures (central line, arterial line, ICD, tracheostomy, bronchoscopy, ICP bolt, FAST) documented via OP-010 procedure record with checklist/consent, line register (insertion/removal dates, site, operator, ultrasound-guided, CLABSI link).
+- Sedation/analgesia protocol: RASS target set by doctor; nurse titration within protocol bounds (infusion pump rate limits) with CPOT; daily SAT; delirium screening & non-pharmacological bundle; restraint orders (physical/chemical) time-limited (renew q24 h), monitoring q2h, consent/family info per NABH.
+- Narcotic infusions: NDPS register linkage (IP-014) with double-check for concentration changes.
+
+### 3.6 Deterioration, code, transfer, death & family
+- Code blue (IP-013) from ICU with timeline; MTP re-activation (IP-007); emergency relook (TR-004 Class 1 request from board).
+- Step-down to HDU (IP-016)/ward with ICU discharge criteria checklist, SBAR handover, tube/line reconciliation, medication reconciliation (IP-014); readmission to ICU < 48 h flagged.
+- Death: declaration, MLC (TR-008: unnatural death → inquest), brain-death protocol (THOA: two examinations by panel with apnoea test, forms, NOTTO/organ donation coordination via IP-019), IP-017 mortuary; TR-011 M&M capture (TRISS Ps vs outcome).
+- **Family updates** (`ticu.family_updates`): daily counsellor/doctor note in plain language (structured template: condition, ventilator status, plan, prognosis category), consented delivery via portal/WhatsApp (EN-009) or ICU family board with token IDs; visiting slot management (EN-015 passes); attendant bystander pass link.
+
+### 3.7 Exceptions & edge cases
+1. **ICU full on activation**: bed hold fails → TR-007/OP-006 alerted; options: HDU (IP-016) with intensivist cover, step-down another patient (discharge-readiness list ranked), or transfer-out (IP-018); decision & time logged (KPI: ICU access delay).
+2. **Device mis-mapping** (monitor paired to wrong bed): nurse "unpair" → streams quarantined from that time; flowsheet cells sourced from wrong device flagged and must be re-validated; incident if any charted.
+3. **Weight unknown** (unconscious/unknown patient): estimated weight with `estimated` flag (Broselow for paeds); vasopressor dose calcs show estimate badge; PBW from measured height/ulna length when possible.
+4. **Score correction after M&M**: allowed via versioned correction by intensivist with reason; TR-011 re-computes O/E for the period (flagged as restated).
+5. **Prolonged outage of lab interface**: manual ABG/lactate entry with `manual` source; scores show manual inputs; back-fill on interface recovery reconciles duplicates by accession no.
+6. **Patient becomes MLC in ICU** (e.g. assault disclosed): TR-008 case opened; ICU records unaffected but banner appears; death → inquest flow.
+7. **Family refuses updates or is absent**: documented; social worker task; unknown-patient identification via TR-008/OP-006.
+8. **Alarm storm** (> 30 alerts/h/bed): auto-throttle to summary alerts for low priority, never for critical; ICU in-charge notified to review thresholds.
+
+## 4. Data Model (schema `ip` for IP-009 core; TR-006 tables prefixed `ticu_` in schema `trauma`)
+- **icu_stays** (IP-009): + trauma_episode_id?, arrival_gcs, arrival_iss, arrival_triss_ps, admission_source enum(er/ot/ward/transfer_in), damage_control_pending bool, relook_due_at?, tertiary_survey_status enum(pending/done_24h/done_pre_dc/waived), pbw_kg numeric(5,1).
+- **icu_flowsheet_hours** (IP-009; monthly partitioned): stay_id, hour_at, vitals jsonb, vent jsonb, infusions jsonb[], intake jsonb, output jsonb, balance_ml, neuro jsonb (gcs_e/v/m, pupils, icp, cpp), sedation jsonb (rass_target, rass_actual, cpot, cam_icu), positioning jsonb, skin jsonb, glucose jsonb, source enum(device/manual/backfill), validated_by, validated_at, notes.
+- **icu_device_streams** (time-series; `analytics` or TimescaleDB-style partitioned table): stay_id, device_id, at, metrics jsonb (1-min); retention 30 d raw, hourly aggregates kept.
+- **ventilation_episodes**: stay_id, started_at (intubation/NIV start), airway enum(ett/tracheostomy/niv/hfnc), tube_size, depth_cm, operator, ended_at, end_reason enum(extubated/trach/death/transfer), reintubated_within_48h bool, vent_days numeric(5,2).
+- **vent_settings_log**: episode_id, at, mode, set_vt, measured_vt, vt_per_pbw, rr_set, rr_total, peep, fio2, pplat, ppeak, map, ie_ratio, driving_pressure, compliance, mv, source, changed_by, reason.
+- **sat_sbt_screens**: stay_id, date, sat_eligible bool, sat_done bool, sat_result, sbt_eligible bool, sbt_done bool, sbt_mode, duration_min, rsbi, outcome enum(pass/fail), failure_reason, extubated_at?, by.
+- **icu_scores**: stay_id, type enum(apache2/sofa/qsofa/rass/cpot/bps/cam_icu/gcs/ards_berlin/kdigo/braden/pts), at, value numeric, components jsonb, inputs jsonb, predicted_mortality numeric(5,4)?, incomplete bool, computed_by enum(system/user), version.
+- **ticu_bundles**: stay_id, bundle enum(ventilator/clabsi/cauti/tbi/spinal/chest/msk_vte/burns/rhabdo/mtp_followup/nutrition/mobility/pressure_injury/mlc_evidence), date, shift, items jsonb ({code, done, na, by, at}), compliance_pct, misses text[].
+- **ticu_tertiary_surveys**: stay_id, seq (1 = 24 h, 2 = pre-discharge), performed_at, by, regions jsonb, imaging_reviewed jsonb, missed_injuries jsonb[] (→ trauma_injuries ids), iss_before, iss_after, signed_at.
+- **ticu_surgery_readiness**: stay_id, at, lactate, temp, inr, platelets, ph, vasopressor_dose, icp, ready bool, blockers text[] (auto-evaluated hourly).
+- **icu_lines_tubes**: stay_id, type enum(cvc/picc/arterial/dialysis/urinary/ett/trach/icd/ng/og/peg/epidural/icp/drain/other), site, inserted_at, by, us_guided bool, removed_at, removal_reason, days, infection_case_id? (IP-012).
+- **icu_alerts**: stay_id, at, type, severity, value, threshold, acknowledged_by, acknowledged_at, escalated_to, resolved_at, action.
+- **icu_daily_plans**: stay_id, date, systems jsonb (plan per system + goals with targets), tasks jsonb, signed_by, signed_at, version.
+- **restraint_orders**, **sedation_targets**, **icu_family_updates** (stay_id, at, author, summary_text, prognosis_category, delivered_via, consent_ref), **brain_death_assessments** (stay_id, exam_no, at, panel jsonb, apnoea_test jsonb, forms file ids, notto_notified_at).
+- Indexes: flowsheet (stay_id, hour_at desc) partitioned monthly; icu_scores (stay_id, type, at desc); icu_alerts (stay_id, resolved_at); ventilation_episodes (stay_id). RLS; append-only for signed plans/surveys; retention ≥ 10 y (raw device streams 30 d).
+
+## 5. Business Rules & Validations
+- Hourly flowsheet row required for every hour of stay; missing > 15 min past the hour → reminder, > 60 min → shift in-charge alert; device-proposed values must be validated by nurse (accepted or edited with reason) before counting as charted.
+- APACHE II computed once at 24 h from worst values (system chooses worst; user may correct source with audit); recomputation only via versioned correction; predicted mortality shown with disclaimer; category coefficients configurable (trauma sets seeded).
+- SOFA daily at 06:00 and on demand; vasopressor dose in µg/kg/min from pump rate × concentration / weight (weight mandatory); missing component → score marked incomplete (not zero).
+- Lung-protective warnings: Vt/PBW > 8 mL/kg or Pplat > 30 → alert to registrar; FiO2 > 0.6 with PEEP < 5 → warn; SAT/SBT screen mandatory daily for ventilated patients (bundle miss otherwise).
+- Sepsis flag: SOFA Δ ≥ 2 + suspected infection → bundle timers; antibiotic > 60 min → breach event.
+- TBI: SBP < 90 or SpO2 < 90 minutes counted; ICP > 22 sustained 5 min → tiered alert; CPP outside 60–70 → alert; hyper/hypoglycaemia; sodium targets.
+- Surgery-readiness rule set configurable (defaults: lactate < 2.5 mmol/L, temp > 35 °C, INR < 1.5, platelets > 100 ×10⁹/L, pH > 7.25, vasopressor ≤ 0.1 µg/kg/min NA, ICP < 20) → status published to TR-007 hourly.
+- Tertiary survey due ≤ 24 h from ICU admission (or when awake), second before ICU discharge; overdue → intensivist task; missed injuries update TR-001/TR-002 and re-open ISS lock.
+- Lines: necessity review daily; CVC > 7 days & urinary catheter > 3 days without documented need → alert; infection linkage to IP-012 with device-days automatically counted.
+- Restraint orders expire 24 h; sedation infusions require RASS target; narcotic concentration changes double-checked (IP-014).
+- Alerts: acknowledgement within 5 min (critical) / 15 min (high) else escalate; alarm suppression only by doctor with reason & duration.
+- Brain-death: THOA panel composition validated (registered medical practitioner, treating doctor, neurologist/neurosurgeon, independent specialist — per state rules), two exams ≥ 6 h apart (adults; longer for children), forms 10; MLC → police informed before organ retrieval (TR-008).
+- Family updates only to consented contacts (EN-028); no prognosis via SMS — link to portal or in-person.
+- Nurse:patient ratio breach (NC-030) shown on board; admission beyond capacity requires supervisor override.
+
+## 6. API Surface (`/api/v1/icu/trauma`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| POST | /stays/{stayId}/link-trauma | attach trauma episode/pull baseline | icu.stay.update | Y | – |
+| GET | /stays/{stayId}/summary | trauma-ICU summary (injuries, scores, readiness) | icu.stay.read | – | – |
+| GET | /stays/{stayId}/flowsheet?from=&to= | flowsheet hours (IP-009) | icu.flowsheet.read | – | cursor |
+| POST | /stays/{stayId}/flowsheet/{hour}/validate | accept/edit device-proposed hour | icu.flowsheet.write | Y | – |
+| POST | /stays/{stayId}/ventilation, /ventilation/{id}/settings, /extubate | ventilator episode & settings | icu.vent.write | Y | – |
+| POST | /stays/{stayId}/sat-sbt | daily screen/trial | icu.vent.write | Y | – |
+| POST | /stays/{stayId}/scores/{type}/compute | APACHE II/SOFA/… compute (or auto) | icu.score.compute | Y | – |
+| PATCH | /stays/{stayId}/scores/{id} | correct inputs (versioned) | icu.score.correct | Y | – |
+| GET | /stays/{stayId}/scores?type= | history/trend | icu.stay.read | – | cursor |
+| POST/GET | /stays/{stayId}/bundles/{bundle} | bundle checklist per shift | icu.bundle.write | Y | – |
+| POST | /stays/{stayId}/tertiary-survey | record | icu.tertiary.write | Y | – |
+| GET | /stays/{stayId}/surgery-readiness | latest & trend | icu.stay.read | – | – |
+| POST/PATCH | /stays/{stayId}/lines[/{id}] | line/tube register | icu.line.write | Y | – |
+| POST | /stays/{stayId}/daily-plan | rounds plan (versioned, sign) | icu.plan.write / icu.plan.sign | Y | – |
+| GET | /board?unit= | multi-organ board read model | icu.board.read | – | – |
+| POST | /alerts/{id}/ack, /suppress | alert handling | icu.alert.respond / icu.alert.suppress | Y | – |
+| POST | /stays/{stayId}/restraints, /sedation-target | orders | icu.order.write | Y | – |
+| POST | /stays/{stayId}/family-updates | update note & delivery | icu.family.update | Y | – |
+| POST | /stays/{stayId}/brain-death/assessments | THOA exams | icu.braindeath.write | Y | – |
+| POST | /stays/{stayId}/discharge-readiness | criteria checklist | icu.stay.update | Y | – |
+| GET | /reports/kpi?unit=&from= | ventilator days, bundles, SMR | icu.report.read | – | – |
+| GET/PUT | /config/thresholds, /config/bundles, /config/readiness-rules, /config/apache-categories | config | icu.configure | Y | – |
+| Device ingest (EN-042 → internal): POST /ingest/streams | gateway | integration.icu.ingest | Y | – |
+
+## 7. Domain Events (outbox)
+- `icu.admitted` {stay_id, trauma_episode_id, bed} → TR-007, TR-001 (KPI icu_admit), IP-001, EN-018.
+- `icu.flowsheet.hour_validated`, `icu.flowsheet.hour_missing`.
+- `icu.vent.started|settings_changed|sbt_result|extubated|reintubated` → IP-012 device-days, TR-011, board.
+- `icu.score.computed` {type, value, predicted_mortality?} → TR-007, TR-011, board; `icu.score.corrected`.
+- `icu.sepsis.flagged|bundle.breached`; `icu.alert.raised|acknowledged|escalated|suppressed` → EN-037.
+- `icu.surgery_readiness.updated` {ready, blockers} → TR-007, TR-004.
+- `icu.tertiary_survey.completed` {missed_injuries[]} → TR-001 (injuries/ISS), TR-002.
+- `icu.bundle.recorded` {compliance_pct, misses} → Quality/IP-012.
+- `icu.line.inserted|removed` → IP-012.
+- `icu.plan.signed` → IP-003 tasks, consults (TR-007).
+- `icu.family_update.sent`; `icu.brain_death.confirmed` → IP-019 (organ donation), IP-017, TR-008.
+- `icu.discharged` {to, readmission_flag} → IP-001, IP-016, TR-010 (rehab), TR-011.
+- Consumes: `trauma.team.activated` (bed hold), `ot.case.completed` (TR-004), `lab.result.available|critical` (OP-004 → scores/alerts), `rad.study.reported`, `blood.issued` (IP-007), `pump.rate.changed`/`vent.alarm` (EN-042), `code_blue.called` (IP-013), `roster.ratio.breached` (NC-030).
+
+## 8. Screens (UI)
+- **Multi-organ trauma board** (desktop wall + EN-018 TV dark theme): bed cards with organ tiles colour-coded, SOFA/APACHE chips, vent day, alerts badge, readiness indicator, relook due; click → patient; sort/filter; real-time; TV shows bed + initials only.
+- **Bedside flowsheet** (wall PC/tablet landscape): hour columns × parameter rows; device-proposed cells shaded until validated; drips panel with dose calc; I/O with running balance; neuro/sedation rows; bundle checklist drawer; keyboard `→` next hour, `V` validate hour, `D` add drip change, `L` lab pull; offline capture; error: gateway stale > 5 min banner.
+- **Ventilator panel**: current settings vs lung-protective targets, waveform snapshot (if gateway supplies), SAT/SBT wizard, extubation checklist, trach prompt.
+- **Scores tab**: APACHE II worksheet with worst-value pickers and source links, SOFA daily grid with delta chart, RASS/CPOT/CAM-ICU per shift, TBI panel (ICP/CPP trend, hypotension/hypoxia minutes).
+- **Rounds/daily plan** (desktop rounds cart/tablet): system-by-system template, goals with live status, tasks, consults, sign; `Ctrl+Enter` sign.
+- **Tertiary survey form** (tablet): body regions checklist, imaging review list with reports, add missed injury (→ TR-001/TR-002), sign.
+- **Alerts console** (phone/desktop): active alerts by severity, ack/escalate/suppress with reason; on-call registrar view.
+- **Lines & tubes register**, **restraint/sedation orders**, **family update composer** (with consent check & delivery log), **brain-death protocol wizard**, **discharge readiness checklist**.
+- Print: ICU 24-h chart PDF, ventilator record, scores summary, family update sheet, THOA forms.
+
+## 9. Integrations
+- EN-042 device gateway: monitors (Philips/GE/Mindray/Nihon Kohden/Draeger — HL7 v2 ORU or vendor SDK), ventilators (Draeger/Hamilton/Getinge/Medtronic — HL7/serial/Ethernet), infusion pumps (B.Braun/Fresenius/Baxter — where interfaces exist), ICP monitors; time sync (NTP) & bed-device mapping with QR pairing; buffering & back-fill.
+- OP-004 labs (ABG analysers via EN-004), OP-008 portable imaging, IP-007 blood, IP-014 infusions/narcotics, IP-012 HAI, IP-013 code, IP-019 NOTTO, EN-029 rules, EN-037 alerts, EN-018 TV, TR-001/002/004/007/011, OP-011 nutrition, OP-015 mobility, EN-015 visitor passes, EN-009 family messages, NC-020 equipment status, NC-030 ratios.
+- Fallbacks: gateway down → manual mode + later back-fill; lab interface down → manual score inputs flagged; TV offline → desktop board.
+
+## 10. Reports & Analytics
+- ICU census, LOS, occupancy; ventilator days, VAP/CLABSI/CAUTI rates per 1000 device-days (IP-012); SAT/SBT compliance, extubation success, re-intubation < 48 h, unplanned extubation, tracheostomy timing; bundle compliance by bundle/shift; APACHE II SMR (observed/predicted), SOFA trends, sepsis bundle timeliness; TBI secondary-insult minutes; surgery-readiness time-to-ready; tertiary survey completion & missed-injury rate; restraint use; pressure injuries; readmission < 48 h; ICU mortality by ISS band; family update compliance; alarm burden per bed; nurse ratio compliance; cost per ICU day.
+- Read models: `analytics.mv_icu_daily`, `analytics.mv_icu_vent`, `analytics.mv_icu_scores`, `analytics.mv_icu_bundles`, `analytics.mv_ticu_readiness`.
+
+## 11. Notifications
+- Nurses: missing hour, alarm/alerts, bundle items due, turning reminders, restraint renewal; Registrar/intensivist: critical alerts with escalation ladder, sepsis flag, SAT/SBT eligible, tertiary survey due, readiness reached (to surgeon too), lab criticals; Surgeons: "window for surgery" reached, relook due; ICN: new device/infection flags; Family: consented daily update link/visiting slot; Quality/MS: unplanned extubation, restraint without order, SMR outliers, brain-death protocol started; Biomedical: ventilator fault.
+
+## 12. Permissions (RBAC keys)
+`icu.stay.read|update`, `icu.flowsheet.read|write`, `icu.vent.write`, `icu.score.compute|correct`, `icu.bundle.write`, `icu.tertiary.write`, `icu.line.write`, `icu.plan.write|sign`, `icu.board.read`, `icu.alert.respond|suppress`, `icu.order.write`, `icu.family.update`, `icu.braindeath.write`, `icu.report.read|export`, `icu.configure`.
+Defaults: ICU nurse (18): flowsheet.*, vent.write (settings log), bundle.write, line.write, alert.respond, board.read, stay.read; Intensivist (11): all clinical incl. plan.sign, alert.suppress, score.correct, braindeath.write, family.update; Registrar/resident (14): write with co-sign; Anaesthetist (10): vent.write, plan.write; RT/physio: vent.write (SBT), bundle.write (mobility); Surgeons: stay.read, board.read; Pharmacist: stay.read, order.write (protocol); ICN/Quality: report, board.read; Counsellor: family.update; MS: report.export; Admin: configure; Auditor: read.
+
+## 13. Non-functional
+- Volumes: 60–100 trauma-ICU beds (of 200+ ICU beds hospital-wide), 1-min device streams ≈ 150k rows/h, hourly validated rows 2.4k/day per unit; board 30 concurrent viewers.
+- p95: flowsheet hour load < 200 ms, validate < 150 ms, board < 300 ms (read model), score compute < 100 ms, alert dispatch < 3 s from threshold breach.
+- Storage: raw streams 30 d then downsample; flowsheet partitions monthly; ≥ 10 y retention for validated data.
+- Offline: bedside tablets queue manual entries ≥ 2 h; gateway buffers 24 h.
+- Accessibility: dark high-contrast board; colour + icons; large touch; audio alerts tiered; i18n family updates in local language.
+- Security: device pairing tokens; PHI-free TV; audit score corrections, alert suppression, restraint orders; family delivery consent enforced.
+
+## 14. Acceptance Criteria
+1. Given a patient admitted to trauma ICU from OT with a TR-001 episode, then the ICU summary shows mechanism, injuries/ISS, RTS, TRISS Ps, operative summary, damage-control flag and relook due, without re-entry.
+2. Given 24 h of flowsheet + labs, then APACHE II computes from worst values (e.g. temp 39.2, MAP 55, HR 130, RR 32, PaO2/FiO2, pH 7.22, Na 150, K 5.6, Cr 2.1 (ARF ×2), Hct 25, WBC 22, GCS 7, age 62, post-emergency surgery) with the correct points and predicted mortality using the multiple-trauma category; missing WBC marks the score incomplete rather than 0.
+3. Given norepinephrine 8 mL/h of 4 mg/50 mL in a 70-kg patient, then dose shows 0.19 µg/kg/min and SOFA CVS = 4; when MAP < 70 without vasopressor, CVS = 1.
+4. Given SOFA rises from 4 to 7 with suspected infection recorded, then sepsis flag raises, bundle timers start, and antibiotic not charted within 60 min emits `icu.bundle.breached`.
+5. Given ventilator settings Vt 560 mL for PBW 60 kg, then Vt/PBW = 9.3 mL/kg triggers a lung-protective alert to the registrar; Pplat 32 also alerts.
+6. Given daily SAT/SBT screen at 06:00 with FiO2 0.35, PEEP 5, stable, RASS 0, then patient is SBT-eligible; the trial log records RSBI 70 and pass; extubation records time; re-intubation at 30 h flags `reintubated_within_48h`.
+7. Given gateway offline for 40 min, then nurse manual entries are accepted; on recovery device data back-fills as `device_backfill` without overwriting validated cells.
+8. Given ICP 25 mmHg sustained 5 min, then a critical alert fires; unacknowledged after 5 min escalates to intensivist and HOD at 15 min; suppression requires doctor reason and duration.
+9. Given lactate 3.1 and temp 34.8, then surgery-readiness shows "not ready" with blockers; when values cross thresholds, `icu.surgery_readiness.updated` ready=true reaches TR-007 within 1 h and the surgeon is notified.
+10. Given tertiary survey at 26 h finds a missed scaphoid fracture, then a TR-002 provisional fracture with source tertiary_survey is created, TR-001 injuries updated, and ISS lock re-opened for coder.
+11. Given a CVC in place 8 days without a "necessity documented" bundle item, then an alert to the intensivist appears and IP-012 device-days include the line.
+12. Given a restraint order placed at 08:00 yesterday, then at 08:00 today it expires and nursing gets a renewal task; monitoring entries q2h are enforced in the bundle.
+13. Given brain-death protocol, then two examinations ≥ 6 h apart by a valid panel are required before `icu.brain_death.confirmed`; MLC cases require police intimation record before NOTTO notification.
+14. Given family contact with consent, then the daily update is delivered via portal link/WhatsApp without prognosis text in SMS; without consent, delivery is blocked and logged.
+15. Given the ICU TV board, then only bed numbers, initials and organ tiles are shown; names/diagnoses never render.
+16. Given ICU discharge to HDU, then criteria checklist must be complete, lines/tubes reconciled, SBAR generated; readmission within 48 h flags the stay and TR-011 record.
+17. Given the monthly report, then VAP rate = VAP cases / ventilator-days × 1000 computed from `ventilation_episodes` and IP-012 cases and matches a manual recomputation on test data.
+18. Given a nurse without `icu.alert.suppress` attempts suppression, then it is rejected (403) and audited.
+19. Given a monitor paired to bed 4 is discovered to belong to bed 5, when the nurse unpairs it, then subsequent streams stop, cells sourced from it since pairing are flagged for re-validation, and an incident is opened if any were charted.
+20. Given ICU full when a Level 1 activation fires, then TR-007 and OP-006 receive an "ICU access delay" alert with the ranked discharge-readiness list, and the decision (HDU/step-down/transfer) is logged with time.
+21. Given a bed generating 40 alerts in an hour, then low-priority alerts collapse into 15-min summaries, critical alerts continue individually, and the ICU in-charge receives a threshold-review task.
+
+## 15. Enhancements / Later phases
+- From VIMS sheet row 80 (ICU) — ventilator tracking, hourly vitals, APACHE/SOFA, alerts (all here/IP-009); Added-Modules sheet: sedation scale, multi-organ dashboard, alert cascade (here).
+- (market) SmartHospital: dedicated ICU bed pool, transfer-to-ward workflow, GCS/pain/vent settings (covered). Later: predictive deterioration/early-warning ML (AI-005), ventilator waveform capture & analytics (EN-042), closed-loop sedation advisories, tele-ICU (OP-018) for hub-and-spoke, ICU capacity forecasting, ABCDEF bundle dashboards with outcomes, PICS follow-up clinic (TR-010), automated ISCCM/NABH indicator submissions (NC-015/EN-001), eCASH/PADIS 2018 guideline prompts (EN-029), ECMO/RRT registers (IP-022 link).
+
+## 16. Open Questions for the Hospital
+1. ICU units and beds (trauma ICU, neuro ICU, SICU), nurse:patient ratios, respiratory therapists available?
+2. Monitor/ventilator/pump makes & models and interface capability (HL7/serial); central station present? Time-sync policy.
+3. Score set: APACHE II only or also APACHE IV/SAPS III? Category coefficients; SOFA at 06:00 or shift-based; RASS/CPOT/CAM-ICU frequency.
+4. Bundles in use and audit expectations (NABH/ISCCM), sepsis protocol thresholds; TBI protocol (ICP monitoring available?).
+5. Definitive-surgery readiness thresholds agreed by trauma & ortho teams?
+6. Tertiary survey timing/ownership; missed-injury reporting culture.
+7. Family communication policy (who, when, channels), visiting hours, counsellor availability; ICU family board?
+8. Brain-death panel composition per state, organ-donation programme (NOTTO registration).
+9. Restraint policy & forms; sedation protocol bounds for nurse titration.
+10. Device data retention (raw 30 d default) and storage budget; TV boards per unit.
+11. Alarm-management policy (tiers, throttling limits) and who reviews thresholds; central alarm station present?

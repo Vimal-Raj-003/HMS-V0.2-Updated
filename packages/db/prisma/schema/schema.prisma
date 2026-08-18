@@ -1,0 +1,47 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Vim's HMS — PostgreSQL 17 schema root
+//
+// Conventions enforced across every model in this folder (docs/03):
+//   - PK is `id uuid` generated in application code as UUIDv7 (time-ordered).
+//   - `hospital_id uuid not null` on every business table; `branch_id` where
+//     operationally scoped. Composite indexes ALWAYS start with `hospital_id`.
+//   - Audit columns: created_at / created_by / updated_at / updated_by,
+//     `deleted_at` only where soft delete is legally allowed, `version int` for
+//     optimistic locking on editable rows.
+//   - Money is `Decimal @db.Decimal(14, 2)` + a `currency Char(3)`. Never Float.
+//   - Time is `timestamptz` only (`@db.Timestamptz`). Date-only is `@db.Date`.
+//   - Enums are Postgres enums for stable sets; lookup tables for anything a
+//     hospital configures.
+//
+// RLS, partitions, triggers, grants and materialised views cannot be expressed
+// in Prisma. They live in hand-written SQL inside the migration folder, per
+// docs/03 §Migrations. `prisma migrate diff` will not see them, which is exactly
+// why `packages/db/src/rls/policies.sql` is applied by a migration and asserted
+// by an integration test rather than trusted.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../../generated/prisma"
+  // multiSchema is GA in Prisma 6 and no longer needs the preview flag.
+  previewFeatures = ["views"]
+  binaryTargets   = ["native"]
+}
+
+// Extensions are NOT managed by Prisma: pg_cron and pgaudit require superuser and
+// `shared_preload_libraries`, which a migration role cannot do. They are created by
+// `infra/docker/postgres/init/01-extensions.sql` (or by the customer's DBA on a
+// managed provider) into the `ext` schema, and the capability register at
+// `ext.db_capabilities` tells the application what it actually got. ADR-0008.
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_MIGRATE_URL")
+  // Prisma validates each migration against a throwaway shadow database. Ours
+  // must be a *persistent* one that already holds the infrastructure-owned `ext`
+  // schema and its extensions, because the migrations legitimately reference
+  // `ext.gin_trgm_ops` and `ext.create_parent`. A shadow database Prisma creates
+  // itself would have neither, and every migration touching a trigram index
+  // would fail validation for a reason that has nothing to do with the schema.
+  shadowDatabaseUrl = env("DATABASE_SHADOW_URL")
+  schemas    = ["core", "mdm", "integration", "analytics"]
+}

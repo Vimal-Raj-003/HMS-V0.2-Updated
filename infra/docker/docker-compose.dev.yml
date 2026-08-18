@@ -1,0 +1,181 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Vim's HMS — local development stack
+#   pnpm infra:up      start
+#   pnpm infra:logs    tail
+#   pnpm infra:nuke    stop and delete volumes
+#
+# Ports are deliberately offset from the defaults (5433/6380/9100/1026) so this
+# stack never collides with a Postgres or Redis the developer already runs.
+# ─────────────────────────────────────────────────────────────────────────────
+name: vims-hms-dev
+
+services:
+  postgres:
+    # PostgreSQL 17 is the locked engine (docs/02 §1). Built from our own
+    # Dockerfile because the stock image lacks pgvector / pg_partman / pg_cron
+    # (docs/03 §Extensions). Same image in dev, CI and on-prem so an EXPLAIN plan
+    # captured on a laptop still means something in a hospital.
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
+    image: vims-hms/postgres:17
+    container_name: vims-hms-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_dev
+      POSTGRES_DB: vims_hms
+      # Deterministic collation so trigram/ordering behaviour matches CI and prod.
+      POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C.UTF-8'
+      TZ: UTC
+      PGTZ: UTC
+      # CERT-In requires clock synchronisation (docs/04 §1); the container
+      # inherits the host clock, and drift is monitored by EN-023 in production.
+    command:
+      - postgres
+      # pg_cron / pg_partman_bgw / pgaudit must be preloaded at startup.
+      - '-c'
+      - 'shared_preload_libraries=pg_stat_statements,pg_cron,pg_partman_bgw,pgaudit'
+      - '-c'
+      - 'cron.database_name=vims_hms'
+      - '-c'
+      - 'pg_partman_bgw.dbname=vims_hms'
+      - '-c'
+      - 'pg_partman_bgw.interval=3600'
+      - '-c'
+      - 'pg_partman_bgw.role=hms_migrator'
+      # docs/07 §6 stage 1 tuning, scaled down for a laptop
+      - '-c'
+      - 'shared_buffers=512MB'
+      - '-c'
+      - 'effective_cache_size=1536MB'
+      - '-c'
+      - 'work_mem=16MB'
+      - '-c'
+      - 'max_connections=200'
+      - '-c'
+      - 'pg_stat_statements.track=all'
+      # docs/07 §5: bound runaway statements and idle transactions so vitals /
+      # audit tables cannot bloat from a forgotten open transaction.
+      - '-c'
+      - 'statement_timeout=15s'
+      - '-c'
+      - 'idle_in_transaction_session_timeout=30s'
+      - '-c'
+      - 'log_min_duration_statement=250ms'
+      - '-c'
+      - 'timezone=UTC'
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d vims_hms']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: vims-hms-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - 'yes'
+      - --maxmemory
+      - 512mb
+      # `noeviction` is deliberate: BullMQ job data and the refresh-token denylist
+      # must never be silently evicted (docs/07 §4, docs/04 §2).
+      - --maxmemory-policy
+      - noeviction
+    ports:
+      - '6380:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: vims-hms-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9101"
+    environment:
+      MINIO_ROOT_USER: vimsminio
+      MINIO_ROOT_PASSWORD: vimsminio_dev_secret
+    ports:
+      - '9100:9000'
+      - '9101:9101'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    container_name: vims-hms-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    # Private bucket + versioning. docs/04 §4: no public objects, ever.
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 vimsminio vimsminio_dev_secret &&
+      mc mb --ignore-existing local/vims-hms-dev &&
+      mc anonymous set none local/vims-hms-dev &&
+      mc version enable local/vims-hms-dev &&
+      echo 'minio bucket ready (private, versioned)'
+      "
+    restart: 'no'
+
+  mailpit:
+    image: axllent/mailpit:v1.24
+    container_name: vims-hms-mailpit
+    restart: unless-stopped
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - '1026:1025' # SMTP
+      - '8026:8025' # web UI — read the invitation and OTP mails here
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8025/livez']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Orthanc is stubbed in Phase 0 and only becomes load-bearing in Phase 3
+  # (OP-008 / EN-008). It is here so the compose file the hospital eventually
+  # runs on-prem is the same one developers use. ADR-0006.
+  orthanc:
+    image: orthancteam/orthanc:25.4.0
+    container_name: vims-hms-orthanc
+    restart: unless-stopped
+    environment:
+      ORTHANC__NAME: VIMS-HMS-DEV
+      ORTHANC__REGISTERED_USERS: '{"vims":"vims_dev"}'
+      ORTHANC__DICOM_SERVER_ENABLED: 'true'
+      ORTHANC__DICOM_AET: VIMSHMS
+      DICOM_WEB_PLUGIN_ENABLED: 'true'
+    ports:
+      - '8142:8042' # REST / DICOMweb
+      - '4243:4242' # DICOM
+    volumes:
+      - orthanc-data:/var/lib/orthanc/db
+    profiles: ['imaging'] # `docker compose --profile imaging up` — not needed for Phase 0
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  orthanc-data:

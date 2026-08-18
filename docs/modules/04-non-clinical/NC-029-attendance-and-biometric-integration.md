@@ -1,0 +1,184 @@
+# NC-029 — Attendance & Biometric Integration (Devices, Punch Capture, Shift Mapping, Late/Early/OT Calculation, Leave Integration, Geo-Fenced Mobile Attendance, Regularisation)
+
+| Field | Value |
+|---|---|
+| Domain | Non-Clinical / ERP |
+| Module ID | NC-029 |
+| Phase | 9 (device ingestion can start Phase 0/1 with EN-020 for pilot) |
+| Priority | P1 |
+| Complexity | Medium–High |
+| Depends on | EN-020 (Biometric Integration — device adapters/SDKs for fingerprint/face/RFID/palm terminals; NC-029 owns attendance semantics on top of raw punches), NC-010 (employee master, weekly-off/holiday calendars, leave balances & applications, payroll consumption of attendance days/OT/allowances, regularisation approvals hierarchy), NC-030 (Duty Roster — planned shift per employee per day; punches map to rostered shift; on-call), NC-014 (Staff Utility Mobile — mobile punch with geo-fence/selfie, regularisation requests, my attendance), NC-019 (access-control door events as secondary punch source; guard attendance), NC-018/NC-025/NC-017/NC-033 (contractor manpower attendance for SLA), NC-021/NC-031 (outsourced staff via vendor; contract labour registers), NC-027 (training attendance via hall device), OP-001 (doctor OPD schedule vs presence → queue/TV "doctor in"), EN-006/EN-018 (doctor arrival status on token boards), EN-007 (users; device enrolment ids), EN-042 (device gateway health), EN-024 (audit), EN-037/EN-009 (notifications), NC-011, EN-041 (multi-branch devices) |
+| Feature flag | `module.attendance.enabled` (sub: `attendance.biometric`, `attendance.face`, `attendance.mobile_geo`, `attendance.web_punch`, `attendance.contractor`, `attendance.doctor_presence`) |
+| Primary roles | HR Executive / Time-office, Department in-charges/HODs (approvals), Employees (punch, regularise) |
+| Secondary roles | Nurse supervisor (22; ward presence vs roster), Security (51; guard posts), Contractor supervisors (vendor 63), Payroll (NC-010), IT Admin (56; devices), Front office (24; doctor presence), Auditor (58) |
+| Regulatory | Shops & Establishments Acts / Factories Act (working hours, spread-over, weekly off, overtime rate 2×, registers of attendance & OT — Form templates vary by state), Contract Labour (R&A) Act (attendance & wage registers for contract labour; principal employer duty), Minimum Wages Act (OT computation), Payment of Wages Act, Maternity Benefit Act (leave integration), Code on Wages 2019 / OSH Code 2020 (when notified: 8 h/day, 48 h/week, OT limits), ESI/PF (attendance days basis), Income-tax (perquisites for OT/allowances), DPDP Act 2023/Rules 2025 & Aadhaar Act (biometric templates = sensitive personal data: consent, purpose limitation, template storage on device/encrypted, no Aadhaar biometrics use, retention limits, DPIA), IT Act §43A, NABH HRM (staff availability records; nurse-patient ratio evidence via NC-030), Medical Council duty-hour guidance for residents (state/NMC), Equal Remuneration provisions |
+
+## 1. Purpose
+NC-029 turns raw punches into **payable attendance**: integrates biometric/face/RFID terminals (via EN-020) plus **mobile geo-fenced punch** with selfie/liveness, web punch and door-access events; maps punches to the **rostered shift** (NC-030) including night shifts crossing midnight, split shifts and multiple punches; computes daily status (present/absent/half-day/weekly-off/holiday/leave/on-duty/tour/WFH), late/early minutes with grace, worked hours, **overtime & compensatory-off eligibility**, night/shift allowances, missed punches; runs **regularisation** (forgot punch/official duty/permission) with approvals; integrates **leave** (NC-010) and holidays; produces the locked monthly attendance for payroll and statutory registers; supports **contractor manpower attendance** for SLA and Contract Labour Act, and **doctor presence** signals for OPD boards. It respects DPDP for biometric data.
+
+## 2. Users & Jobs-to-be-done
+- **Employee** (device/mobile/web): punch in/out (biometric at terminal; mobile with geo-fence at approved sites e.g. camps/home visits; web punch for approved roles), see my attendance/late/OT, request regularisation/permission/comp-off; get missed-punch alerts.
+- **HOD/in-charge** (web/mobile): approve regularisations & OT, see team presence vs roster live (who is in), absentees, late trends; request shift changes (NC-030).
+- **Time-office/HR** (desktop): device management & health, enrolment mapping (employee ↔ device ids/templates), exceptions queue, monthly processing/lock, OT policy, statutory registers, contractor attendance reconciliation, audit.
+- **Payroll**: consume locked attendance (payable days, LOP, OT hours, night shifts, allowances).
+- **Front office/queue**: doctor arrival status auto (`attendance.doctor_presence`).
+- **Contractor supervisor** (vendor role): mark/verify manpower per post; disputes.
+- **IT admin**: device onboarding, network, firmware, template sync (EN-020).
+
+## 3. Core Workflows
+### 3.1 Device & enrolment management (with EN-020)
+1. **IT/HR** registers device: type enum(fingerprint/face/palm/rfid/qr_kiosk/access_controller), make/model (ZKTeco/eSSL/Mantra/Suprema/HikVision/Realtime/Matrix…), serial, location/branch/gate, protocol (push SDK/HTTP webhook, ADMS, vendor cloud API, SDK pull), timezone, direction mode (in/out/auto), allowed employee groups → **enrolment**: employee (NC-010) ↔ device user id; template capture at device (templates stay on device/vendor server; HMS stores only ids/hashes if required; consent recorded EN-028), face enrolment via photo (with consent, liveness), RFID card ids; **sync** enrolments across devices (multi-branch groups) → device health monitoring (last heartbeat, punch lag) → offline buffering & backfill → Event `attendance.device.registered|offline|online`.
+
+### 3.2 Punch capture (all channels)
+1. Punch sources → **normalised punch record** {employee_id, at (UTC + device tz), source enum(biometric/face/rfid/mobile_geo/web/door_access/manual), device_id?, direction (in/out/auto), geo?, selfie_file?, liveness_score?, confidence, raw_ref} → dedupe (same source within 60 s), clock-skew correction (device time vs server), suspicious flags (punch at two distant sites within impossible time; buddy-punch risk on RFID/web (photo mismatch); mobile outside geo-fence → rejected/flagged per policy) → Event `attendance.punch.recorded` (also consumed by OP-001/EN-006 doctor presence, NC-018/NC-030 availability).
+2. **Mobile geo punch** (`attendance.mobile_geo`; NC-014): allowed for configured roles/sites (camps NC-035, home care, field marketing, remote branches); geo-fence radius per site; selfie with liveness (blink/turn) and face match to enrolled photo (EN-020 face service or on-device); offline punch queued with device time & GPS, flagged `offline_sync`; mock-location detection (rooted/dev options) → reject.
+3. **Web punch** (`attendance.web_punch`) from hospital network IP ranges only for approved roles (admin/desk); **door-access** events (NC-019) as secondary punches when configured; **manual punch** by HR with reason (audited).
+
+### 3.3 Shift mapping & daily computation
+1. Nightly (and incremental) job: for each employee/day → **planned shift** from NC-030 roster (or default shift pattern NC-010; general shift 09:00–17:00 fallback) → attendance window (shift start − early_in_allow (e.g. 2 h) to shift end + late_out_allow (e.g. 6 h); night shifts across midnight attributed to shift start date) → pick first-in/last-out (or pair punches for split shifts/breaks if policy `pair_punches`) → compute: in_time, out_time, worked_minutes (minus unpaid break policy), late_minutes (after grace e.g. 10 min; monthly late allowance count → beyond → half-day/LOP rule), early_out_minutes, status enum(present/half_day/absent/weekly_off/holiday/leave(type)/on_duty/tour/wfh/comp_off/missed_punch/pending_regularisation), OT_minutes (worked − shift duration − threshold; only if OT-eligible category & pre-approved or auto-approve rules; rounding to 30 min; cap/day & /month; weekly-off/holiday work → OT at 2× or comp-off per policy), night_shift flag (allowance), extra hours for comp-off eligibility → **exceptions**: missed in/out, absent without leave, late beyond limit, mobile flags → notify employee & HOD; leave applications (NC-010) & holidays override → Event `attendance.day.computed|exception`.
+2. Multi-punch scenarios: doctors visiting multiple branches (punches at different branch devices → consolidated presence hours), split shift, mid-day permission (short leave with approval → not late/early), on-duty outside (official duty regularisation), tour.
+
+### 3.4 Regularisation, permission & OT approval
+1. **Employee** raises regularisation (missed punch with actual time, official duty (OD) with location/purpose, WFH, permission/short leave up to N hours/month, comp-off request against extra hours) with reason/attachment (NC-014/web) → **HOD** approve/reject (EN-038; auto-escalate 48 h; limits per month e.g. 3 regularisations; beyond → HR) → recompute day → Event `attendance.regularisation.approved|rejected`.
+2. **OT**: pre-approval request (HOD) or post-facto approval of computed OT (list per department; bulk approve) per policy; comp-off credit to NC-010 leave balance (expiry 90 days); night/shift allowance counts.
+
+### 3.5 Monthly processing & lock
+- Cut-off (e.g. 25th or month-end) → HR reviews exceptions dashboard (pending regularisations auto-decide per policy: reject → LOP or HR decision), finalises → **lock** → summary per employee (payable days, LOP days, OT hours (regular/holiday), night shifts, late count, comp-offs earned) → NC-010 payroll consumption → statutory registers (attendance register, OT register — state formats via EN-039 templates) → unlock requires HR manager + reason + payroll not approved (NC-010 rule) → Event `attendance.month.locked`.
+
+### 3.6 Contractor manpower attendance (`attendance.contractor`)
+- Contract staff (housekeeping/security/FM/canteen/laundry via NC-021/NC-031) enrolled on devices under vendor tag with post/shift plan (from contract) → daily manpower actual vs planned per post → shortfall → NC-018/NC-019/NC-025 SLA & penalty; vendor supervisor verification & disputes; Contract Labour Act registers; no payroll (vendor billing basis).
+
+### 3.7 Doctor presence & live boards (`attendance.doctor_presence`)
+- Doctor punch (or Wi-Fi/BLE presence optional via EN-042) → OP-001 schedule "doctor arrived" → EN-006/EN-018 token boards; late-arrival alerts to front office/HOD; visiting consultants' hours for NC-034 (retainer models: minimum hours) & OPD punctuality KPI.
+
+### 3.8 Edge cases & computation details
+- **Direction inference** for `auto` devices: first punch of the attendance window = IN, last = OUT; intermediate punches paired for breaks when `pair_punches`; single punch → `missed_punch` (in or out inferred by proximity to shift start/end) → regularisation prompt.
+- **Cross-midnight & double shifts**: attendance window anchored to rostered shift; a punch belongs to the nearest window; two rostered shifts same day → two day-records (date + shift); 24-h duty (residents on-call) → worked hours capped/allowanced per policy; on-call attended events from NC-030 log count as on-duty presence.
+- **Multi-branch consultants**: punches at any branch device consolidated into one presence timeline; per-branch hours split for NC-034 retainer sessions & cost allocation (NC-008).
+- **Device clock/DST**: device tz per record; server converts; skew > 5 min corrected & flagged; DST not applicable in India but supported for global tenants.
+- **Holiday work / weekly-off swap**: employee/HOD can swap weekly-off with another day (approval) → attendance recalculated; comp-off issuance rules.
+- **Half-day & permission**: permission ≤ 2 h (config) not counted as late/early; > 2 h → half-day; short leave balance monthly.
+- **Late arrival waivers**: bulk waiver for events (transport strike/flood) by HR with reason applies to date/branch.
+- **Trainees/interns**: separate policy (no OT; stipend basis days); **outsourced staff on hospital devices**: excluded from payroll but included in manpower reports.
+- **Retro corrections**: locked months immutable; correction → next month adjustment lines (payable days ±) → NC-010 arrears/recovery; audit trail.
+- **Data quality monitors**: employees with no punches for 3 consecutive rostered days & no leave → HR alert (possible absconding/enrolment issue); devices with zero punches during a shift → offline suspicion.
+
+## 4. Data Model (schema `hr`, prefix `att_`)
+- **att_devices**: id, hospital_id, branch_id, device_code, type enum, make, model, serial, location, ip?, protocol enum(push_http/adms/vendor_cloud/sdk_pull/webhook), tz, direction_mode enum(in/out/auto/toggle), allowed_groups jsonb, status enum(active/offline/maintenance/retired), last_heartbeat_at, last_punch_at, firmware, config jsonb. UNIQUE (hospital_id, device_code), (serial).
+- **att_enrolments**: employee_id (or contractor_staff_id), device_id?/global, device_user_id, template_type enum(finger/face/palm/card), template_ref (hash/vendor id; no raw template), consent_ref (EN-028), enrolled_at, enrolled_by, status. UNIQUE (device_id, device_user_id).
+- **att_punches** (partitioned monthly): id, hospital_id, branch_id, employee_id?, contractor_staff_id?, at timestamptz, device_at (raw), source enum, device_id?, direction enum(in/out/auto), geo point?, geo_site_id?, selfie_file_id?, liveness_score?, face_match_score?, flags text[] (offline_sync/outside_geofence/mock_location/impossible_travel/duplicate/skew_corrected/manual), raw_ref, ingested_at. INDEX (employee_id, at desc), (hospital_id, at desc), (device_id, at desc).
+- **att_geo_sites** (branch_id, name, centre point, radius_m, allowed_roles/employees jsonb, active_from/to (camps)).
+- **att_shift_policies** (id, hospital_id, name, grace_in_min, grace_out_min, early_in_allow_min, late_out_allow_min, unpaid_break_min, half_day_min_minutes, full_day_min_minutes, late_allowance_per_month, late_penalty_rule jsonb, ot_eligible bool, ot_threshold_min, ot_rounding_min, ot_cap_day_min, ot_cap_month_min, ot_rate_weekday, ot_rate_holiday, comp_off_rule jsonb, night_shift_window jsonb, pair_punches bool, requires_pre_approval_ot bool) — assigned via NC-010 employee category/grade or NC-030 shift.
+- **att_days** (partitioned monthly): id, hospital_id, branch_id, employee_id, date, planned_shift_id? (NC-030), shift_code, shift_start, shift_end, in_at, out_at, in_source, out_source, worked_min, break_min, late_min, early_out_min, ot_min_computed, ot_min_approved, ot_kind enum(none/weekday/weekly_off/holiday), night_shift bool, status enum, status_reason, leave_type?, leave_ref?, holiday_ref?, regularisation_ids uuid[], flags text[], computed_at, version, is_locked bool. UNIQUE (employee_id, date); INDEX (hospital_id, branch_id, date), (status) partial for exceptions.
+- **att_regularisations**: id, employee_id, date, kind enum(missed_in/missed_out/official_duty/wfh/permission/comp_off_request/shift_change_request/late_waiver), requested_in_at?, requested_out_at?, hours?, reason, attachment_file_id?, location?, status enum(pending/approved/rejected/auto_rejected/cancelled), approver_id, decided_at, comments. INDEX (employee_id, date), (status, approver_id).
+- **att_ot_approvals** (employee_id, date, minutes_requested, minutes_approved, kind, pre_approved bool, approver_id, decided_at, comp_off_credited bool).
+- **att_month_summaries**: employee_id, period (YYYY-MM), payable_days, present_days, half_days, absent_days, lop_days, weekly_offs, holidays, leave_days jsonb {type: days}, ot_min_weekday, ot_min_holiday, night_shifts, late_count, comp_off_earned, locked_at, locked_by, unlocked_log jsonb. UNIQUE (employee_id, period).
+- **att_contractor_staff** (vendor_id, name, id_proof_ref (masked), post/trade, contract_id, active), **att_contractor_daily** (contract_id, date, shift, post, planned, present, verified_by_vendor, disputed bool, notes).
+- **att_exceptions_queue** (view over att_days with flags/pending) — read model; **analytics.attendance_daily** (branch, department, date: headcount, present, absent, late, on_leave, ot_hours, mobile_punches, device_offline_minutes).
+- RLS; biometric consent & minimal data (DPDP); punches retained 3 years (statutory registers 3 years; configurable), selfies 90 days then deleted; audit on manual punches/regularisation decisions/unlocks.
+
+## 5. Business Rules & Validations
+- Punch dedupe 60 s; direction resolution: device mode or auto (first = in, alternate); clock skew > 5 min → corrected & flagged; punches without an active employee/enrolment → unmatched queue for HR mapping.
+- Mobile geo: allowed only for configured roles/sites & radius; outside fence → rejected (or flagged per site policy); selfie liveness/face match below threshold → flagged for HOD verification; mock location/rooted → rejected; offline queued punches accepted within 24 h with `offline_sync` flag & GPS proof.
+- Shift mapping: use rostered shift; if none, employee default pattern; night shifts credited to shift-start date; multiple shifts/day (double duty) allowed with roster; worked hours from paired punches if `pair_punches` else first-in/last-out.
+- Late: grace per policy; monthly late allowance; beyond → penalty rule (half-day/LOP/warning) auto-applied at lock unless waived; early-out symmetric.
+- OT: only OT-eligible categories; threshold & rounding; caps; weekly-off/holiday work → OT at 2× (Factories/S&E) or comp-off per policy; pre-approval when required; unapproved OT lapses at lock (config) with report; comp-off credited via NC-010 leave ledger with expiry.
+- Leave/holiday precedence: approved leave > holiday > weekly-off > punches (present on holiday → OT/comp-off eligibility); half-day leave with punches → half-day computation.
+- Regularisation limits per month; OD requires location/purpose; approvals SoD (self-approval blocked; HOD approves subordinates; HR for HOD).
+- Month lock: exceptions must be resolved or auto-decided; unlock rules as NC-010; locked days immutable (corrections next month with arrears via NC-010).
+- Contract staff attendance never enters payroll; used for vendor SLA/billing; ID minimal.
+- Numbering not required; audit trail complete; DPDP: consent for biometrics recorded, purpose = attendance/access; deletion of templates on exit (device sync).
+
+## 6. API Surface (`/api/v1/attendance`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| GET/POST/PATCH | /devices ; POST /devices/{id}/(sync-enrolments|reboot|test) ; GET /devices/health | devices (EN-020) | attendance.device.manage / .read | Y | cursor |
+| POST/GET | /enrolments ; POST /enrolments/bulk ; DELETE /enrolments/{id} (exit) | enrolment mapping | attendance.enrolment.manage | Y | cursor |
+| POST | /punches/ingest (EN-020 adapters/webhooks; batch) ; POST /punches/mobile {geo, selfie, liveness} ; POST /punches/web ; POST /punches/manual | punch capture | integration.attendance.ingest / attendance.punch.mobile (self) / attendance.punch.web / attendance.punch.manual (HR) | Y | – |
+| GET | /punches?employee=&from=&to= ; GET /unmatched | punches | attendance.punch.read (self/HOD/HR) | – | cursor |
+| GET | /days?employee=&month= ; GET /me/attendance ; GET /team/attendance?date= (HOD live) ; GET /exceptions?dept=&status= | computed days | attendance.day.read (ABAC) | – | cursor |
+| POST | /recompute {employee_ids?, from, to} | recompute | attendance.process.manage | Y | – |
+| POST/GET | /regularisations ; POST /regularisations/{id}/(approve|reject|cancel) ; POST /regularisations/bulk-approve | regularisation | attendance.regularisation.request (self) / .approve (HOD/HR) | Y | cursor |
+| POST/GET | /ot ; POST /ot/{id}/approve ; POST /ot/bulk-approve | OT | attendance.ot.request / .approve | Y | cursor |
+| GET/POST | /policies ; /geo-sites | config | attendance.configure | Y | – |
+| GET | /months/{period}/summary?dept= ; POST /months/{period}/(lock|unlock) ; GET /months/{period}/payroll-feed | monthly | attendance.month.read / .lock (HR) / hr.payroll.read | Y | cursor |
+| POST/GET | /contractors/staff ; /contractors/daily ; POST /contractors/daily/{id}/(verify|dispute) | contractor | attendance.contractor.manage / vendor.attendance.verify | Y | cursor |
+| GET | /presence/doctors?branch= (OP-001/EN-006) ; GET /presence/department/{id} | live presence | attendance.presence.read | – | – |
+| GET | /reports/(daily-attendance|late-early|ot|absenteeism|missed-punch|regularisation-tat|device-uptime|mobile-punch-audit|contractor-manpower|statutory-registers) | analytics | attendance.report.read | – | – |
+| WS | `att:presence:<branch>` | live in/out | attendance.presence.read | – | – |
+
+## 7. Domain Events (outbox)
+- `attendance.punch.recorded` {employee_id, at, source, direction, flags} → NC-030 (presence vs roster), OP-001/EN-006/EN-018 (doctor presence), NC-018/NC-019 (staff availability), NC-027 (hall device), NC-011.
+- `attendance.punch.flagged` {employee_id, flags} → HOD/HR review.
+- `attendance.device.offline|online` → NC-028 ticket, HR.
+- `attendance.day.computed|exception` {employee_id, date, status, late_min, ot_min} → employee/HOD notifications, NC-010 (view), NC-030 (no-show → replacement), NC-014.
+- `attendance.regularisation.requested|approved|rejected`, `attendance.ot.approved`, `attendance.comp_off.earned` → NC-010 (leave ledger), employee.
+- `attendance.month.locked|unlocked` {period, summary_count} → NC-010 payroll, NC-011.
+- `attendance.contractor.shortfall` {contract_id, date, post, shortfall} → NC-018/NC-019/NC-025/NC-021 SLA.
+- Consumes: `hr.employee.joined|transferred|exited|category.changed` (NC-010 → enrol/deactivate/policy), `hr.leave.approved|cancelled` / `hr.holiday.calendar.updated` (NC-010), `roster.published|shift.swapped|shift.changed` (NC-030), `security.access.granted` (NC-019 door punches when configured), `camp.scheduled` (NC-035 → temporary geo-site), `device.heartbeat|punch.raw` (EN-020/EN-042), `contract.manpower.plan.updated` (NC-031).
+
+## 8. Screens (UI)
+- **My Attendance** (NC-014 mobile/web): calendar with status colours, today's punches, worked hours, late/OT, quick actions (Mobile punch with map & selfie; Regularise; Permission; Comp-off), notifications; offline punch queue indicator.
+- **Team Presence** (HOD; web/mobile, realtime): rostered vs present list (in/out/absent/late/on-leave), department strength, quick approve regularisations; `A` approve, `R` reject.
+- **Time-office Console** (desktop): exceptions queue (missed punches, flags, pending regularisations, unmatched punches), employee day drill (punch timeline, map for mobile, selfie review), recompute, manual punch modal (reason), month lock wizard with checklist & payroll feed preview; keyboard-first grid.
+- **Devices Dashboard** (IT/HR): device tiles (online/offline, last punch), enrolment sync status, unmatched device users, firmware; ticket to NC-028.
+- **Policies & Geo-sites Config** (desktop): shift policy editor, geo-fence map editor, role/site allow lists.
+- **OT & Regularisation Approvals** (EN-038 inbox; bulk).
+- **Contractor Attendance** (desktop/tablet for supervisors; vendor portal): planned vs present per post, verify/dispute.
+- **Doctor Presence Board** (front office; EN-018 tile): doctors arrived/expected/late.
+- **Reports** with statutory register templates. Empty/error states; WCAG 2.2 AA; i18n; large buttons for mobile punch.
+
+## 9. Integrations
+- EN-020 device adapters: ZKTeco/eSSL (ADMS push/SDK), Mantra, Suprema (BioStar API), HikVision/Dahua face terminals (ISAPI/HTTP listening), Realtime, Matrix COSEC (API), generic webhook/CSV; vendor cloud attendance APIs; face liveness/match service (on-device SDK or server model via EN-042/AI service — consented); NC-030 roster; NC-010 leave/holidays/payroll; NC-014 mobile (GPS, camera); NC-019 access control; OP-001/EN-006/EN-018 presence; NC-021/NC-031 contractor plans; EN-039 statutory register templates; EN-037/EN-009 notifications; NC-028 device tickets; EN-024 audit; EN-036 import of legacy attendance.
+
+## 10. Reports & Analytics
+- Daily attendance register (state format), monthly muster roll, late/early analysis by department/employee, absenteeism rate & trends (Bradford factor optional), OT hours & cost by department (with NC-010 rates), comp-off earned/used, missed punch & regularisation volumes/TAT, mobile punch audit (flags, outside-fence attempts), device uptime & punch lag, unmatched punches, doctor punctuality (OPD start vs arrival), presence vs roster compliance (NC-030), contractor manpower vs plan & shortfall, statutory registers (attendance, OT, Contract Labour Form XVI/XVII equivalents per state), payroll feed reconciliation. Read model `analytics.attendance_daily`.
+
+## 11. Notifications
+- Employee: missed punch (end of shift + 30 min), late warning count, regularisation decision, OT approved/lapsed, comp-off credited/expiring, mobile punch rejected reason; HOD: pending approvals digest, absentees at shift start + 30 min, flagged punches, team OT summary; HR: device offline, unmatched punches, month lock reminders (T-3), policy breaches; Payroll: month locked; Front office: doctor arrived/late; Vendor supervisor: shortfall/dispute; IT: device faults (NC-028).
+
+## 12. Permissions (RBAC keys)
+`attendance.device.manage|read`, `attendance.enrolment.manage`, `attendance.punch.mobile` (self; role/site gated), `attendance.punch.web` (approved roles/IPs), `attendance.punch.manual` (HR; audited), `attendance.punch.read` (self/HOD ABAC/HR), `attendance.day.read` (self/team/all), `attendance.process.manage`, `attendance.regularisation.request|approve`, `attendance.ot.request|approve`, `attendance.configure`, `attendance.month.read|lock`, `attendance.contractor.manage`, `vendor.attendance.verify` (vendor role 63), `attendance.presence.read` (front office/boards), `attendance.report.read`, `attendance.export`; `integration.attendance.ingest`. SoD: requester ≠ approver; HR cannot approve own; unlock needs HR manager. Defaults: HR (47) all; HOD (5)/Nurse supervisor (22) team & approvals; employees self; IT (56) devices; Receptionist (24) presence.read.
+
+## 13. Non-functional
+- Volumes: 5–8k staff (incl. contractors) × 2–4 punches/day = 30k punches/day, peaks 3k/10 min at shift changes; 150 devices; ingest p95 < 100 ms per punch (batch endpoint), day computation for all employees < 5 min nightly, incremental within 1 min of punch; presence board realtime.
+- Availability: devices buffer offline; adapters retry with idempotency (device serial + device punch id); mobile offline queue 24 h.
+- Security/privacy: biometric templates not stored centrally (ids/hashes only); selfies encrypted & purged 90 days; geo data purpose-limited; RLS; audit; DPDP consent ledger; rate limits on mobile punch.
+- Printing: registers/muster rolls; i18n; WCAG 2.2 AA; low-end Android support for mobile punch.
+
+## 14. Acceptance Criteria
+1. Given a nurse rostered 20:00–08:00 punches in 19:50 and out 08:10 next day, then the day record for the shift-start date shows present, worked ~12 h, night shift flag, no late/early, and no duplicate on next date.
+2. Given a punch at 09:12 for a 09:00 shift with grace 10 min, then late_min = 12 and monthly late count increments; on the 4th late (allowance 3) the policy applies half-day at lock unless waived.
+3. Given an employee punches at Branch A device at 10:00 and Branch B device (30 km away) at 10:10, then the second punch is flagged `impossible_travel` for HR review.
+4. Given a mobile punch from 300 m outside a 200 m geo-fence, then it is rejected with reason; inside the fence with liveness score below threshold it is flagged for HOD verification.
+5. Given a missed out-punch, then the employee gets an alert 30 min after shift end and can request regularisation; HOD approval recomputes the day to present.
+6. Given OT-eligible technician works 11 h on a 8 h shift with threshold 30 min & rounding 30 min, then OT computed = 2.5 h; requires HOD approval; if unapproved at lock, OT lapses and appears on the lapsed report.
+7. Given approved CL on a date with punches, then status = leave (CL) and punches are retained but not counted (or per policy) — configurable and tested.
+8. Given work on a declared holiday, then OT kind = holiday at 2× or comp-off credited (per policy) to NC-010 leave ledger with 90-day expiry.
+9. Given month lock for July with 12 pending regularisations, then lock is blocked until resolved/auto-decided; after lock, payroll feed shows payable days per employee and days become immutable.
+10. Given a contractor post plan of 10 housekeeping staff on morning shift and 8 punches, then shortfall 2 is recorded and NC-018 SLA/penalty is notified; vendor supervisor can dispute with evidence.
+11. Given a doctor's OPD scheduled at 10:00 and punch at 09:55, then EN-006 board shows "Doctor arrived"; no punch by 10:15 → front office & HOD alert.
+12. Given an employee exits, then enrolments are deactivated and device templates deleted via sync within 24 h; audit shows deletion.
+13. Given a user attempts self-approval of own regularisation, then 403 (SoD).
+14. Given a resident rostered for two shifts on the same date (M and N), then two day-records exist and punches map to the nearest window; hours are summed for the weekly cap check in NC-030.
+15. Given a consultant punching at Branch A (09:00–12:00) and Branch B (14:00–17:00), then presence shows 6 h split 3/3 per branch and NC-034 receives per-branch session counts.
+16. Given an employee with no punches for 3 rostered days and no leave, then HR receives an alert and the record appears in the data-quality queue.
+17. Given a locked July and an approved correction for 20 July (absent → present), then July stays immutable and an adjustment (+1 payable day) posts to August's payroll feed with audit.
+18. Given a bulk late-waiver for 15 Aug (transport strike), then late minutes for that date at the branch are waived for all affected employees and each day record shows the waiver reference.
+
+### 14.1 Test data & golden path (for e2e)
+- Seed 2 devices (biometric, face), 1 geo-site (camp), 20 employees with shifts (day/night/general/OT-eligible), holidays & 2 approved leaves; ingest a day of punches incl. night cross-midnight, missed punch, mobile outside fence, impossible travel; run computation, regularisations, OT approval, month lock, payroll feed check.
+
+## 15. Enhancements / Later phases
+- From VIMS sheet: punch-in/out, shift mapping, leave integration, OT calc (Phase 9 core above).
+- (market) Geo-fenced/face attendance (in scope), Wi-Fi/BLE beacon presence, wearable/RTLS-based ward presence for nurse-patient ratio evidence (NC-030), fatigue/duty-hour analytics for residents, predictive absenteeism (AI-005), WhatsApp attendance queries bot, kiosk QR punch with photo, integration with government labour portals (Shram Suvidha) for registers, payroll-ready statutory register packs by state, gig/locum staff time tracking with NC-034 payouts.
+
+## 16. Open Questions for the Hospital
+1. Devices in use (make/model/count/protocol) and existing enrolment data; who owns devices (IT/HR)?
+2. Shift policies: grace, late allowance & penalties, OT eligibility/rates/caps/pre-approval, comp-off rules, night allowance definition?
+3. Which roles/sites may use mobile geo punch (camps, home care, marketing) and web punch; selfie/liveness requirement; DPDP consent process for biometrics?
+4. Regularisation limits & approval hierarchy; permission hours per month?
+5. Month cut-off date, lock/unlock authority; statutory register formats for your state?
+6. Contract staff attendance on hospital devices — vendor list & post plans; principal-employer registers needed?
+7. Doctor presence for OPD boards & retainer minimum-hours tracking (NC-034)?
+

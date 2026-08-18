@@ -1,0 +1,553 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Identity, RBAC, ABAC, sessions  (EN-007 §4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum UserType {
+  staff
+  external
+  partner
+  device
+  service
+  patient
+
+  @@schema("core")
+}
+
+enum UserStatus {
+  invited
+  active
+  locked
+  suspended
+  deactivated
+
+  @@schema("core")
+}
+
+model User {
+  id           String  @id @db.Uuid
+  /// Home tenant. A user has exactly one identity across the group (EN-041 §3.7).
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  groupId      String? @map("group_id") @db.Uuid
+
+  username     String  @db.VarChar(64)
+  email        String? @db.VarChar(254)
+  mobile       String? @db.VarChar(20)
+  /// { family, given, middle?, prefix?, suffix? } — family name is emphasised on
+  /// documents and in the patient banner (docs/06 §4.2).
+  name         Json
+  displayName  String  @map("display_name") @db.VarChar(200)
+  employeeId   String? @map("employee_id") @db.VarChar(64)
+  type         UserType @default(staff)
+  status       UserStatus @default(invited)
+
+  // ── credentials ───────────────────────────────────────────────────────────
+  /// Argon2id (docs/04 §2: memory ≥ 64 MB, t=3). Null for SSO-only users, which
+  /// is deliberate: a federated user has no local password to steal.
+  passwordHash        String?  @map("password_hash") @db.Text
+  passwordChangedAt   DateTime? @map("password_changed_at") @db.Timestamptz(6)
+  mustChangePassword  Boolean  @default(false) @map("must_change_password")
+  mfaEnabled          Boolean  @default(false) @map("mfa_enabled")
+  /// [{ method, enrolledAt, label }] — the TOTP secret itself lives encrypted.
+  mfaMethods          Json     @default("[]") @map("mfa_methods")
+  mfaSecretEncrypted  String?  @map("mfa_secret_encrypted") @db.Text
+  /// Hashes only; the plaintext codes are shown exactly once (EN-007 §4).
+  recoveryCodesHash   String[] @default([]) @map("recovery_codes_hash")
+  /// PIN for quick re-auth on clinical screens (EN-007 §3.4.6). Hashed, never stored raw.
+  pinHash             String?  @map("pin_hash") @db.Text
+  ssoSubject          String?  @map("sso_subject") @db.VarChar(255)
+
+  // ── professional identity (printed on prescriptions and reports) ──────────
+  /// { registrationNo, council, hprId, speciality, qualification, signatureFileId }
+  professional Json    @default("{}")
+
+  preferences  Json    @default("{}")
+  photoFileId  String? @map("photo_file_id") @db.Uuid
+
+  lastLoginAt    DateTime? @map("last_login_at") @db.Timestamptz(6)
+  failedAttempts Int      @default(0) @map("failed_attempts")
+  lockedUntil    DateTime? @map("locked_until") @db.Timestamptz(6)
+  /// EN-007 §5: "Deactivated users: cannot be deleted; historical audit preserved."
+  /// `deletedAt` is only ever set for an erroneous creation before first login.
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(6)
+  deactivatedAt  DateTime? @map("deactivated_at") @db.Timestamptz(6)
+  deactivationReason String? @map("deactivation_reason") @db.VarChar(500)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  userRoles     UserRole[]
+  sessions      Session[]
+  branchAccess  UserBranchAccess[]
+  passwordHistory PasswordHistory[]
+  accessRequests  AccessRequest[]
+
+  // Uniqueness is per *group*, not per hospital: one person, one login across
+  // the group (EN-041 §3.7). A partial unique index excluding deleted rows is
+  // added in SQL, because Prisma cannot express `WHERE deleted_at IS NULL`.
+  @@unique([groupId, username], map: "users_group_username_key")
+  @@index([hospitalId, status])
+  @@index([hospitalId, employeeId])
+  @@index([ssoSubject])
+  @@map("users")
+  @@schema("core")
+}
+
+/// The permission catalogue, synced from `packages/contracts` at boot.
+/// EN-007 §3.3.1: new keys appear as "unassigned" in the admin UI; keys that
+/// vanish from code are marked deprecated, never deleted, so a historical audit
+/// row still resolves.
+model Permission {
+  key         String  @id @db.VarChar(96)
+  module      String  @db.VarChar(16)
+  resource    String  @db.VarChar(64)
+  action      String  @db.VarChar(32)
+  description String  @db.Text
+  dataClass   String  @map("data_class") @db.VarChar(16)
+  risk        String  @db.VarChar(16)
+  phase       Int
+  sensitiveGrant       Boolean @default(false) @map("sensitive_grant")
+  requiresSecondPerson Boolean @default(false) @map("requires_second_person")
+  requiresReason       Boolean @default(false) @map("requires_reason")
+  requiresStepUp       Boolean @default(false) @map("requires_step_up")
+  phiRead              Boolean @default(false) @map("phi_read")
+  /// EN-040 §5: licence state may never gate this key.
+  clinicalSafetyExempt Boolean @default(false) @map("clinical_safety_exempt")
+  deprecated           Boolean @default(false)
+
+  syncedAt DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  rolePermissions RolePermission[]
+
+  @@index([module])
+  @@index([deprecated])
+  @@map("permissions")
+  @@schema("core")
+}
+
+model Role {
+  id          String  @id @db.Uuid
+  /// Null for the 64 read-only system templates; set for a hospital's custom roles.
+  hospitalId  String? @map("hospital_id") @db.Uuid
+  key         String  @db.VarChar(64)
+  name        String  @db.VarChar(160)
+  description String  @db.Text
+  /// Which system template this was cloned from, for governance visibility.
+  templateKey String? @map("template_key") @db.VarChar(64)
+  abacDefaults Json   @default("{}") @map("abac_defaults")
+  homeWorkspace String @map("home_workspace") @db.VarChar(64)
+  navPreset    Json    @default("{}") @map("nav_preset")
+  isSystem     Boolean @default(false) @map("is_system")
+  mfaMandatory Boolean @default(false) @map("mfa_mandatory")
+  /// EN-007 §5: granting this role needs dual approval and MFA on the grantee.
+  sensitiveGrant Boolean @default(false) @map("sensitive_grant")
+  /// docs/05 row 14: resident output needs a consultant co-signature.
+  requiresCoSign Boolean @default(false) @map("requires_co_sign")
+  category     String  @db.VarChar(24)
+  docsRow      Int?    @map("docs_row")
+  /// Every role edit creates a new version (EN-007 §5).
+  version      Int     @default(1)
+  active       Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+  accessRequests  AccessRequest[]
+
+  @@unique([hospitalId, key])
+  @@index([hospitalId, active])
+  @@index([templateKey])
+  @@map("roles")
+  @@schema("core")
+}
+
+model RolePermission {
+  roleId        String @map("role_id") @db.Uuid
+  permissionKey String @map("permission_key") @db.VarChar(96)
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionKey], references: [key], onDelete: Restrict)
+
+  @@id([roleId, permissionKey])
+  @@index([permissionKey])
+  @@map("role_permissions")
+  @@schema("core")
+}
+
+/// A role assignment, scoped to a branch and optionally narrower, with validity
+/// dates so temporary elevation expires on its own (EN-007 §3.2.3).
+model UserRole {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  userId     String  @map("user_id") @db.Uuid
+  roleId     String  @map("role_id") @db.Uuid
+  /// Null means the assignment applies across every branch the user can access.
+  branchId   String? @map("branch_id") @db.Uuid
+  /// ABAC narrowing: departments, wards, units, own-patients-only, care-team-only.
+  scope      Json    @default("{}")
+  /// ABAC ceilings: amount_limit, time_window, ip_allowlist, requires_second_person.
+  conditions Json    @default("{}")
+  validFrom  DateTime @default(now()) @map("valid_from") @db.Timestamptz(6)
+  validTo    DateTime? @map("valid_to") @db.Timestamptz(6)
+  grantedBy  String? @map("granted_by") @db.Uuid
+  /// The EN-038 approval that authorised a sensitive grant.
+  approvalId String? @map("approval_id") @db.Uuid
+  active     Boolean @default(true)
+  /// `manual` grants survive an SSO group-claim sync; `sso` grants do not
+  /// (EN-025 §3.3.4 — "unless locally pinned with `source=manual`").
+  source     String  @default("manual") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  // The hottest authorisation query in the system.
+  @@index([userId, active])
+  @@index([hospitalId, roleId, active])
+  @@index([hospitalId, branchId, active])
+  @@map("user_roles")
+  @@schema("core")
+}
+
+/// EN-007 §3.3.4: conflicting permission pairs. `block` cannot be overridden
+/// except by a Hospital Admin with a reason (audited).
+model SodRule {
+  id         String  @id @db.Uuid
+  hospitalId String? @map("hospital_id") @db.Uuid
+  permA      String  @map("perm_a") @db.VarChar(96)
+  permB      String  @map("perm_b") @db.VarChar(96)
+  mode       String  @db.VarChar(8)
+  reason     String  @db.Text
+  active     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, permA, permB])
+  @@map("sod_rules")
+  @@schema("core")
+}
+
+enum AccessRequestStatus {
+  pending
+  approved
+  rejected
+  withdrawn
+  expired
+
+  @@schema("core")
+}
+
+model AccessRequest {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  userId        String  @map("user_id") @db.Uuid
+  roleId        String  @map("role_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  scope         Json    @default("{}")
+  justification String  @db.Text
+  requestedBy   String  @map("requested_by") @db.Uuid
+  status        AccessRequestStatus @default(pending)
+  /// EN-038 approval request that carries the decision chain.
+  approvalId    String? @map("approval_id") @db.Uuid
+  decidedAt     DateTime? @map("decided_at") @db.Timestamptz(6)
+  decidedBy     String? @map("decided_by") @db.Uuid
+  decisionReason String? @map("decision_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@index([userId])
+  @@map("access_requests")
+  @@schema("core")
+}
+
+/// EN-007 §3.2.5: quarterly attestation producing NABH/ISO evidence.
+model AccessReview {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  name        String  @db.VarChar(200)
+  periodStart DateTime @map("period_start") @db.Date
+  periodEnd   DateTime @map("period_end") @db.Date
+  dueAt       DateTime @map("due_at") @db.Timestamptz(6)
+  status      String  @default("open") @db.VarChar(16)
+  openedBy    String? @map("opened_by") @db.Uuid
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  items AccessReviewItem[]
+
+  @@index([hospitalId, status, dueAt])
+  @@map("access_reviews")
+  @@schema("core")
+}
+
+model AccessReviewItem {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  reviewId   String  @map("review_id") @db.Uuid
+  userRoleId String  @map("user_role_id") @db.Uuid
+  reviewerUserId String? @map("reviewer_user_id") @db.Uuid
+  decision   String? @db.VarChar(16)
+  decidedAt  DateTime? @map("decided_at") @db.Timestamptz(6)
+  note       String? @db.Text
+
+  review AccessReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, reviewId, decision])
+  @@map("access_review_items")
+  @@schema("core")
+}
+
+/// EN-007 §4 `auth_policies` — one row per hospital.
+model AuthPolicy {
+  hospitalId String @id @map("hospital_id") @db.Uuid
+  /// { minLength, complexityClasses, historyCount, maxAgeDays, minAgeDays, breachCheck }
+  password   Json   @default("{}")
+  /// { maxAttempts, durationMin, progressive }
+  lockout    Json   @default("{}")
+  /// { requiredRoles[], methods[], rememberDays, gracePeriodDays }
+  mfa        Json   @default("{}")
+  /// { idleMin, absoluteH, concurrentByRole, pinReauthWindowMin }
+  session    Json   @default("{}")
+  /// { length, expiryMin, maxPerHour }
+  otp        Json   @default("{}")
+  /// { forced, providers[] }
+  sso        Json   @default("{}")
+  /// { enabled, minLength, maxLength }
+  pin        Json   @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@map("auth_policies")
+  @@schema("core")
+}
+
+model PasswordHistory {
+  id           String   @id @db.Uuid
+  hospitalId   String   @map("hospital_id") @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  passwordHash String   @map("password_hash") @db.Text
+  changedAt    DateTime @default(now()) @map("changed_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, changedAt(sort: Desc)])
+  @@map("password_history")
+  @@schema("core")
+}
+
+enum SessionMethod {
+  password
+  sso
+  otp
+  device
+  impersonation
+  break_glass
+
+  @@schema("core")
+}
+
+/// Partitioned monthly (EN-007 §4). 180-day online retention per CERT-In.
+model Session {
+  id             String   @db.Uuid
+  hospitalId     String   @map("hospital_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  branchId       String?  @map("branch_id") @db.Uuid
+  deviceId       String?  @map("device_id") @db.Uuid
+  userAgent      String?  @map("user_agent") @db.VarChar(500)
+  ip             String?  @db.Inet
+  /// Coarse only — city/region. docs/04 §4 forbids precise location.
+  geo            String?  @db.VarChar(120)
+  method         SessionMethod
+  /// EN-025 §3.5: `acr`/`amr` on the session so step-up can tell "password only"
+  /// from "phishing-resistant MFA" without re-authenticating.
+  acr            String?  @db.VarChar(64)
+  amr            String[] @default([])
+  authTime       DateTime @map("auth_time") @db.Timestamptz(6)
+  /// Rotating refresh-token family. Reuse of a retired member is a theft signal.
+  refreshFamilyId String  @map("refresh_family_id") @db.Uuid
+  refreshTokenHash String? @map("refresh_token_hash") @db.Text
+  refreshGeneration Int    @default(0) @map("refresh_generation")
+  /// Set when the client reports unsaved clinical work, so seat-limit eviction
+  /// can never discard it (EN-040 §3.3.2).
+  hasUnsavedWork Boolean  @default(false) @map("has_unsaved_work")
+  impersonatorUserId String? @map("impersonator_user_id") @db.Uuid
+
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSeenAt     DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz(6)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokeReason   String?  @map("revoke_reason") @db.VarChar(200)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([id, createdAt])
+  @@index([hospitalId, userId, createdAt(sort: Desc)])
+  @@index([refreshFamilyId])
+  @@index([hospitalId, branchId, revokedAt])
+  @@map("sessions")
+  @@schema("core")
+}
+
+enum DeviceKind {
+  kiosk
+  tv
+  print_agent
+  workstation
+  mobile
+  analyzer
+
+  @@schema("core")
+}
+
+/// EN-007 §3.4.5: pairing-code flow producing a scoped, long-lived token bound to
+/// a device fingerprint. Kiosks and boards never idle out; their token is the limit.
+model Device {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  kind        DeviceKind
+  name        String  @db.VarChar(120)
+  locationLabel String? @map("location_label") @db.VarChar(160)
+  fingerprint String? @db.VarChar(200)
+  tokenHash   String? @map("token_hash") @db.Text
+  scopes      String[] @default([])
+  /// Short-lived, single-use pairing code shown on the device.
+  pairingCode String? @map("pairing_code") @db.VarChar(16)
+  pairingCodeExpiresAt DateTime? @map("pairing_code_expires_at") @db.Timestamptz(6)
+  pairedBy    String? @map("paired_by") @db.Uuid
+  pairedAt    DateTime? @map("paired_at") @db.Timestamptz(6)
+  lastSeenAt  DateTime? @map("last_seen_at") @db.Timestamptz(6)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokeReason String? @map("revoke_reason") @db.VarChar(200)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, branchId, name])
+  @@index([hospitalId, kind, revokedAt])
+  @@index([pairingCode])
+  @@map("devices")
+  @@schema("core")
+}
+
+/// Short-lived MFA / step-up / branch-selection challenges. Kept in Postgres
+/// rather than only Redis so a challenge survives a cache flush mid-login.
+model MfaChallenge {
+  id         String   @id @db.Uuid
+  hospitalId String   @map("hospital_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  purpose    String   @db.VarChar(32)
+  /// The action key for a step-up challenge (EN-025 §3.6).
+  actionKey  String?  @map("action_key") @db.VarChar(96)
+  method     String?  @db.VarChar(24)
+  codeHash   String?  @map("code_hash") @db.Text
+  attempts   Int      @default(0)
+  maxAttempts Int     @default(5) @map("max_attempts")
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, userId, purpose])
+  @@index([expiresAt])
+  @@map("mfa_challenges")
+  @@schema("core")
+}
+
+/// Patient/family OTP codes. Hashed, rate-limited, single-use (EN-007 §3.4.4).
+model OtpCode {
+  id         String   @id @db.Uuid
+  hospitalId String   @map("hospital_id") @db.Uuid
+  /// Hashed so a database read cannot enumerate patient mobile numbers.
+  targetHash String   @map("target_hash") @db.VarChar(64)
+  channel    String   @db.VarChar(16)
+  purpose    String   @db.VarChar(32)
+  codeHash   String   @map("code_hash") @db.Text
+  attempts   Int      @default(0)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, targetHash, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("otp_codes")
+  @@schema("core")
+}
+
+/// EN-007 §4 / EN-024 §3.3: authentication log, 180 days online (CERT-In).
+/// Partitioned monthly. Deliberately separate from `audit_log` so a brute-force
+/// burst cannot dilute the clinical audit trail.
+model LoginAudit {
+  id                String   @db.Uuid
+  hospitalId        String?  @map("hospital_id") @db.Uuid
+  /// Recorded even when no user matched, which is how a spray attack is spotted.
+  usernameAttempted String   @map("username_attempted") @db.VarChar(254)
+  userId            String?  @map("user_id") @db.Uuid
+  providerId        String?  @map("provider_id") @db.Uuid
+  result            String   @db.VarChar(32)
+  reasonCode        String?  @map("reason_code") @db.VarChar(64)
+  method            String   @db.VarChar(24)
+  acr               String?  @db.VarChar(64)
+  amr               String[] @default([])
+  ip                String?  @db.Inet
+  userAgent         String?  @map("user_agent") @db.VarChar(500)
+  geo               String?  @db.VarChar(120)
+  deviceId          String?  @map("device_id") @db.Uuid
+  latencyMs         Int?     @map("latency_ms")
+  correlationId     String?  @map("correlation_id") @db.VarChar(128)
+  occurredAt        DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@id([id, occurredAt])
+  @@index([hospitalId, occurredAt(sort: Desc)])
+  @@index([usernameAttempted, occurredAt(sort: Desc)])
+  @@index([userId, occurredAt(sort: Desc)])
+  @@index([result, occurredAt(sort: Desc)])
+  @@map("login_audit")
+  @@schema("core")
+}
+
+/// EN-007 §3.8: support impersonation. Read-only by default, time-boxed at 30
+/// minutes, banner not hideable, both identities on every audit row.
+model ImpersonationSession {
+  id            String   @id @db.Uuid
+  hospitalId    String   @map("hospital_id") @db.Uuid
+  actorUserId   String   @map("actor_user_id") @db.Uuid
+  targetUserId  String   @map("target_user_id") @db.Uuid
+  /// Mandatory: no ticket, no impersonation.
+  ticketRef     String   @map("ticket_ref") @db.VarChar(64)
+  reason        String   @db.Text
+  mode          String   @default("read") @db.VarChar(8)
+  approvedBy    String?  @map("approved_by") @db.Uuid
+  approvalId    String?  @map("approval_id") @db.Uuid
+  sessionId     String?  @map("session_id") @db.Uuid
+  startedAt     DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  expiresAt     DateTime @map("expires_at") @db.Timestamptz(6)
+  endedAt       DateTime? @map("ended_at") @db.Timestamptz(6)
+  endedReason   String?  @map("ended_reason") @db.VarChar(32)
+
+  @@index([hospitalId, startedAt(sort: Desc)])
+  @@index([targetUserId])
+  @@map("impersonation_sessions")
+  @@schema("core")
+}

@@ -1,0 +1,152 @@
+# NC-024 — Transport / Fleet Management (Non-Ambulance Vehicles: Vehicle Log, Trip Sheets, Driver Assignment, Fuel, Maintenance, Staff Shuttle & Patient Pickup)
+
+| Field | Value |
+|---|---|
+| Domain | Non-Clinical / ERP |
+| Module ID | NC-024 |
+| Phase | 9 |
+| Priority | P2 |
+| Complexity | Low–Medium |
+| Depends on | NC-013 (Ambulance & Fleet — ambulances are owned there; NC-024 shares vehicle master tables, driver master, fuel/maintenance sub-ledgers and GPS adapter; ambulances excluded from NC-024 dispatch), NC-002 (vehicles as assets: depreciation, insurance, disposal), NC-020/NC-025 (workshop/maintenance work orders for vehicles via facility), NC-010/NC-029/NC-030 (drivers as employees; attendance, roster, OT/night allowances), NC-005/NC-006 (fuel/tyres/spares purchase, fuel card vendors), NC-021/NC-031 (hired vehicle vendors, cab aggregators, contracts), NC-009 (fuel/maintenance costs, per-km costing, cost centre allocation NC-008), NC-023 (RC, permit, insurance, PUC, fitness, driver licence expiries), NC-033/NC-006 (goods movement: kitchen supplies, stores inter-branch transfers), NC-016 (waste vehicle trips are vendor-side; own vehicle if any), OP-014/NC-035 (camp vehicles), PE-001/OP-020 (patient pickup/drop requests: elderly, dialysis, health-check), NC-019 (gate vehicle log), EN-042 (GPS/OBD telematics), EN-009/EN-037 (notifications), NC-011, EN-024 |
+| Feature flag | `module.transport.enabled` (sub: `transport.gps`, `transport.patient_pickup`, `transport.staff_shuttle`, `transport.hired_vehicles`, `transport.fuel_cards`) |
+| Primary roles | Transport Supervisor / Fleet In-charge, Drivers |
+| Secondary roles | Staff requesters (any employee; official trips), Front office/Call centre (25; patient pickup booking), Stores/Kitchen (44/53; goods trips), HR (47), Accounts (46), Security gate (51), Camp coordinator (NC-035), Auditor (58) |
+| Regulatory | Motor Vehicles Act 1988 & CMV Rules (RC, fitness certificate for commercial vehicles, permits (contract carriage for staff buses), PUC, insurance (third-party mandatory), driver licence classes & validity, speed governors for buses, AIS-140 GPS/panic button for public service vehicles per state), Motor Transport Workers Act 1961 (driver hours of work, rest), Income-tax (perquisite valuation of vehicle use §17(2)/Rule 3; conveyance reimbursement), GST (ITC restrictions on motor vehicles §17(5); RCM on cab services), Legal Metrology (fuel), state RTO taxes, Contract Labour Act (hired drivers), Environment (BS-VI, scrappage policy for old vehicles), Occupational safety (night driving policy), DPDP (GPS location data of staff — purpose limitation) |
+
+## 1. Purpose
+NC-024 manages all **non-ambulance vehicles**: hospital cars, staff shuttles/buses, goods vans/pick-ups, camp vehicles, VIP/doctor cars, and hired cabs. It covers the **vehicle log book** (RC/permit/insurance/PUC/fitness, odometer, assignments), **trip requests & dispatch** (official duty, patient pickup/drop, inter-branch goods, camps, staff shuttle routes), **driver assignment & duty hours**, **trip sheets** (start/end odometer, purpose, passengers/goods, tolls/parking, signatures), **fuel tracking** (fills, fuel cards, mileage km/l, anomaly detection), **maintenance & documents expiry**, hired-vehicle billing verification, and cost per km / per department (chargeback via NC-008). Ambulance operations (emergency dispatch, EMT, GPS pre-hospital) stay in NC-013/TR-009; both share the vehicle & driver masters.
+
+## 2. Users & Jobs-to-be-done
+- **Fleet in-charge** (desktop): approve trip requests, assign vehicle+driver, plan shuttle routes, monitor GPS, track documents/expiries, fuel & maintenance costs, hired-vehicle bills, driver duty hours & compliance.
+- **Driver** (phone PWA): today's trips, start/end trip with odometer photo & GPS, passenger/goods confirmation (OTP/signature), fuel fill entry with receipt photo, incident/breakdown report, shuttle route check-ins; offline-tolerant.
+- **Employee requester** (web/NC-014 mobile): request vehicle (date/time, from/to, purpose, passengers, cost centre), approval by manager, track status, rate trip.
+- **Front office/call centre**: book patient pickup/drop (dialysis, health-check, elderly), confirm ETA to patient (SMS/WhatsApp), collect charges (OP-005) if payable.
+- **Stores/kitchen**: goods trips (inter-branch transfer, market purchase) with delivery challans.
+- **Accounts/HR**: fuel/maintenance ledgers, per-km cost, perquisite data, driver OT/night allowance inputs (NC-010).
+
+## 3. Core Workflows
+### 3.1 Vehicle & driver master (shared with NC-013)
+1. **Fleet in-charge** registers vehicle: reg no., type enum(car/suv/van/bus/mini_bus/pickup/tempo/two_wheeler/other), owned/hired/leased, asset_id (NC-002), make/model/year, fuel type (petrol/diesel/CNG/EV), seating/payload, permit type, documents (RC, insurance policy & expiry, PUC expiry, fitness expiry, permit expiry, road tax, GPS AIS-140 cert), fuel card id, GPS device id (EN-042), home branch, cost centre default, odometer, status enum(available/on_trip/maintenance/off_road/disposed) → expiries tracked (NC-023 registry mirror; alerts 30/15/7 days; expired insurance/PUC/fitness → vehicle blocked from dispatch) → Event `fleet.vehicle.registered`.
+2. Driver master: employee (NC-010) or vendor driver; licence no./class/expiry, badge, medical fitness, police verification (NC-019 style), training (NC-027 defensive driving), assigned vehicles, duty pattern (NC-030), duty-hour rules (max 8 h driving/12 h spread; weekly rest) → licence expiry blocks assignment.
+
+### 3.2 Trip request → approval → dispatch
+1. **Requester** submits trip: type enum(official_duty/patient_pickup/patient_drop/goods/camp/vip/airport/inter_branch/staff_shuttle_adhoc), date/time window, pickup/drop (address/geo, branch/ward), passengers or goods (weight/volume; cold-chain flag), purpose, cost centre (NC-008), priority → **manager approval** (EN-038, auto for pre-approved categories/roles) → **Fleet in-charge** dispatch: pick vehicle (available, suitable type/capacity, documents valid) & driver (on duty, licence class ok, hours ok) → optionally hired cab (`transport.hired_vehicles`: aggregator/vendor booking, rate card) → confirmation to requester (vehicle no., driver name/phone) → Event `fleet.trip.dispatched`.
+2. **Trip execution** (driver app): start (odometer reading + photo, GPS start), passenger onboarding (OTP/scan for patients), waypoints, tolls/parking expenses (photo), end (odometer, GPS end), passenger sign/rating, remarks → distance = end − start (validated vs GPS distance ± tolerance) → **trip sheet** finalised → chargeback amount = km × rate (per vehicle type; or actual cost) to cost centre → Event `fleet.trip.completed`.
+3. Exceptions: cancellation (by requester with reason; late cancel flag), no-show, breakdown en route (replacement vehicle, NC-025 workshop), accident (incident report, insurance claim NC-002, police/NC-019), route deviation alert (GPS), overspeed alerts.
+
+### 3.3 Patient pickup/drop (`transport.patient_pickup`)
+- From OP-012 dialysis schedules, OP-014 health-check bookings, PE-001/OP-020 requests, discharge drop (IP-002; non-medical transport only — medical need → NC-013 ambulance) → booking with patient UHID (minimal PHI: name, phone, address), chargeable/free (package inclusion), wheelchair need → dispatch → SMS/WhatsApp with driver & ETA (EN-009) → live tracking link (GPS) → completion → billing (OP-005 service "patient transport") if applicable.
+
+### 3.4 Staff shuttle routes (`transport.staff_shuttle`)
+- Routes with stops & timings per shift (NC-030 shift times), vehicle & driver rota, staff subscription (NC-010 employee; salary deduction if applicable), boarding via QR/ID scan or headcount, live ETA to staff app (NC-014), route occupancy analytics; contract bus vendor SLA (punctuality, breakdowns).
+
+### 3.5 Fuel tracking (`transport.fuel_cards`)
+- Fuel fills: vehicle, date, litres, amount, odometer, pump/vendor, payment (cash/fuel card/vendor credit), receipt photo; fuel-card statement import (HPCL/IOCL/BPCL card CSV) reconcile with entries; **mileage** km/l per vehicle rolling; anomaly rules (fill > tank capacity, mileage deviation > 25 % from baseline, fill without trip, duplicate receipts) → review queue; EV: charging sessions kWh; monthly fuel cost per vehicle/department.
+
+### 3.6 Maintenance & documents
+- Service schedules by km/time (OEM), tyre changes, battery, work orders (NC-025 shared work-order tables or vendor garage via NC-021), cost capture (NC-009), downtime; document renewals (insurance/PUC/fitness/permit/tax) with NC-023 mirror; accident/insurance claims (NC-002); vehicle disposal → NC-002.
+
+### 3.7 Hired vehicles & billing verification
+- Vendor rate cards (per km/day/hour, min km, night/outstation, driver bata), trip logs from vendor vs system trip sheets, monthly bill verification (variance > tolerance flagged), GST RCM handling (NC-009), vendor performance (NC-021).
+
+## 4. Data Model (schema `ops`, prefix `fl_` — shared with NC-013)
+- **fl_vehicles** (shared): id, hospital_id, branch_id, reg_no, category enum(ambulance/car/suv/van/bus/mini_bus/pickup/tempo/two_wheeler/other), ownership enum(owned/hired/leased), asset_id?, make, model, year, fuel_type enum, seats, payload_kg, tank_capacity_l, permit_type, documents jsonb [{type: rc/insurance/puc/fitness/permit/tax/ais140, number, valid_until, file_id}], fuel_card_id?, gps_device_id?, cost_centre_id, odometer_km, status enum, home_branch_id, vendor_id? (hired), rate_card jsonb?, is_ambulance bool (NC-013 scope), version. UNIQUE (hospital_id, reg_no); INDEX (hospital_id, branch_id, status), (documents expiry via generated column min_doc_expiry).
+- **fl_drivers** (shared): id, hospital_id, employee_id?/vendor_driver jsonb, licence_no, licence_class text[], licence_valid_until, badge_no?, medical_fitness_until, police_verified_until, trainings jsonb, status, phone. INDEX (licence_valid_until).
+- **fl_trip_requests**: id, hospital_id, branch_id, request_no, type enum, requester_user_id, department_id, cost_centre_id, patient_id? (pickup), scheduled_start, scheduled_end?, pickup jsonb {text, geo, branch/ward}, drop jsonb, waypoints jsonb, passengers jsonb [{name, phone?, employee_id?}], goods jsonb {desc, weight, cold_chain}, purpose, priority, approval_status enum(auto/pending/approved/rejected), approved_by, status enum(requested/approved/dispatched/in_progress/completed/cancelled/no_show), cancel_reason, chargeable bool, charge_amount?, bill_ref?. INDEX (hospital_id, branch_id, scheduled_start), (requester_user_id), (status).
+- **fl_trips** (trip sheets): id, request_id?, vehicle_id, driver_id, hired_vendor_id?, dispatched_at, start_at, start_odo, start_odo_photo_id, end_at, end_odo, end_odo_photo_id, distance_km (odo), gps_distance_km?, gps_track_ref?, expenses jsonb [{type: toll/parking/other, amount, receipt_file_id}], passenger_confirmations jsonb, rating smallint?, remarks, chargeback_amount, cost_centre_id, status enum(started/completed/aborted), anomaly_flags text[]. INDEX (vehicle_id, start_at desc), (driver_id, start_at desc).
+- **fl_shuttle_routes** (id, branch_id, name, stops jsonb [{name, geo, offset_min}], schedule jsonb, vehicle_id, driver_id, vendor_id?, capacity), **fl_shuttle_runs** (route_id, date, shift, vehicle_id, driver_id, started_at, stop_events jsonb, boarded_count, delays_min), **fl_shuttle_subscriptions** (employee_id, route_id, stop, active, deduction_amount).
+- **fl_fuel_logs**: id, vehicle_id, at, litres/kwh, amount, odometer, vendor/pump, payment_mode enum(cash/fuel_card/vendor_credit/upi), card_txn_ref?, receipt_file_id, entered_by, driver_id, mileage_kmpl (computed), anomaly_flags text[], reconciled bool. INDEX (vehicle_id, at desc).
+- **fl_fuel_card_statements** (card_id, period, lines jsonb, imported_at, matched_count, unmatched jsonb).
+- **fl_maintenance** (vehicle_id, kind enum(service/repair/tyre/battery/accident/inspection), due_km/due_date, work_order_id? (NC-025), vendor_id?, cost, downtime_hours, odo_at, notes, status), **fl_incidents** (trip_id?, vehicle_id, kind enum(accident/breakdown/traffic_violation/theft/complaint), at, description, police/fir, insurance_claim_ref, cost, security_incident_id? NC-019).
+- **fl_hired_bills** (vendor_id, period, lines jsonb [{trip_id, km, amount}], system_total, vendor_total, variance, status).
+- **fl_gps_positions** (partitioned daily; vehicle_id, at, lat, lng, speed, ignition) — shared with NC-013 via EN-042; retention 90 days (DPDP purpose).
+- **analytics.fleet_daily** (branch, date, vehicle, trips, km, fuel_l, fuel_cost, maintenance_cost, utilisation_pct, cost_per_km, on_time_pct).
+- RLS; PHI minimal for patient trips (name/phone masked after 90 days).
+
+## 5. Business Rules & Validations
+- Dispatch blocked if vehicle has expired insurance/PUC/fitness/permit or is under maintenance; driver blocked if licence expired/class mismatch/duty hours exceeded (max 8 h driving, 12 h spread, mandatory 30 min break after 5 h; weekly off) — override by fleet in-charge with reason (audited, not for insurance expiry).
+- Trip sheet: end_odo > start_odo; distance vs GPS distance tolerance ±10 % (flag beyond); odometer continuity across trips (start_odo ≥ previous end_odo); photos mandatory when GPS unavailable; passenger OTP/sign for patient trips.
+- Fuel: litres ≤ tank capacity; mileage outside baseline ±25 % → anomaly; fill without trip within 24 h → flag; fuel-card txn must match log within ±2 % amount; unreconciled after 30 days → finance alert.
+- Chargeback: rate per km per vehicle category (config) or actual cost pool ÷ km monthly; posted to NC-008 cost centres monthly.
+- Patient pickup: only non-medical transport (no monitoring/oxygen); if clinical need flagged → redirect to NC-013 ambulance; charges per tariff RC-003; free within packages OP-014/OP-012.
+- Hired vendor bills: approve only when variance ≤ tolerance or explained line-by-line; RCM GST handled by NC-009.
+- Numbering `TRIP` per branch/FY; trip sheets immutable after completion (corrections via adjustment with approval).
+- GPS data: staff location only during duty trips; retention 90 days; access limited (DPDP).
+
+## 6. API Surface (`/api/v1/fleet`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| GET/POST/PATCH | /vehicles ; GET /vehicles/{id} ; POST /vehicles/{id}/documents ; POST /vehicles/{id}/status | vehicle master (shared NC-013) | fleet.vehicle.manage / .read | Y | cursor |
+| GET/POST/PATCH | /drivers ; POST /drivers/{id}/documents | drivers | fleet.driver.manage / .read | Y | cursor |
+| POST/GET/PATCH | /requests ; POST /requests/{id}/(approve|reject|cancel) | trip requests | fleet.trip.request (all staff) / fleet.trip.approve (manager) | Y | cursor |
+| POST | /requests/{id}/dispatch {vehicle_id, driver_id|vendor} ; POST /trips/{id}/(start|waypoint|expense|end|abort) ; GET /trips ; GET /me/trips (driver) | dispatch & execution | fleet.dispatch.manage / fleet.trip.execute (driver) | Y | cursor |
+| POST/GET | /patient-pickups (front office; creates request type patient_*) ; GET /track/{token} (public link) | patient transport | fleet.patient.book / – | Y | cursor |
+| GET/POST | /shuttle/routes ; POST /shuttle/runs ; POST /shuttle/runs/{id}/stop-event ; POST /shuttle/subscriptions | shuttle | fleet.shuttle.manage / .board | Y | cursor |
+| POST/GET | /fuel ; POST /fuel/statements/import ; POST /fuel/{id}/reconcile ; GET /fuel/anomalies | fuel | fleet.fuel.log / .manage | Y | cursor |
+| POST/GET | /maintenance ; /incidents | maintenance/incidents | fleet.maintenance.manage / fleet.incident.report | Y | cursor |
+| POST/GET | /hired-bills ; POST /hired-bills/{id}/(verify|approve) | vendor bills | fleet.vendor_bill.manage | Y | cursor |
+| POST | /gps/ingest (EN-042) ; GET /vehicles/{id}/position | telematics | integration.fleet.ingest / fleet.gps.read | Y | – |
+| GET | /dashboard ; /reports/(utilisation|cost-per-km|fuel|mileage|documents-expiry|driver-hours|on-time|chargeback|hired-variance|shuttle-occupancy) | analytics | fleet.report.read | – | – |
+
+## 7. Domain Events (outbox)
+- `fleet.vehicle.registered|status.changed|document.expiring|document.expired` → NC-023 mirror, dispatch cache, EN-037.
+- `fleet.trip.requested|approved|dispatched|started|completed|cancelled|no_show` {request_id, vehicle, driver, km, cost_centre, chargeback} → requester notifications, NC-008 chargeback, OP-005 (patient chargeable), NC-011.
+- `fleet.trip.anomaly` {trip_id, flags} / `fleet.fuel.anomaly` → fleet in-charge, finance.
+- `fleet.driver.hours.exceeded|licence.expiring` → HR/fleet.
+- `fleet.incident.reported` → NC-019 (accident/theft), NC-002 (insurance claim), NC-025 (workshop).
+- `fleet.shuttle.run.started|stop.reached|delayed` → NC-014 staff app ETA.
+- Consumes: `dialysis.session.scheduled` (OP-012), `healthcheck.booking.created` (OP-014), `portal.transport.requested` (PE-001/OP-020), `ip.discharge.completed` (drop request prompt), `camp.scheduled` (NC-035), `inventory.transfer.dispatch_requested` (NC-006), `hr.employee.exited` (driver deactivate), `roster.published` (NC-030 drivers), `iot.gps.position` (EN-042), `licence.expired` (NC-023 vehicle docs), `security.gate.vehicle.in|out` (NC-019 log reconciliation).
+
+## 8. Screens (UI)
+- **Dispatch Board** (desktop): today's requests timeline by hour, vehicles lane view (available/on trip/maintenance), drag request onto vehicle+driver, conflict warnings (documents/hours), map with live GPS (`transport.gps`); shortcuts `D` dispatch, `A` approve, `/` search.
+- **Trip Request Form** (web/mobile): type-specific fields, cost centre, passengers; status tracker; rate & feedback.
+- **Driver App** (phone PWA; offline): today's trips list, Start (odometer + camera + GPS), passenger OTP, expenses with receipt photo, End, incident/breakdown button, fuel entry, shuttle stop check-ins; low-data mode; large buttons.
+- **Patient Pickup Desk** (front office): booking with UHID search (OP-001), address map pin, chargeable toggle, SMS confirmation, live tracking link.
+- **Fuel & Mileage** (desktop): logs, card statement import & reconciliation, anomaly queue, mileage charts per vehicle.
+- **Vehicle 360**: documents with expiry chips, trips, fuel, maintenance, incidents, cost per km.
+- **Shuttle Planner**: routes/stops map, run monitoring, occupancy heat map, staff subscriptions.
+- **Reports/Dashboard**; empty/error states; WCAG 2.2 AA; i18n (driver app in local languages).
+
+## 9. Integrations
+- EN-042 GPS/telematics (AIS-140 devices, OBD; vendor APIs e.g. Loconav/Fleetx via EN-017), Google Maps/OSM (geocoding, distance, ETA), fuel-card statement CSV import (HPCL/IOCL/BPCL), cab aggregators (Uber for Business/Ola Corporate API — optional), NC-013 shared masters, NC-002 assets/insurance, NC-025 work orders, NC-021/NC-009 vendor bills & RCM, NC-008 chargeback, NC-010/NC-030/NC-029 drivers, NC-023 documents, OP-005/RC-003 patient charges, EN-009 SMS/WhatsApp, NC-014 staff app, NC-019 gate log.
+
+## 10. Reports & Analytics
+- Vehicle utilisation (trips, km, hours, idle %), cost per km & per trip by vehicle/category, fuel consumption & mileage trend, fuel anomalies, maintenance cost & downtime, document expiry calendar, driver duty hours & violations, on-time performance (dispatch vs scheduled; patient pickup punctuality), department-wise chargeback, hired vs owned cost comparison, shuttle occupancy & delays, incidents/accidents register, patient transport revenue vs cost. Read model `analytics.fleet_daily`.
+
+## 11. Notifications
+- Requester: approved/rejected, dispatched (vehicle/driver), driver arriving, completed (rate); Patient (SMS/WhatsApp): booking confirmed, driver details & ETA, tracking link; Driver: new trip, schedule changes, document/licence expiry; Fleet in-charge: pending approvals, unassigned trips within 2 h, anomalies, breakdowns, expiries; Finance: monthly chargeback posted, unreconciled fuel, hired bill variances; HR: driver hours violations.
+
+## 12. Permissions (RBAC keys)
+`fleet.vehicle.manage|read`, `fleet.driver.manage|read`, `fleet.trip.request` (all staff), `fleet.trip.approve` (managers; ABAC own department), `fleet.dispatch.manage`, `fleet.trip.execute` (drivers; own trips), `fleet.patient.book` (front office/call centre), `fleet.shuttle.manage|board`, `fleet.fuel.log|manage`, `fleet.maintenance.manage`, `fleet.incident.report`, `fleet.vendor_bill.manage`, `fleet.gps.read`, `fleet.report.read`, `fleet.export`; `integration.fleet.ingest`. Defaults: Transport supervisor (role family 52) manage; drivers execute/fuel.log; Receptionist (24)/Call centre (25) patient.book; Accounts (46) vendor bills/report; HR (47) driver read.
+
+## 13. Non-functional
+- Volumes: 30–60 non-ambulance vehicles, 150 trips/day, 20 shuttle runs/day, GPS 1 position/10 s per vehicle (~500k rows/day partitioned, 90-day retention), 300 fuel logs/month; dispatch board realtime; driver app offline queue ≥ 12 h.
+- Security: RLS; GPS access limited; patient PHI minimal; audit on overrides.
+- Printing: trip sheets, monthly log book (RTO format), chargeback statements; i18n; WCAG 2.2 AA.
+
+## 14. Acceptance Criteria
+1. Given a vehicle whose insurance expired yesterday, when dispatcher assigns it, then dispatch is blocked with the reason and no override is available for insurance.
+2. Given a driver who has driven 8 h today, when assigned another 2 h trip, then the system warns/blocks per duty-hour rule; override requires reason and is audited.
+3. Given a trip started at odometer 45,120 and ended at 45,190 with GPS distance 62 km, then distance = 70 km, anomaly flag "odo_vs_gps > 10 %" is set and the trip goes to review.
+4. Given a patient pickup booked for dialysis at 07:00, then the patient receives SMS with driver name/phone/ETA and a tracking link; on completion, the trip is marked and (if chargeable) a charge posts to OP-005.
+5. Given a fuel fill of 60 L on a vehicle with 50 L tank, then the entry is flagged and cannot be reconciled until reviewed.
+6. Given a fuel-card statement import with 40 lines and 38 matches, then 2 unmatched lines appear in the reconciliation queue.
+7. Given a completed trip charged to cost centre "Marketing", then month-end chargeback posts km × rate to NC-008 for that cost centre.
+8. Given a hired vendor bill claiming 1,200 km vs system 1,050 km (variance 14 % > 5 %), then approval is blocked until variance is explained line by line.
+9. Given a shuttle run delayed 15 min at stop 3, then subscribed staff for later stops get an ETA update in NC-014.
+10. Given a driver app offline during a trip, then start/end/expenses queue and sync in order; the trip sheet is finalised server-side after sync.
+11. Given a requester from Department A, then they see only their own requests; fleet in-charge sees all.
+
+## 15. Enhancements / Later phases
+- From VIMS sheet: vehicle log, trip sheet, fuel tracking, driver assignment (Phase 9 core above).
+- (market) Route optimisation for multi-pickup patient transport, EV fleet charging management, driver behaviour scoring from telematics (harsh braking/overspeed), predictive maintenance (AI-005), carbon footprint reporting, integration with cab aggregators for overflow, staff shuttle app with live bus tracking (NC-014), toll (FASTag) statement reconciliation, automated RTO document renewal reminders via Parivahan (NC-023), pool-car self-service booking with key lockers.
+
+## 16. Open Questions for the Hospital
+1. Fleet list (owned/hired) and vehicle types; are staff shuttles run in-house or by contractor?
+2. Trip approval policy by trip type/role; pre-approved categories?
+3. Chargeback to departments needed? Rate per km or actual cost pooling?
+4. Patient pickup/drop service offered? Free for which packages; tariff for others?
+5. Telematics devices installed (AIS-140)? Fuel cards used (provider)?
+6. Driver duty-hour policy and allowances (night/outstation) for payroll (NC-010)?
+7. Hired vendor rate cards & billing cycle; aggregator accounts?
+

@@ -1,0 +1,31 @@
+{
+  "name": "@vims/worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BullMQ processors and cron: outbox relay, escalation timers, partition maintenance, retention/archival, PDF rendering, print dispatch.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@vims/contracts": "workspace:*",
+    "@vims/db": "workspace:*",
+    "@vims/print-templates": "workspace:*",
+    "bullmq": "^6.1.2",
+    "ioredis": "^6.0.0",
+    "pino": "^10.3.1",
+    "playwright": "^1.62.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "vitest": "^4.1.10"
+  }
+}

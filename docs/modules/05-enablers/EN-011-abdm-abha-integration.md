@@ -1,0 +1,193 @@
+# EN-011 — ABDM / ABHA Integration (V3 APIs: ABHA Create/Verify, Scan & Share, Care-Context Linking, HIP M2 with FHIR Bundles, HIU M3, Consent Manager, HFR/HPR, Fidelius Encryption, Sandbox → Production Certification, Key Management)
+
+| Field | Value |
+|---|---|
+| Domain | Enabler |
+| Module ID | EN-011 |
+| Phase | 1 (M1 identity, scan & share), 11 (M2 HIP, M3 HIU, HFR/HPR sync) |
+| Priority | P0 |
+| Complexity | High |
+| Depends on | OP-001 (patient MPI, registration), EN-028 (consent ledger — DPDP + ABDM consent artefacts), EN-019 (FHIR R4 layer — resource mapping), EN-017 (integration hub, callbacks, DLQ), EN-007 (settings, HFR/HPR ids, secrets), EN-024 (audit), OP-002 (OPConsultNote, Prescription), IP-002 (DischargeSummary), OP-004 (DiagnosticReport lab), OP-008 (DiagnosticReport imaging), OP-013 (ImmunizationRecord), OP-014 (WellnessRecord/HealthDocumentRecord), NC-003 (MRD documents), PE-001 (patient portal — ABHA login, linked records), EN-006 (scan & share → token), EN-009 (OTP/SMS), RC-001 (NHCX shares identity/gateway concepts), EN-016 (signatures), NC-010 (HPR for staff) |
+| Feature flag | `module.abdm.enabled` (sub: `abdm.m1`, `abdm.scan_share`, `abdm.m2_hip`, `abdm.m3_hiu`, `abdm.hfr_hpr`, `abdm.sandbox`) |
+| Primary roles | Receptionist / Front Office (24), MRD Officer (43), IT Admin (56), Doctor (view linked records via HIU) |
+| Secondary roles | Patient (ABHA creation/consent), Privacy Officer (57), Hospital Admin (HFR/HPR), Nurse (care-context linking at discharge), Auditor |
+| Regulatory | ABDM (NHA) V3 API specifications & Health Information Exchange & Consent Manager (HIE-CM) framework, ABDM Sandbox certification (M1/M2/M3), NHA Health Data Management Policy, ABHA Rules (Aadhaar/DL/mobile based creation, ABHA address `@sbx`/`@abdm`), FHIR R4 India profiles (NRCeS/`nrces.in` IG: OPConsultRecord, DischargeSummaryRecord, DiagnosticReportRecord, PrescriptionRecord, ImmunizationRecord, WellnessRecord, HealthDocumentRecord, InvoiceRecord), Fidelius (ECDH Curve25519 + AES-GCM) for data transfer, DPDP Act/Rules 2025 (consent, purpose codes, notice), Aadhaar Act (no Aadhaar number storage; only ABHA/XML tokens), HFR & HPR registries, DHIS/eHospital interoperability, IT Act digital signature |
+
+## 1. Purpose
+EN-011 makes Vim's HMS ABDM-compliant: create/verify/link **ABHA** numbers and addresses at registration (Aadhaar OTP, mobile OTP, DL, biometric later), **Scan & Share** QR-based OPD registration/token, act as **HIP** (Milestone 2) by discovering patients, linking care contexts (visits/admissions/orders), building FHIR R4 bundles per Health Information (HI) type, encrypting with Fidelius and transferring on consent; act as **HIU** (Milestone 3) to request consent and fetch/render a patient's records from other providers into the doctor's chart; manage consent artefacts, subscriptions and notifications with the HIE-CM/Gateway; keep **HFR** (facility) and **HPR** (professionals) ids in sync; and run the sandbox → production certification path with robust key management, callbacks and audit.
+
+## 2. Users & Jobs-to-be-done
+- **Receptionist** (desktop/tablet): create ABHA (Aadhaar OTP/mobile OTP) or verify existing ABHA (number/address/QR) at registration; handle scan & share tokens; link visit as care context. Hundreds/day.
+- **Patient**: create ABHA at kiosk/portal, scan hospital QR from ABHA/PHR app to share profile, approve consent requests in PHR app, view linked records in PE-001.
+- **Doctor**: click "Fetch ABDM records" (HIU) → consent request → view fetched OPConsult/Discharge/Diagnostic records inline; sign documents that become HI bundles.
+- **MRD/Nurse**: ensure care contexts linked (discharge summaries, reports) and HI bundles generated; resolve link failures.
+- **IT Admin**: gateway credentials, HFR/HPR ids, callback endpoints, key rotation, sandbox/production switch, monitoring, certification evidence.
+- **Privacy Officer**: consent ledger, data-transfer audit, DSAR support, breach reporting.
+
+## 3. Core Workflows
+
+### 3.1 Setup & certification
+1. IT registers hospital in ABDM sandbox → obtains `client_id/secret` (Gateway session), configures **HIP id / HIU id / HFR facility id** per branch, bridge URL (public HTTPS callback endpoints), key pairs (X25519 for Fidelius; RSA for legacy) stored in Vault → `abdm_config` → **sandbox mode** flag → run **certification test cases** (M1: ABHA create/verify/scan-share; M2: discovery, link, consent notify, HI request/transfer, notify; M3: consent request/init/status, HI fetch/decrypt) with recorded evidence (request/response logs, screenshots) → NHA approval → switch to production credentials/domain (`@abdm`) → Event `abdm.certified`.
+2. HFR: facility record synced (name, address, type, services, hours) via HFR APIs; HPR: doctors' HPR ids captured/verified in EN-007 professional profile (self-registration links); HFR/HPR ids stamped on FHIR resources (Organization/Practitioner).
+3. Gateway auth: access token cache (Redis) with refresh; request signing headers (`REQUEST-ID`, `TIMESTAMP`, `X-CM-ID` e.g. `sbx`/`abdm`, `X-HIP-ID`/`X-HIU-ID`); every outbound call and inbound callback logged (`abdm_messages`), correlated by request id, retried with backoff on 5xx, DLQ after N.
+
+### 3.2 ABHA creation & verification (M1)
+1. **Create via Aadhaar** (V3 `/abha/api/v3/enrollment/request/otp` → OTP to Aadhaar-linked mobile → `/enrollment/enrol/byAadhaar` with encrypted Aadhaar/OTP (RSA public key from ABDM certs endpoint) → returns ABHA number, ABHA address suggestions, profile (name, DOB, gender, photo, address), `X-token`) → patient chooses ABHA address (`name@abdm`) → System stores ABHA number/address/photo/kyc-verified flag in `patient.identifiers` (never stores Aadhaar number; only last-4 masked from response, transaction id) → **ABHA card** printed/sent (PDF via SMS/WhatsApp) → Event `abdm.abha.created`.
+2. **Create via mobile/DL** (non-Aadhaar): OTP → demographic details → DL upload flow (`enrol/byDocument`) → status pending verification.
+3. **Verify/link existing ABHA**: by ABHA number/address (OTP to ABHA-registered mobile or Aadhaar OTP), by **QR scan** of ABHA card (offline QR JSON with ABHA number, name, DOB, gender, address → demographic prefill + optional OTP verify), by mobile number search → link to patient (MPI dedupe suggestion in OP-001 by ABHA/mobile/name/DOB) → `verified` flag with method & time.
+4. **Profile updates**: fetch ABHA profile/photo, re-KYC prompts, ABHA address change; **de-link** with reason (patient request) → audit.
+5. Consent/notice: DPDP notice + ABDM consent for creation/linking captured on screen/kiosk (EN-028), languages.
+
+### 3.3 Scan & Share (OPD registration/token)
+1. Hospital/branch/counter **QR** (ABDM-issued HIP QR with `hip-id`, counter id) printed at reception/kiosk/website (EN-012) → patient scans from ABHA/PHR/Arogya Setu app and shares profile → ABDM posts **share-profile** callback (`/v3/hip/patient/share`) with token, ABHA number/address, name, DOB, gender, address, mobile → System: match/create patient in MPI (dedupe), create pre-registration/visit intent, generate **token** (EN-006) → respond with token number & expiry → patient sees token in app; reception sees "scan & share arrivals" list to complete registration/appointment/payment → Event `abdm.scan_share.received`.
+2. Deep-link support (`abha://` / PHR intents) on hospital website; department-specific QRs.
+
+### 3.4 HIP: discovery & care-context linking (M2)
+1. **Care-context creation**: every OPD visit, IP admission, lab/rad order (or discharge) creates a care context (`abdm_care_contexts`: reference no e.g. `OPV-2026-000123`, display "OPD Visit – Cardiology – 12 Mar 2026", HI types available, patient id) — auto by rules per hospital (per visit vs per encounter).
+2. **Link initiated by hospital** (auto after visit if patient has verified ABHA): `/v3/link/carecontext` (HIP-initiated linking with ABHA-address token; V3 uses `link-token` from `/v3/token/generate-token` per patient) → gateway acks → status `linked`; patient notified in PHR app; failures retried; **manual link** via OTP (`/v3/link/init` → OTP to patient → `/confirm`) at desk if needed.
+3. **Discovery** (patient-initiated from PHR app): callback `/v3/hip/patient/care-context/discover` with verified identifiers (ABHA address, mobile, name, gender, YOB, unverified ids like UHID) → System searches MPI (matching rules: ABHA exact; else mobile+name+YOB fuzzy; never over-disclose) → responds `on-discover` with matched patient reference and unlinked care contexts (or no match); then `link/init` (OTP to patient's registered mobile via hospital) → `link/confirm` → linked.
+4. **Care-context update/notify**: when new HI is available (report signed, discharge summary final) → `/v3/link/context/notify` (or subscription-based notification) so PHR shows new record; deep-linked to HI type.
+
+### 3.5 HIP: consent notification & HI transfer (M2)
+1. Consent granted by patient in PHR (to some HIU) → CM posts `/v3/consent/request/hip/notify` (consent artefact: HIU id, purpose code, HI types, date range, expiry, care contexts, frequency, patient) → System validates signature/artefact → stores (`abdm_consents` with status `granted`) → acks → Event `abdm.consent.granted` (mirror in EN-028 ledger).
+2. HIU triggers `/v3/hip/health-information/request` (consent id, date range, key material — receiver public key, nonce, data push URL) → System validates consent (active, not expired/revoked, HI types/date range/care contexts) → acks → **worker builds FHIR R4 bundles** per care context & HI type (3.7) → **encrypts** with Fidelius (ECDH X25519 shared key using sender private + receiver public, HKDF, AES-GCM; sender public key & nonce in `keyMaterial`) → pushes to HIU `dataPushUrl` in pages (`entries[]` with content/checksum/careContextReference) → sends `/v3/health-information/notify` to gateway with transfer status (TRANSFERRED/FAILED per care context) → Event `abdm.hi.transferred`.
+3. Consent revoked/expired callback → status update, in-flight transfers halted; consent audit report for Privacy Officer.
+4. Data page size and pagination per spec; retries; DLQ; transfer log retained.
+
+### 3.6 HIU: request, fetch & render (M3)
+1. Doctor in OP-002/IP chart clicks **Fetch ABDM records** → System creates consent request `/v3/consent/request/init` (purpose e.g. `CAREMGT`, HI types selected, date range, expiry, frequency, requester = HPR-id doctor, hospital HIU id) → patient gets PHR notification → CM callback `on-init` (request id) → `/consent/request/status` or callback `notify` (GRANTED/DENIED/EXPIRED) with consent artefacts (per HIP) → status shown to doctor.
+2. On GRANTED → System fetches artefact (`/consent/fetch`), generates key pair per request (X25519), calls `/v3/health-information/cm/request` (consent id, date range, our data push URL, key material) → HIP(s) push encrypted bundles to our **data push endpoint** → decrypt (Fidelius) → validate FHIR → store `abdm_hiu_records` (bundle JSON, HI type, source HIP, care context, received_at, checksum ok) → send `/health-information/notify` acknowledgment.
+3. **Render**: patient chart "ABDM Records" tab lists bundles by HIP/date/type; render via FHIR viewer (Composition sections → readable cards: diagnoses, medications, reports with observations, attachments/PDF); doctor can import selected items (allergies, meds, diagnoses) into local record with provenance ("imported from ABDM – HIP X – consent Y") → Event `abdm.hiu.record.imported`.
+4. Consent lifecycle: doctor/patient can revoke; auto-expiry; retention of fetched records per consent's `dataEraseAt` (auto purge job) → Event `abdm.hiu.record.purged`.
+5. Subscriptions (optional): patient can subscribe hospital to new-record notifications (`/subscription-requests`) — enhancement.
+
+### 3.7 FHIR bundle generation (HI types)
+- Mapping via EN-019 from HMS entities into NRCeS profiles: **OPConsultRecord** (Composition + Encounter + Practitioner (HPR) + Organization (HFR) + Condition, AllergyIntolerance, MedicationRequest, Procedure, ServiceRequest, Observation vitals, DocumentReference for PDF), **PrescriptionRecord** (MedicationRequest with SNOMED/drug codes, dosage instructions), **DiagnosticReportRecord** (DiagnosticReport lab/imaging with Observations (LOINC), Specimen, presentedForm PDF, ImagingStudy links via EN-008), **DischargeSummaryRecord** (Composition sections: chief complaints, history, investigations, procedures, medications, care plan, follow-up, documents), **ImmunizationRecord** (Immunization with vaccine codes, lot, ImmunizationRecommendation), **WellnessRecord** (vitals/physical activity/lifestyle Observations from health check OP-014), **HealthDocumentRecord** (scanned/unstructured docs from NC-003), **InvoiceRecord** (Invoice/ChargeItem from OP-005/IP-005 — optional). Bundles are `type=document`, signed (Bundle.signature with hospital DSC/e-sign EN-016 optional), validated against profiles (HAPI validator in worker); generation on document finalisation and cached (`abdm_hi_bundles`, versioned; regenerated on amendment).
+
+### 3.8 Exceptions & offline
+- ABDM gateway/CM outage: ABHA creation queued/deferred (register with UHID, retry ABHA later, task list); callbacks retried by CM (must be idempotent by request id); scan & share unavailable → normal token.
+- OTP failures/limits (ABDM rate limits per Aadhaar/mobile) → user guidance; alternate methods.
+- Patient mismatch on discovery → respond no-match; never partial disclosure; suspicious repeated discovery → alert DPO.
+- Key rotation: rotate X25519/RSA keys periodically; old keys retained for in-flight decrypt; certificate expiry alerts.
+- Offline reception PWA: registration proceeds; ABHA verification queued.
+
+## 4. Data Model (schema `integration`, prefix `abdm_`)
+- `abdm_config` — hospital_id, branch_id?, mode (sandbox/production), client_id, secret_ref, hip_id, hiu_id, hfr_id, cm_id (`sbx`/`abdm`), bridge_url, callback_secret_ref, keys jsonb [{kid, alg (x25519/rsa), public, private_ref, created_at, retired_at}], cert_status, last_token_at.
+- `patient.identifiers` (OP-001) rows type `abha_number` (14-digit), `abha_address`; plus `abdm_abha_profiles` — patient_id, abha_number, abha_address, kyc_verified, method (aadhaar_otp/mobile_otp/dl/qr/biometric), photo_file_id, profile jsonb (name, gender, dob, address masked), linked_at, verified_at, delinked_at, txn_ref, notice_consent_id.
+- `abdm_txn_log` — enrollment/verification transactions (txn_id, type, mobile_masked, status, error).
+- `abdm_scan_share_events` — token, hip_id, counter_id, abha_address, profile jsonb, patient_id (matched/created), visit_intent_id, queue_token_id, received_at, status.
+- `abdm_care_contexts` — id, hospital_id, patient_id, reference UNIQUE(hospital_id, reference), display, encounter_type (opd/ip/lab/rad/vacc/checkup/doc), encounter_id, hi_types text[], link_status (pending/linked/failed/delinked), linked_at, link_txn, last_notified_at.
+- `abdm_link_requests` — request_id, patient_id, mode (hip_initiated/user_initiated/discovery), otp_ref, status, care_context_ids[], error.
+- `abdm_discovery_requests` — request_id, transaction_id, identifiers jsonb (masked), matched_patient_id?, response, at.
+- `abdm_consents` — id, hospital_id, consent_id (artefact id), role (hip/hiu), consent_request_id, patient_id, abha_address, hiu_id, hip_id, purpose_code, hi_types text[], date_from, date_to, expiry_at, frequency jsonb, care_context_refs jsonb, status (requested/granted/denied/revoked/expired), artefact jsonb (signed), signature_valid, data_erase_at, created_at, updated_at; index (patient_id), (status, expiry_at).
+- `abdm_hi_requests` — id, consent_id, transaction_id, direction (outbound_as_hip/inbound_as_hiu), key_material jsonb (public keys/nonce; private ref), data_push_url, status (received/acked/transferring/transferred/failed/partial), pages_sent, entries jsonb [{care_context, hi_type, status, checksum}], notified_at, error.
+- `abdm_hi_bundles` — id, hospital_id, patient_id, care_context_id, hi_type, source_doc_id/version, fhir jsonb (or file_id), profile_version, validation_status, sha256, generated_at; UNIQUE(care_context_id, hi_type, source_doc_version).
+- `abdm_hiu_records` — id, hospital_id, patient_id, consent_id, hip_id, care_context_ref, hi_type, bundle jsonb/file_id, checksum_ok, received_at, imported_items jsonb, erase_at, purged_at.
+- `abdm_messages` — id, hospital_id, direction, api_path, request_id, correlation_id, payload jsonb (encrypted; PHI), status_code, error, at; partitioned monthly; index (request_id).
+- `abdm_hfr_hpr` — entity (facility/practitioner), local_id (branch_id/user_id), registry_id, status, last_synced_at, payload jsonb.
+- `abdm_certification_evidence` — milestone, test_case, request_ids[], screenshots[], status, submitted_at.
+
+## 5. Business Rules & Validations
+- Aadhaar number never persisted; only encrypted in transit to ABDM; logs mask all identifiers; ABHA number stored as identifier with `verified` flag; unverified ABHA (typed manually) cannot be used for HIP linking until OTP-verified.
+- One ABHA per patient; ABHA already linked to another patient → MPI merge workflow (OP-001), never silent relink.
+- Care contexts created only for encounters with at least one HI type document; reference stable & unique; linking auto only if patient consented to ABDM linking (EN-028 `abdm_link` purpose) — default opt-in via registration notice, revocable.
+- HI transfer strictly within consent (HI types ∩ available, date range on document date, care contexts listed, expiry not passed, status granted); every transfer entry checksummed and logged; consent revoked mid-transfer → stop and notify FAILED for remaining.
+- Discovery matching: verified identifiers first (ABHA address/mobile), unverified (UHID) may narrow but never solely disclose; return ≤ 1 patient; ambiguous → no match with error code.
+- HIU records retained only until `dataEraseAt` (per consent) unless imported items (which become part of local record with provenance); purge job daily; doctors' access to fetched records audited.
+- FHIR bundles must validate against NRCeS profiles; invalid bundle blocks transfer with alert to MRD/IT (fix mapping); documents amended → new bundle version; superseded bundles kept for audit.
+- Callback endpoints: verify gateway JWT/`Authorization` where provided; idempotent on `requestId`; respond 202 within 1 s and process async.
+- Keys: private keys in Vault; per-HI-request ephemeral key pairs for HIU; rotation ≤ 12 months; certificate expiry alerts 30 days.
+- Sandbox data never mixes with production tables (separate hospital/tenant or `mode` guard on every row).
+- Retention: consent artefacts & transfer logs 8 years (audit); messages 1 year (PHI-encrypted).
+
+## 6. API Surface (`/api/v1/abdm` — internal; `/abdm/callbacks/**` — public bridge endpoints)
+| Method | Path | Purpose | Permission | Notes |
+|---|---|---|---|---|
+| GET/PUT | /config ; POST /config/rotate-keys ; POST /config/test-gateway ; POST /config/switch-mode | setup | integration.abdm.configure (IT + Admin dual) | audited |
+| POST | /abha/enrol/aadhaar/otp ; POST /abha/enrol/aadhaar/verify ; POST /abha/enrol/mobile/otp|verify ; POST /abha/enrol/dl | create ABHA | abdm.abha.create (Front office, kiosk device) | rate-limited |
+| POST | /abha/verify/otp {abhaNumber|address, method} ; POST /abha/verify/confirm ; POST /abha/verify/qr {payload} ; POST /abha/search/mobile | verify/link | abdm.abha.verify | |
+| POST | /patients/:id/abha/link ; POST /patients/:id/abha/delink {reason} ; GET /patients/:id/abha | patient linkage | abdm.abha.link / delink | consent id |
+| GET | /abha/:id/card.pdf | ABHA card | abdm.abha.read | |
+| GET | /scan-share/arrivals?counter ; POST /scan-share/:id/complete {patientId, visitId} | reception list | abdm.scan_share.manage | |
+| GET/POST | /care-contexts?patient ; POST /care-contexts/:id/link ; POST /care-contexts/:id/notify ; POST /care-contexts/link/init|confirm (OTP) | HIP linking | abdm.hip.link (Front office, MRD, system) | |
+| GET | /consents?role&patient&status ; GET /consents/:id | consent ledger | abdm.consent.read (DPO, MRD; doctor own patients) | |
+| POST | /hiu/consent-requests {patientId, hiTypes[], from, to, purpose, expiry} ; GET /hiu/consent-requests/:id ; POST /:id/revoke | HIU consent | abdm.hiu.request (Doctor) | |
+| GET | /hiu/records?patient&type&hip ; GET /hiu/records/:id (rendered) ; POST /hiu/records/:id/import {items} | fetched records | abdm.hiu.read (care team; audited) / abdm.hiu.import (Doctor) | |
+| GET | /hi-requests?direction&status ; POST /hi-requests/:id/retry | transfer monitor | integration.abdm.read / retry | |
+| GET | /bundles?patient&careContext&type ; POST /bundles/generate {docId} ; GET /bundles/:id/validate | HI bundles | abdm.bundle.read / generate (MRD, system) | |
+| GET/POST | /hfr ; /hpr ; POST /hpr/verify/:userId | registries | abdm.registry.manage | |
+| GET | /messages?requestId ; /health ; /metrics | monitoring | integration.abdm.read | PHI masked |
+| GET/POST | /certification/evidence | certification pack | integration.abdm.configure | |
+| **Callbacks (public bridge, gateway-authenticated):** POST /abdm/callbacks/v3/hip/patient/share ; /v3/hip/patient/care-context/discover ; /v3/link/on-init|on-confirm ; /v3/consent/request/hip/notify ; /v3/hip/health-information/request ; /v3/consent/request/on-init|on-status|hiu/notify ; /v3/health-information/hiu/on-request ; /v3/hiu/data/push (data receive) ; /v3/link/on-carecontext ; /v3/token/on-generate-token ; /v3/hip/patient/care-context/on-notify … | ABDM → HMS | gateway auth | 202 + async |
+
+## 7. Domain Events (outbox)
+- `abdm.abha.created|verified|linked|delinked|profile_updated` → OP-001 (identifiers, banner chip), PE-001, EN-009 (ABHA card SMS).
+- `abdm.scan_share.received|completed` → OP-001 pre-registration, EN-006 token.
+- `abdm.care_context.created|linked|link_failed|notified` → MRD task list.
+- `abdm.discovery.received|matched|no_match` → DPO monitoring (anomaly).
+- `abdm.consent.requested|granted|denied|revoked|expired` (role hip/hiu) → EN-028 ledger, doctor UI, DPO.
+- `abdm.hi.request_received|transferred|failed` (HIP) → MRD/IT alerts.
+- `abdm.hiu.records_received|imported|purged` → OP-002 chart tab, EN-024.
+- `abdm.bundle.generated|validation_failed` → MRD/IT.
+- `abdm.gateway.down|recovered`, `abdm.key.rotated|expiring`, `abdm.certified|mode_switched`.
+
+## 8. Screens
+- **ABHA panel in Registration** (OP-001; desktop/tablet/kiosk): tabs Create (Aadhaar OTP / Mobile OTP / DL) · Verify (number/address/QR scan via camera or scanner/mobile search) · Linked profile card (photo, ABHA number masked, address, KYC badge, delink); consent/notice checkbox with language toggle; ABHA card print/send; shortcuts `Alt+A` open panel, `Alt+Q` QR scan.
+- **Scan & Share Arrivals** (reception desktop): live list (name, ABHA, token, time, counter) with "complete registration" → prefilled OP-001 form; kiosk shows token confirmation.
+- **Care-Context & Linking monitor** (MRD desktop): unlinked encounters, failures with retry/manual OTP link, notify status; filters by ward/department.
+- **Consent Ledger** (DPO/MRD desktop): HIP/HIU consents, artefact details, transfers per consent, revoke (HIU), export for audit.
+- **Doctor "ABDM Records" tab** (OP-002/IP chart; desktop/tablet): Fetch button (HI types, date range), consent status timeline (pending in patient app → granted), records list grouped by HIP/date, FHIR-rendered cards, import selection, provenance chips; empty state "No consent yet — patient approves in ABHA app"; error states.
+- **HI Transfer Monitor** (IT/MRD): outbound/inbound requests, per-care-context status, retries, DLQ.
+- **ABDM Admin** (IT desktop): config, keys, mode switch, gateway health, HFR/HPR sync, certification evidence tracker (test cases checklist).
+- **Patient portal (PE-001)**: ABHA login, view linked care contexts, ABHA card, consent history.
+- Offline: registration proceeds; ABHA actions queued with visible "pending ABDM" chip.
+
+## 9. Integrations
+- ABDM Gateway V3 (`https://dev.abdm.gov.in`/`https://abhasbx.abdm.gov.in` sandbox; production endpoints), HIE-CM, ABHA service, HFR/HPR APIs, ABDM certificate endpoint (RSA public key), Fidelius library (Java CLI or native TS implementation of X25519+HKDF+AES-GCM per spec), FHIR validator (HAPI) with NRCeS IG package, EN-019 FHIR facade, EN-016 bundle signing, EN-009 SMS (ABHA card, OTP relays where hospital sends), Vault keys, EN-017 message logging/DLQ, PHR apps (ABHA app, Arogya Setu, DigiLocker) via standard flows, NHCX (RC-001) shares gateway credentials pattern.
+
+## 10. Reports & Analytics
+- ABHA creation/verification counts by method/counter/day, ABHA coverage % of registrations (NHA incentive/DHIS reporting), scan & share usage, care contexts created vs linked (%), link failures by reason, consents (HIP/HIU) by status/purpose, HI transfers success rate & latency, HIU fetch usage by doctor/department, bundle validation failures by HI type, gateway uptime/latency, certification status. MVs `analytics.mv_abdm_daily`.
+
+## 11. Notifications
+- Patient: ABHA created/linked (SMS/WhatsApp with card link), consent request pending (via PHR app by CM; hospital may send reminder SMS), records linked (CM notification).
+- Front office/MRD: link failures, bundle validation errors; Doctor: consent granted → records available; DPO: unusual discovery patterns, revoked consents during transfer; IT: gateway down, key/cert expiry, callback failures.
+
+## 12. Permissions (RBAC keys)
+`integration.abdm.configure` (IT Admin + Hospital Admin dual) · `integration.abdm.read` (IT, MRD) · `abdm.abha.create` (Front office, Kiosk device, Call centre) · `abdm.abha.verify` · `abdm.abha.link/delink` (Front office; delink needs supervisor) · `abdm.abha.read` · `abdm.scan_share.manage` (Front office) · `abdm.hip.link` (Front office, MRD, system) · `abdm.consent.read` (DPO, MRD, doctors own patients) · `abdm.hiu.request` (Doctor, ABAC care-team) · `abdm.hiu.read` (care team; audited) · `abdm.hiu.import` (Doctor) · `abdm.bundle.read/generate` (MRD, system) · `abdm.registry.manage` (Admin, HR for HPR) · patient self-scope via PE-001.
+
+## 13. Non-functional
+- 5000 registrations/day → ~2000 ABHA operations/day; ABHA OTP round-trip UI < 3 s excluding SMS delivery; scan & share callback → token < 2 s; care-context link job < 5 min after visit close; HI transfer for a 20-document consent < 60 s; callbacks respond 202 < 1 s.
+- Bridge endpoints publicly reachable (HTTPS, valid CA cert, IP allowlist optional), high availability; on-prem tenants expose via reverse proxy/Cloudflare tunnel; sandbox and production isolated.
+- Security: PHI encrypted in message logs, Aadhaar never stored, private keys in Vault, ephemeral keys, signature verification of consent artefacts, audit on every record access; DPDP notices multilingual.
+- Accessibility/i18n: ABHA panel in local languages; kiosk large fonts; QR scanning via camera in PWA.
+
+## 14. Acceptance Criteria
+1. Given a patient with Aadhaar-linked mobile, when the receptionist starts ABHA creation, then OTP is delivered, ABHA number and address are created via V3 API, stored as verified identifiers, and no Aadhaar number exists in any table or log.
+2. Given an existing ABHA card QR, when scanned at registration, then demographics prefill, OTP verification links the ABHA to the patient, and the banner shows the ABHA chip.
+3. Given the hospital QR scanned from the ABHA app, when the share-profile callback arrives, then a patient is matched/created, a token is issued within 2 s, and the arrival appears in the reception list.
+4. Given an OPD visit closed for a patient with verified ABHA and linking consent, when the job runs, then a care context is created and linked (HIP-initiated) and appears in the patient's PHR app.
+5. Given a discovery request with ABHA address matching one patient, when processed, then `on-discover` returns that patient's unlinked care contexts; with ambiguous identifiers it returns no match.
+6. Given a granted consent for DiagnosticReport 2025-01-01..2026-03-31, when an HI request arrives, then only DiagnosticReport bundles dated within range for listed care contexts are encrypted (Fidelius) and pushed, and the gateway is notified TRANSFERRED per care context.
+7. Given a consent revoked mid-transfer, when the revoke callback arrives, then remaining entries are marked FAILED and no further data is pushed.
+8. Given a doctor requests records (HIU) and the patient grants in the PHR app, when data is pushed, then bundles decrypt, validate, render in the ABDM tab within 60 s, and access is audited.
+9. Given imported items from an ABDM record, when saved, then local allergy/medication rows carry provenance (HIP, consent id) and the original bundle purge at `dataEraseAt` does not remove imported items.
+10. Given a discharge summary amended, when finalised again, then a new DischargeSummaryRecord bundle version validates against NRCeS profile and the care context notify is re-sent.
+11. Given a FHIR bundle failing profile validation, when generation runs, then transfer is blocked, MRD/IT are alerted with validation errors, and the request is retried after fix.
+12. Given a duplicate callback with the same requestId, when received, then it is acknowledged 202 and not processed twice.
+13. Given the gateway unreachable, when a receptionist tries ABHA creation, then registration continues with UHID, the ABHA action queues, and a "pending ABDM" chip appears; retry succeeds later.
+14. Given sandbox mode, when certification test cases run, then evidence (request ids, payload logs, screenshots) is stored per test case and exportable.
+15. Given a user without `abdm.hiu.read`, when opening the ABDM tab, then fetched records are hidden and the API returns 403.
+16. Given key rotation, when new keys are generated, then in-flight HI requests using old keys still decrypt and old keys are retired after their last use.
+
+## 15. Enhancements / Later phases
+- Biometric (Aadhaar fingerprint/face) ABHA creation at kiosks (EN-020), ABHA-based patient login (delivered PE-001), Health locker/subscriptions for continuous record sharing, DHIS/e-Hospital pushes, NHCX end-to-end claims (RC-001), ABDM incentive/DHIS reporting automation, InvoiceRecord bundles, HIU auto-fetch on admission (with standing consent), FHIR bulk export for research (anonymised), UHI (Unified Health Interface) for discovery/appointment, PHR-app deep links from portal, DigiLocker document pulls, ABDM analytics dashboard (NHA MIS format).
+
+## 16. Open Questions for the Hospital
+1. Existing HIP/HIU/HFR ids or sandbox registration status? Who is the ABDM point of contact and DPO?
+2. Which encounter types create care contexts (every OPD visit? IP admission? lab-only visits)? Auto-link policy vs ask patient?
+3. HI types to support at go-live (OPConsult, Prescription, DiagnosticReport, DischargeSummary first?) and document finalisation points in your workflow.
+4. Do you want doctors to fetch ABDM records routinely (HIU) — which departments first? Consent purpose codes and default expiry?
+5. Public bridge endpoint hosting (cloud vs on-prem reverse proxy), SSL certificate ownership.
+6. Doctors' HPR ids availability; facility details in HFR to verify.
+7. Kiosk/self ABHA creation desired? Aadhaar biometric devices available?
+8. Retention preferences for fetched records beyond consent expiry (only imported items kept?).

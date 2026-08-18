@@ -1,0 +1,146 @@
+# OP-040 — Obstetrics & Gynaecology Antenatal Clinic (ANC registration & visits, EDD/GA engine, Risk stratification & high-risk flags, Investigations & USG per trimester, Immunisation/IFA/Ca, Birth preparedness, PC-PNDT & MTP compliance, Postnatal & Gynaecology, Link to Labour Room IP-011)
+
+| Field | Value |
+|---|---|
+| Domain | OPD Clinical |
+| Module ID | OP-040 |
+| Phase | 8 |
+| Priority | P2 |
+| Complexity | High |
+| Depends on | **OP-025 §0 (shared specialty console framework)**, OP-002 (encounter/e-Rx with pregnancy category alerts), OP-007 (vitals: BP/weight/urine dipstick, FHR doppler), OP-004 (ANC labs: Hb, blood group/Rh & ICT, HIV/HBsAg/VDRL, OGTT (DIPSI/75 g), TSH, urine culture, GBS; NT/dual/quad markers), OP-008/EN-008 (obstetric USG: dating, NT scan, anomaly (TIFFA), growth/Doppler; **PC-PNDT Form F** integration; PACS), OP-013 (Td/Tdap, influenza; newborn schedule handoff), OP-011 (nutrition, GDM diet), OP-033 (newborn follow-up), IP-011 (labour room: admission, partograph, delivery, newborn — receives full ANC record), IP-001/IP-006 (LSCS/planned admissions), IP-007 (blood availability for high-risk), OP-029/OP-030/OP-032 (medical co-morbidities, EPDS mental health), OP-024 (fertility → pregnancy continuity), OP-018 (tele-ANC), OP-038 (ANC classes/education), EN-029 (pregnancy drug safety, teratogen hard-stops, dose), EN-028 (consents: MTP Form C/I, PC-PNDT declaration Form F, sterilisation consent), EN-039 (forms), RC-007 (JSY/PMSMA/JSSK/PMJAY maternity packages), NC-034 (none), EN-017 (RCH portal/PMSMA/MCTS reporting; state MTP & PC-PNDT returns), NC-023 (PC-PNDT registration/licence tracker), NC-015 (maternal near-miss/death review), EN-009 (reminders), PE-002 (visit recalls), OP-020 (mother app), NC-003 (MTP records legal custody) |
+| Feature flag | `module.obg_anc.enabled` (sub: `obg.high_risk_clinic`, `obg.mtp`, `obg.pcpndt`, `obg.gynae`, `obg.postnatal`, `obg.family_planning`) |
+| Primary roles | Obstetrician-Gynaecologist (6/9), ANC nurse / staff nurse (16), ANC counsellor / ASHA-ANM liaison, Resident (14), Sonologist/Radiologist (12, PC-PNDT registered) |
+| Secondary roles | Anaesthetist (10, PAC for LSCS), Physician/endocrinologist (GDM/HTN), Dietician (39), Lab (33), Pharmacist (30), Reception/billing (24/27), MRD (43, MTP/PC-PNDT registers), Quality/MS (54/4), Mother/family |
+| Regulatory | **PC-PNDT Act 1994** (& Rules: registered USG machines/centres, Form F for every obstetric scan, no sex determination, records 2 years+, monthly Form F submission to appropriate authority, decoy/inspection readiness), **MTP Act 1971 & Amendment 2021** (gestation limits: up to 20 wk one RMP, 20–24 wk two RMPs for specified categories, > 24 wk Medical Board; Form C consent, Form I opinion, Form II monthly report; confidentiality; minors with guardian consent; POCSO reporting for minors), MTP Rules 2003/2021, **Medical Termination — no consent of spouse required**, JSY/JSSK/PMSMA/SUMAN & RCH portal reporting (Mother ID/MCTS), Maternal death review (MDSR), Rh immunoglobulin, GoI ANC guidelines (≥ 4 ANC visits; 12 wk registration; ANC checklist), NABH, DPDP (sensitive: pregnancy/abortion data), Sterilisation standards & consent (family planning), Surrogacy/ART Acts (via OP-024) |
+
+## 1. Purpose
+OP-040 runs the antenatal and gynaecology outpatient service: **ANC registration** (LMP/USG-based **EDD & gestational age engine**, obstetric formula G/P/L/A, history), structured **trimester-wise visits** (vitals/weight gain curve, symphysio-fundal height, FHR, presentation, oedema, urine albumin/sugar, complaints), **investigation & USG schedule** with due/overdue tracking, **risk stratification** with automatic **high-risk flags** (age, BMI, previous LSCS/PPH/stillbirth, HTN/pre-eclampsia risk, GDM, anaemia, Rh negative, multiple pregnancy, placenta praevia, IUGR, PROM, thyroid, cardiac, sickle cell/thalassaemia, HIV/HBsAg, epilepsy, short interval), high-risk clinic pathways (aspirin/calcium/IFA prophylaxis, GDM/HTN monitoring, growth scans, delivery planning), Td/Tdap & IFA/Ca supplementation, birth preparedness & delivery plan (mode, place, blood availability, PAC), **PC-PNDT Form F** and **MTP** statutory workflows with registers/returns, postnatal & newborn linkage, family planning, gynaecology consult (menstrual, PCOS, fibroids, infertility hand-off OP-024, screening Pap/HPV, colposcopy via OP-010), and hand-over to labour room IP-011 with the full ANC card. Framework per OP-025 §0.
+
+## 2. Users & Jobs-to-be-done
+- **Obstetrician** (desktop/tablet; 40–80 ANC + gynae/day): review ANC card, risk flags, USG/labs, plan, prescribe safely (pregnancy categories), counsel, schedule delivery, sign statutory forms.
+- **ANC nurse/counsellor**: registration, vitals/weight/urine, FHR doppler, IFA/Ca/Td, education & birth preparedness, danger-sign counselling, PMSMA/JSY forms, recalls, home/ASHA coordination.
+- **Sonologist**: obstetric USG worklist with Form F pre-filled, structured dating/anomaly/growth reports (OP-008), no-sex-disclosure attestation.
+- **MRD/Quality**: PC-PNDT & MTP registers, monthly Form F/Form II submissions, maternal death/near-miss review data.
+- **Mother** (app): ANC card, next visit, medications, kicks counter, danger signs, classes, EDD countdown, PMSMA reminders.
+
+## 3. Core Workflows
+### 3.1 ANC registration & EDD/GA engine
+1. Console tabs: ANC card · Visits · Risk · Investigations/USG · Medications/Immunisation · Delivery plan · MTP · Postnatal · Gynae · Family planning.
+2. Register pregnancy: LMP (certain/uncertain, cycle length), **EDD** = LMP + 280 d (Naegele, cycle-adjusted) → if early USG (CRL ≤ 14 wk) differs > 5–7 days (config per ACOG-style rule) → **USG-based EDD** becomes working EDD (audit of change); GA auto-computed everywhere (weeks+days); obstetric formula G/P/L/A(E) with previous pregnancy details (year, outcome, mode, weight, complications), medical/surgical/family history, height/weight/BMI, blood group/Rh, consanguinity, contraception, HIV/HBsAg/VDRL status; RCH/Mother ID & PMSMA eligibility, JSY/JSSK/PMJAY flags; ANC card number → visit schedule auto-generated (12, 20, 26, 30, 34, 36, 38, 40 wk config + monthly/fortnightly/weekly rules) → `obg.pregnancy.registered`.
+### 3.2 Visits (trimester-wise)
+- Each visit: GA banner, complaints (danger signs checklist: bleeding, leaking, headache/visual/epigastric pain, reduced FM, fever), BP (both arms first visit; ≥ 140/90 flags; repeat protocol), weight (gain curve vs IOM by BMI), pallor/oedema, urine albumin/sugar dipstick, SFH (cm vs GA ± 3 → IUGR/polyhydramnios flag), fetal lie/presentation/engagement (≥ 36 wk), FHR (doppler device OP-007), fetal movements, breast/pelvic exam when indicated; review labs/USG due; supplements (IFA 60 mg from 12 wk → 180 tabs; calcium 500 mg BID; folic acid pre-conception–12 wk; deworming 2nd trimester), Td/Tdap dose recording (OP-013), aspirin 75–150 mg for high pre-eclampsia risk from 12 wk, GDM diet/insulin, counselling & education (OP-038: nutrition, danger signs, birth preparedness), next visit → sign → ANC card print/app update → `obg.anc.visit.recorded`.
+### 3.3 Investigations & USG schedule
+- Auto-schedule by GA: 1st visit panel (Hb, ABO/Rh, ICT if Rh−, HIV/HBsAg/VDRL/HCV, urine R/M & culture, RBS/OGTT (DIPSI 75 g at booking, 24–28 wk), TSH, HbA1c, haemoglobinopathy screen if policy), 2nd/3rd trimester repeats (Hb, OGTT, ICT), GBS (35–37 wk if policy) → OP-004 orders with due dates; USG: dating (6–10 wk), NT/NB + dual marker (11–13+6), anomaly/TIFFA (18–20 wk), growth ± Doppler (28–32, 36 wk; extra for high-risk) → OP-008 orders with **PC-PNDT Form F** auto-drafted (indication code, referring doctor, patient declaration) → results feed risk engine (low PAPP-A, NT > 3 mm → genetic counselling; placenta previa; EFW < 10th centile; AFI; Doppler indices).
+### 3.4 Risk stratification & high-risk clinic (`obg.high_risk_clinic`)
+- Risk engine (EN-029 obstetric rule set; hospital-configurable): factors from history/vitals/labs/USG → **risk category** (low/moderate/high) & specific flags with recommended pathway (e.g. previous LSCS → VBAC counselling & planned mode; Rh negative → ICT schedule, anti-D at 28 wk & sensitising events; anaemia Hb < 11/< 7 severe → IV iron/transfusion pathway; GDM → glucose monitoring/insulin/dietician; HTN/pre-eclampsia → BP protocol, urine PCR, labs, aspirin/calcium; APH; multiple pregnancy; IUGR; PROM/preterm risk; HIV → PPTCT/ART; HBsAg → newborn HBIG plan; cardiac/thyroid/epilepsy → physician co-management; BMI ≥ 30; age < 18/> 35; short inter-pregnancy interval; bad obstetric history) → high-risk badge on banner/worklist, more frequent visits, PMSMA/State HRP reporting; obstetric early warning (MEOWS) at visits; near-miss/death review link (NC-015 MDSR).
+### 3.5 Delivery planning & hand-over to IP-011
+- From 34–36 wk: delivery plan (place, expected mode: vaginal/planned LSCS with indication & date, VBAC), PAC by anaesthetist (IP-024), blood group & availability request (IP-007) for high-risk, planned admission booking (IP-001), birth companion, transport, JSY/JSSK/PMJAY paperwork, newborn plan (paediatrician alert for high-risk, HBIG/ART, cord blood), consents (LSCS/sterilisation) → **ANC summary bundle** available to labour room; on admission (IP-011) the full ANC card & risk flags display; delivery outcome flows back to close pregnancy episode (outcome, baby links, postnatal schedule).
+### 3.6 PC-PNDT compliance (`obg.pcpndt`)
+- Machine/centre registration & renewal tracked (NC-023), only registered sonologists can report obstetric USG (RBAC + attribute), **Form F** per scan (mandatory fields, patient declaration, referral, indication, result "no sex disclosed" attestation, signature/e-sign) locked with report; monthly Form F register/return export (PDF/CSV per state format) & submission log; audit trail; no fetal-sex fields anywhere; inspection-ready register print.
+### 3.7 MTP workflow (`obg.mtp`)
+- Request → eligibility (GA by USG; category per 2021 amendment: ≤ 20 wk one RMP opinion; 20–24 wk two RMPs & category (rape/incest, minor, change of marital status, disability, fetal anomaly, humanitarian); > 24 wk Medical Board for substantial fetal anomalies) → **Form I** (RMP opinion, two for 20–24 wk), **Form C** (consent; guardian if minor/mentally ill; no spousal consent), POCSO reporting task for minors (with confidentiality nuances), counselling → method (medical: mifepristone/misoprostol regimen with follow-up; surgical: MVA/EVA/D&E via OP-010/IP-006 with anaesthesia) → procedure/administration record → follow-up (bleeding, USG completeness), Rh anti-D if Rh−, contraception counselling → **MTP register** (admission register per Rules; identity kept in sealed/coded register — system stores full identity but MTP register views/prints show serial no. & code with restricted access) → **Form II** monthly report; strict ABAC (MTP data visible only to treating team + designated MRD/MS; excluded from general timeline unless break-glass; excluded from ABDM sharing).
+### 3.8 Postnatal & family planning (`obg.postnatal`, `obg.family_planning`)
+- PNC visits (day 3/7/14/42 or config): involution, lochia, breastfeeding, BP (postpartum pre-eclampsia), EPDS depression screen (OP-032 pathway if ≥ 13 or item 10), contraception (LARC/PPIUCD/sterilisation with consent standards & Form), anaemia; newborn linkage (OP-033/OP-013 schedules); sterilisation/IUCD/implant registers & reporting.
+### 3.9 Gynaecology (`obg.gynae`)
+- Menstrual history & calendar, PCOS work-up, fibroids/adenomyosis, AUB (PALM-COEIN), pelvic exam, cervical screening (Pap/HPV/VIA with recall 3–5 yr), colposcopy/biopsy (OP-010; histopath tracking OP-004), infertility hand-off (OP-024), menopause, gynae-onco referral (OP-031), pre-op planning for hysterectomy/laparoscopy (IP-006).
+### 3.10 Exceptions
+- LMP unknown → USG dating; conflicting EDDs → doctor decision audited; missed visits → recall (ASHA/phone), overdue labs/USG chips; danger signs at visit → same-day obstetric ER path (OP-006/IP-011 triage); PC-PNDT sonologist not registered → report blocked; MTP outside legal limits → hard-stop with board pathway; offline: visit forms cached (ANC camps NC-035).
+
+## 4. Data Model (schema `specialty`; MTP/PC-PNDT tables ABAC-restricted)
+- **pregnancies**: id, hospital_id, branch_id, patient_id, anc_no (numbering `ANC`), lmp date, lmp_certain bool, cycle_days, edd_lmp date, edd_usg date?, usg_dating jsonb (crl_mm, ga_at_scan, scan_date, study_ref), working_edd date, edd_source enum(lmp/usg/clinical), gravida, para, living, abortions, ectopic, obstetric_history jsonb, medical_history jsonb, booking_bmi, blood_group, rh enum(pos/neg), risk_category enum(low/moderate/high), risk_flags jsonb ([{code, since, source, active}]), rch_id, pmsma bool, scheme enum(jsy/jssk/pmjay/none), status enum(active/delivered/aborted/mtp/ectopic/transferred/lost), outcome jsonb (from IP-011), closed_at; index (hospital_id, status), (patient_id), (hospital_id, working_edd).
+- **anc_visits**: id, pregnancy_id, encounter_id, visit_no, ga_weeks, ga_days, complaints jsonb, danger_signs text[], bp_sys/dia (both arms first), weight_kg, weight_gain, pallor, oedema, urine_albumin, urine_sugar, sfh_cm, lie, presentation, engagement, fhr, fetal_movements, exam jsonb, meows_score, supplements jsonb (ifa, ca, fa, aspirin), immunisation jsonb (td doses ref OP-013), counselling text[], plan, next_visit_at, signed_by/at; index (pregnancy_id, visit_no).
+- **anc_schedule_items**: pregnancy_id, kind enum(visit/lab/usg/vaccine/supplement), code, due_ga_weeks, due_at, order_id?, status enum(due/ordered/done/overdue/waived), result_summary jsonb.
+- **anc_risk_assessments**: id, pregnancy_id, at, inputs jsonb, category, flags jsonb, pathway jsonb, by/auto.
+- **delivery_plans**: pregnancy_id, planned_mode enum(vaginal/vbac/planned_lscs), indication, planned_date, place, pac_id?, blood_request_id?, admission_booking_id?, consents jsonb, newborn_plan jsonb, birth_companion, transport, version, signed_by/at.
+- **pcpndt_form_f**: id, hospital_id, branch_id, scan_order_id (OP-008), patient_id, pregnancy_id?, machine_id (registered), centre_reg_no, sonologist_id, referring_doctor, indication_code, declaration jsonb (patient e-sign/thumb), result_summary (no sex fields), signed_at, submitted_in_return_id?, locked bool; index (hospital_id, signed_at); ABAC read: sonologists/MRD/MS.
+- **pcpndt_returns**: hospital_id, month, form_f_ids, file_key, submitted_at, ack_ref.
+- **mtp_cases** (restricted): id, hospital_id, branch_id, patient_id, mtp_serial (per-centre register no.), pregnancy_id?, ga_weeks_by_usg, category enum(le20/20_24/gt24_board), grounds enum, minor bool, guardian_consent_id?, form_i_ids uuid[] (1–2 RMP opinions), form_c_consent_id, medical_board_ref?, method enum(medical/mva/eva/de/other), regimen jsonb, procedure_id?, performed_at, performed_by, complications jsonb, followup jsonb, anti_d bool, contraception jsonb, pocso_report_task_id?, register_locked bool; index (hospital_id, performed_at); RLS/ABAC restricted.
+- **mtp_returns** (Form II monthly): hospital_id, month, counts jsonb, file_key, submitted_at.
+- **pnc_visits**: pregnancy_id, day, findings jsonb, epds, contraception, breastfeeding, referral, by, at; **family_planning_records**: patient_id, method enum(cu_iucd/lng_ius/implant/injectable/ocp/condom/sterilisation_female/male), inserted_at, removed_at, consent_id, register_no.
+- **gynae_consults**: patient_id, encounter_id, menstrual jsonb, palm_coein jsonb, exam jsonb, screening jsonb (pap/hpv/via, next_due), plan, signed_by/at; **cervical_screening_recalls**: patient_id, method, done_at, result, next_due.
+- Enums: `edd_source`, `risk_category`, `pregnancy_status`, `mtp_category`, `mtp_method`, `fp_method`.
+
+## 5. Business Rules & Validations
+- GA computed from working EDD (280 − (EDD − today)); LMP vs early USG discrepancy > 5 d (< 9 wk), > 7 d (9–14 wk) → USG EDD (config); EDD change requires doctor & audit; GA banner everywhere; visit schedule regenerated on EDD change.
+- Danger signs → red banner & same-day obstetrician review/ER; BP ≥ 140/90 → repeat in 15 min protocol & flag; ≥ 160/110 → emergency; proteinuria + HTN → pre-eclampsia pathway; Hb < 7 → severe anaemia pathway; SFH discrepancy ± 3 → growth scan suggestion; reduced FM ≥ 28 wk → NST/CTG (device attach OP-022) or ER.
+- Prescribing (EN-029): pregnancy category/teratogen hard-stops (ACE-i/ARB, warfarin, isotretinoin, methotrexate, valproate, tetracyclines, statins…) with override + reason; lactation flags postnatal; IFA/Ca reminders; anti-D at 28 wk & within 72 h of sensitising event for Rh−; Td/Tdap timing.
+- Risk engine versioned; flags carry source & activation; high-risk requires pathway acknowledgement by obstetrician; MEOWS thresholds config; PMSMA/HRP reporting fields.
+- **PC-PNDT**: obstetric USG report cannot be finalised without locked Form F; only registered sonologist/machine; no field for fetal sex exists in any template; register/return by month; records retained ≥ 2 years (system: permanent).
+- **MTP**: GA gate by USG; ≤ 20 wk 1 Form I; 20–24 wk 2 Form I + category; > 24 wk Medical Board reference mandatory; Form C consent (patient; guardian for < 18/mentally ill; no spouse); minor → POCSO reporting task (with policy on identity disclosure) & confidentiality; only RMPs with MTP training/approved place; MTP register serial gapless; Form II monthly; identity in register views coded; ABAC: MTP data excluded from general timeline/portal/ABDM/referral letters; break-glass audited; access reports to Privacy Officer.
+- Family planning: sterilisation consent standards (Form, waiting period, age/child conditions per GoI standards), IUCD registers; postpartum EPDS ≥ 13 or item 10 → OP-032 pathway.
+- Hand-over: pregnancy status closes only from IP-011 outcome or documented OP outcome (abortion/MTP/transfer); postnatal schedule generated from delivery date; newborn linked (OP-033/OP-013).
+- Documents immutable after sign; ANC card versions; retention: obstetric records long-term; MTP/PC-PNDT statutory retention.
+
+## 6. API Surface (`/api/v1/obg`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| GET | /worklist?date=&risk= | ANC/gynae worklist | obg.visit.read | – | cursor |
+| POST/GET/PATCH | /pregnancies, /pregnancies/{id} | register/update (EDD engine) | obg.pregnancy.create/read/update | Y | cursor |
+| POST | /pregnancies/{id}/edd (recalc/change) | EDD management | obg.pregnancy.update | Y | – |
+| GET | /pregnancies/{id}/schedule | due/overdue items | obg.pregnancy.read | – | – |
+| POST/GET | /pregnancies/{id}/visits | ANC visits | obg.visit.record/sign/read | Y | cursor |
+| POST | /pregnancies/{id}/risk/evaluate, GET /risk | risk engine | obg.risk.read/ack | – | – |
+| POST/PUT | /pregnancies/{id}/delivery-plan | plan | obg.plan.manage | Y | – |
+| GET | /pregnancies/{id}/anc-card.pdf, /handover-bundle | prints & IP-011 hand-over | obg.pregnancy.read | – | – |
+| POST/GET | /pcpndt/form-f, /pcpndt/returns | statutory | obg.pcpndt.record / obg.pcpndt.report | Y | cursor |
+| POST/GET/PATCH | /mtp/cases, /mtp/returns | MTP (restricted) | obg.mtp.manage / obg.mtp.report | Y | cursor |
+| POST/GET | /pnc/visits, /family-planning | postnatal & FP | obg.pnc.record / obg.fp.record | Y | cursor |
+| POST/GET | /gynae/consults, /screening/recalls | gynaecology | obg.gynae.record/read | Y | cursor |
+| POST | /patient/kicks (app scope) | fetal movement counter | patient | Y | – |
+| GET | /reports/rch, /reports/pmsma, /reports/kpis | reports | obg.report.read | – | – |
+
+## 7. Domain Events (outbox)
+- `obg.pregnancy.registered|edd_changed|closed`, `obg.anc.visit.recorded` {ga, risk}, `obg.risk.high_flag` {codes} → worklist/PMSMA, `obg.danger_sign` → ER/obstetrician, `obg.schedule.due|overdue` → PE-002/EN-009, `obg.usg.ordered` (→ OP-008 with Form F draft), `obg.pcpndt.form_f.locked|return.submitted`, `obg.mtp.case.created|completed|return.submitted` (restricted payload — ids only), `obg.delivery_plan.signed` → IP-001 booking, IP-007 request, IP-024 PAC, `obg.handover.ready` → IP-011, `obg.pnc.visit.recorded`, `obg.epds.high` → OP-032, `obg.fp.recorded`, `obg.screening.recall_due`.
+- Consumes: `lab.result.final` (ANC labs → schedule/risk), `rad.report.final` (USG → EDD/risk), `vaccine.administered` (Td), `labour.admitted|delivered` (IP-011 → close/outcome/PNC), `er.visit.created` (obstetric), `visit.no_show`, `consent.recorded`.
+
+## 8. Screens (UI)
+1. **ANC worklist** (desktop): GA column, risk badge (red high), overdue labs/USG chips, PMSMA/JSY icons, danger-sign flag.
+2. **ANC card workspace** (desktop/tablet): banner (GA weeks+days, EDD, G/P/L/A, blood group/Rh, risk), tabs; visit form with weight-gain & BP sparkline, SFH vs GA chart, FHR device read, supplements/vaccine tick-boxes, danger-sign checklist; `F2` normal fill; `Ctrl+Enter` sign; ANC card print (GoI MCP card style + hospital format).
+3. **Schedule & investigations panel**: timeline by GA with due/done/overdue; one-click order; USG results summary with PACS thumbnails.
+4. **Risk & pathway view**: flags with sources, recommended actions checklist, acknowledgement.
+5. **Delivery planner** (desktop): mode/date, PAC/blood/admission status chips, consents, newborn plan; hand-over bundle preview.
+6. **PC-PNDT console** (sonologist/MRD): Form F entry locked to scan, machine registry, monthly return generator/print.
+7. **MTP console** (restricted): eligibility calculator, Form I/C wizard, board reference, procedure link, register (coded), Form II; lock icon & break-glass.
+8. **PNC/FP & Gynae screens**; **Mother app** (phone): ANC card, next visit, kicks counter, danger signs (call button), classes, medicines.
+- Empty/error: unknown LMP prompt; USG EDD conflict dialog; PC-PNDT sonologist not registered → block message.
+
+## 9. Integrations
+- OP-008/PACS obstetric USG templates & Form F, OP-004 ANC panels/OGTT, OP-013 Td/Tdap, IP-011 hand-over (bundle + events), IP-001/IP-006/IP-024/IP-007 planning, EN-029 obstetric rule set (risk & drug safety), RCH portal/MCTS & PMSMA/HRP reporting (EN-017 connectors/CSV per state), state PC-PNDT & MTP return formats, OP-038 ANC classes, OP-020 mother app, FHR doppler/CTG devices (EN-042/OP-022 for NST strips), NC-023 PC-PNDT licence tracker, EN-011 ABDM (share ANC summary with consent; MTP excluded).
+
+## 10. Reports & Analytics
+- ANC registrations (< 12 wk %), ≥ 4 visits %, high-risk prevalence & pathway compliance, anaemia/GDM/HTN rates, USG/lab schedule compliance, PMSMA days, Td/IFA coverage, delivery plan completion, LSCS rate (with IP-011), maternal near-miss/deaths (MDSR), PC-PNDT Form F counts/returns, MTP counts by category/method (Form II) — restricted, PNC coverage & EPDS positives, FP acceptors, cervical screening coverage, RCH/HMIS returns. Read models `analytics.anc_monthly`, `analytics.obg_statutory` (restricted).
+
+## 11. Notifications
+- Mother (consent, privacy-safe): visit/lab/USG reminders, IFA/Ca daily nudges (opt-in), Td due, danger-sign advice, class schedule, delivery plan/admission date, PNC visits, contraception follow-up, screening recall. Staff: danger signs, high-risk new flags, overdue high-risk visits, USG without Form F, PC-PNDT/MTP returns due, EDD conflicts, PAC/blood pending 2 weeks before planned LSCS, EPDS high.
+
+## 12. Permissions (RBAC keys)
+`obg.visit.read`, `obg.pregnancy.create|read|update|close`, `obg.visit.record|sign`, `obg.risk.read|ack`, `obg.plan.manage`, `obg.pcpndt.record|report|read`, `obg.mtp.manage|read|report|break_glass`, `obg.pnc.record`, `obg.fp.record`, `obg.gynae.record|read`, `obg.report.read`, `obg.configure`; ABAC attributes: `pcpndt_registered_sonologist`, `mtp_approved_rmp`. Defaults: Obstetrician — all clinical (mtp.manage only if attribute); ANC nurse — pregnancy.create, visit.record, schedule, pnc/fp record; Sonologist — pcpndt.record (attribute); MRD — pcpndt.report, mtp.report (register views coded); MS — reports/break-glass audit; Resident — record no sign; Patient — own ANC card/app.
+
+## 13. Non-functional
+- Volumes: 300 ANC visits/day enterprise, 5 000 active pregnancies, 120 obstetric USG/day, MTP per policy; EDD/GA calc deterministic (unit tests incl. leap years); schedule generation < 200 ms; risk evaluation < 100 ms; offline: ANC visit forms for camps; print: ANC/MCP card (regional languages), Form F, MTP Forms I/C/II, sterilisation forms; privacy: MTP tables separate RLS policies + column encryption; audits to Privacy Officer.
+
+## 14. Acceptance Criteria (plus OP-025 §0.9)
+1. Given LMP 2026-01-10 (28-day cycle), then EDD = 2026-10-17 and GA on 2026-04-16 = 13 w 5 d; given a 12-week USG suggests EDD 2026-10-25 (8 days later), then the working EDD switches to USG with audit and the schedule regenerates.
+2. Given BP 150/96 at a 30-week visit, then a repeat-BP prompt appears; a second reading ≥ 140/90 sets the HTN/pre-eclampsia flag with pathway checklist and urine PCR order suggestion.
+3. Given Rh-negative mother, then ICT schedule and anti-D at 28 weeks are auto-scheduled and shown due; missing anti-D at 30 weeks flags overdue.
+4. Given previous LSCS and age 36, then risk category high with flags and PMSMA/HRP fields, and the worklist shows a red badge.
+5. Given an obstetric USG order, then Form F is drafted with patient declaration; the radiology report cannot be finalised until Form F is locked by a registered sonologist; the monthly return lists it.
+6. Given an MTP request at 22 weeks for fetal anomaly, then two Form I opinions and category are required before scheduling; at 25 weeks the system requires a Medical Board reference and blocks otherwise.
+7. Given an MTP case, then it does not appear on the general patient timeline/portal/ABDM bundle; a non-team doctor opening it triggers break-glass with reason and Privacy Officer notification; the MTP register print shows serial and code only.
+8. Given enalapril prescribed to a pregnant patient, then hard-stop with override reason path.
+9. Given the delivery plan is signed for planned LSCS at 39 weeks, then IP-001 booking, IP-024 PAC and IP-007 blood availability requests are created and the hand-over bundle is available to IP-011.
+10. Given IP-011 records delivery, then the pregnancy closes with outcome, PNC schedule (day 3/7/14/42) generates, and the newborn is linked to OP-033/OP-013.
+11. Given EPDS 15 at PNC day 42, then OP-032 pathway alert is raised.
+12. Given an ANC nurse attempts to sign a visit or lock Form F, then 403 and audit.
+13. Given a mother app user, then she sees her ANC card, next visit and kick counter but no MTP data ever.
+
+## 15. Enhancements / Later phases
+- New module (M) requested by index; competitor gap: full obstetric case record (antepartum/intrapartum/postnatal continuity, market). Later: CTG/NST device streaming & AI interpretation (EN-042/AI-007), home BP/glucose monitoring for GDM/HTN in app, tele-ANC for rural (OP-018/NC-035), RCH portal APIs when available, maternal MDSR analytics, fetal medicine module (invasive procedures CVS/amnio with genetic reports), lactation clinic, gynae-onco tumour board integration (OP-031), PCOS lifestyle programme (OP-014).
+
+## 16. Open Questions for the Hospital
+1. ANC visit schedule & investigation panel policy; growth scan schedule; GDM screening method (DIPSI vs 75 g OGTT)?
+2. PC-PNDT: registered machines/sonologists list, state return format & appropriate authority; MTP: approved place registration, RMP list, state Form II format?
+3. Government schemes (JSY/JSSK/PMSMA/PMJAY) & RCH portal reporting obligations?
+4. Risk-stratification rules to seed (state HRP definitions); MEOWS thresholds?
+5. Labour room hand-over expectations (IP-011) and postnatal follow-up ownership; mother app features/consent?
+6. Family planning services & sterilisation camps?

@@ -1,0 +1,164 @@
+# NC-026 — Marketing & CRM (Lead Capture & Conversion, Campaigns, Referral Source Tracking, Patient Loyalty, Camps Link, Online Reputation/Google Reviews, Corporate & Doctor Relations)
+
+| Field | Value |
+|---|---|
+| Domain | Non-Clinical / ERP |
+| Module ID | NC-026 |
+| Phase | 10 |
+| Priority | P2 |
+| Complexity | Medium |
+| Depends on | OP-001 (patient MPI, appointments — lead → patient conversion, referral source on registration), EN-009 (SMS/WhatsApp gateways, DLT templates, bulk campaigns, opt-in/out, DND), EN-032 (email campaigns), EN-012 (website widgets/forms → leads; landing pages; SEO), EN-033 (IVR/call centre — inbound enquiries → leads, call dispositions), AI-001 (chatbot leads/hand-off), EN-030 (post-visit feedback/NPS → review routing to Google), NC-032 (grievances → service recovery; detractor follow-up), PE-001/OP-020 (patient app: offers, loyalty wallet), PE-005 (loyalty & wellness programme engine — points/rewards; NC-026 configures campaigns and segments), OP-014 (health-check packages & corporate wellness sales), NC-012/PE-006 (corporate clients — account management), OP-021/PE-007 (referring doctors — relationship management, referral analytics; payouts in NC-034 with NMC guard), NC-035 (camps — lead source, follow-up conversion), OP-005/IP-005 (revenue attribution by source/campaign, discount coupons validation), RC-003 (offer pricing/packages), NC-022 (marketing budget), NC-011/EN-001 (analytics), EN-028/DPDP (marketing consent ledger, purpose limitation), EN-024 |
+| Feature flag | `module.crm.enabled` (sub: `crm.leads`, `crm.campaigns`, `crm.reputation`, `crm.loyalty` (uses PE-005), `crm.corporate_accounts`, `crm.doctor_relations`, `crm.coupons`) |
+| Primary roles | Marketing / CRM Executive, Marketing Manager, Call-centre agents (25), Business development (corporate/doctor relations) |
+| Secondary roles | Front office (24; lead capture at desk), Hospital Admin (2), Finance (46; budget/ROI), Camp coordinator (NC-035), Doctors (own referral/patient feedback insights limited), Patient (opt-in/out), Auditor (58) |
+| Regulatory | DPDP Act 2023 & Rules 2025 (marketing requires specific consent; purpose limitation; withdrawal as easy as opt-in; no processing of children's data for targeted ads; consent records), TRAI TCCCPR 2018 (DLT registration of headers/templates; promotional vs service categories; DND scrubbing; preferred time 10:00–21:00; consent templates), IT Rules, NMC Code of Ethics 2002 §6.1/§6.4 & Professional Conduct regs (no solicitation/advertisement by doctors beyond permitted; no commission for referrals — kickback guard with NC-034/OP-021), Drugs & Magic Remedies (Objectionable Advertisements) Act 1954 (no claims for listed conditions), Consumer Protection Act 2019 (misleading ads; celebrity endorsements), ASCI code, PC-PNDT (no sex-selection advertising), Clinical Establishments Act (display of rates; truthful advertising), CGST (marketing services, coupons/discount treatment on invoices), Google/Meta platform policies (healthcare ads restrictions), Copyright/trademark |
+
+## 1. Purpose
+NC-026 gives the hospital a **healthcare-compliant CRM**: capture enquiries/leads from every channel (website, chatbot, calls, walk-ins, camps, corporate, social, referrals), qualify and follow up to conversion (appointment/admission/package purchase) with attribution; run **consent-based campaigns** (WhatsApp/SMS/email/app push/IVR) to segments built from de-identified clinical/utilisation attributes with strict DPDP/TRAI controls; manage **referral sources** (doctors, clinics, corporates, agents — analytics only, no clinician-facing incentives) and **corporate/doctor relationship** activities; drive **loyalty** (via PE-005) and **online reputation** (Google/Practo reviews routing from EN-030, response workflow); coupons/offers with billing validation; and measure marketing ROI (cost per lead/acquisition, revenue by source/campaign) against NC-022 budget.
+
+## 2. Users & Jobs-to-be-done
+- **CRM executive** (desktop + phone): work the lead queue (call, WhatsApp, schedule callbacks), log dispositions, book appointments (OP-001) from lead, convert, tag source/campaign; respond to reviews; manage coupons.
+- **Marketing manager**: plan campaigns (audience, channel, content, DLT template, budget), approvals (medical content review), launch, monitor delivery/response/conversions/ROI; segments; camps calendar with NC-035; reputation dashboard.
+- **Business development**: corporate accounts (visits, MoUs, wellness camps, utilisation reviews with PE-006/NC-012), doctor relations (referral trends, CME invitations, visit logs) — with NMC-compliant boundaries.
+- **Call-centre agent**: inbound enquiry capture (EN-033 screen-pop), outbound follow-ups, campaign response handling.
+- **Front office**: capture "how did you hear about us" (referral source master) at registration; walk-in enquiries as leads.
+- **Admin/Finance**: ROI, budget vs spend, revenue by source; consent audits.
+
+## 3. Core Workflows
+### 3.1 Lead capture & qualification (`crm.leads`)
+1. Sources → **System** creates lead: website form/landing page (EN-012 webhook with UTM), chatbot (AI-001), IVR/call (EN-033 screen-pop; missed-call capture), WhatsApp inbound (EN-009), walk-in/front desk, camp registration (NC-035 events), corporate HR request (PE-006), referral portal (PE-007), social/paid ads (Meta/Google lead forms via EN-017 webhook), phone directory/manual import; fields: name, phone (dedupe against MPI OP-001 → existing patient link), city, interest (specialty/doctor/package/procedure/second opinion/international), preferred time, language, source & campaign attribution (UTM/campaign_id/referrer), **consent flags** (contact for this enquiry = service; marketing = separate opt-in) → lead score (rules: interest value, urgency, source quality) → auto-assign (round-robin per specialty/language; SLA first response e.g. 15 min working hours) → Event `crm.lead.created`.
+2. **Executive** works lead: call/WhatsApp (templates), disposition enum(contacted/interested/not_reachable/callback/junk/duplicate/converted/lost with reason), notes, next action date; **book appointment** (OP-001 API; slot search) or **estimate/quote** (RC-008) or package (OP-014/OP-023) → conversion when appointment attended/admission/package paid (events from OP-001/IP-001/OP-005) → attributed revenue (first-touch/last-touch configurable) → Event `crm.lead.converted|lost`.
+3. Escalation: unattended lead > SLA → manager; hot leads (surgery/international) → BD; duplicate merge; DPDP: lead data retention (e.g. 180 days for lost leads then anonymise).
+
+### 3.2 Referral source master & attribution
+- Master of sources: categories enum(walk_in/doctor_referral/hospital_referral/corporate/insurance_tpa/camp/website/social/google_ads/print/tv_radio/hoarding/word_of_mouth/patient_referral/agent/govt_scheme/international_facilitator/other) with named entities (doctor/clinic/corporate/agent — shared `external_referrers` with OP-021/PE-007) → captured at OP-001 registration/visit and IP-001 admission → revenue by source (analytics), trend, new vs repeat; **anti-kickback guard**: source analytics visible to marketing/finance only; any payout must go through NC-034 with signed agreement & compliance flags; clinicians never see source-linked incentives.
+
+### 3.3 Segments & campaigns (`crm.campaigns`)
+1. **Manager** builds **segment** from de-identified attributes (age band, gender, locality/pincode, last visit recency, service line used (e.g. diabetes clinic → foot screening camp), package due (annual health check anniversary), chronic programme enrolment (with clinical-team approval), corporate, loyalty tier, language) — **only patients with marketing consent** (EN-028 ledger) & not DND for promotional SMS (TRAI scrub); exclusions (deceased, minors, opted-out, sensitive categories: psychiatry/HIV/fertility/oncology unless explicit consent for programme messages) → count preview.
+2. Campaign: objective enum(awareness/health_camp/package_offer/follow_up_recall (service category)/vaccination_drive/festival_offer/doctor_launch/reputation), channels (WhatsApp template (Meta approved), SMS (DLT promotional/service template), email, app push, IVR voice, print/OOH (offline tracking only)), content (medical claims **review & approval** by medical director — Drugs & Magic Remedies/ASCI checklist), schedule (TRAI 10:00–21:00 for promotional), budget/cost, UTM/short links (per-recipient tracked), coupon code (3.5), A/B variants → approvals (EN-038: marketing head + medical content reviewer + DPO for sensitive segments) → launch via EN-009/EN-032/EN-037 (throttled) → delivery/read/click/reply tracking → responses become leads (3.1) → conversions & revenue attribution → ROI = attributed revenue − cost → Event `crm.campaign.launched|completed`.
+3. Recall/service messages (follow-ups, vaccination due) are owned by PE-002/OP-013 as **service** category (no marketing consent needed) — NC-026 must not repurpose them for promotions.
+
+### 3.4 Loyalty & patient referral (`crm.loyalty`, engine in PE-005)
+- Configure earning rules (points per ₹ on OP/pharmacy/health-check; bonus for referrals of new patients — non-cash rewards permitted; no doctor involvement), tiers, redemption (discount on packages/pharmacy — validated at OP-005), expiry; wallet in PE-001/OP-020; campaigns targeting tiers; **patient-refers-patient** codes with attribution; compliance: no rewards for prescriptions/diagnostics inducement contrary to policy.
+
+### 3.5 Coupons & offers (`crm.coupons`)
+- Coupon master (code, discount type/value, applicable services/packages (RC-003), payer restrictions (not on insurance/scheme), validity, usage limits per patient/total, channels, campaign link) → OP-005 validates at billing (discount reason "coupon", approval matrix bypass within limits; audit) → redemption analytics.
+
+### 3.6 Reputation management (`crm.reputation`)
+- EN-030 post-visit NPS: promoters (9–10) → invite to Google/Practo/JustDial review link (per branch/doctor page); passives/detractors → NC-032 service recovery ticket (no review invite — no review gating that violates platform policy: option to always show link, configurable); **review inbox**: pull reviews (Google Business Profile API via EN-017), sentiment tag, assign, draft reply (templates; no PHI in replies), approve, post; rating trends by branch/doctor; alerts for ≤ 2-star; competitor benchmark (manual).
+
+### 3.7 Corporate & doctor relations (`crm.corporate_accounts`, `crm.doctor_relations`)
+- **Accounts** (corporates, TPAs, referring hospitals/clinics, facilitators): contacts, MoUs (NC-031), visit/meeting logs, wellness camp plans (NC-035), utilisation reviews (PE-006/NC-012 data), renewals, opportunities pipeline (health-check contracts, OPD tie-ups) with value/stage → forecast.
+- **Doctor relations**: referring doctor profiles (OP-021 master), referral trends (counts, specialties — no per-referral money view), CME/webinar invitations & attendance (NC-027 events), feedback loop (report turnaround to referrer via PE-007), visits by BD executive; strict NMC compliance banner; any incentive discussion blocked in UI notes (keyword flag).
+
+### 3.8 Camps link (NC-035)
+- Camp calendar & lead sourcing; camp registrations flow into leads with follow-up tasks; conversion tracking to appointments/procedures; camp ROI.
+
+### 3.9 Consent & preference centre
+- Patient preference page (PE-001/app/WhatsApp keyword STOP/START, IVR key): marketing consent per channel & language; withdrawal effective immediately (EN-028 ledger, EN-009 suppression); consent audit report for DPO; children/guardian rule.
+
+## 4. Data Model (schema `engage`, prefix `crm_`)
+- **crm_sources** (id, hospital_id, category enum, name, external_referrer_id? (OP-021), corporate_id? (NC-012), active, utm_defaults jsonb).
+- **crm_leads**: id, hospital_id, branch_id, lead_no, patient_id? (OP-001 link), name, phone (citext, encrypted), email?, city, pincode, language, interest jsonb {specialty_id?, doctor_id?, package_id?, procedure, notes}, source_id, campaign_id?, utm jsonb, channel enum(web/chatbot/call/whatsapp/walk_in/camp/corporate/referral_portal/social/import), consent_service bool, consent_marketing bool, consent_ref (EN-028), score int, assigned_user_id, first_response_due_at, first_response_at, status enum(new/contacted/qualified/appointment_booked/converted/lost/junk/duplicate/merged), lost_reason?, converted_ref jsonb {type, id, at, revenue}, next_action_at, merged_into_id?, retention_until, version. INDEX (hospital_id, status, assigned_user_id), (phone), (source_id), (campaign_id), (created_at desc). Partition optional by month for high volume.
+- **crm_lead_activities** (lead_id, at, by, type enum(call/whatsapp/sms/email/note/appointment/quote/status_change/callback), disposition, duration_s?, recording_ref? (EN-033), payload jsonb).
+- **crm_segments** (id, name, definition jsonb (rule tree), last_count, last_built_at, includes_sensitive bool, approvals jsonb), **crm_segment_members** (segment_id, patient_id, built_at) — transient.
+- **crm_campaigns**: id, hospital_id, branch_id?, code, name, objective enum, segment_id?, channels jsonb [{channel, template_id (EN-009 DLT/WhatsApp), variant}], content jsonb, medical_review jsonb {reviewer, at, checklist}, dpo_review jsonb?, schedule jsonb, budget numeric, spend numeric, coupon_id?, utm jsonb, status enum(draft/pending_approval/approved/scheduled/running/paused/completed/cancelled), metrics jsonb {sent, delivered, read, clicked, replied, opted_out, leads, conversions, revenue}, created_by. INDEX (hospital_id, status), (code).
+- **crm_campaign_sends** (partitioned): campaign_id, patient_id/lead_id, channel, message_id (EN-009), sent_at, delivered_at, read_at, clicked_at, replied_at, opted_out_at, variant, short_link_code.
+- **crm_short_links** (code, target_url, campaign_id, recipient_ref, clicks, created_at).
+- **crm_coupons** (id, code, name, discount_type enum(pct/flat), value, applicable jsonb {services, packages, departments}, excluded_payers jsonb, valid_from/to, max_uses_total, max_uses_per_patient, channels, campaign_id?, status), **crm_coupon_redemptions** (coupon_id, patient_id, bill_id, amount, at).
+- **crm_reviews** (id, platform enum(google/practo/justdial/facebook/internal), external_id, branch_id, doctor_id?, rating, text, author (masked), posted_at, sentiment, assigned_to, reply_draft, reply_approved_by, replied_at, status, feedback_id? (EN-030)). UNIQUE (platform, external_id).
+- **crm_accounts** (id, type enum(corporate/tpa/referring_hospital/clinic/facilitator/agent/ngo/govt), name, corporate_id?/external_referrer_id?, owner_user_id, contacts jsonb, mou_contract_id? (NC-031), status, tier), **crm_opportunities** (account_id, name, value, stage enum(prospect/proposal/negotiation/won/lost), expected_close, owner, notes), **crm_activities** (account_id/doctor_id, type enum(visit/call/meeting/cme/webinar/gift_declared?/email), at, by, notes, next_action) — `gift_declared` limited & policy-checked, **crm_events** (CME/webinars: name, date, invitees, attendance link NC-027).
+- **crm_preferences** (patient_id, channel, marketing_opt_in bool, language, updated_at, source enum(portal/whatsapp_keyword/ivr/desk), consent_ref) — mirrors EN-028.
+- **analytics.crm_daily** (branch, date, source, campaign, leads, contacted, converted, revenue, cost, cpl, cpa, nps, reviews_avg).
+- RLS; phone/email encrypted; retention: leads lost/junk anonymised after 180 days (config); campaign sends 2 years; consent ledger permanent (EN-028).
+
+## 5. Business Rules & Validations
+- No campaign send without: valid consent per channel (marketing), DND scrub for promotional SMS, approved DLT/WhatsApp template, medical content review, schedule within TRAI window; sensitive segments require DPO approval and explicit programme consent; opt-out honoured within minutes across all channels (EN-009 suppression list).
+- Lead SLA: first response within configured minutes during working hours; unassigned > 5 min → round-robin fallback; duplicate detection by phone within 30 days → merge.
+- Attribution model configurable (first/last touch; conversion window 90 days); revenue attribution read from OP-005/IP-005 finalized bills only; never adjusts bills.
+- Coupons: OP-005 validates eligibility (services/payer/limits/validity); coupon discounts within pre-approved limits bypass approval matrix; audit trail; not stackable unless flagged; not applicable to insurance/scheme payer bills.
+- Reputation: no PHI in replies (regex/AI guard for names/UHID/diagnoses); replies approved by manager; review invitations only after visit completion; no incentives for reviews.
+- Doctor/corporate relations: notes scanned for incentive keywords → compliance flag; referral analytics aggregate only; per-referral monetary data lives only in NC-034 with legal agreements; UI banner on NMC compliance.
+- Loyalty rules cannot reward prescriptions/diagnostic ordering by clinicians; patient-referral rewards non-cash or wallet credits per policy; GST treatment per NC-009.
+- Lead & campaign numbering `LEAD`, `CAMP`; audit on consent changes, campaign approvals, coupon config.
+
+## 6. API Surface (`/api/v1/crm`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| POST | /leads (internal) ; POST /webhooks/leads/{source} (web/chatbot/ads/IVR; signed) | capture | crm.lead.create / integration.crm.ingest | Y | – |
+| GET/PATCH | /leads?status=&assignee=&source= ; GET /leads/{id} ; POST /leads/{id}/(assign|activity|book-appointment|convert|lose|merge) | lead work | crm.lead.read|manage (ABAC own assigned) | Y | cursor |
+| GET/POST/PATCH | /sources | source master | crm.source.manage / .read | Y | – |
+| POST/GET | /segments ; POST /segments/{id}/build (count preview) | segments | crm.segment.manage | Y | cursor |
+| POST/GET/PATCH | /campaigns ; POST /campaigns/{id}/(submit|approve|schedule|launch|pause|resume|cancel) ; GET /campaigns/{id}/metrics | campaigns | crm.campaign.manage / .approve (marketing head, medical reviewer, DPO) | Y | cursor |
+| GET | /l/{short_code} (public redirect + click tracking) | short links | – | – | – |
+| POST/GET | /coupons ; POST /coupons/validate {code, patient_id, services} (OP-005) ; POST /coupons/{id}/redeem | coupons | crm.coupon.manage / billing.coupon.validate | Y | cursor |
+| GET/POST | /reviews ; POST /reviews/sync ; POST /reviews/{id}/(assign|draft|approve|reply) | reputation | crm.review.manage / .approve | Y | cursor |
+| GET/POST/PATCH | /accounts ; /opportunities ; /activities ; /events | relations | crm.account.manage / .read | Y | cursor |
+| GET/PUT | /preferences/{patient_id} ; POST /webhooks/optout (EN-009 STOP) | consent prefs | crm.preference.manage / integration | Y | – |
+| GET | /dashboard ; /reports/(funnel|source-revenue|campaign-roi|sla|coupons|reputation|corporate-pipeline|doctor-referral-trends|consent-audit) | analytics | crm.report.read | – | – |
+
+## 7. Domain Events (outbox)
+- `crm.lead.created|assigned|contacted|qualified|converted|lost|merged` {lead_id, source, campaign, patient_id?} → EN-037 (assignee), OP-001 (appointment link), NC-035 (camp conversion), NC-011.
+- `crm.campaign.submitted|approved|launched|paused|completed` {campaign_id, channels, audience_count} → EN-009/EN-032/EN-037 send jobs, NC-022 spend, NC-011.
+- `crm.campaign.message.sent|delivered|read|clicked|replied|opted_out` (from EN-009 callbacks) → metrics, lead creation on reply.
+- `crm.coupon.redeemed` {coupon_id, bill_id, amount} → analytics, campaign ROI.
+- `crm.review.received|replied|low_rating` {platform, rating, branch, doctor?} → NC-032 (service recovery), admin alerts.
+- `crm.preference.changed` {patient_id, channel, opt_in} → EN-028 consent ledger, EN-009 suppression, PE-001.
+- `crm.account.opportunity.won` → NC-012/PE-006 (corporate onboarding), NC-031 (MoU).
+- Consumes: `patient.registered` (source capture), `appointment.booked|completed|no_show` (OP-001 conversion), `ip.admitted`, `bill.finalized|ip.bill.finalized` (revenue attribution), `feedback.received` (EN-030 NPS → reputation), `grievance.ticket.closed` (NC-032 service recovery), `camp.registration.created|camp.completed` (NC-035), `chatbot.lead` (AI-001), `ivr.call.logged` (EN-033), `web.form.submitted` (EN-012), `consent.withdrawn` (EN-028), `sms.dlr|whatsapp.status` (EN-009), `loyalty.points.earned|redeemed` (PE-005).
+
+## 8. Screens (UI)
+- **Lead Inbox** (desktop; phone list view): queue by status/SLA with colour timers, lead card (contact actions: click-to-call via EN-033, WhatsApp template picker, quick note), disposition modal, book appointment drawer (OP-001 slot search), convert; shortcuts `C` call, `W` WhatsApp, `B` book, `N` note, `J/K` navigate.
+- **Lead 360**: timeline of activities & messages, attribution, patient link (limited PHI: name/UHID/upcoming appointment; no clinical details), consent status.
+- **Campaign Studio** (desktop): wizard Objective → Audience (segment builder with live count & compliance checks: consent %, DND excluded, sensitive flag) → Content (template picker showing DLT/WhatsApp approval status, preview per language, variants) → Schedule/Budget → Approvals → Launch; live metrics dashboard (funnel: sent→delivered→read→click→lead→conversion→revenue), heat by hour.
+- **Segment Builder**: rule tree UI (attribute/operator/value), preview count, save; sensitive-category warning.
+- **Coupon Manager**; **Reputation Inbox** (reviews list, sentiment chips, reply editor with PHI guard, approvals; rating trend charts).
+- **Accounts & Pipeline** (kanban by stage; account 360 with activities, MoU, utilisation charts from PE-006/NC-012).
+- **Doctor Relations** (list of referrers with aggregate trends, visits/CME log; compliance banner).
+- **Marketing Dashboard** (desktop/TV): leads by source, conversion %, CPL/CPA, campaign ROI, NPS & reviews, corporate pipeline value, budget vs spend (NC-022).
+- **Preference Centre** (patient-facing in PE-001/app/web link): toggles per channel/language; confirmation.
+- Empty/error states; WCAG 2.2 AA; i18n (templates multi-language).
+
+## 9. Integrations
+- EN-009 (WhatsApp Cloud API templates & interactive replies, SMS DLT, DND scrub, suppression), EN-032 email (SES/SMTP, unsubscribe headers), EN-037 push, EN-033 IVR/CTI (screen-pop, click-to-call, recordings), EN-012 web forms/landing pages/UTM, AI-001 chatbot leads, Meta Lead Ads & Google Ads lead-form webhooks + conversion upload (offline conversions with hashed identifiers only after consent) via EN-017, Google Business Profile API (reviews read/reply), Practo/JustDial (where API/CSV), URL shortener (own domain), OP-001 appointments/MPI, OP-005 coupon validation & revenue, PE-005 loyalty engine, EN-030 NPS, NC-032 tickets, NC-035 camps, PE-006/NC-012 corporate data, OP-021/PE-007 referrers, NC-031 MoUs, NC-022 budget, EN-028 consent ledger, NC-011 analytics.
+
+## 10. Reports & Analytics
+- Lead funnel by source/channel/specialty/executive (new→contacted→qualified→booked→converted), first-response SLA %, conversion %, lost reasons, CPL/CPA, revenue by source & campaign (first/last touch), campaign performance (delivery/read/click/reply/opt-out; ROI), coupon redemptions & discount cost, NPS & review ratings trend by branch/doctor, response time to reviews, corporate pipeline & won value, doctor referral trends (aggregate counts, new vs lapsed referrers), camp conversion (NC-035), loyalty programme metrics (PE-005), consent coverage & opt-out rates, budget vs spend (NC-022), executive productivity. Read model `analytics.crm_daily`.
+
+## 11. Notifications
+- Executive: new lead assigned (push), SLA breach warning, callback due; Manager: unassigned leads, campaign approvals, low ratings, opt-out spikes, budget overrun; Medical reviewer/DPO: content/segment approvals; Patient: campaign messages (consented, DLT/WhatsApp templates), coupon/offer, review invitation (post-visit), preference confirmations; Corporate/doctor contacts: event invitations (email/WhatsApp with consent).
+
+## 12. Permissions (RBAC keys)
+`crm.lead.create|read|manage` (ABAC own assigned; manager all), `crm.source.manage|read`, `crm.segment.manage`, `crm.campaign.manage|approve` (approve split: marketing head / medical reviewer / DPO by campaign attributes), `crm.coupon.manage`, `billing.coupon.validate` (OP-005 service), `crm.review.manage|approve`, `crm.account.manage|read`, `crm.preference.manage`, `crm.report.read`, `crm.export` (audited; no clinical fields), `crm.configure`; `integration.crm.ingest`. Defaults: Marketing/CRM (55) manage; Call centre (25) lead work; Receptionist (24) lead create/source capture; Hospital Admin (2) approve/reports; MS (4) medical content approve; DPO (57) sensitive approvals & consent audit; Finance (46) reports.
+
+## 13. Non-functional
+- Volumes: 500–2,000 leads/day (campaign peaks 10k), campaigns to 200k recipients (throttled per gateway TPS), 5k review sync/day; lead inbox p95 < 200 ms; segment count preview < 5 s for 1M patients (analytics read model/pre-aggregates); short-link redirect < 50 ms (Redis).
+- Security/privacy: marketing data class separated from clinical; segments computed on analytics replica with minimal fields; exports audited; encryption of contacts; consent checks at send time (not only at segment build); RLS.
+- Offline: not required (executive app online); i18n templates; WCAG 2.2 AA; TV dashboard mode.
+
+## 14. Acceptance Criteria
+1. Given a website form submission with UTM (source=google, campaign=knee_replacement), then a lead is created within 5 s, deduped against MPI by phone, assigned round-robin to an ortho CRM executive, and first-response SLA timer starts.
+2. Given a lead not contacted within 15 working minutes, then the manager is alerted and the lead shows SLA breach in the queue.
+3. Given an executive books an appointment from the lead and the patient attends, then the lead auto-converts with attribution and revenue from the finalized bill appears in source/campaign reports.
+4. Given a promotional SMS campaign scheduled at 21:30, then scheduling is rejected (TRAI window); at 20:00 with 10k recipients, only consented & non-DND numbers are sent using the approved DLT template.
+5. Given a segment including psychiatry patients, then the campaign requires DPO approval and explicit programme consent; without it, launch is blocked.
+6. Given a patient replies STOP on WhatsApp, then marketing opt-in is set false within 1 min, EN-028 ledger records withdrawal, and any running campaign excludes the patient.
+7. Given coupon KNEE10 valid for ortho packages only, when applied to a lab bill in OP-005, then validation fails; when applied to an eligible package for a self-pay patient, discount applies within limit and redemption is recorded.
+8. Given a 1-star Google review synced, then it appears in the reputation inbox with alert to manager, a service-recovery ticket is created in NC-032, and a reply containing a UHID pattern is blocked by the PHI guard.
+9. Given a BD activity note containing "commission per referral", then the note is flagged for compliance review and the user sees the NMC compliance warning.
+10. Given the campaign completes, then ROI = attributed revenue (90-day window) − cost is shown, and NC-022 marketing budget spend is updated.
+11. Given a user with `crm.lead.read` only, then they cannot export leads (403) and cannot see clinical details on the lead 360.
+
+## 15. Enhancements / Later phases
+- From VIMS sheet: lead capture, campaign track, patient loyalty, referral bonus (loyalty via PE-005; referral payouts only via NC-034 with NMC guard) — Phase 10 core above.
+- (market) WhatsApp campaign builder with segmented drips (SmartHospital-style 7 standard events), hospital website builder/landing pages (EN-012), AI lead scoring & next-best-action (AI-005), conversational lead qualification bot (AI-001), sentiment analysis of reviews (AI), marketing attribution with Meta/Google conversion APIs, referral agent register (compliance-gated), event/CME management with certificates (NC-027), patient community engagement (PE-004), international patient desk (facilitators, visa letters), competitor rate intelligence.
+
+## 16. Open Questions for the Hospital
+1. Lead sources in use (website, ads, call centre, agents?) and current CRM tool/data to import; expected lead volume?
+2. Consent capture practice today for marketing; DLT headers/templates registered; WhatsApp Business account?
+3. Attribution model preference (first/last touch) and conversion window; revenue attribution reporting needs?
+4. Loyalty programme rules & rewards; coupon/discount policy limits; GST treatment agreed with finance?
+5. Reputation platforms to manage (Google, Practo, JustDial); who approves replies?
+6. Corporate/doctor relations team structure; policy on gifts/CME sponsorship (NMC compliance); international patient services?
+7. Camps frequency and integration expectations (NC-035); marketing budget by channel (NC-022)?
+

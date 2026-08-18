@@ -1,0 +1,278 @@
+# EN-039 — Forms & Template Builder (Dynamic Clinical Form Designer, Body Diagrams & Annotation, Scales & Calculated Fields, LOINC/SNOMED Binding, Conditional Logic, Versioning with Data-Migration Rules, Specialty Console Framework Consumption, Print & Letterhead Designer, Document Templates, Template Governance, HTML→PDF Rendering Pipeline, Thermal & Label Templates)
+
+| Field | Value |
+|---|---|
+| Domain | Enabler |
+| Module ID | EN-039 |
+| Phase | 0 / 2 |
+| Priority | P0 |
+| Complexity | Very High |
+| Depends on | EN-027 (MDM — value sets, LOINC/SNOMED/ICD concepts, drug & service masters used in pickers and merge fields), EN-007 (roles, branch identity, settings, numbering series), EN-038 (template publication approvals), EN-024 (audit of every template change and every document render), EN-016 (digital signature applied to rendered clinical/legal documents), EN-005 (thermal/label device targets — ESC/POS & ZPL), EN-013 (barcode/QR payloads embedded in templates), EN-041 (group vs branch template scoping and letterhead overrides), EN-032/EN-009 (rendered documents delivered by email/WhatsApp), EN-036 (bulk import of legacy templates) |
+| Consumed by | OP-002 (consultation forms, SOAP templates, order sets), OP-025 §0 **specialty console framework** and OP-026…OP-040 (every specialty console's flexible sections), OP-007/IP-003/IP-009 (vitals, assessments, flowsheets, scales), IP-002 (discharge summary), OP-003/IP-014 (prescription print), OP-004/OP-008 (lab & radiology report layouts), EN-028 (consent form templates), IP-006 (WHO checklist, op notes), TR-008 (MLC & body-map documentation), NC-004 (controlled documents), NC-010 (payslips, letters), NC-005 (PO/RFQ print), OP-005/IP-005 (bill, receipt, GST invoice), EN-030 (survey forms), EN-037 (notification card templates), EN-029 (alert-card and order-set rendering), EN-002/RC-001 (claim forms) |
+| Feature flag | `module.forms.enabled` (always on; sub-flags `forms.body_diagram`, `forms.calculated`, `forms.terminology_binding`, `forms.print_designer`, `forms.thermal`, `forms.offline`) |
+| Primary roles | Clinical Informaticist / Template Steward (custom role), Doctor (6/7/8/9 — authors own note templates & favourites), Nurse Supervisor (22 — assessment forms), Hospital Admin (2), MRD Officer (43 — document templates & retention), IT Admin (56) |
+| Secondary roles | HOD (5 — departmental template approval), Medical Superintendent (4 — clinical template governance), Quality Manager (54 — NABH document control), Marketing (55 — letterhead/branding), Billing (27 — invoice layouts), Lab/Radiology managers (report layouts), Auditor (58) |
+| Regulatory | **NABH 6th edn** (MOM: legible, complete prescriptions with generic names and prescriber identity; IMS/document control: controlled documents with version, approval, review date, distribution; medical record content requirements), **NMC/MCI prescription norms** (generic name prominence, prescriber registration number, legibility), **EHR Standards for India 2016** (structured data with SNOMED CT / LOINC bindings, minimum data sets), **ABDM/NRCeS FHIR profiles** (OPConsultRecord, DischargeSummary, Prescription, DiagnosticReport — a form's structured output must map to these), **GST rules** for tax-invoice layout (HSN/SAC, tax split, IRN/QR where e-invoicing applies), **Drugs & Cosmetics Rules** for prescription and label content, **Legal Metrology / CDSCO** for medicine labels, **DPDP Act 2023** (form design determines what personal data is collected — data minimisation by design), IT Act §65B & §5 (electronic records and signatures for legal documents) |
+
+## 1. Purpose
+EN-039 is the configuration surface that lets a hospital shape *what it records* and *what it prints* without a code deploy. It provides one dynamic form engine (typed field library, conditional logic, calculated fields, clinical scales, body diagrams with annotation, terminology binding, versioning with explicit data-migration rules) used by every clinical and administrative screen, and one document/print engine (letterhead designer, page geometry, headers/footers, watermarks, QR verification, multilingual layouts, thermal and label formats) used by every printed artefact from a discharge summary to a specimen label. Structured, queryable data stays in typed columns owned by domain modules; EN-039 owns the *flexible* layer, the *rendering* layer and the *governance* around both.
+
+## 2. Users & Jobs-to-be-done
+- **Clinical informaticist / template steward (desktop, weekly)**: build a "Diabetes follow-up" form with conditional sections, bind fields to LOINC, publish it to the Endocrinology console, and later add a field without invalidating six months of collected data.
+- **Doctor (6, desktop/tablet, every consultation)**: use a departmental template, keep personal favourites and macros, fill a form in seconds with smart defaults and last-visit carry-forward, and never fight a layout designed for someone else's specialty.
+- **Nurse (17/18, tablet at the bedside)**: complete a Braden/Morse/pain assessment with big touch targets, auto-scored totals and risk banding, offline in a corridor with poor Wi-Fi.
+- **Surgeon / ER doctor (9/8)**: mark injuries on a body diagram, annotate an X-ray thumbnail, and have the annotation stored as structured coordinates (not a flattened image) so it can be reported on and re-rendered.
+- **MRD officer (43)**: control which document templates are approved, current and retired; prove version history to an assessor; ensure every printed record carries the mandatory identifiers.
+- **Branch admin / marketing (3/55)**: change the letterhead for one branch without touching clinical content, and see a preview of every affected document before publishing.
+- **Lab & pharmacy staff (33/30)**: print specimen labels and medicine labels that fit the exact stock they buy, with barcodes that scan first time.
+- **Patient**: receive a prescription and a discharge summary that are readable, in their language where configured, and verifiable by QR.
+
+## 3. Core Workflows
+
+### 3.1 Form design (the dynamic form engine)
+1. A steward creates a **form template**: key, name, category (`clinical_note` / `assessment` / `flowsheet` / `checklist` / `intake` / `consent_body` / `survey` / `administrative`), scope (system / group / hospital / branch / department / specialty console), target modules, roles allowed to fill, and whether it produces a **clinical document** (signable, immutable when signed) or a **data capture** (editable within a window).
+2. **Field library** (typed widgets, each with validation, help text, PHI classification and an optional terminology binding):
+   - *Primitives*: text, long text (with dictation button), number (with unit + UCUM), integer, decimal with precision, date, time, datetime, duration, boolean, yes/no/unknown, single-select, multi-select, ranked list, slider, rating, colour-coded chips.
+   - *Clinical*: vitals group (with normal-range shading), pain scale (NRS 0–10, VAS, FACES, FLACC for infants), **GCS** (E/V/M with auto-total and non-testable handling), **NEWS2/PEWS/MEWS** component group (score computed by EN-029, displayed here), **Braden**, **Morse Fall**, **Barthel/FIM**, **APACHE II / SOFA** panels, **AO/OTA fracture classifier**, **ASA grade**, **Aldrete**, **ESI triage**, **mMRC/CAT**, **PHQ-9/GAD-7/MMSE/MoCA**, **Glasgow-Blatchford**, growth-percentile input (auto WHO/IAP z-score), APGAR, partograph cell.
+   - *Structured pickers*: diagnosis (ICD-10/ICD-11 with favourites), procedure, drug (with strength/route/frequency composer), allergy substance, lab test, organism/antibiotic (from IP-012), body site (SNOMED body structure with laterality), implant (with UDI scan).
+   - *Media & drawing*: **body diagram** (§3.2), image annotation, photo capture with consent gate, file attachment, voice note (transcription later), signature pad.
+   - *Layout*: section, repeating group (e.g. "wounds", "medications on admission"), grid/table, tabs, columns, conditional container, read-only computed summary, instruction/markdown block, page break (for print).
+   - *References*: patient banner token, previous-value carry-forward, "same as last visit" toggle, and a **linked-field** widget that reads a typed column from a domain module (e.g. latest creatinine) as read-only context.
+3. **Conditional logic**: per-field and per-section `visible_when` / `required_when` / `readonly_when` / `value_when` expressions over the form's own fields plus a whitelisted patient context (age, sex, pregnancy, encounter type, department, ward, payer). Expressions are a typed AST built visually, evaluated identically on client and server (shared Zod + a small interpreter in `packages/contracts`), so the server never trusts client-side validation.
+4. **Calculated fields**: formulas over other fields with a declared unit and rounding — BMI, BSA (Mosteller/DuBois), estimated blood loss, IBW/AdjBW, eGFR (CKD-EPI 2021 / Schwartz), Wells/Padua/Caprini totals, fluid balance, dose per kg, GFR-adjusted dose suggestion, pack-years, drip rate, corrected calcium, anion gap, QTc (Bazett/Fridericia). Every formula declares its reference (guideline + year) shown in a tooltip, and is unit-safe (a mismatch is a publish-time error, not a runtime surprise).
+5. **Terminology binding**: any field may bind to a code system — `LOINC` for observations, `SNOMED CT` for findings/body sites/procedures, `ICD-10/11` for diagnoses, `UCUM` for units, `RxNorm/ATC` for drugs. The binding drives (a) value-set-constrained pickers from EN-027, (b) the **FHIR mapping** of the response (`Observation`, `Condition`, `Procedure`, `QuestionnaireResponse`) so ABDM/EN-019 export is automatic rather than bespoke, and (c) analytics: a bound field is reportable across templates even when hospitals name it differently.
+6. **Data placement rule (normative, matches OP-025 §0.1)**: *anything used in a WHERE clause, a report, an alert or a bill must be a typed column owned by the domain module*; free narrative and hospital-configurable extras live in `clinical.form_responses.data` JSONB. When a steward marks a field `promote_to_column`, the publish workflow raises a task for engineering rather than silently indexing JSON. Expression indexes are permitted on high-traffic bound fields.
+7. **Preview & test**: render the form for a sample patient context on desktop, tablet and phone; test conditional logic and calculations with a fixture set; a template cannot be published while any fixture fails or any required translation is missing.
+
+### 3.2 Body diagrams, drawing & annotation
+- A **diagram asset** is an SVG with named, addressable regions (anterior/posterior human body — adult male/female, child, infant; dental FDI/Universal chart; eye OD/OS anterior & fundus; ear; skin lesion map; spine; hand/foot; obstetric abdomen; burn Lund-Browder chart with percentage regions; wound map).
+- The clinician taps a region or draws freehand; the engine stores **structured annotations** — `{ region_code (SNOMED body structure), laterality, x, y, path?, shape, colour, label, marker_type (fracture/wound/rash/pain/scar/burn), severity, note, created_by, at }` — **never a flattened bitmap**. This is what makes a body diagram reportable ("all left-tibia fractures this quarter") and re-renderable at any resolution, and what lets a later version replay an annotation on a corrected diagram.
+- **Burn charts** auto-compute TBSA % from the marked Lund-Browder regions by age band; **dental charts** map to tooth numbers with per-surface marking; **wound maps** carry measurements (length × width × depth, undermining) and link to serial photos (OP-017).
+- **Image annotation**: annotate an attached photo or a DICOM thumbnail with the same structured model (the diagnostic annotation of DICOM itself belongs to EN-008); annotations are versioned with the document.
+- Touch ergonomics: pinch-zoom, palm rejection, undo/redo, marker palette, and a "compare with previous" overlay showing the prior visit's markings in a faded colour.
+
+### 3.3 Versioning & data-migration rules (the hard part)
+1. Every template has immutable **published versions**; every response stores `template_key + version`. Rendering a historical response always uses its own version, so a note written in 2024 displays exactly as it was.
+2. On publishing a new version, the steward must classify each change and supply a **migration rule**:
+   | Change | Class | Rule required |
+   |---|---|---|
+   | Add optional field | *compatible* | none (old responses show it as blank/"not recorded") |
+   | Add required field | *breaking-forward* | default value or "not applicable for pre-vX responses" |
+   | Rename label | *cosmetic* | none (key unchanged) |
+   | Change key | *breaking* | explicit key map old→new |
+   | Change type (text→select) | *breaking* | value map, or `keep_as_legacy_text` |
+   | Change unit | *breaking* | conversion factor, applied on read (never destructively rewritten) |
+   | Narrow a value set | *breaking* | mapping for retired codes |
+   | Remove field | *breaking* | retain-and-hide (data is never deleted) |
+   | Change a formula | *analytical break* | recompute-on-read vs keep-stored decision, and a visible break marker in trend charts |
+3. **Migrations are read-time by default** (a view function applies the map when an old response is rendered or exported), preserving the original data verbatim. A destructive rewrite is possible only through EN-036 with approval and a rollback point.
+4. **Deprecation**: a version can be closed to new responses while remaining renderable forever; a template is retired, never deleted.
+5. **Diff view**: field-by-field diff between any two versions, with change class chips, used in the approval packet.
+
+### 3.4 Specialty console framework consumption (OP-025 §0)
+- Specialty consoles (OP-025 … OP-040) register tabs in `mdm.specialty_consoles`; each tab may reference an EN-039 `form_template_key` for its flexible sections while its typed clinical findings live in the console's own `specialty.*` tables (OP-025 §0.1).
+- EN-039 therefore ships **console-aware form contexts**: a form rendered inside a console receives the console code, the encounter, the sided-structure helper (`{od/os}`, `{left/right}`, dental quadrants) and the console's device-result types, so a form can display an attached OCT or spirometry result inline as read-only context.
+- **Sided fields** are a first-class widget: a field marked `sided` renders as a paired control and stores `{right: value, left: value, bilateral?: value}` with laterality codes — reused by ophthalmology, ENT, ortho, dermatology and dental.
+- A console can be created and its tabs populated **without a code deploy** when its tabs reference existing components or EN-039 templates (OP-025 §0.9 F1) — EN-039 is what makes that promise true.
+- Every console's **specialty visit summary** print (OP-025 §0.6) is an EN-039 print template under `packages/print-templates/specialty/<code>`.
+
+### 3.5 Print & letterhead template designer
+1. **Letterhead / branding assets** are managed per hospital and per branch (EN-041): logo (light/dark), hospital legal name, address, phone, email, website, GSTIN, registration/licence numbers (Clinical Establishment, drug licence, NABH/NABL accreditation marks with validity), and a footer disclaimer — all as **merge tokens**, never hard-coded into a layout.
+2. A **print template** declares: page size (A4/A5/Letter/thermal 80 mm/58 mm/label sizes), orientation, margins, header (repeat on every page / first page only), footer (page x of y, disclaimer, QR), **watermark** (draft/copy/cancelled/"not for medico-legal use", with opacity and rotation), background stationery (pre-printed paper mode where the header is omitted but its space reserved), duplex behaviour, and a bleed/safe-area guide.
+3. **Content is composed** of bands and blocks: patient banner block (configurable fields), content body (bound to a form response, a domain document, or a table dataset), tables with repeating rows and page-break control (`avoid-break-inside`, repeating table headers), signature blocks (name, designation, registration number, e-sign image or cryptographic mark from EN-016), and a **QR verification block** (EN-013) encoding a signed short URL so a third party can verify authenticity.
+4. **Multilingual layouts**: bilingual side-by-side or stacked rendering (English + local language), per-language font stacks (Noto Devanagari/Tamil/Telugu/Malayalam/Kannada/Bengali/Gujarati/Arabic), correct shaping and line-breaking, RTL support with mirrored margins, and per-language page-length checks (translated text expands ~30 % — the preview flags overflow).
+5. **Document template families** shipped as seeded, overridable defaults: discharge summary, OP consultation summary, prescription (with generic-name prominence and prescriber registration number per NMC), lab report (with method, reference interval, NABL symbol where in scope), radiology report, operation notes, anaesthesia record, consent forms (EN-028 bodies), MLC/injury report (TR-008), death summary & certificate (Form 4/4A), birth record, medical fitness certificate, sick-leave certificate, insurance claim forms, estimate/quotation, GST tax invoice & receipt, credit note, statement of account, purchase order, indent, payslip, offer/relieving letters, ambulance trip sheet, diet chart, vaccination certificate, physiotherapy plan, referral letter.
+6. **Thermal & label templates** (link EN-005): token slips (80 mm), cash receipts (80/58 mm), specimen labels (with accession barcode, patient name, UHID, test, container colour, collection time), wristbands (adult/paediatric/neonatal, with UHID barcode and allergy band), medicine/unit-dose labels (drug, strength, dose, route, time, patient, warnings, dispensed-by), asset tags, blood-bag labels (with SBTC-mandated fields), and consignment/implant tags. Authored in a WYSIWYG with a millimetre grid, compiled to **ESC/POS** or **ZPL/EPL** command sets and validated against the target printer's DPI and label stock; a "print calibration sheet" action verifies alignment on the physical stock.
+7. **Preview & test print**: server-rendered preview identical to the final PDF (same pipeline), sample-data selector (real de-identified record or fixture), page-count and overflow warnings, and a physical test print to a selected device.
+
+### 3.6 Rendering pipeline (HTML → PDF via Playwright)
+1. Template + data context → **render service** in `services/worker`: templates compile to HTML with inlined, print-safe CSS (`@page`, `@media print`, `break-inside: avoid`, running headers via `position: fixed` in the header band), fonts embedded/subsetted, images fetched from object storage by presigned URL.
+2. **Playwright (Chromium) `page.pdf()`** produces PDF/A-compatible output where required (archival documents: discharge summary, invoices, consents), with `printBackground`, exact page size, and deterministic pagination. Rendering is done in a **pooled, sandboxed browser** (no JS from templates beyond a whitelisted helper set, no network egress except the object store) — templates are data, not code.
+3. **Determinism**: the same template version + same data + same locale must produce a byte-comparable PDF (fixed font versions, no timestamps in content unless declared), so a document's hash is meaningful for the EN-016 signature chain and the clinical hash chain.
+4. **Signing**: clinical/legal documents are hashed, signed (EN-016 — DSC/Aadhaar eSign/HSM), and the signature block plus verification QR are embedded; the signed artefact is stored immutably in object storage with `sha256` and `prev_sha256` per the append-only clinical-document rule.
+5. **Delivery**: the rendered artefact is handed to EN-005 (print queue → physical printer), EN-032 (email, honouring the PHI attachment policy), EN-009 (WhatsApp/SMS link), PE-001 (portal), or EN-011 (ABDM FHIR document bundle where the structured form output maps to a profile).
+6. **Caching & idempotency**: renders are keyed by `(template_version, data_hash, locale, purpose)`; a re-print of an unchanged document reuses the stored artefact (and is logged as a reprint, watermarked `COPY` where policy requires) rather than re-rendering.
+7. **Thermal path** bypasses Playwright entirely: the template compiles directly to ESC/POS or ZPL byte streams sent to EN-005 — no PDF, no rasterisation, sub-second printing.
+
+### 3.7 Template governance & approval
+- Templates are **controlled documents**: draft → review → approved → published (effective-dated) → superseded → retired, with an owner, a reviewer set, an approval matrix in EN-038 (clinical templates: HOD + Medical Superintendent; consent bodies: + legal/DPO; invoices: + Finance; branding: + Marketing + Admin), a **review-due date** (default annual, NABH IMS expectation) and a distribution list.
+- Every published version carries version number, effective date, approver names and a document-control footer (where the printed artefact requires it); NC-004 holds the SOP-style controlled-document register and links here.
+- **Change impact preview**: publishing shows how many responses exist on the current version, which modules/consoles consume the template, and which print templates would change.
+- **Emergency rollback**: one-click revert to the previous version (reason mandatory), propagated to all clients within 30 s via cache invalidation.
+- Templates can be **exported/imported** as a signed bundle (JSON + assets) for sharing between branches or tenants, with a compatibility check against the target's masters.
+
+### 3.8 Exceptions & edge behaviour
+- **Offline form fill** (`forms.offline`): active template versions and their assets are cached in IndexedDB; responses queue locally with the version pinned; on sync, if the template has since advanced, the response is stored against the version it was filled on (never silently upgraded). Conflicts on signed documents are server-wins; drafts are client-wins (matching OP-025 §0.8).
+- **A field's value set changed after a response was captured** → the stored code is preserved and displayed with a "retired code" chip plus its mapped successor.
+- **Print overflow** (translated text, long medication lists) → the preview flags it at design time; at render time, overflow triggers continuation pages with repeated headers rather than truncation. Truncating a clinical document is never acceptable.
+- **Printer/paper mismatch** on labels → EN-005 rejects the job with a specific message ("template is 50×25 mm, printer stock is 38×25 mm") rather than printing garbage.
+- **Render failure** → the calling module is told the document could not be produced; no partial or blank artefact is ever delivered, and a DLQ item is raised. For a signed document, failure blocks the sign action.
+- **Very large documents** (a 400-page ICU chart export) → rendered as a background job with progress, chunked and merged, delivered as a download link.
+
+## 4. Data Model (schema `core` for templates, `clinical` for responses; prefix `tpl_` / `form_`)
+- `tpl_form_templates` — id, hospital_id (null = system), key citext, name, category enum(clinical_note/assessment/flowsheet/checklist/intake/consent_body/survey/administrative), scope enum(system/group/hospital/branch/department/console), console_code?, department_ids uuid[], produces_clinical_document bool, signable bool, roles_allowed text[], current_version, review_due_at, owner_user_id, status enum(draft/in_review/approved/published/superseded/retired), created…; UNIQUE(hospital_id, key).
+- `tpl_form_versions` — id, template_id, version int, schema jsonb (sections[], fields[] {key, type, label_i18n, help, required, validation, phi_class, terminology_binding{system, value_set, code}, unit, sided, default, carry_forward, promote_to_column}), logic jsonb (conditional expressions), calculations jsonb (formula, unit, rounding, reference), layout jsonb (device variants: desktop/tablet/phone), fixtures jsonb, migration_rules jsonb (from_version → per-field class + map), fhir_mapping jsonb, effective_from, effective_to, published_by, published_at, approval_ref, checksum, immutable; UNIQUE(template_id, version).
+- `clinical.form_responses` — id uuidv7, hospital_id, branch_id, patient_id, encounter_id?, template_key, template_version, console_code?, status enum(draft/final/amended/cancelled), data jsonb, computed jsonb (calculated field values as of save), annotations jsonb (body-diagram structured marks), completeness_pct, filled_by, filled_at, signed_by, signed_at, sha256, prev_sha256, amend_reason, source enum(web/tablet/mobile/kiosk/offline_sync/import), device_ref; **partitioned monthly**; indexes (hospital_id, patient_id, filled_at desc), (encounter_id), (template_key, template_version), GIN on `data` with targeted expression indexes for bound high-traffic fields.
+- `clinical.form_response_versions` — response_id, version, data jsonb, changed_by, changed_at, reason; append-only amendment history.
+- `tpl_diagram_assets` — id, hospital_id?, key, name, kind enum(body_adult/body_child/body_infant/dental_fdi/dental_universal/eye/ear/skin/spine/hand/foot/obstetric/burn_lund_browder/custom), svg_ref, regions jsonb (region_code, snomed_code, label, laterality, tbsa_pct_by_age), version, active.
+- `tpl_print_templates` — id, hospital_id, branch_id?, key citext, name, family enum(clinical/billing/pharmacy/lab/radiology/consent/legal/hr/procurement/label/thermal/wristband), page jsonb (size, orientation, margins, duplex, stationery_mode), header jsonb, footer jsonb, watermark jsonb, blocks jsonb (ordered bands with data bindings), languages text[], bilingual_mode enum(none/side_by_side/stacked), output enum(pdf/escpos/zpl/epl), target_device_profile, current_version, status, review_due_at, owner_user_id; UNIQUE(hospital_id, key).
+- `tpl_print_versions` — id, print_template_id, version, definition jsonb, css text, sample_context jsonb, effective_from, published_by/at, approval_ref, checksum, immutable.
+- `tpl_branding` — id, hospital_id, branch_id?, logo_light_ref, logo_dark_ref, legal_name, address jsonb, contacts jsonb, gstin, licences jsonb (clinical establishment, drug licence, NABH/NABL with validity), colours jsonb, fonts jsonb, footer_disclaimer_i18n jsonb, effective_from, updated_by.
+- `tpl_render_jobs` — id, hospital_id, print_template_id, version, purpose enum(original/copy/duplicate/draft/cancelled), data_hash, locale, status enum(queued/rendering/rendered/failed), artifact_ref, sha256, pages, size_bytes, duration_ms, error_class, requested_by, ref_type, ref_id, created_at, delivered_to jsonb; partitioned monthly; UNIQUE(hospital_id, print_template_id, version, data_hash, locale, purpose) for cache reuse.
+- `tpl_print_audit` — id, render_job_id, action enum(printed/reprinted/emailed/downloaded/shared), actor, device_ref, copies, at, reason (for reprints of financial/clinical documents); retained 7 years.
+- `tpl_favourites` — user_id, template_key, kind enum(template/macro/snippet), payload jsonb (pre-filled values, text macro), name, sort, private bool.
+- `tpl_translations` — template_key, version, language, keys jsonb, completeness_pct, translated_by, reviewed_by; used by the completeness meter.
+- `tpl_bundles` — id, name, contents jsonb (templates + assets), signature, exported_from, imported_at, compatibility_report.
+- Retention: templates and versions **permanent** (a document must always be renderable); responses follow the clinical record (10 years / as per MRD policy); render artefacts for signed clinical & financial documents permanent, transient previews 7 days.
+
+## 5. Business Rules & Validations
+- **Templates are data, not code.** A template may not contain executable script; expressions and formulas are a typed AST evaluated by the engine, and the render sandbox has no network egress and no arbitrary JS.
+- **Every response is bound to its template version**, forever. A version is never edited in place; changing anything creates a new version with a declared migration rule per changed field.
+- **Data is never destroyed by a template change.** Removed fields are retained-and-hidden; unit changes are applied on read with a stored conversion factor; a destructive rewrite requires EN-036 with approval and a restore point.
+- **Signed clinical documents are immutable.** An amendment creates a new version with a mandatory reason, preserves the original, and re-signs with a hash chain (`prev_sha256`).
+- **The typed-column rule (OP-025 §0.1) is enforced at publish**: a field marked as needed for reports/alerts/billing cannot simply live in JSONB — publication raises an engineering task and the field is flagged until a typed column exists.
+- **Calculated fields must be unit-safe and cite a reference**; a formula whose operand units are incompatible fails publication. Formula changes mark a visible break in trend charts rather than silently recomputing history.
+- **Terminology-bound fields must resolve** against an active EN-027 value set at publish time; a binding to a retired code system blocks publication.
+- **Mandatory print content** cannot be removed from a template family: patient identifiers (name, UHID, age/sex), document date/time, hospital identity, and — where the family requires it — prescriber name + registration number, GSTIN and HSN/SAC on invoices, NABL symbol only for in-scope tests, and the page-x-of-y footer on multi-page clinical documents. Publication validates these.
+- **Watermarks are policy**: a reprint of a financial receipt or a clinical report prints `COPY`/`DUPLICATE` unless the user holds an override permission; cancelled documents always print `CANCELLED`; drafts always print `DRAFT — NOT FOR CLINICAL USE`.
+- **Rendering is deterministic**: fixed font versions, no ambient timestamps in content, so a document hash is stable and meaningful to the signature chain.
+- **No partial output**: a render failure yields no artefact; for signable documents it blocks the sign action rather than signing something incomplete.
+- **Translations gate publication** for patient-facing templates: any declared language with < 100 % of patient-visible strings translated blocks publish (staff-facing templates may publish with a warning).
+- **Template publication follows EN-038**; proposer ≠ approver; clinical templates require Medical Superintendent, consent bodies require legal/DPO, invoices require Finance, branding requires Admin.
+- **Offline responses keep the version they were filled on** and are never silently upgraded on sync.
+- **PHI classification per field** drives export, print masking and DPDP records; a field classified `sensitive` cannot be placed in a template whose family is patient-handout without an explicit override with reason.
+
+## 6. API Surface (`/api/v1/templates`)
+| Method | Path | Purpose | Permission | Notes |
+|---|---|---|---|---|
+| GET | /forms?scope&console&department&status | form template catalogue | `tpl.form.read` | branch-scoped |
+| GET | /forms/:key?version&asOf | resolved schema for rendering | `tpl.form.read` (all clinical roles) | cached; ETag; offline-cacheable |
+| POST/PATCH | /forms ; /forms/:id | author a draft | `tpl.form.manage` | draft only |
+| POST | /forms/:id/versions | create a new version with migration rules | `tpl.form.manage` | migration class required per changed field |
+| POST | /forms/:id/preview ; /forms/:id/test | render preview / run fixtures | `tpl.form.manage` | device variants |
+| GET | /forms/:id/diff?from&to | version diff with change classes | `tpl.form.read` | approval packet |
+| POST | /forms/:id/publish \| /deprecate \| /retire \| /rollback | lifecycle | `tpl.form.publish` (+ EN-038) | effective-dated, cache invalidation <30 s |
+| POST | /responses | save a form response (draft or final) | `tpl.response.write` (role-gated by template) | server re-validates logic & calculations |
+| GET | /responses/:id ; GET /responses?patient&encounter&template | read responses | `tpl.response.read` | PHI-audited; rendered with its own version |
+| POST | /responses/:id/amend \| /sign | amend with reason / sign | `tpl.response.amend` / `tpl.response.sign` | EN-016; hash chain |
+| GET | /diagrams ; GET /diagrams/:key | body-diagram assets & region maps | `tpl.form.read` | SVG + regions |
+| GET/POST/PATCH | /prints ; /prints/:id | print template authoring | `tpl.print.manage` | |
+| POST | /prints/:id/preview {sampleRef} | server-rendered preview (same pipeline as final) | `tpl.print.manage` | page count & overflow warnings |
+| POST | /prints/:id/test-print {deviceId} | physical test print / calibration sheet | `tpl.print.manage` | via EN-005 |
+| POST | /prints/:id/publish \| /rollback | lifecycle | `tpl.print.publish` (+ EN-038) | |
+| POST | /render {printTemplateKey, context, locale, purpose} | render a document | `tpl.render` (service + roles) | idempotent by data_hash; returns artifact ref |
+| GET | /render/jobs/:id | render status & artefact | `tpl.render` | background for large docs |
+| POST | /render/:jobId/print \| /email \| /share | deliver | per-channel permission | audited as PHI where applicable |
+| GET/PUT | /branding?branchId | letterhead & identity assets | `tpl.branding.manage` (Admin/Marketing) | preview of affected documents |
+| GET/POST | /favourites | personal templates, macros, snippets | authenticated | private by default |
+| GET/POST | /translations/:key | translation matrix & upload | `tpl.translation.manage` | completeness meter |
+| POST | /bundles/export ; /bundles/import | share templates across branches/tenants | `tpl.bundle.manage` (Admin) | signed, compatibility-checked |
+| GET | /governance/review-due ; /governance/usage | control-document register & usage stats | `tpl.governance.read` (MRD 43, Quality 54) | NABH evidence |
+
+## 7. Domain Events (outbox)
+- `template.form.published|deprecated|retired|rolled_back` → client cache invalidation (<30 s), consoles, offline packs, EN-024.
+- `template.print.published|rolled_back` / `template.branding.updated` → print cache invalidation, affected-document notice.
+- `form.response.saved|finalised|amended|signed` → domain modules (a vitals form writes typed columns via the owning module), EN-029 (trigger re-evaluation), EN-011 (FHIR export where mapped), clinical timeline.
+- `document.rendered|render_failed` → calling module, EN-005 print queue, EN-032/EN-009 delivery, DLQ on failure.
+- `document.printed|reprinted|emailed|downloaded` → EN-024 audit as a disclosure where PHI-bearing.
+- `template.review_due` (60/30/7 days) → owner, MRD, Quality.
+- `template.migration_required` (a version change needs an engineering-backed column) → IT backlog.
+- Consumes: `mdm.value_set.changed` (re-validate bindings), `branch.created` (seed branch templates & branding), `licence.features.changed` (gate designer features).
+
+## 8. Screens (UI)
+- **Form Designer** (desktop, three panes): left = field palette grouped by category with search; centre = canvas with drag-drop sections/fields, inline label editing, device-variant tabs (desktop/tablet/phone) and a live "as the clinician sees it" toggle; right = field properties (type, validation, PHI class, terminology binding with a value-set picker, unit, conditional logic builder, calculation editor with a unit-checked formula field and a reference note). Bottom drawer = fixtures & test results. Shortcuts `Ctrl+S` save draft, `Ctrl+P` preview, `Ctrl+T` run fixtures, `Ctrl+Shift+P` request publish, `/` search palette.
+- **Logic & Calculation Builder** (desktop, modal): visual `when → then` rows over form fields + whitelisted patient context, with a live evaluation panel against a sample patient; formula editor with autocomplete over field keys, unit display and an instant computed preview.
+- **Version & Migration Wizard** (desktop): side-by-side diff, each changed field showing its auto-detected change class and a required migration rule input; a summary "1 240 existing responses will be read through this map"; blocked until every breaking change has a rule.
+- **Body Diagram Editor** (desktop for authoring; tablet for use): region-named SVG with a region inspector; the clinical-use view is a full-screen tablet canvas with a marker palette, pinch-zoom, undo/redo, "compare with previous visit" overlay and a structured findings list beside the diagram that stays in sync with the marks.
+- **Print/Letterhead Designer** (desktop, wide): page canvas at true proportions with rulers and safe-area guides, band-based layout (header / body / footer), block inspector with data bindings (drag a merge token from a searchable token tree), watermark and stationery-mode toggles, language tabs with overflow warnings, and a **live server-rendered preview** side by side (identical pipeline to production). Shortcuts `Ctrl+G` toggle grid, `Ctrl+R` re-render preview, `Ctrl+L` language switch.
+- **Label/Thermal Designer** (desktop): millimetre grid at the target stock size, barcode/QR widgets with symbology and quiet-zone validation, DPI-aware preview, ESC/POS-ZPL source view for experts, `Print calibration sheet` action.
+- **Template Catalogue & Governance** (desktop, MRD/Quality): all form and print templates with owner, version, status, effective date, **review-due chip**, consumers (which modules/consoles use it), 30-day usage count and last-used date; filters for "review overdue", "unused 180 days", "draft > 30 days"; bulk review-date extension with reason.
+- **Clinician-facing form runtime** (desktop/tablet/phone): the actual filled form — section navigation rail, autosave every 5 s with a visible saved state, required-field summary at the top, calculated fields shown with a small ƒ badge and a tooltip citing the formula reference, carry-forward chips ("same as 12-Mar"), dictation button on long-text fields, and a sticky Save/Sign bar. Offline badge when working from cache. Keyboard: `Tab` order follows visual order, `Ctrl+Enter` save, `Alt+N` next section, `Alt+M` insert macro.
+- **My Templates & Macros** (doctor, desktop): personal favourites, text macros with placeholders, and the ability to clone a departmental template into a personal variant (which stays linked to its parent for governance visibility).
+- **Render Job Monitor** (desktop, IT): queued/rendering/failed jobs, durations, failure classes, cache hit rate, and a retry action.
+- Empty/error states: "This form has 3 required translations missing in Tamil — publishing is blocked", "Your offline responses were filled on version 4; the template is now version 5. They have been saved against version 4.", "This label template is 50×25 mm but the selected printer is loaded with 38×25 mm stock", "Formula error: cannot divide kg by cm² without a unit conversion".
+
+## 9. Integrations
+- **EN-027** value sets, code systems and masters power every picker and binding; **EN-019/EN-011** consume the declared FHIR mapping so a form response exports as a `QuestionnaireResponse`/`Observation`/`Condition` bundle without bespoke code.
+- **EN-016** signs rendered clinical and legal documents (DSC / Aadhaar eSign / HSM) and supplies the verification mark; **EN-013** generates the barcodes/QRs embedded in prints and labels.
+- **EN-005** owns the physical print path (queues, device profiles, ESC/POS & ZPL transmission, paper/stock validation); EN-039 owns the layout that EN-005 sends.
+- **Playwright/Chromium** in `services/worker` for HTML→PDF, with a pooled sandbox, subsetted fonts (Noto family for Indic scripts) and PDF/A output for archival families.
+- **EN-032/EN-009/PE-001** deliver rendered artefacts; **NC-004** registers clinical/administrative templates as controlled documents; **EN-038** approves publications; **EN-036** imports legacy templates and performs any destructive data migration.
+- **OP-025 §0** specialty console framework is the largest single consumer; **EN-028** consent bodies and **EN-030** surveys are rendered by the same engine, guaranteeing one look and one governance model.
+
+## 10. Reports & Analytics
+- **Template usage**: responses per template/version/department/doctor, median completion time, abandonment (drafts never finalised), field-level fill rates (which fields nobody uses — candidates for removal), and required-field friction (fields most often blocking save).
+- **Data quality from forms**: completeness by template, out-of-range value rates, free-text usage where a coded field exists (a signal to add a picker), and terminology-binding coverage.
+- **Governance**: templates overdue for review, drafts stale > 30 days, versions published per month, approval turnaround, unused templates, and the NABH document-control evidence pack.
+- **Print/render**: documents rendered per family/day, cache hit rate, median render time, failures by class, reprint rate by family (a high receipt-reprint rate is an operational smell), pages printed per branch (paper cost), and label reprint rate (a scanning/quality signal).
+- **Localisation**: translation completeness per template and language; documents delivered in each language.
+- Read models: `analytics.mv_tpl_usage_daily`, `analytics.mv_tpl_render_daily`.
+
+## 11. Notifications
+- **To template owners/stewards**: review due at 60/30/7 days; draft stale; publication approved/rejected; a value set your template binds to has changed; a formula reference has a newer guideline version (informational).
+- **To IT**: render failures above threshold, render queue backlog, font/asset missing, printer profile mismatch spikes.
+- **To clinicians**: "a new version of the assessment form you use is effective from Monday — preview it" (in-app, low severity, once).
+- **To MRD/Quality**: monthly document-control status; templates published without full translation (warning list).
+
+## 12. Permissions (RBAC keys)
+`tpl.form.read` (all clinical & administrative roles) · `tpl.form.manage` (Clinical Informaticist, IT Admin 56, HOD 5 for departmental templates) · `tpl.form.publish` (Medical Superintendent 4 for clinical, Hospital Admin 2 otherwise; via EN-038) · `tpl.response.write` / `tpl.response.read` (role-gated per template definition; PHI-audited) · `tpl.response.amend` / `tpl.response.sign` (clinicians per document type) · `tpl.print.manage` (IT Admin, MRD 43, Billing 27 for invoices, Marketing 55 for branding-adjacent) · `tpl.print.publish` (Hospital Admin + domain owner) · `tpl.render` (services + roles that produce documents) · `tpl.reprint.override` (print an original without the COPY watermark — Billing lead, MRD; audited) · `tpl.branding.manage` (Hospital Admin 2, Branch Admin 3, Marketing 55) · `tpl.translation.manage` · `tpl.bundle.manage` (Hospital Admin, Super Admin 1) · `tpl.governance.read` (MRD 43, Quality 54, Auditor 58).
+
+## 13. Non-functional
+- **Volumes (2000-bed enterprise)**: ~300–600 active form templates and ~150 print templates; **~60 000 form responses/day** (vitals, assessments, notes, checklists); **~25 000 document renders/day** (prescriptions, reports, bills, receipts, labels, tokens) of which ~18 000 are thermal/label (sub-second, no PDF) and ~7 000 are PDF.
+- **Latency**: form schema fetch (cached) < 50 ms; form runtime first render < 1 s with cached schema (matches OP-025 §0.8); response save p95 < 300 ms including server-side logic/calculation re-validation; **PDF render p95 < 2.5 s** for a 1–4 page document, < 8 s for a 20-page discharge summary; thermal/label compile+send < 300 ms.
+- **Throughput**: Playwright pool sized for ≥ 20 concurrent renders per worker node with browser reuse and page recycling; render queue must absorb a 500-document burst (end-of-day billing) within 5 minutes.
+- **Determinism & size**: fonts subsetted (a 4-page bilingual discharge summary ≤ 400 KB); identical inputs produce byte-comparable output for hash stability.
+- **Offline**: active template schemas + diagram SVGs + fonts cached in IndexedDB with a size budget (≤ 8 MB per role profile); responses queue with the pinned version; sync is conflict-aware (server-wins on signed, client-wins on drafts).
+- **Storage**: template versions are small but permanent; rendered artefacts for signed clinical/financial documents are permanent in object storage with lifecycle to cold tier at 90 days; preview artefacts purged at 7 days.
+- **Security**: templates cannot execute arbitrary code; the render sandbox has no network egress except the object store; merge tokens are resolved server-side from a permission-checked context, so a template can never be used to exfiltrate data the requester cannot see; every render of a PHI-bearing document is audited.
+- **Accessibility**: form runtime is WCAG 2.2 AA — labels programmatically associated, error messages announced, no colour-only validation, 44 px targets on tablet, logical tab order, and clinical scales operable by keyboard; printed documents use ≥ 9 pt body text and sufficient contrast, with a large-print variant for patient handouts.
+- **i18n**: full Unicode with Noto fonts for `hi, ta, te, ml, kn, mr, bn, gu, pa, or, as` and Arabic RTL; correct complex-script shaping in PDF; bilingual layouts with per-language overflow checks; date/number/currency formatting per locale (Indian digit grouping).
+
+## 14. Acceptance Criteria
+1. **Given** a steward publishes a form template with a required field added in version 5, **when** a response saved under version 4 is opened, **then** it renders exactly as version 4 defined it, the new field is shown as "not recorded", and no validation error is raised against historical data.
+2. **Given** a version change renames a field key, **when** publication is attempted without a key map, **then** publication is blocked with the specific field listed.
+3. **Given** a calculated BMI field, **when** height is entered in cm and weight in kg, **then** BMI is computed with the declared rounding, its formula reference is visible in a tooltip, and a unit mismatch at design time blocks publication.
+4. **Given** a conditional section "if pregnant → show LMP and EDD", **when** the sex/pregnancy context does not match, **then** the section is hidden on the client **and** its fields are rejected by server-side validation if submitted.
+5. **Given** a clinician marks two injuries on the anterior body diagram, **when** the response is saved, **then** structured annotations with SNOMED body-structure codes, laterality and coordinates are stored (not a flattened image), and a report can list all left-forearm injuries for the month.
+6. **Given** a burn chart with regions marked, **when** the TBSA field computes, **then** it uses the Lund-Browder percentages for the patient's age band and shows the age band used.
+7. **Given** a signed discharge summary, **when** a clinician amends it, **then** a new version is created with a mandatory reason, the original remains retrievable and unchanged, and the hash chain links the versions.
+8. **Given** a print template with a bilingual layout, **when** the Tamil text overflows the page, **then** the designer preview flags the overflow and the rendered PDF continues onto a new page with the header repeated — content is never truncated.
+9. **Given** a receipt is printed a second time, **when** the user lacks `tpl.reprint.override`, **then** the output carries a `COPY` watermark and the reprint is audited with a reason.
+10. **Given** the same document is rendered twice with identical data, template version and locale, **when** the hashes are compared, **then** they are identical and the second render is served from cache.
+11. **Given** a render fails (missing font, malformed data), **when** the job completes, **then** no artefact is produced, the calling module is notified, a DLQ item is raised, and any dependent sign action is blocked.
+12. **Given** a specimen label template of 50 × 25 mm, **when** it is sent to a printer loaded with 38 × 25 mm stock, **then** EN-005 rejects the job with a stock-mismatch message rather than printing a misaligned label.
+13. **Given** a patient-facing template declares Tamil support, **when** 8 % of patient-visible strings are untranslated, **then** publication is blocked with the missing keys listed.
+14. **Given** a nurse fills an assessment offline, **when** connectivity returns and the template has advanced to a new version, **then** the response is stored against the version it was filled on and is never silently upgraded.
+15. **Given** a field is bound to LOINC, **when** the response is exported for ABDM, **then** it maps to a FHIR `Observation` with the bound code without any module-specific code being written.
+16. **Given** a template field is marked as needed for a report filter, **when** publication runs, **then** the system requires a typed column (raising an engineering task) rather than allowing a WHERE clause over JSONB.
+17. **Given** a branch changes its letterhead, **when** the branding is published, **then** the admin sees which document families are affected, the print cache is invalidated, and the next render uses the new letterhead without any template being edited.
+18. **Given** a template is overdue for its annual review, **when** the governance dashboard renders, **then** it appears in the review-due list with its owner and last approval date, and the owner has been notified at 60, 30 and 7 days.
+19. **Given** a template author attempts to embed a script tag or an external URL in a print template, **when** they save, **then** it is rejected — templates are data and the render sandbox permits no arbitrary code or network egress.
+20. **Given** a specialty console registers a tab referencing an existing EN-039 template, **when** an encounter in the mapped department opens, **then** the tab renders without a code deploy (OP-025 §0.9 F1).
+
+## 15. Enhancements / Later phases
+- **FHIR Questionnaire / SDC (Structured Data Capture)** as the interchange format for form definitions, enabling import of national and vendor questionnaires and export of hospital forms to registries.
+- **AI-assisted authoring** (AI-003/AI-005): generate a draft form from a paper scan or a guideline PDF, suggest terminology bindings, and propose field removal based on fill-rate analytics — always human-approved.
+- **Ambient/voice-driven form filling**: dictation mapped to structured fields (AI voice notes) with clinician confirmation.
+- **Smart defaults & carry-forward learning**: pre-fill from the patient's prior responses and the clinician's own patterns, with a visible "carried forward" chip and one-tap clear.
+- **Template marketplace**: curated, peer-reviewed clinical form and document packs per specialty, installable per tenant with attribution and version tracking (pairs with the EN-029 rule marketplace).
+- **Advanced print**: pre-printed stationery calibration wizard, PDF/UA accessible-tagged output, e-invoicing IRN/QR embedding, and duplex booklet layouts for chart packs.
+- **Real-time collaborative editing** of long clinical documents (discharge summary drafted by resident and consultant simultaneously) with presence and conflict-free merging.
+- **Form analytics for clinical research**: cohort extraction directly from bound fields across template versions, feeding EN-036's anonymised research exports.
+- **Rules-linked forms**: a field value directly triggering an EN-029 rule evaluation inline (e.g. entering a Padua score auto-prompting VTE prophylaxis) beyond the current event-driven path.
+
+## 16. Open Questions for the Hospital
+1. Which **existing paper forms and printed documents** must be reproduced exactly at go-live (please supply samples), and which may be redesigned to the product defaults?
+2. Who is the **template steward** per domain (clinical, nursing, billing, HR), and who approves clinical templates — HOD, Medical Superintendent, or a documentation committee?
+3. What must appear on the **letterhead** for each branch (logo, legal name, GSTIN, licence numbers, accreditation marks), and does any branch use **pre-printed stationery** (which changes header handling)?
+4. Which documents must be **bilingual**, in which languages, and who supplies and reviews the translations?
+5. What are the **paper and label stocks** in use (A4/A5, 80 mm/58 mm thermal, exact label dimensions for specimens, wristbands, medicine labels, asset tags) and the printer models per location?
+6. Which documents legally require a **digital signature** (EN-016) versus a scanned signature image, and whose signature appears on each?
+7. What is the hospital's policy on **reprints** — should duplicates always carry a `COPY` watermark, and who may print an unmarked original?
+8. Which **clinical scales and assessments** are in use today (pain scale variant, PEWS version, falls and pressure-ulcer tools), and are there local scoring variations we must reproduce exactly?
+9. Are there **specialty-specific diagrams** required beyond the shipped set (e.g. a particular dental chart notation, a departmental wound map)?
+10. What is the **review cycle** for controlled documents (NABH expects at least annual), and who is notified?
+11. Should doctors be allowed to create **personal template variants**, or must all templates be departmentally governed?
+12. Which form fields must be **reportable** (used in dashboards, alerts or billing) so they are built as typed columns rather than JSON from day one?
+13. What **retention** applies to rendered documents (originals, copies, previews), and does MRD require the exact rendered artefact or is re-rendering from data acceptable?
+14. Are there **legacy templates or form definitions** in the outgoing system that should be imported (EN-036), and in what format?

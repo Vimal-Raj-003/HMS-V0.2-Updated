@@ -1,0 +1,1679 @@
+=== SHEET Original Data (Unchanged) A1:F955
+S.No|Category|Modules|Functions|Functional Breakdown (Detailed)|Missing Features / Enhancements
+1|OPD|Front Office|Registration, ABHA, Appointments, Queue, Staff Mgmt|1. PATIENT REGISTRATION WORKFLOW:
+  • New Patient: Receptionist clicks 'New Patient' → Form captures Name, Age, Gender, Mobile, Aadhaar, Photo → System generates unique UHID → OTP verification via SMS → Record created in patients table
+  • Existing Patient: Search by Mobile/UHID/Name → Auto-populate details → Update if changed
+  • ABHA Integration: Click 'Link ABHA' → ABDM API call → Verify ABHA Number → Link to patient profile → Health Locker consent
+2. APPOINTMENT MANAGEMENT:
+  • Input: Doctor, Specialty, Date, Time Slot → System checks slot availability → Booking confirmed → SMS/WhatsApp confirmation sent
+  • Reschedule: Select appointment → Choose new slot → Auto-notify patient
+  • Cancel: Select → Reason capture → Refund trigger (if paid) → Slot released
+3. QUEUE MANAGEMENT:
+  • Token Generation: Appointment check-in → Token number assigned → Printed/SMS → Added to doctor queue
+  • Live Queue: Real-time position display → Hold/Skip/Reorder by receptionist → WebSocket push to doctor dashboard + patient app
+  • Walk-in: Quick registration → Auto-queue after scheduled patients
+4. STAFF MANAGEMENT:
+  • Create User: Admin → Add Staff → Assign Role (RBAC) → Set Department → Generate credentials
+  • Doctor Schedule Config: Select Doctor → Set weekly slots → Block holidays → Publish
+5. OUTPUTS: UHID card, Token print, Appointment confirmation SMS/WhatsApp, Queue display feed|• Multi-language registration (Tamil/Hindi/English)
+• Aadhaar e-KYC instant verification
+• Emergency contact auto-capture
+• Insurance card OCR scan
+• AI photo-match for return visits
+• Geo-fenced auto check-in (regulars)
+2|OPD|OPD / CPOE|Doctor Dashboard, Consultation, ICD-10, E-Rx,Lab Orders|1. DOCTOR QUEUE INTERFACE:
+  • Doctor logs in → Dashboard shows live queue → Each patient card shows: Token #, Name, Pre-captured Vitals (BP, SpO2, Temp, Pulse), Wait Time
+  • Click 'Start Consultation' → Opens patient workspace
+2. CONSULTATION WORKFLOW:
+  • Step 1: Chief Complaint → Free-text + Quick-pick templates
+  • Step 2: Clinical Examination → Structured form + free notes
+  • Step 3: ICD-10 Diagnosis → Search box with auto-suggest → Select Primary + Secondary codes → Severity tag
+  • Step 4: Treatment Plan → Notes + Instructions to patient
+3. E-PRESCRIPTION (E-Rx):
+  • Drug search → Auto-suggest (brand/generic) → Select: Drug, Dose, Frequency, Duration, Route, Instructions
+  • Drug Allergy Check: System cross-checks patient allergy list → Alert popup if match
+  • Drug Interaction Check: System validates against co-prescribed drugs → Warning if conflict
+  • Template Library: Doctor saves frequently used Rx combos → One-click apply
+  • Output: Digital Rx pushed to Pharmacy module in real-time via WebSocket
+4. LAB ORDERING:
+  • Doctor selects tests from catalog → Priority flag (Routine/Urgent/STAT) → Order pushed to Lab dashboard → Patient notified
+5. PATIENT HISTORY:
+  • Timeline view: All past visits, diagnoses, prescriptions, lab results → Filterable by date/specialty
+6. OUTPUTS: Consultation record, E-Prescription PDF, Lab Order, Follow-up appointment, Clinical notes print|• AI clinical decision support (drug-diagnosis)
+• Voice-to-text clinical notes
+• Smart Rx: auto-suggest drugs per diagnosis
+• Clinical pathway templates per diagnosis
+• Patient education auto-share post-diagnosis
+• Multi-specialty referral with shared notes
+3|OPD|Pharmacy|Dispensing, Inventory, Expiry Alerts, OTC Billing|1. PENDING PRESCRIPTION DASHBOARD:
+  • Real-time feed of all e-prescriptions from all doctors via WebSocket → Each card shows: Patient Name, Doctor, Rx Items, Priority, Timestamp
+  • Pharmacist clicks 'Dispense' to start workflow
+2. DISPENSING WORKFLOW:
+  • Step 1: Verify Rx → Check patient identity (UHID/Mobile)
+  • Step 2: Pick medicines → Barcode scan each item → System validates batch, expiry, stock
+  • Step 3: Partial fulfillment → If drug unavailable, mark partial → Suggest generic substitute (with doctor approval flag)
+  • Step 4: Print label → Dosage instructions on each strip/bottle
+  • Step 5: Bill generation → Auto-calculate pricing → Apply discounts → Payment collection
+  • Step 6: Mark dispensed → Status update pushed to Doctor + Patient
+3. INVENTORY MANAGEMENT:
+  • Stock Register: Item-wise current stock, batch, expiry, location
+  • Auto-Reorder: Stock falls below min level → System generates Purchase Indent → Alert to Store Manager
+  • Expiry Alerts: 30/60/90-day expiry warnings → Dashboard widget + daily email
+4. OTC BILLING:
+  • Walk-in sales without prescription → Item search → Add to cart → Bill → Payment
+5. NARCOTIC REGISTER:
+  • Controlled substance log → Batch tracking → Double-verification → Regulatory report
+6. OUTPUTS: Dispensing receipt, Inventory alerts, Expiry report, Sales analytics, Narcotic log|• Drug-Drug interaction severity levels
+• Patient medication counseling checklist
+• Smart dispensing: bin location guidance
+• Returns analytics by reason code
+• Near-expiry auto-discount suggestion
+• Controlled substance dual-authorization
+4|OPD|Laboratory|Orders, Sample Tracking, Result Entry, PDF Reports|1. ORDER RECEPTION:
+  • Lab orders arrive from Doctor/ER/IP via system → Pending Orders Dashboard shows: Patient, Test(s), Priority, Ordering Doctor, Timestamp
+2. SAMPLE COLLECTION:
+  • Phlebotomist selects order → Generates barcode label → Affixes to sample tube → Scans to confirm collection → Status = 'Collected'
+  • Sample Rejection: If hemolyzed/clotted/insufficient → Reject with reason → Auto-notify doctor + patient for recollect
+3. RESULT ENTRY:
+  • Technician selects test → Enter values → System auto-compares against reference range (age/gender specific)
+  • Abnormal Flag: Out-of-range values highlighted RED → Critical values trigger instant push alert to ordering doctor
+  • Delta Check: System compares current result vs previous result → Flags significant variance
+  • Validation: Senior technician reviews → Approves → Result finalized
+4. REPORT GENERATION:
+  • Auto-generate branded PDF report → Include: Patient demographics, Test name, Result, Reference Range, Flag, Doctor name
+  • Delivery: Available on Patient Portal + WhatsApp PDF push + Print at counter
+5. LAB MACHINE INTEGRATION (HL7/ASTM):
+  • Bi-directional: Orders sent to analyzer → Results received automatically → Mapped to patient → Reduces manual entry errors
+6. TAT MONITORING:
+  • Track: Order time → Collection time → Result time → Report time → Dashboard shows SLA compliance %
+7. OUTPUTS: Lab report PDF, Critical alert notification, TAT analytics, NABL compliance report|• POCT integration
+• Auto-dilution calculation
+• External lab order routing
+• Cumulative patient report (all visits)
+• Specimen chain-of-custody (medico-legal)
+• Proficiency testing / EQA tracking
+5|OPD|OP Billing|Master Bill, Razorpay, Digital Receipts, Revenue MIS,|1. MASTER BILL CONSOLIDATION:
+  • System auto-aggregates all charges: Consultation Fee + Pharmacy Bill + Lab Charges + Procedure Charges + Radiology + Other Services
+  • Single unified bill view per patient per visit
+2. PAYMENT PROCESSING:
+  • Multi-mode: Cash / Card (POS integration) / UPI / Razorpay (QR code) / Net Banking / Wallet
+  • Split Payment: Patient pays partial cash + partial card → System tracks both
+  • Advance Payment: Collect deposit → Adjust against final bill
+3. DIGITAL RECEIPT:
+  • Auto-generate receipt with: Hospital logo, Patient details, Itemized charges, Payment mode, GST breakup, QR code for verification
+  • Delivery: Print + WhatsApp + Email + Patient Portal
+4. REVENUE MIS:
+  • Dashboard: Daily/Weekly/Monthly revenue → Department-wise split → Doctor-wise earnings → Payer-wise (Self-Pay/Insurance/Corporate)
+  • Doctor Payout: Auto-calculate consultation share → Generate payout report
+5. DISCOUNT & CONCESSION:
+  • Predefined discount slabs → Approval matrix (>10% needs Admin approval) → Discount reason mandatory → Audit trail
+6. REFUND PROCESSING:
+  • Initiate refund → Reason capture → Approval workflow → Refund processed → Credit note generated
+7. OUTPUTS: Master bill PDF, Digital receipt, Revenue MIS report, Doctor payout sheet, GST report|• QR code digital receipt verification
+• Auto-GST with HSN code mapping
+• Revenue forecast from appointment pipeline
+• Bad debt provisioning & write-off
+• Patient wallet/prepaid balance
+• EMI/installment payment option
+6|OPD|Emergency & Day Care|Fast-Track ER, Triage, Day Care Workflow|1. QUICK REGISTRATION:
+  • Minimal fields: Name, Age, Gender, Mobile, Chief Complaint → UHID generated in <30 seconds
+  • Stretcher/Wheelchair patients: Tag-based ID → Full registration post-stabilization
+2. TRIAGE (ESI 5-LEVEL):
+  • ER Nurse performs: Vital signs → Symptom assessment → ESI Level assignment (1=Resuscitation, 2=Emergent, 3=Urgent, 4=Less Urgent, 5=Non-Urgent)
+  • Color-coded patient cards: Red/Orange/Yellow/Green/Blue
+  • Auto-queue by severity, not arrival time
+3. EMERGENCY BED MANAGEMENT:
+  • Real-time bed availability → Quick assign → ER to IP transfer with one-click admission
+4. MLC (MEDICO-LEGAL CASE):
+  • MLC flag on patient → Auto-generate police intimation → Document injuries → Chain of custody log
+5. DAY CARE WORKFLOW:
+  • Day care booking → Package selection → Procedure execution → Post-procedure observation → Same-day discharge → Billing
+6. ON-CALL DOCTOR ALERT:
+  • System sends push notification + SMS to on-call doctor → Acknowledge button → ETA tracking
+7. OUTPUTS: Triage tag, MLC register, ER statistics dashboard, Day care discharge summary|• Mass casualty START triage protocol
+• ER-to-IP seamless data transfer
+• Trauma scoring (ISS/RTS/TRISS auto-calc)
+• Poison info center integration
+• Forensic documentation templates
+• Real-time ER occupancy broadcast
+7|OPD|Dietician|Diet Plans, Patient Assignment, Tracking|1. PATIENT ASSIGNMENT:
+  • Doctor refers patient → Dietician receives referral notification → Patient appears in dietician's queue
+  • Walk-in: Receptionist books dietician appointment → Standard queue flow
+2. NUTRITIONAL ASSESSMENT:
+  • Input: Height, Weight, BMI auto-calc, Body composition, Medical history, Food allergies, Current diet recall (24-hour)
+  • System generates nutritional gap analysis
+3. DIET PLAN CREATION:
+  • Template library: Diabetic, Cardiac, Renal, Post-Surgery, Pediatric, Geriatric, Weight Management
+  • Customization: Meal-wise (Breakfast/Lunch/Snack/Dinner) → Food items + Quantity + Calories + Macros
+  • Special considerations: Allergies, Religious preferences, Regional cuisine
+4. IP DIET COORDINATION:
+  • Diet plan pushed to Kitchen/Canteen module → Meal dispatch tracking → Patient feedback
+5. TRACKING & FOLLOW-UP:
+  • Progress: Weight trend, BMI chart, Lab values (HbA1c, Lipid profile) → Visual graphs
+  • Follow-up scheduling with reminder SMS
+6. OUTPUTS: Diet plan PDF, Nutritional assessment report, Progress chart, Kitchen dispatch order|• AI-based meal recommendation per condition
+• Patient food preference learning
+• Therapeutic diet cost tracking
+• Meal delivery rating by patient
+• Allergen cross-contamination alert
+• Nutritional supplement inventory
+8|OPD|Dialysis|Session Scheduling, Vitals Recording, Machine Tracking|1. SESSION SCHEDULING:
+  • Chronic patient registration → Recurring session booking (e.g., MWF) → Machine assignment based on availability
+  • Emergency dialysis: Priority slot allocation
+2. PRE-DIALYSIS ASSESSMENT:
+  • Nurse records: Weight (dry weight comparison), BP, Temperature, Vascular access inspection → System flags concerns
+3. INTRA-SESSION MONITORING:
+  • Vital recording every 30 min: BP, Pulse, Temperature → Auto-plot trend chart
+  • Machine Parameters: Blood flow rate, Dialysate flow, TMP, UF rate, UF volume
+  • Complication logging: Hypotension, Cramps, Fever → Alert to nephrologist
+4. MACHINE TRACKING:
+  • Machine master: ID, Type, Last maintenance, Next service due → Utilization dashboard
+  • Water quality log: RO plant readings, Bacteriology results, Endotoxin levels
+5. POST-DIALYSIS:
+  • Post-weight, BP → Actual UF volume → Session summary → Patient education notes
+6. BILLING:
+  • Per-session charge + Consumables → Package billing option → Insurance pre-auth integration
+7. OUTPUTS: Session summary, Machine utilization report, Water quality log, Monthly dialysis summary|• IoT machine vitals (pump RPM, conductivity)
+• Automated water quality sensors
+• Patient transport coordination
+• Telemedicine follow-up for chronic patients
+• Vascular access management module
+• Kt/V adequacy auto-calculation
+9|OPD|Vaccination|Schedules, Certificates, Reminders|1. SCHEDULE MANAGEMENT:
+  • Age-based vaccine calendar (NIS/IAP schedule) → Auto-generate due dates from DOB
+  • Travel vaccines: Destination-based recommendation
+2. ADMINISTRATION WORKFLOW:
+  • Nurse selects patient → Verifies schedule → Scans vaccine barcode → Records: Vaccine name, Batch, Expiry, Site, Route, Dose
+  • Adverse Event: AEFI documentation form → Mandatory reporting trigger
+3. INVENTORY:
+  • Cold chain tracking: Temperature log (IoT integration) → Alert if temp breach
+  • Batch tracking: Vial open time, Multi-dose vial wastage tracking
+4. CERTIFICATES:
+  • Auto-generate: Vaccination certificate with QR code → Digital + Print → CoWIN sync
+5. REMINDERS:
+  • SMS/WhatsApp: 7 days before due → 1 day before → On due date → Overdue alert
+6. OUTPUTS: Vaccination card, Certificate PDF, AEFI report, Coverage statistics, Due list|• Cold chain IoT temperature sensors
+• Vaccine forecast from birth rate data
+• Multi-dose vial wastage reduction
+• U-WIN government portal integration
+• School vaccination camp management
+• AEFI follow-up workflow
+10|OPD|Radiology|Sessions, Treatment Plans, Progress Tracking|1. ORDER MANAGEMENT:
+  • Doctor orders radiology investigation → Specify: Modality (X-Ray/CT/MRI/USG), Body part, Clinical indication, Priority
+  • Order appears on Radiology Worklist
+2. SCHEDULING & EXECUTION:
+  • Slot booking by modality → Patient preparation instructions sent → Patient check-in → Technician performs scan
+  • DICOM Modality Worklist (MWL): Patient demographics auto-pushed to scanner
+3. IMAGE MANAGEMENT (PACS):
+  • Images auto-archived to PACS → Web-based DICOM viewer → Radiologist views on workstation
+  • Prior study comparison: System pulls previous studies for same body part
+4. REPORTING:
+  • Structured report template by modality → Findings + Impression → Radiologist e-signs
+  • Critical Finding Alert: Urgent result → Immediate push to ordering doctor
+5. PROGRESS TRACKING:
+  • TAT: Order → Scan → Report → Delivery time tracking → SLA dashboard
+  • Radiation dose log: Cumulative exposure per patient
+6. OUTPUTS: Radiology report PDF, DICOM images via portal, Critical alert, TAT analytics|• AI-assisted image annotation
+• 3D reconstruction (CT/MRI)
+• Voice dictation for reports
+• Cumulative radiation dose tracking
+• Contrast allergy pre-med protocol
+• Peer review/quality audit module
+11|OPD|Health Check-Up|Sessions, Treatment Plans, Progress Tracking|1. PACKAGE CONFIGURATION:
+  • Admin defines packages: Basic/Advanced/Executive/Corporate → Each includes: Lab tests + Radiology + Specialist consultations
+  • Pricing: Package price (discounted) vs à la carte total → System shows savings
+2. BOOKING WORKFLOW:
+  • Patient/Corporate HR books package → Select tier → Choose date → Payment (advance) → Confirmation SMS
+3. EXECUTION ROUTING:
+  • Check-in → System generates task sequence: Vitals → Blood draw → Radiology → Doctor consult
+  • Status board: Green=Done, Yellow=In Progress, Red=Pending per station
+4. REPORT CONSOLIDATION:
+  • All results auto-collated → Health Score calculated (composite index) → Doctor reviews + adds summary notes
+  • Comparison: Current vs previous check-up results → Trend arrows (improving/declining)
+5. CORPORATE MANAGEMENT:
+  • Bulk employee upload → Schedule assignment → Batch execution → Corporate billing (B2B)
+  • Corporate dashboard: Completion %, common findings, aggregate reports
+6. OUTPUTS: Consolidated health report PDF, Health score card, Comparison chart, Corporate summary|• AI health risk score from results
+• Employer wellness dashboard (B2B)
+• Lifestyle recommendation engine
+• Population norm benchmarking
+• Digital health passport
+• Annual check-up auto-scheduler
+12|OPD|Packages|Orders, Reports, Image Upload/Viewer|1. ORDER MANAGEMENT:
+  • Doctor orders imaging/test → Appears on worklist → Priority queue → Technician picks up
+2. REPORT WORKFLOW:
+  • Technician/Radiologist captures → Uploads images → Enters findings → Report auto-formatted
+  • Templates: Pre-built per investigation type → Drop-down selections + free text
+3. IMAGE UPLOAD/VIEWER:
+  • Upload: DICOM, JPEG, PDF → Cloud storage → Viewer with zoom, pan, window/level
+  • Patient access: Reports + images available on Patient Portal
+4. OUTPUTS: Investigation report PDF, Image viewer link, Status tracking dashboard|• Priority queue management
+• Equipment maintenance-downtime alerts
+• Patient prep SMS with instructions
+• Report co-signing (Resident→Consultant)
+• Urgent investigation fast-track pathway
+13|OPD|Vital Room|Package Config, Booking, Reports|1. PACKAGE CONFIGURATION:
+  • Define service packages: Surgery bundles, Health check-ups, Procedure packages
+  • Components: Services + Consumables + Bed charges + Doctor fees → Total package price
+  • Inclusion/Exclusion rules: What's covered, caps per item
+2. BOOKING:
+  • Patient selects package → Date → Advance payment → Booking confirmed → Pre-op instructions sent
+3. EXECUTION & TRACKING:
+  • Package activation on admission → All included services auto-authorized → Variance tracking: Actual vs Package amount
+  • Excess charges: Flag and seek approval before billing beyond package limit
+4. REPORTS:
+  • Package utilization report → Revenue per package type → Variance analysis → Profitability per package
+5. OUTPUTS: Package booking confirmation, Utilization report, Variance summary, Revenue analytics|• Dynamic pricing by occupancy
+• Package comparison tool (patient-facing)
+• Insurance auto-mapped package selection
+• Package profitability dashboard
+• Patient co-pay estimator
+• Package validity/expiry management
+14|OPD|Management|Room Tracker, Nurse Vitals Interface|1. ROOM/BED TRACKER:
+  • Visual bed map: Ward-wise → Floor-wise → Color-coded: Green=Vacant, Red=Occupied, Yellow=Discharge-pending, Blue=Maintenance
+  • Click on bed → Shows: Patient Name, Admission Date, Doctor, Expected Discharge
+2. BED TRANSFER:
+  • Transfer request → Select destination bed → Approval (if ICU) → Auto-update billing room charges
+3. NURSE VITALS INTERFACE:
+  • Bedside vital entry → BP, SpO2, Temp, Pulse, RR, Pain Score → Auto-chart on vital trend graph
+  • Abnormal value → Auto-alert to attending doctor via push notification
+4. INTAKE/OUTPUT CHART:
+  • Input: IV fluids, Oral intake, Blood products → Output: Urine, Drain, Emesis → Auto-calculate balance
+5. OCCUPANCY DASHBOARD:
+  • Real-time: Total beds, Occupied, Vacant, Under maintenance → Occupancy % per ward → Trend analysis
+6. OUTPUTS: Bed occupancy dashboard, Patient location map, Vital trend charts, I/O balance report|• Predictive bed demand forecasting (ML)
+• Auto housekeeping dispatch on discharge
+• Patient fall detection (IoT wearable)
+• Family visit scheduling via portal
+• Patient satisfaction survey per ward
+15|OPD|Telemedicine|Video Consult, Tele-Rx, Recording, Consent|1. VIDEO CONSULTATION SETUP:
+  • Patient books teleconsult slot (via Portal/App) → Payment online → Confirmation with video link (WebRTC)
+  • Doctor receives schedule → Clicks 'Start Call' at slot time
+2. CONSULTATION FLOW:
+  • Waiting Room: Patient joins → Queue position shown → Auto-admit when doctor ready
+  • During Call: HD Video/Audio → Screen share (reports) → Chat messaging → File upload (prescriptions, images)
+  • Clinical: Doctor writes notes, ICD-10 code, E-Rx → Same workflow as in-person consultation
+3. TELE-PRESCRIPTION:
+  • E-Rx generated during call → Digitally signed → Pushed to Pharmacy/Patient Portal
+  • Lab orders: Can order tests → Patient visits lab for sample collection
+4. RECORDING & CONSENT:
+  • Pre-call consent form → Recording (if consented) → Stored encrypted → Accessible for medico-legal
+5. OUTPUTS: Teleconsult record, E-Rx PDF, Call recording (encrypted), Follow-up appointment|• AI symptom checker pre-consultation
+• Multi-language teleconsult support
+• E-pharmacy integration for delivery
+• Remote vitals from patient home devices
+• Second opinion workflow
+• Group therapy session support
+16|OPD|Fertility|Cycle Tracking, IVF/IUI Protocols, Outcomes|1. PATIENT REGISTRATION:
+  • Couple profile: Both partners linked → Medical history, Previous treatments, Hormone levels
+2. CYCLE TRACKING:
+  • Menstrual cycle log → Ovulation prediction → Hormone monitoring (LH, FSH, E2, Progesterone)
+  • Ultrasound tracking: Follicle count + size per visit → Growth chart
+3. IVF/IUI PROTOCOLS:
+  • Protocol selection: Antagonist/Long Agonist/Natural/Mini-IVF → Medication schedule auto-generated
+  • IUI: Sperm prep → Insemination → Luteal support → Beta-hCG scheduling
+  • IVF: Stimulation → Trigger → OPU (egg retrieval count) → Fertilization → Embryo grading (Day 3/5) → Transfer → Cryopreservation
+4. OUTCOME TRACKING:
+  • Beta-hCG result → Clinical pregnancy confirmation → Ongoing pregnancy tracking
+  • Analytics: Success rate per protocol, per doctor, per age group
+5. OUTPUTS: Cycle summary, Embryo report, Outcome analytics, Treatment plan PDF|• Embryo photo/video storage
+• Cryopreservation inventory management
+• Donor consent management
+• Genetic counseling integration
+• ML-based outcome prediction
+• Multi-center data sharing (research)
+17|OPD|Procedure Console|Scheduling, Documentation, Consent, Billing|1. PROCEDURE SCHEDULING:
+  • Doctor selects procedure type → Room assignment → Time slot → Patient notification → Pre-procedure instructions sent
+2. DOCUMENTATION:
+  • Pre-procedure: Consent capture (digital signature) → Checklist (allergies, fasting, medications)
+  • During: Procedure notes → Findings → Complications (if any) → Photo/Video capture
+  • Post-procedure: Recovery notes → Discharge instructions → Follow-up scheduling
+3. CONSUMABLES & BILLING:
+  • Consumables used → Auto-deduct from inventory → Auto-add to patient bill
+  • Procedure fee + Consumables + Anesthesia (if applicable) → Consolidated billing
+4. CONSENT MANAGEMENT:
+  • Template-based consent forms → Patient digital signature → Witness → Timestamped → Stored in MRD
+5. OUTPUTS: Procedure report, Consent record, Billing entry, Post-procedure instructions PDF|• Risk scoring & informed consent auto-gen
+• Real-time procedure video recording
+• 30-day complication tracking
+• Evidence-linked procedure templates
+• Patient-reported outcome measures (PROMs)
+18|OPD|Doctor Mobile App
+(iOS & Android)|Queue, Consult, Rx, Push, Offline|1. SECURE LOGIN:
+  • Doctor: Mobile/Email + Password → Biometric (fingerprint/face) → JWT token → Session management
+2. LIVE QUEUE:
+  • Real-time patient queue on phone → Pull-to-refresh → Push notification when patient checked in
+  • Each patient card: Name, Token, Vitals (BP, SpO2, Temp), Chief Complaint
+3. MOBILE CONSULTATION:
+  • Quick clinical notes → Voice-to-text option → E-Prescription (drug search + template) → Lab ordering
+4. PUSH NOTIFICATIONS:
+  • Critical vitals alert → Lab result ready → New appointment → Emergency page → Prescription dispensed confirmation
+5. OFFLINE MODE:
+  • Consultation data cached locally → Sync when back online → Conflict resolution logic
+6. OUTPUTS: Mobile Rx, Queue management, Notification center, Earnings dashboard|• Wearable device data integration
+• AI priority sorting of notifications
+• Secure inter-doctor messaging
+• Digital signature for notes/reports
+• Multi-hospital dashboard
+19|OPD|Patient Mobile App
+(iOS & Android)|Booking, Queue, Records, Lab, Push|1. PATIENT LOGIN:
+  • OTP-based (no password) → Enter Mobile → Receive OTP → Verify → JWT session → Profile auto-loaded
+2. APPOINTMENT BOOKING:
+  • Browse: Specialty → Doctor → Available slots → Select → Pay online (Razorpay) → Confirmation + Queue entry
+3. LIVE QUEUE TRACKING:
+  • Real-time position → Estimated wait time → Push notification: 'You are next' / 'Doctor is ready'
+4. MEDICAL RECORDS ACCESS:
+  • Past consultations timeline → Clinical notes (doctor-authorized visibility) → Prescriptions PDF download → Lab reports PDF download
+5. FAMILY MANAGEMENT:
+  • Add family members → Manage their appointments/records from single login
+6. PUSH NOTIFICATIONS:
+  • Appointment reminder → Queue update → Lab report ready → Bill generated → Follow-up due
+7. OUTPUTS: Booking confirmation, Queue position widget, Records viewer, Report downloads|• AI chatbot (symptom triage + doctor rec)
+• Health goals & wellness tracking
+• Medication reminder with adherence score
+• Teleconsult integration in-app
+• Emergency SOS with location sharing
+• Insurance claim status tracking
+20|IP |Admission|IP Admission, Bed Mgmt, Ward Config,Emergency Admit|1. ADMISSION REQUEST:
+  • Source: Doctor (from OPD) / Emergency / Direct → Admission form: Patient, Diagnosis, Expected LOS, Treating Doctor
+2. BED MANAGEMENT:
+  • Real-time bed availability dashboard → Filter by: Ward/Room Type/Floor → Select bed → Assign
+  • Bed types: General Ward, Semi-Private, Private, ICU, NICU, HDU, Isolation
+  • Ward Configuration: Admin sets room categories, bed count, tariff per bed type
+3. ADMISSION WORKFLOW:
+  • Step 1: Verify patient identity (UHID/ABHA)
+  • Step 2: Admission form + Consent capture (General + Procedure-specific)
+  • Step 3: Advance deposit collection → Receipt generation
+  • Step 4: Bed assigned → Nursing assessment initiated → Diet order placed → Medication orders started
+4. EMERGENCY ADMISSION:
+  • Fast-track: Minimal fields → Bed assign → Stabilize → Complete registration later
+5. INSURANCE PRE-AUTH TRIGGER:
+  • If insurance patient → Auto-generate pre-auth request → Upload documents → Track approval status
+6. OUTPUTS: Admission summary, Bed allocation slip, Deposit receipt, Bystander pass, Insurance pre-auth form|• AI predicted length of stay
+• Auto bed suggestion by acuity
+• Pre-admission checklist completion
+• Patient belongings inventory
+• Auto-alert dietary/pharmacy on admit
+21|IP |Discharge|Discharge Summary, Final Bill, Follow-Up|1. DISCHARGE PLANNING:
+  • Doctor initiates discharge → System checks: All orders completed? Pending labs? Pending bills?
+  • Discharge checklist: Medications reconciled, Follow-up scheduled, Instructions given, Consent signed
+2. DISCHARGE SUMMARY:
+  • Auto-populated template: Admission date, Diagnosis (ICD-10), Procedures performed, Key lab results, Treatment given, Condition at discharge
+  • Doctor adds: Final notes, Discharge medications, Follow-up plan, Dietary advice, Activity restrictions
+  • Digital signature → PDF generated → Pushed to Patient Portal
+3. FINAL BILL:
+  • System consolidates ALL charges: Room (per-day auto-posted) + Pharmacy + Lab + Procedure + OT + Consumables + Doctor fees
+  • Deposit adjustment → Balance calculation → Payment processing
+  • Insurance: Claim amount vs patient co-pay split
+4. FOLLOW-UP:
+  • Auto-schedule follow-up appointment → SMS/WhatsApp reminder → Post-discharge call (3-day) scheduled
+5. BED RELEASE:
+  • Discharge complete → Bed status = 'Housekeeping' → Cleaning confirmed → Bed = 'Available'
+6. OUTPUTS: Discharge summary PDF, Final bill, Take-home medication list, Follow-up appointment card|• Automated discharge readiness score
+• Post-discharge remote monitoring
+• Transport arrangement at discharge
+• DAMA (Discharge Against Medical Advice)
+• 30-day readmission tracking & root cause
+• Discharge satisfaction survey
+22|IP |Nursing Station|IP Vitals, MAR, Nursing Notes, Shift Handover|1. WARD PATIENT DASHBOARD:
+  • Bed-wise view: Patient Name, Diagnosis, Day of admission, Attending Doctor, Acuity level
+  • Color-coded alerts: Red=Critical, Orange=Attention, Green=Stable
+2. IP VITALS CHARTING:
+  • Scheduled vital capture: BP, Pulse, Temp, SpO2, RR, Pain Score → Frequency as per doctor order (Q1H, Q4H, Q8H)
+  • Auto-trend chart: Time-series graph per vital parameter → Abnormal flag → Alert to doctor
+3. MEDICATION ADMINISTRATION RECORD (MAR):
+  • Active medication list → Scheduled times → Nurse confirms: Given/Held/Refused → Barcode scan verification
+  • Drug-time verification: Right Patient, Right Drug, Right Dose, Right Route, Right Time (5R check)
+4. NURSING NOTES:
+  • Structured: SBAR format (Situation, Background, Assessment, Recommendation) → Free-text option
+  • Assessment tools: Fall Risk (Morse), Pressure Ulcer (Braden), Pain Scale, Glasgow Coma Scale
+5. SHIFT HANDOVER:
+  • Outgoing nurse completes handover form per patient → Incoming nurse acknowledges → Digital sign-off
+  • Content: Active issues, Pending orders, Critical alerts, Family concerns
+6. OUTPUTS: Vital trend chart, MAR log, Nursing notes, Handover document, Assessment scores|• Nurse call bell with response time tracking
+• Early warning score (NEWS2) auto-calc
+• Sepsis screening protocol
+• Restraint usage documentation
+• Nursing workload balancing algorithm
+23|IP |Nursing Mobile App(Android )|Bedside Vitals, Barcode Scan, Push Alerts|1. BEDSIDE VITALS ENTRY:
+  • Nurse at bedside → Scan patient wristband QR → Patient verified → Enter vitals → Save → Auto-synced to Nursing Station
+2. BARCODE MEDICATION VERIFICATION:
+  • Scan patient wristband → Scan medication barcode → System verifies: Correct patient + Correct drug + Correct time → Green ✓ or Red ✗
+3. PUSH ALERTS:
+  • Critical vital → Immediate push notification on nurse phone → Acknowledge button → Escalation if no response in 5 min
+  • Doctor orders: New medication/test → Push to assigned nurse
+4. PHOTO CAPTURE:
+  • Wound documentation → Take photo → Auto-tag with patient, date, location → Stored in medical record
+5. OFFLINE MODE:
+  • Data entry cached locally → Auto-sync when network restored → No data loss during connectivity gaps
+6. OUTPUTS: Bedside vital records, Medication verification log, Wound photos, Task completion status|• Wristband reprinting at bedside
+• Voice-to-text nursing notes on mobile
+• Medication admin photo documentation
+• Real-time nurse location (RTLS)
+• Emergency code activation from mobile
+24|IP |IP Billing|IP Master Bill, Per-Day Charges, TPA Pre-Auth|1. IP MASTER BILL:
+  • Running bill updated real-time: Room charges (auto-posted daily at midnight) + Pharmacy + Lab + Radiology + Procedure + OT + Blood + Consumables + Doctor visits + Nursing charges
+2. PER-DAY CHARGES:
+  • Automated: Bed type → Daily tariff → Auto-posted to bill at midnight → Room upgrade/downgrade auto-adjusts
+3. TPA PRE-AUTHORIZATION:
+  • Insurance patient → Generate pre-auth request → Upload: ID, Insurance card, Doctor letter, Estimated cost
+  • Track: Submitted → Under Review → Approved/Rejected → Enhancement request if needed
+  • Approved amount → System sets credit limit → Alerts when charges approach limit
+4. INTERIM BILLING:
+  • Patient/family can view running bill anytime → Interim bill print → Deposit top-up request
+5. PACKAGE BILLING:
+  • Surgery packages: Fixed price → All included services auto-authorized → Excess tracking → Variance report
+6. OUTPUTS: Running bill statement, Pre-auth request, Interim bill, Final bill, Insurance claim form, Variance report|• Real-time cost visibility for family
+• Auto deposit top-up notification
+• Package exhaustion alert to doctor
+• Patient-friendly bill explainer
+• Multi-currency (international patients)
+• Dynamic pricing engine
+25|IP |Operation Theatre|OT Schedule, Pre/Intra/Post-Op Docs,Consumables|1. OT SCHEDULING:
+  • Surgeon requests OT slot → OT calendar shows availability → Room assignment → Team assignment (Surgeon, Anesthetist, OT Nurse, Scrub Nurse)
+  • Emergency OT: Override scheduled cases → Priority booking
+2. PRE-OP WORKFLOW:
+  • WHO Surgical Safety Checklist: Sign In (before anesthesia) → Time Out (before incision) → Sign Out (before leaving OT)
+  • Pre-op checklist: Consent ✓, NPO Status ✓, Blood availability ✓, Implants ready ✓, Site marking ✓
+  • Anesthesia assessment: Anesthetist reviews → ASA grading → Anesthesia plan documented
+3. INTRA-OP DOCUMENTATION:
+  • Surgery notes: Procedure performed, Findings, Implants used (with serial numbers), Blood products used, Complications
+  • Consumable tracking: Every item used → Barcode scanned → Auto-deduct from inventory → Auto-add to bill
+4. POST-OP:
+  • Recovery room: Vital monitoring → Pain management → Discharge criteria (Aldrete Score) → Transfer to ward
+5. OT REPORTS:
+  • Utilization: OT hours used/available → Surgeon-wise → Cancellation rate → Start-time compliance
+6. OUTPUTS: OT schedule, WHO checklist, Surgery report, Implant log, OT utilization dashboard|• SSI surveillance module
+• Implant recall & patient notification
+• Robot-assisted surgery documentation
+• OT environment monitoring (temp/humidity)
+• Surgeon fatigue tracking
+• Cost-per-surgery analytics
+26|IP |Labour Room|Labour Monitoring, Partograph, Delivery Docs,Newborn|1. LABOUR ADMISSION:
+  • Patient arrives → Quick admission → Gestational age, Gravida/Para, Membrane status, Cervical exam documented
+2. PARTOGRAPH MONITORING:
+  • Digital partograph: Cervical dilation plot, Descent plot, FHR, Contractions, Maternal vitals
+  • Alert line + Action line: System alerts if labour crosses action line → Doctor notified
+3. DELIVERY DOCUMENTATION:
+  • Mode: Normal/Assisted/LSCS → Time of delivery → Baby details: Sex, Weight, APGAR (1min, 5min)
+  • Complications: PPH, Shoulder dystocia, Cord prolapse → Documented + Alert triggered
+4. NEWBORN MODULE:
+  • Auto-registration: Baby of [Mother Name] → UHID generated → Birth weight, Length, Head circumference
+  • Newborn examination: Congenital anomaly check → Hearing screen → Metabolic screen → Vaccination (BCG, OPV, HepB)
+  • Mother-Baby linking: Wristband match → Prevents mix-up
+5. BIRTH CERTIFICATE:
+  • Auto-generated with all statutory fields → Print → Digital copy to parents
+6. OUTPUTS: Partograph chart, Delivery record, APGAR card, Birth certificate, Newborn exam report|• High-risk pregnancy alert system
+• Maternal early warning (MEWS)
+• PPH protocol trigger
+• Skin-to-skin contact timer
+• Breastfeeding initiation documentation
+• Neonatal sepsis screening
+27|IP |Blood Bank|Donors, Inventory, Cross-Match, Issue Workflow|1. DONOR MANAGEMENT:
+  • Donor registration → Health screening questionnaire → Hemoglobin check → Eligibility determination
+  • Donation: Collection bag barcode → Collection start/end time → Volume → Donor adverse event log
+2. BLOOD INVENTORY:
+  • Unit registration: Bag ID, Blood group, Rh type, Collection date, Expiry date, Component type (WB/PRBC/FFP/Platelets/Cryo)
+  • Component preparation: Whole blood → Separation → Individual component tracking
+  • Storage: Temperature monitoring → Expiry alert → FIFO dispatch
+3. CROSS-MATCH & ISSUE:
+  • Transfusion request from doctor/OT → Blood group verification → Cross-match test → Compatibility result
+  • Issue: Cross-match OK → Issue unit → Barcode scan at bedside before transfusion → Transfusion reaction monitoring
+4. REGULATORY COMPLIANCE:
+  • SBTC/NACO reporting → Mandatory testing (HIV, HBV, HCV, Syphilis, Malaria) → Documentation
+5. OUTPUTS: Donor card, Cross-match report, Issue slip, Transfusion record, Inventory dashboard, Regulatory report|• Component therapy guidelines
+• Massive transfusion protocol activation
+• Near-miss event reporting
+• Platelet demand forecasting
+• External blood bank network integration
+• Autologous donation tracking
+28|IP |IP Package|Surgery Bundles, Package Billing, VarianceTracking|1. PACKAGE DEFINITION:
+  • Surgery bundles: Define package name → Include: OT charges, Surgeon fee, Anesthesia, Room (X days), Pharmacy, Lab, Consumables
+  • Rate: Fixed package price → Insurance-specific tariff mapping
+2. PACKAGE BILLING:
+  • Patient admitted under package → All included services auto-authorized → Charges posted against package limit
+  • System tracks: Consumed amount vs Package limit → Alert at 80% and 100% utilization
+3. VARIANCE TRACKING:
+  • Actual cost vs Package price → Positive variance (under budget) = hospital margin → Negative variance (over budget) = loss alert
+  • Root cause: Which component exceeded? → Drill-down analytics
+4. INSURANCE MAPPING:
+  • Map hospital packages to TPA/Insurance company packages → Rate negotiation support → Auto pre-auth amount calculation
+5. OUTPUTS: Package booking confirmation, Running utilization report, Variance analysis, Profitability dashboard|• ML-based package pricing optimization
+• Real-time cost trajectory prediction
+• Clinical path deviation auto-alert
+• Patient out-of-pocket estimator
+• Package benchmarking across periods
+29|IP |Doctor IP Mobile (iOS
+& Android)|Ward Rounds, IP Orders, Push Alerts|1. WARD ROUNDS:
+  • Doctor opens IP app → See assigned patients list → Bed-wise view → Each card: Diagnosis, Day of stay, Recent vitals, Active medications
+  • Click patient → Full IP chart: Notes, Orders, Results
+2. IP ORDERS:
+  • Doctor writes orders on phone: Medications (add/modify/stop), Lab tests, Radiology, Diet change, Nursing instructions
+  • Orders pushed instantly to respective departments via WebSocket
+3. PUSH ALERTS:
+  • Critical lab result → Push to phone → Doctor acknowledges → Orders new action
+  • Nurse escalation → Doctor receives alert → Responds with order
+4. DISCHARGE INITIATION:
+  • Doctor initiates discharge from phone → Discharge summary template pre-filled → Doctor completes → Submitted
+5. OUTPUTS: IP order sheet, Mobile discharge summary, Alert acknowledgment log|• Dictation mode for ward rounds
+• Wound progress photo capture
+• Inter-doctor secure chat
+• Smart notification filtering
+• Offline prescription with sync
+30|Non Clinical |CASH COUNTER|Multi-Counter Config, Shift Open/Close, Cash Reconciliation, Denomination Sheet, Digital Receipt, Daily Collection Summary, Advance Collection, Refund Processing|1. COUNTER SETUP:
+  • Admin configures multiple cash counters → Assign staff per shift → Shift open with starting cash balance
+2. COLLECTION WORKFLOW:
+  • Patient bill arrives → Cashier selects payment mode: Cash/Card/UPI/Cheque → Amount entered → Receipt generated
+  • Split payment: Cash ₹500 + UPI ₹1,500 → Both recorded against same bill
+3. SHIFT RECONCILIATION:
+  • Shift close: System-calculated total vs Actual cash count → Denomination entry → Shortage/Excess flagged
+  • Shift report: Total collections by mode, bills processed, refunds issued
+4. ADVANCE & REFUND:
+  • Advance collection: Receipt with advance reference → Adjusted at final billing
+  • Refund: Approval workflow → Refund processed → Original receipt linked
+5. DAILY SUMMARY:
+  • Auto-generated: Total collections, Mode-wise breakup, Counter-wise, Cashier-wise → Sent to Accounts
+6. OUTPUTS: Payment receipt, Shift reconciliation report, Daily collection summary, Denomination sheet|• UPI QR generation per bill
+• Cash drawer integration
+• Forex counter (international patients)
+• Denomination calculator
+• Night shift emergency collection
+31|Non Clinical |ASSET MANAGEMENT|Asset Register, Tag/Barcode, AMC/CMC Tracking, Depreciation Calc, Breakdown Log, Preventive Maintenance Schedule, Disposal Workflow, Location Tracking, Audit Trail|1. ASSET REGISTRY:
+  • Asset creation: Name, Category (Medical/Non-Medical/IT/Furniture), Purchase Date, Cost, Vendor, Warranty, Location, Department
+  • Unique Tag: Barcode/QR label generated → Physical affixing → Location mapped
+2. LIFECYCLE TRACKING:
+  • Purchase → Installation → Active use → Maintenance/Repair → Decommission → Disposal
+  • Each stage documented with dates, costs, and responsible person
+3. AMC/CMC MANAGEMENT:
+  • Contract entry: Vendor, Start/End date, Coverage scope, Cost → Renewal alerts 60/30 days before expiry
+  • Service call logging: Issue description → Vendor notified → Resolution time tracked → SLA compliance
+4. DEPRECIATION:
+  • Method: SLM/WDV → Auto-calculate annual/monthly depreciation → Book value updated → Finance integration
+5. PREVENTIVE MAINTENANCE:
+  • Schedule: Frequency per asset → Auto-generate work orders → Completion tracking → Overdue alerts
+6. AUDIT:
+  • Physical verification: Staff scans asset barcode → Confirms location → Condition assessment → Discrepancy report
+7. OUTPUTS: Asset register, AMC tracker, Depreciation schedule, Maintenance log, Audit discrepancy report|• IoT asset tracking (RFID/BLE)
+• Utilization rate analytics per asset
+• Insurance claim for asset damage
+• Green disposal/e-waste compliance
+• Asset sharing booking system
+32|Non Clinical |DIGITAL MRD|Digital File Creation, ICD Coding, Scan & Upload, Deficiency Check, Record Retrieval Log, Retention Policy, Medico-Legal Flag, File Movement Tracker, e-MRD Search|1. DIGITAL FILE CREATION:
+  • Patient visit → Medical record auto-created → Linked to UHID → All clinical docs (consultation, lab, radiology, discharge) auto-attached
+2. ICD CODING:
+  • MRD staff reviews discharge summary → Assigns/verifies ICD-10 codes → DRG grouping → Coding quality check
+3. SCAN & UPLOAD:
+  • Physical documents → Scan station → OCR processing → Category tagging (Consent, Insurance, External Report) → Linked to patient record
+4. RECORD RETRIEVAL:
+  • Request: Doctor/Legal/Insurance → MRD staff searches by UHID/Name/Date → Retrieval log maintained → Return tracking
+5. RETENTION POLICY:
+  • Rules: Adult records = 7 years, Minor = 7 years after 18th birthday, Medico-legal = Indefinite
+  • Auto-flag records approaching retention end → Review → Archive or Destroy (with audit log)
+6. MEDICO-LEGAL FLAG:
+  • Tagged records: Cannot be deleted/modified without dual approval → Complete audit trail
+7. OUTPUTS: Digital patient file, Coding accuracy report, Retrieval log, Retention compliance report|• AI auto-coding from discharge summaries
+• NLP clinical data extraction (research)
+• HIPAA/DISHA compliance checker
+• Inter-hospital record sharing
+• Patient portal record access request
+33|Non Clinical |DOCUMENT MANAGEMENT|Document Upload/Scan, Version Control, Category Tagging, Role-Based Access, OCR Search, Template Library, Approval Workflow, Expiry/Renewal Alert, Digital Archive|1. DOCUMENT UPLOAD/SCAN:
+  • Upload: PDF, Image, Word → OCR text extraction → Full-text searchable
+  • Categories: Policies, SOPs, Licenses, Contracts, Training materials, Circulars
+2. VERSION CONTROL:
+  • New upload of existing doc → System creates Version 2 → Old version archived → Change log maintained
+  • Comparison: Diff view between versions
+3. ACCESS CONTROL:
+  • Role-based: Department-level access → Read/Write/Admin → Download permissions per document
+4. APPROVAL WORKFLOW:
+  • Document submission → Reviewer assigned → Approve/Reject/Request changes → Published to department
+5. EXPIRY & RENEWAL:
+  • Licenses/Contracts: Expiry date tracked → Alert 90/60/30 days → Renewal task auto-created
+6. SEARCH:
+  • Full-text search → Filter by: Category, Department, Date, Author → Quick access bookmarks
+7. OUTPUTS: Document repository, Version history, Expiry dashboard, Approval audit trail|• E-signature for document approval
+• Multilingual document support
+• Auto-fill templates from patient data
+• Regulatory compliance checker
+• Bulk expiry renewal management
+34|Non Clinical |PURCHASE|Purchase Indent, Vendor Quotation, Comparative Statement, Purchase Order, GRN, Invoice Matching (3-Way), Approval Matrix, Rate Contract, Repeat Order, PO Amendment|1. PURCHASE INDENT:
+  • Department raises indent → Item, Quantity, Urgency, Justification → Routing: HOD Approval → Purchase Dept
+2. VENDOR QUOTATION:
+  • RFQ generated → Sent to registered vendors → Quotations received → Entered in system
+3. COMPARATIVE STATEMENT:
+  • Auto-generated: Vendor-wise comparison → Price, Delivery time, Quality score, Past performance → Highlights lowest/best
+4. PURCHASE ORDER:
+  • PO creation from selected quotation → Terms & Conditions → Approval matrix → PO sent to vendor
+  • Amendment: PO modification with version tracking
+5. GRN (GOODS RECEIVED NOTE):
+  • Material arrives → GRN entry: PO reference, Quantity received, Quality check → Accept/Reject/Partial
+6. INVOICE MATCHING (3-WAY):
+  • PO vs GRN vs Invoice → System auto-matches → Discrepancies flagged → Approved for payment
+7. RATE CONTRACT:
+  • Long-term pricing agreement with vendor → Auto-applied on PO → Rate revision tracking
+8. OUTPUTS: Purchase indent, Comparative statement, PO, GRN, Invoice matching report, Rate contract|• Vendor rating algorithm
+• Emergency purchase fast-track
+• Budget vs actual tracking
+• Vendor self-service portal
+• AI demand forecasting for procurement
+35|Non Clinical |STORES/INVENTORY|Item Master, Stock Register, GRN, Issue/Return, Min/Max/Reorder Level, Batch & Expiry Tracking, ABC/VED Analysis, Physical Stock Count, Inter-Store Transfer, Dead Stock Alert|1. ITEM MASTER:
+  • Comprehensive item database: Name, Code, Category, UoM, Reorder Level, Min/Max stock, HSN code, Tax %
+  • Generic-Brand mapping for medicines
+2. STOCK REGISTER:
+  • Real-time: Item-wise → Batch-wise → Location-wise stock → Valuation (FIFO/Weighted Average)
+3. GRN & ISSUE:
+  • Inward: GRN from Purchase → Quality check → Shelving → Stock updated
+  • Issue: Department indent → Store approves → Issues material → Stock deducted → Recipient acknowledges
+  • Return: Department returns unused → Store receives → Stock credited
+4. BATCH & EXPIRY:
+  • Every item tracked by batch → Expiry date → FEFO (First Expiry First Out) dispatch → 30/60/90 day expiry alerts
+5. ANALYSIS:
+  • ABC: Items classified by consumption value (A=High, B=Medium, C=Low)
+  • VED: Classified by criticality (Vital, Essential, Desirable)
+  • ABC-VED Matrix: Combined priority for procurement planning
+6. INTER-STORE TRANSFER:
+  • Transfer request → Approval → Dispatch → Receipt → Both store stocks updated
+7. PHYSICAL COUNT:
+  • Cycle count schedule → Count entry → Variance report → Adjustment with approval
+8. OUTPUTS: Stock register, Expiry alert report, ABC-VED analysis, Stock variance report, Transfer log|• RFID stock movement tracking
+• Temperature-sensitive zone management
+• Dead stock auto-identification
+• Multi-unit conversion (strip↔box↔case)
+• Safety stock auto-calculation
+36|Non Clinical |CONSIGNMENT|Consignment Vendor Setup, Implant/Device Log, Usage-Based Billing, Consignment Stock Register, Auto PO on Consumption, Expiry Tracking, Vendor Reconciliation|1. CONSIGNMENT VENDOR SETUP:
+  • Vendor agreement: Items on consignment → Commission/pricing terms → Storage location in hospital
+2. IMPLANT/DEVICE LOG:
+  • Each consignment item: Serial number, Batch, Expiry, Vendor, Cost → Barcode tracked
+  • Implants: Patient-implant linking for traceability (regulatory requirement)
+3. USAGE-BASED BILLING:
+  • Item used during surgery/procedure → Scan barcode → Linked to patient → Auto-PO generated to vendor
+  • Monthly reconciliation: Items used → Invoice from vendor → Payment processing
+4. STOCK MANAGEMENT:
+  • Consignment stock separate from owned stock → Physical count → Discrepancy resolution with vendor
+5. EXPIRY MANAGEMENT:
+  • Near-expiry consignment items → Return to vendor workflow → No financial loss to hospital
+6. OUTPUTS: Consignment stock register, Usage report, Vendor reconciliation, Auto-PO, Expiry return note|• Real-time consignment value tracking
+• Vendor auto-billing on consumption
+• Implant registry with patient trace
+• Expired item auto-return processing
+• Consignment audit checklist
+37|Non Clinical |CONSUMPTION ENTRY|Department-Wise Consumption, Ward Stock Issue, Auto Deduction on Billing, Consumption Report, Cost Centre Mapping, Variance Alert, Item-Wise Usage Trend|1. DEPARTMENT-WISE CONSUMPTION:
+  • Each department's material usage tracked → Cost centre mapped → Monthly consumption report
+2. WARD STOCK ISSUE:
+  • Ward indent → Store issues → Nurse acknowledges → Consumed against admitted patients
+3. AUTO DEDUCTION ON BILLING:
+  • When consumable billed to patient → Inventory auto-deducted → No manual stock adjustment needed
+4. COST CENTRE MAPPING:
+  • Every consumption linked to: Department + Cost Centre + Budget head → Enables profitability analysis per department
+5. VARIANCE MONITORING:
+  • Actual consumption vs Budget → Alert if >10% deviation → Monthly variance report to management
+6. ITEM-WISE TREND:
+  • Consumption trend: Daily/Weekly/Monthly → Seasonal patterns → Forecasting for procurement planning
+7. OUTPUTS: Consumption report (dept-wise), Variance analysis, Trend chart, Cost centre report|• Budget allocation per dept per quarter
+• AI consumption anomaly detection
+• Paperless indent-to-consumption
+• Benchmarking against bed capacity
+• Waste reduction analytics
+38|Non Clinical |ACCOUNTS|General Ledger, Accounts Payable, Accounts Receivable, Bank Reconciliation, Journal Entries, TDS/GST Computation, Trial Balance, P&L, Balance Sheet, MIS Reports|1. GENERAL LEDGER:
+  • Chart of Accounts setup → Journal entries (auto from Billing/Purchase/Payroll + manual) → Ledger posting → Trial Balance
+2. ACCOUNTS PAYABLE:
+  • Vendor invoice entry → 3-way match verification → Payment scheduling → Cheque/NEFT/RTGS processing → Payment advice to vendor
+3. ACCOUNTS RECEIVABLE:
+  • Patient outstanding → Insurance receivable → Corporate receivable → Aging analysis (0-30, 31-60, 61-90, 90+) → Follow-up alerts
+4. BANK RECONCILIATION:
+  • Bank statement import (CSV/MT940) → Auto-match with book entries → Unmatched items flagged → Manual reconciliation → BRS report
+5. TAX COMPLIANCE:
+  • TDS computation → TDS return data → GST computation → GSTR-1/3B data → Professional Tax → ESI/PF contribution tracking
+6. FINANCIAL REPORTS:
+  • Trial Balance, P&L Statement, Balance Sheet → Department-wise P&L → Cash flow → Fund flow → Budget vs Actual
+7. OUTPUTS: Trial Balance, P&L, Balance Sheet, Aging report, BRS, TDS/GST reports|• IndAS revenue recognition automation
+• Multi-branch consolidation
+• Fixed asset accounting integration
+• Internal audit with sampling
+• Cost centre P&L (management accounting)
+39|Non Clinical |HR & PAYROLL|Employee Master, Attendance Integration, Leave Management, Salary Structure, Payslip Generation, PF/ESI/PT Calc, Loan & Advance, Full & Final, Statutory Reports, IT Declaration|1. EMPLOYEE MASTER:
+  • Profile: Personal details, Qualification, Experience, Department, Designation, Reporting manager, Bank details, Emergency contact
+  • Documents: Photo, ID proofs, Certificates → Digital storage
+2. ATTENDANCE:
+  • Biometric integration → Punch-In/Out → Late/Early/OT auto-calculated → Shift mapping → Exception handling
+3. LEAVE MANAGEMENT:
+  • Leave types: CL, EL, SL, ML, Comp-Off → Application → Manager approval → Balance updated → Leave encashment
+4. PAYROLL:
+  • Salary structure: Basic + HRA + DA + Special Allowance + Other → Deductions: PF, ESI, PT, TDS, Loan EMI
+  • Monthly processing: Attendance days → Gross calc → Deductions → Net salary → Bank file generation → Payslip
+5. STATUTORY:
+  • PF: Monthly ECR generation → Payment challan
+  • ESI: Contribution calculation → Payment
+  • PT: State-wise slab → Deduction → Return
+  • TDS: Tax declaration → Provisional deduction → Year-end adjustment → Form 16
+6. LOAN & ADVANCE:
+  • Salary advance request → Approval → Disbursement → EMI deduction from salary
+7. FULL & FINAL:
+  • Resignation/Termination → Notice period calc → Leave encashment → Asset return → Gratuity → Final settlement
+8. OUTPUTS: Payslip, PF ECR, ESI challan, PT return, Form 16, F&F statement, Attendance report|• Employee self-service portal (ESS)
+• Recruitment pipeline tracker
+• Training & competency mapping
+• 360° performance appraisal
+• Engagement survey module
+• Succession planning
+40|Non Clinical |MOBILE APPS – UTILITY(ANDROID)|Staff Directory, Attendance Mark, Leave Apply, Payslip View, Announcements, IT Declaration, Help Desk Ticket, Push Notifications, Document Upload|1. STAFF DIRECTORY:
+  • Search employees by name/department → View profile → Quick call/message
+2. ATTENDANCE:
+  • Mark attendance via mobile (geo-fenced) → View monthly attendance summary → Regularization request
+3. LEAVE MANAGEMENT:
+  • Apply leave from phone → Manager gets push notification → Approve/Reject → Balance updated instantly
+4. PAYSLIP:
+  • View monthly payslip → Download PDF → View YTD earnings & deductions
+5. ANNOUNCEMENTS:
+  • Hospital-wide / Department-specific announcements → Push notifications → Read receipts
+6. HELP DESK:
+  • Raise IT/Maintenance/Admin tickets → Track status → Resolution notification
+7. DOCUMENT UPLOAD:
+  • Submit: Tax declarations, Reimbursement claims, Certificates → Approval tracking
+8. OUTPUTS: Mobile attendance, Leave status, Payslip PDF, Ticket status, Announcement feed|• Geo-fenced attendance verification
+• Emergency SOS button
+• Cafeteria meal booking from app
+• Internal job posting & application
+• Team calendar & shift swap request
+41|Non Clinical |REPORTS|MIS Dashboard, Department-Wise Revenue, Doctor-Wise Collection, Payer-Wise Report, Outstanding Aging, Daily/Weekly/Monthly Summary, Custom Report Builder, Export (PDF/Excel), Scheduled Reports|1. MIS DASHBOARD:
+  • Real-time: OPD footfall, IP census, Revenue today, Collection today, Outstanding → Auto-refresh
+  • Drill-down: Click any metric → Department-wise → Doctor-wise → Date-wise detail
+2. REVENUE REPORTS:
+  • Department-wise revenue, Doctor-wise collection, Service-wise breakup, Payer-wise (Self/Insurance/Corporate)
+  • Trend: Daily/Weekly/Monthly/Yearly comparison → Growth % calculation
+3. CLINICAL REPORTS:
+  • Disease-wise statistics (ICD-10 based), Lab TAT, OT utilization, Average LOS, Readmission rate
+4. OPERATIONAL REPORTS:
+  • Bed occupancy %, ER volume, Pharmacy sales, Lab test volume, Appointment no-show rate
+5. CUSTOM REPORT BUILDER:
+  • Drag-and-drop fields → Filter conditions → Group by → Aggregate functions → Save as template → Schedule auto-run
+6. EXPORT:
+  • All reports exportable: PDF, Excel, CSV → Email scheduling → Dashboard embedding
+7. OUTPUTS: MIS dashboard, Revenue MIS, Clinical reports, Custom reports, Scheduled email reports|• NLP query ('show me last month OPD revenue')
+• Automated anomaly detection in metrics
+• Board-level presentation auto-gen
+• Regulatory auto-submission (NRHM/HMIS)
+• Multi-branch comparative analytics
+42|Non Clinical |B2B BILLING|Corporate Client Master, Credit Billing, Invoice Generation, Statement of Account, Payment Follow-Up, Credit Limit Config, Bulk Invoice, TDS Certificate, Revenue Reconciliation|1. CORPORATE CLIENT MASTER:
+  • Company profile: Name, GST, Address, Contract terms, Credit limit, Discount %, TPA linkage, Payment terms
+2. CREDIT BILLING:
+  • Employee visits → Bill generated under corporate account → Credit limit checked → If within limit, auto-approved
+  • Limit exceeded → Alert to billing + Corporate HR notification
+3. INVOICE GENERATION:
+  • Periodic (Weekly/Fortnightly/Monthly) → Consolidate all employee bills → Generate corporate invoice → GST compliant
+4. STATEMENT OF ACCOUNT:
+  • Running balance: Opening + Invoices – Payments – Credit Notes = Outstanding → Shared with corporate
+5. PAYMENT FOLLOW-UP:
+  • Aging: 0-30/31-60/61-90/90+ → Auto-reminder emails at thresholds → Escalation matrix
+6. TDS CERTIFICATE:
+  • If corporate deducts TDS → Certificate upload → Reconciliation → Credit to hospital account
+7. REVENUE RECONCILIATION:
+  • Corporate collections vs Outstanding → Department-wise corporate revenue → Profitability per corporate client
+8. OUTPUTS: Corporate invoice, Statement of account, Aging report, TDS reconciliation, Revenue analytics|• Corporate employee health dashboard
+• Contract auto-renewal reminders
+• Employee utilization per corporate
+• Volume-based dynamic pricing
+• Corporate satisfaction survey
+43|Non Clinical |AMBULANCE MANAGEMENT|Vehicle Register, Trip Sheet, Driver Assignment, GPS Tracking, Patient Pickup Request, Fuel Log, Maintenance Schedule, Emergency Dispatch, Billing Integration, Response Time Log|1. VEHICLE REGISTER:
+  • Fleet master: Vehicle ID, Type (ALS/BLS), Registration, Insurance, Fitness certificate, GPS device ID
+2. TRIP MANAGEMENT:
+  • Request: Patient/Hospital initiates → Dispatch assigns vehicle + driver → Route planned
+  • Trip sheet: Start time, Start KM, Patient pickup, Hospital arrival, End KM, End time
+3. GPS TRACKING:
+  • Real-time vehicle location → ETA to patient/hospital → Route history → Speed monitoring
+4. DRIVER MANAGEMENT:
+  • Driver profile: License, Medical fitness, Training certifications → Shift assignment → Performance score
+5. EMERGENCY DISPATCH:
+  • 108/Emergency call → Nearest available ambulance auto-selected → Driver alerted → GPS tracking active
+  • Response time tracking: Call → Dispatch → Arrival → Hospital → SLA compliance
+6. BILLING:
+  • Per-trip billing → Distance-based / Flat rate → Integration with patient bill or separate
+7. MAINTENANCE:
+  • Vehicle service schedule → Fuel log → Breakdown log → Maintenance cost tracking
+8. OUTPUTS: Trip sheet, GPS tracking dashboard, Response time report, Fleet utilization report, Fuel log|• Equipment checklist per trip
+• Patient monitoring during transport
+• Inter-hospital transfer coordination
+• Insurance/permit management
+• 108/112 emergency integration
+44|Enabler Modules|DATA ANALYTICS|Real-Time Dashboard, KPI Scorecards, Drill-Down Reports, Predictive Models, Trend Analysis, Department Benchmarking, Custom Widget Builder, Data Export, Scheduled Email Reports|1. REAL-TIME DASHBOARD:
+  • KPI widgets: OPD count, IP census, Revenue, Collection, Bed occupancy, Lab TAT → Auto-refresh every 30 sec
+  • Role-based: Admin sees all → Department head sees own dept → Doctor sees own metrics
+2. DRILL-DOWN ANALYTICS:
+  • Click metric → Drill: Hospital → Department → Doctor → Patient-level → Date range filter
+3. PREDICTIVE MODELS:
+  • Patient volume forecast → Revenue projection → Inventory demand prediction → Staffing need forecast
+4. BENCHMARKING:
+  • Department-vs-Department → Month-over-Month → Year-over-Year → Industry benchmark comparison
+5. CUSTOM WIDGETS:
+  • Create custom charts: Bar, Line, Pie, Heatmap → Drag-drop data fields → Save to personal dashboard
+6. SCHEDULED REPORTS:
+  • Configure: Report + Frequency + Recipients → Auto-email at scheduled time (daily MIS at 8 AM)
+7. OUTPUTS: Live dashboard, Trend reports, Forecast models, Custom analytics, Scheduled email reports|• Conversational BI (NLP queries)
+• AI anomaly detection in ops metrics
+• Social determinants of health analytics
+• Cost-per-patient analytics
+• Population health dashboard
+• Protocol-wise outcome analytics
+45|Enabler Modules|INSURANCE MODULE|TPA Master, Tariff Mapping, Pre-Auth Request/Approval, Claim Submission, Cashless/Reimbursement Workflow, Rejection Handling, Denial Tracking, Settlement Reconciliation, ROHINI Code Mapping|1. TPA MASTER SETUP:
+  • Register TPAs/Insurance companies → Tariff sheets uploaded → Rate mapping: Hospital service → TPA rate → Discount %
+  • ROHINI code mapping for standardized claiming
+2. PRE-AUTHORIZATION:
+  • Patient admitted with insurance → Pre-auth form auto-generated → Documents attached → Submitted to TPA (portal/email)
+  • Status tracking: Submitted → Query raised → Enhancement needed → Approved → Amount confirmed
+3. CLAIM WORKFLOW:
+  • Cashless: Pre-auth approved → Treatment → Final claim with discharge summary + bills → TPA review → Settlement
+  • Reimbursement: Patient pays → Hospital generates claim pack → Patient submits to insurer
+4. REJECTION HANDLING:
+  • Rejection reason captured → Analysis: Coding error / Document missing / Not covered → Resubmission workflow
+5. SETTLEMENT RECONCILIATION:
+  • TPA payment received → Match against claims → Short payment identified → Dispute raised → Resolution tracked
+6. DENIAL ANALYTICS:
+  • Denial rate by TPA → Common rejection reasons → Doctor-wise claim success rate → Revenue impact
+7. OUTPUTS: Pre-auth form, Claim pack, Settlement reconciliation, Denial analytics, TPA-wise revenue report|• IRDAI regulatory reporting automation
+• Insurance eligibility verification API
+• Patient cost estimator pre-admission
+• Multi-insurer claim splitting
+• Fraud detection analytics
+• Empanelment management
+46|Enabler Modules|CSSD MODULE|Instrument Wrap, Sterilization Cycle Log, Autoclave Monitoring, Tray Config, Biological Indicator Log, Issue to OT/Ward, Return & Re-Process, Recall Alert, CSSD Dashboard|1. INSTRUMENT WRAP:
+  • Tray composition: Define tray → List instruments → Pack with chemical/biological indicator → Seal + Label with barcode
+2. STERILIZATION CYCLE:
+  • Load autoclave → Cycle parameters: Temp, Pressure, Duration → Cycle log recorded → Pass/Fail result
+  • Biological indicator: Spore test result at 24/48 hours → Mandatory documentation
+3. AUTOCLAVE MONITORING:
+  • Machine master: ID, Type, Last validation, Next validation → Cycle count → Maintenance schedule
+  • Bowie-Dick test: Daily test for porous load autoclaves → Result logged
+4. TRAY TRACKING:
+  • Barcode-based: Tray ID → Sterilization status → Location (CSSD/OT/Ward) → Usage log → Return for reprocessing
+5. ISSUE TO OT/WARD:
+  • Request from OT → CSSD dispatches sterile tray → Barcode scan at OT → Usage confirmed → Return tracking
+6. RECALL ALERT:
+  • If biological indicator fails → System identifies all trays from that cycle → Recall notification → Re-sterilization
+7. OUTPUTS: Sterilization log, Tray tracking register, Biological indicator report, CSSD dashboard|• Flash sterilization tracking
+• Instrument lifecycle (sharpen/repair/retire)
+• Endoscope reprocessing tracking
+• Loan instrument vendor management
+• Staff competency assessment
+47|Enabler Modules|LAB MACHINE INTEGRATION|Instrument Master, HL7/ASTM Interface, Bi-Directional Result Flow, Auto-Validation Rules, Machine Downtime Log, QC Result Capture, Barcode Sample Mapping, Error Handling|1. INSTRUMENT MASTER:
+  • Register lab analyzers: Name, Model, Serial, Protocol (HL7 v2/ASTM), Connection type (Serial/TCP), Communication port
+2. BI-DIRECTIONAL FLOW:
+  • Outbound: Lab orders → Translated to HL7/ASTM message → Sent to analyzer → Machine receives worklist
+  • Inbound: Analyzer completes test → Result message sent → System parses → Maps to patient + test → Result auto-populated
+3. AUTO-VALIDATION:
+  • Rules engine: If result within acceptable range + delta check pass → Auto-validate → Technician reviews exceptions only
+4. QC INTEGRATION:
+  • Levey-Jennings chart: QC results plotted → Westgard rules applied → Out-of-control alerts → Machine locked until QC passes
+5. ERROR HANDLING:
+  • Communication failure: Auto-retry → Alert to IT → Fallback to manual entry
+  • Result mismatch: Patient ID verification → Reject and re-run
+6. OUTPUTS: Interface log, Auto-validation report, QC chart, Error log, Machine uptime report|• New analyzer onboarding wizard
+• Multi-analyzer result averaging
+• Middleware for complex routing
+• Reagent consumption per machine
+• Uptime SLA monitoring per analyzer
+48|Enabler Modules|DIU UTILITY|Data Import Utility, Bulk Upload (Patient/Item/Doctor), Migration Validation, De-Duplication Check, Error Log, Rollback Support, Scheduled Import/Export, ETL Workflow|1. DATA IMPORT:
+  • Bulk upload templates: Patient master, Item master, Doctor master, Department master → Excel/CSV format
+  • Upload → Validation (mandatory fields, data types, duplicates) → Error report → Fix → Re-upload → Commit
+2. MIGRATION SUPPORT:
+  • Legacy system data → ETL (Extract-Transform-Load) → Mapping configuration → Validation → Import → Verification
+3. DE-DUPLICATION:
+  • Intelligent matching: Mobile + Name + DOB → Potential duplicate list → Manual review → Merge/Reject
+4. SCHEDULED JOBS:
+  • Auto import/export: Lab results from external lab → Scheduled daily → Error notification
+5. ROLLBACK:
+  • Import batch tracking → If errors found post-import → Rollback entire batch → Restore previous state
+6. OUTPUTS: Import log, Validation error report, De-duplication report, Migration verification report|• API-based real-time data sync
+• Data quality scoring dashboard
+• Master data governance workflow
+• Legacy system decommission checklist
+• Data anonymization for research
+49|Enabler Modules|PRINTER INTEGRATION|Printer Config (Thermal/Laser/Label/Dot Matrix), Print Queue Management, Template Mapping, Auto-Print Trigger, Network Printer Discovery, Barcode/QR Label Print, Print Log|1. PRINTER CONFIGURATION:
+  • Register printers: Name, Type (Thermal/Laser/Dot Matrix/Label), IP address, Location, Department assignment
+2. TEMPLATE MAPPING:
+  • Map document type to printer: Token → Thermal printer, Bill → Laser, Label → Label printer, Report → A4 Laser
+3. PRINT QUEUE:
+  • Centralized print queue → Status: Pending/Printing/Completed/Failed → Retry failed jobs
+4. AUTO-PRINT TRIGGERS:
+  • Configure: Token generation → Auto-print token, Bill finalized → Auto-print receipt, Lab report → Auto-print
+5. BARCODE/QR LABEL PRINTING:
+  • Patient wristband labels, Lab sample labels, Asset tags, Medication labels → Configurable label templates
+6. NETWORK DISCOVERY:
+  • Auto-discover network printers → One-click setup → Health monitoring → Alert on offline
+7. OUTPUTS: Print queue dashboard, Printer health status, Print volume analytics|• Mobile printing from doctor/nurse apps
+• Patient self-service report kiosk
+• Print cost tracking per department
+• Eco-friendly print policy (duplex)
+• Cloud printing for remote locations
+50|Enabler Modules|TV OUT PUT INTGERATION|OPD Token Display, Ward-Wise Patient Status, Doctor Availability Board, OT Schedule Display, Lab TAT Display, Emergency Alert Banner, Custom Layout Config, Auto-Refresh|1. OPD TOKEN DISPLAY:
+  • Large screen outside each doctor's room → Shows: Current Token, Next 3 tokens, Doctor name, Status (Consulting/Break)
+  • Auto-advance when doctor completes consultation
+2. WARD PATIENT STATUS:
+  • Nursing station TV → Patient list: Bed #, Name, Acuity level, Pending tasks → Auto-refresh
+3. DOCTOR AVAILABILITY:
+  • Reception area display → Doctor-wise: Available/On break/In OT/Telemedicine → Real-time update
+4. OT SCHEDULE:
+  • OT corridor display → Today's schedule: Time, Patient, Surgeon, Procedure, OT Room → Status: Scheduled/In Progress/Done
+5. LAB TAT DISPLAY:
+  • Lab waiting area → Test-wise average TAT → Patient token: Estimated ready time
+6. EMERGENCY ALERTS:
+  • Hospital-wide: Emergency code announcements → Scrolling banner with color coding
+7. CUSTOM LAYOUTS:
+  • Admin configures: Which info → Which screen → Layout template → Auto-refresh interval
+8. OUTPUTS: Token display feed, Ward status board, OT schedule display, Emergency banner|• Patient education videos during wait
+• Digital signage content scheduler
+• Emergency evacuation map display
+• Multi-language content rotation
+• Health awareness campaign display
+51|Enabler Modules|QUEUE MANAGEMENT|Token Generation, Counter Assignment, Average Wait Time Display, Priority Queue, SMS/WhatsApp Call Notification, Doctor-Wise Queue, Multi-Department Support, Walk-In vs Appointment, Queue Analytics|1. TOKEN GENERATION:
+  • Patient checks in → Token assigned: Auto-increment per doctor → Printed slip with QR code + Estimated wait
+2. MULTI-DEPARTMENT QUEUES:
+  • Separate queues per department/doctor → Centralized view for admin → Patient sees only their queue
+3. COUNTER ASSIGNMENT:
+  • Queue reaches front → Counter/Room assignment → Display board calls token + room number
+4. PRIORITY QUEUE:
+  • Emergency/Senior citizen/Physically challenged → Priority flag → Auto-moved up in queue
+5. SMS/WHATSAPP NOTIFICATION:
+  • Position update: 'You are #5 in queue, ~20 min wait' → 'Your turn, please proceed to Room 3'
+6. ANALYTICS:
+  • Average wait time → Peak hours identification → Doctor-wise throughput → No-show rate
+7. WALK-IN vs APPOINTMENT:
+  • Appointment patients get priority slots → Walk-ins interleaved → Configurable ratio
+8. OUTPUTS: Queue token, Position display, Wait time analytics, Throughput report|• Virtual queue (join from home via app)
+• Queue position via hospital Wi-Fi
+• ML-based dynamic wait time estimate
+• Load balancing across departments
+• Exit feedback kiosk
+52|Enabler Modules|SYSTEM|User Master, Role & Permission Config, Password Policy, Audit Trail, Session Management, System Logs, Backup Config, Global Settings, Notification Config, License Management|1. USER MANAGEMENT:
+  • Create/Edit/Deactivate users → Role assignment (RBAC: 22 roles) → Department mapping → Multi-hospital access
+2. ROLE & PERMISSION:
+  • Granular permissions: Module access + Feature access + Data access (own dept/all depts) → Custom role creation
+3. PASSWORD & SECURITY:
+  • Policy: Min length, Complexity, Expiry (90 days), History (can't reuse last 5) → Failed login lockout → 2FA option
+4. AUDIT TRAIL:
+  • Every action logged: Who, What, When, Where (IP), Before/After values → Tamper-proof → Searchable
+5. SESSION MANAGEMENT:
+  • Concurrent session limit → Auto-timeout (idle 15 min) → Force logout capability
+6. SYSTEM CONFIGURATION:
+  • Hospital settings: Name, Logo, Address, Tax registration → Department setup → Fee master → Billing rules
+7. BACKUP:
+  • Auto daily backup → Cloud replication → Retention policy → DR drill log → RTO/RPO targets
+8. LICENSE MANAGEMENT:
+  • Module activation → User seat tracking → License expiry alerts → Usage analytics
+9. OUTPUTS: User directory, Role matrix, Audit log, System config, Backup status, License dashboard|• Zero trust security architecture
+• SIEM integration for threat detection
+• Data Loss Prevention (DLP) policies
+• Automated compliance scanning
+• DR drill scheduling & results
+• SSL/TLS certificate auto-renewal
+53|Enabler Modules|PACS INTEGRATION|DICOM Viewer, Study Worklist, Image Archive, CD Burn/Share, Radiologist Worklist, Prior Study Comparison, Report Integration, Cloud PACS, Modality Worklist (MWL), Tele-Radiology|1. DICOM VIEWER:
+  • Web-based zero-footprint viewer → Window/Level adjustments → Zoom/Pan → Measurements → Annotations
+  • Multi-frame: CT/MRI scroll through slices → MPR (Multi-Planar Reconstruction) basic
+2. STUDY WORKLIST:
+  • Radiologist worklist: Pending studies → Priority sorted → Click to view → Report template opens alongside
+3. IMAGE ARCHIVE:
+  • Cloud PACS: All DICOM images stored → Retention per modality → Compression for long-term → Backup
+4. CD/DVD BURN & SHARE:
+  • Patient requests images → CD/DVD burn with viewer → Or: Share link via Patient Portal → Time-limited access
+5. PRIOR STUDY COMPARISON:
+  • System auto-fetches previous studies for same anatomy → Side-by-side comparison on viewer
+6. TELE-RADIOLOGY:
+  • Remote radiologist access → Secure VPN → Report from anywhere → Digital signature → Seamless integration
+7. MODALITY WORKLIST (MWL):
+  • Orders pushed to scanners → Patient demographics auto-populated → Reduces manual entry at scanner
+8. OUTPUTS: DICOM web viewer, Radiology worklist, Study archive, CD/Share link, Tele-radiology report|• AI preliminary read for critical findings
+• Cloud PACS with edge caching
+• 3D printing from imaging data
+• Patient imaging portal with annotations
+• Cross-institution DICOM web sharing
+54|Enabler Modules|GATE PASS & BYSTANDER|Visitor Entry, Gate Register, Vehicle In/Out Log, Material Gate Pass (Returnable/Non-Returnable), Photo Capture, OTP Verification, Time Tracking, Security Dashboard|1. VISITOR ENTRY:
+  • Visitor arrives → Guard captures: Name, Mobile, Photo, Purpose, Patient visiting → OTP verification (optional)
+  • System checks: Visiting hours compliance → Patient's allowed visitor count → Approve/Deny
+2. GATE REGISTER:
+  • Digital register: Entry time, Exit time, Duration → Searchable by date/patient/visitor
+3. VEHICLE LOG:
+  • Vehicle entry: Number plate, Type, Driver → Parking assignment → Exit time → Duration
+4. MATERIAL GATE PASS:
+  • Returnable: Equipment/Cylinder going out → Return date → Follow-up if not returned
+  • Non-Returnable: Scrap/Waste → Approved by Admin → Documented → Gate release
+5. SECURITY DASHBOARD:
+  • Real-time: Visitors in hospital, Vehicles in parking, Pending material returns, Incident log
+6. OUTPUTS: Visitor pass, Gate register report, Vehicle log, Material gate pass, Security dashboard|• Facial recognition for frequent visitors
+• Contractor pass + safety induction
+• Delivery/courier management
+• Parking bay assignment management
+• CCTV integration with gate events
+55|Enabler Modules|PASS MANAGEMENT|Bystander Pass Issue, Visit Hour Config, Patient-Wise Visitor Limit, QR Pass, Extension Request, Pass Revoke, Ward-Wise Visitor Report, Emergency Override, Photo ID Capture|1. BYSTANDER PASS:
+  • IP patient → Allowed bystander count (configurable per ward) → Pass issued with QR code → Photo ID
+2. VISITING HOURS:
+  • Configure: Ward-wise visiting hours → Pass valid only during hours → Alerts if violation
+3. PATIENT-WISE LIMIT:
+  • Max visitors per patient → System enforces → ICU: 1 visitor, General: 2 visitors (configurable)
+4. PASS MANAGEMENT:
+  • Issue → Extend (with approval) → Revoke (disciplinary/clinical reason) → Re-issue
+  • QR scan at ward entry → System validates: Active pass + Correct ward + Visiting hours → Allow/Deny
+5. EMERGENCY OVERRIDE:
+  • Critical patient → Doctor/Nurse can override visiting restrictions → Logged with reason
+6. REPORTS:
+  • Ward-wise visitor traffic → Peak hours → Violations log → Compliance rate
+7. OUTPUTS: Bystander pass with QR, Visitor report, Violation log, Compliance dashboard|• Digital pass on family member phone
+• Auto-deactivation on patient discharge
+• Multilingual pass instructions
+• Wheelchair/special needs flagging
+• Infection control screening questions
+56|Enabler Modules|COMPLAINT MANAGEMENT|Complaint Register, Category/Priority Tagging, Auto-Assignment, Escalation Matrix, SLA Timer, Resolution Notes, Patient/Staff Complaint, Feedback Loop, TAT Report, Trend Analysis|1. COMPLAINT REGISTRATION:
+  • Source: Patient/Family/Staff/Doctor → Channel: In-person/Phone/App/Website/Kiosk
+  • Capture: Complainant details, Category (Clinical/Administrative/Facility/Staff Behavior), Description, Priority (Low/Medium/High/Critical)
+2. AUTO-ASSIGNMENT:
+  • Category → Pre-mapped department/person → Auto-assigned → Notification sent to assignee
+3. ESCALATION MATRIX:
+  • SLA: Low=72hrs, Medium=48hrs, High=24hrs, Critical=4hrs → If not resolved → Auto-escalate to next level
+  • Level 1: Department head → Level 2: Admin → Level 3: Hospital Director
+4. RESOLUTION:
+  • Assignee investigates → Resolution notes → Root cause → Corrective action → Close complaint
+  • Feedback loop: Complainant notified → Satisfaction survey
+5. ANALYTICS:
+  • Complaint volume trend → Category-wise distribution → Avg resolution time → Repeat complaints → Department-wise TAT
+6. OUTPUTS: Complaint ticket, Escalation alert, Resolution report, Trend analytics, Patient feedback survey|• AI sentiment analysis on complaints
+• NLP auto-categorization
+• Repeat complaint correlation
+• NABH quality indicator linkage
+• Public complaint portal (website)
+• Complaint-to-improvement workflow
+57|Enabler Modules|CANTEEN MODULE|Menu Master, Meal Order (Diet-Linked), Token Billing, POS Counter, Inventory Deduction, Vendor Supply Log, Hygiene Checklist, Revenue Report, Staff Meal Subsidy, Waste Tracking|1. CANTEEN MENU MANAGEMENT:
+  • Menu master: Items, Prices, Category (Veg/Non-Veg), Availability by time slot (Breakfast/Lunch/Dinner)
+2. MEAL ORDER (DIET-LINKED):
+  • IP patients: Diet plan from Dietician module → Auto-translated to meal order → Kitchen receives
+  • Special diets: Diabetic/Renal/Soft/Liquid → Kitchen prepares accordingly
+3. TOKEN/POS BILLING:
+  • Staff/Visitor canteen: Token purchase → POS billing → Cash/Card/UPI/Salary deduction
+4. INVENTORY:
+  • Raw material tracking → Recipe-based consumption calculation → Auto-indent to stores
+5. HYGIENE & QUALITY:
+  • Daily hygiene checklist → Temperature monitoring (fridge/cooking) → Pest control log
+6. STAFF MEAL SUBSIDY:
+  • Configure subsidy per staff grade → Meal consumed → Subsidy applied → Net charge deducted from salary
+7. WASTE TRACKING:
+  • Food waste measurement → Trend analysis → Menu optimization recommendations
+8. OUTPUTS: Meal dispatch sheet, POS bill, Inventory indent, Hygiene checklist, Waste report, Revenue report|• Online meal ordering via app
+• Nutritional labeling at counter
+• Patient meal feedback collection
+• Kitchen CCTV compliance
+• Vendor-managed perishable inventory
+• Special event catering management
+58|Enabler Modules|SMS & WHATSAPP|SMS Gateway Config, Template Master, Auto-Trigger (Appointment/Lab/Discharge), WhatsApp Business API, Delivery Report, DND Check, Bulk Messaging, Opt-In/Out Management, Campaign Tracker|1. GATEWAY CONFIGURATION:
+  • SMS: Service provider setup (MSG91/Twilio) → API key → Sender ID → DLT registration → Route config
+  • WhatsApp: Business API setup → Phone number verification → Template submission → Approval tracking
+2. TEMPLATE MASTER:
+  • Create templates: Appointment confirmation, Lab report ready, Bill generated, Discharge summary, Follow-up reminder, Medication reminder
+  • Variables: {{patient_name}}, {{doctor_name}}, {{date}}, {{time}}, {{amount}} → Auto-populated per patient
+3. AUTO-TRIGGERS:
+  • Event-based: Appointment booked → SMS, Lab report ready → WhatsApp with PDF, Bill generated → WhatsApp receipt
+  • Scheduled: Appointment reminder (1 day before), Follow-up reminder, Vaccination due, EMI due
+4. DELIVERY TRACKING:
+  • Status: Sent → Delivered → Read (WhatsApp) → Failed → Retry queue
+  • DND check: System verifies DND status before SMS → WhatsApp fallback
+5. BULK MESSAGING:
+  • Health campaigns → Target: All diabetic patients / All patients from area → Personalized content → Batch send
+6. OPT-IN/OUT:
+  • Patient preference: SMS only / WhatsApp only / Both / None → Compliance with TRAI regulations
+7. OUTPUTS: Message log, Delivery report, Campaign analytics, Opt-out register, Cost tracking|• RCS (Rich Communication Services)
+• Multi-language template library
+• AI-optimized send time
+• Patient preference learning
+• Cost optimization (SMS vs WhatsApp)
+• Regulatory audit trail for all messages
+59|Enabler Modules|INTEGRATION|EMR/ERP/LIS/RIS Integration Hub, REST/SOAP API, Middleware Config, Data Mapping, Sync Frequency, Error Queue, Retry Logic, Integration Dashboard, Third-Party Connector|1. INTEGRATION HUB:
+  • Central middleware: All external system connections managed → Protocol support: REST API, SOAP, HL7 v2, FHIR R4, ASTM
+2. API MANAGEMENT:
+  • API registry: All exposed APIs documented → Version management → Deprecation notices
+  • Security: API key authentication → Rate limiting → IP whitelist → JWT validation
+3. DATA MAPPING:
+  • Source field → Target field mapping → Transformation rules → Data type conversion → Validation
+4. SYNC CONFIGURATION:
+  • Real-time (WebSocket/webhook) vs Batch (scheduled) → Frequency config → Retry policy → Dead letter queue
+5. ERROR MANAGEMENT:
+  • Failed transactions → Error queue → Auto-retry (configurable) → Manual review → Resolution logging
+  • Alert: Email/SMS to IT team on persistent failures
+6. MONITORING DASHBOARD:
+  • Integration health: Green/Yellow/Red per connector → Message volume → Error rate → Latency → Uptime %
+7. THIRD-PARTY CONNECTORS:
+  • Pre-built: Razorpay, MSG91, WhatsApp Business, CoWIN, ABDM, Lab machines, PACS → Custom connector framework
+8. OUTPUTS: Integration dashboard, API documentation, Error log, Connector health report, Data flow diagram|• FHIR R4 compliance (interoperability)
+• ABDM Health Information Exchange
+• e-Hospital (NIC) data push
+• PMJAY/CGHS/ESIC scheme integration
+• IoT device gateway for equipment
+• Blockchain audit trail for consent
+60|Enabler Modules|WEBSITE INTEGRATION|Online Appointment Booking, Doctor Profile Page, Department Listing, Patient Testimonials, Lab Report Download, Health Blog Sync, SEO Metadata, Contact Form, Chatbot Widget, Payment Link|1. ONLINE APPOINTMENT BOOKING:
+  • Website widget: Select Specialty → Doctor → Date → Slot → Patient details → Pay online → Confirmation
+  • Embedded: iframe/React component on hospital website → Seamless UX
+2. DOCTOR PROFILE PAGES:
+  • Auto-generated: Doctor photo, Qualification, Specialization, Experience, Available slots, Patient rating → SEO optimized
+3. DEPARTMENT LISTING:
+  • All departments with description → Key doctors → Services offered → Contact info
+4. LAB REPORT DOWNLOAD:
+  • Patient login on website → OTP verification → View/Download lab reports → Share via email
+5. HEALTH BLOG:
+  • CMS integration → Doctors author articles → Published on website → SEO metadata auto-generated
+6. CHATBOT WIDGET:
+  • AI-powered bot → Appointment booking → FAQ answers → Doctor recommendation → Handoff to human agent
+7. PAYMENT LINK:
+  • Shareable payment link for advance/follow-up payment → Razorpay integration → Receipt auto-generated
+8. TESTIMONIALS:
+  • Patient reviews from portal → Curated display on website → Star ratings
+9. OUTPUTS: Booking widget, Doctor profiles, Department pages, Report download portal, Chatbot, Payment link|• SEO-optimized doctor/service pages
+• Google review sync
+• WhatsApp-based appointment booking
+• PWA for mobile web
+• Multilingual auto-translation
+• Patient acquisition channel analytics
+61|OPD|Ophthalmology|Vision Test, Refraction, Slit Lamp, IOP, Fundus, Rx|1. Vision Test: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Refraction: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Slit Lamp: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. IOP: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+5. Fundus: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+6. Rx: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+62|OPD|Dental|Dental Charting, Treatment Plans, X-Ray, Procedure Notes|1. Dental Charting: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Treatment Plans: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. X-Ray: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Procedure Notes: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+63|OPD|Physiotherapy / Rehabilitation|Assessment, Exercise Plans, Progress, Equipment Log|1. Assessment: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Exercise Plans: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Progress: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Equipment Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+64|OPD|Dermatology|Skin Mapping, Procedure Log, Photo Comparison, Biopsy|1. Skin Mapping: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Procedure Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Photo Comparison: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Biopsy: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+65|OPD|ENT|Audiometry, Endoscopy, Allergy Test, Procedure Notes|1. Audiometry: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Endoscopy: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Allergy Test: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Procedure Notes: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+66|OPD|Cardiology|ECG, Echo, TMT, Holter Monitor, Cath Lab Scheduling|1. ECG: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Echo: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. TMT: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Holter Monitor: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+5. Cath Lab Scheduling: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+67|OPD|Pulmonology|PFT, Spirometry, Sleep Study, Bronchoscopy Scheduling|1. PFT: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Spirometry: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Sleep Study: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Bronchoscopy Scheduling: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+68|OPD|Oncology / Chemotherapy|Chemo Protocols, Cycle Tracking, Toxicity Grading, Rx|1. Chemo Protocols: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Cycle Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Toxicity Grading: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Rx: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+69|OPD|Psychiatry / Mental Health|Screening Tools, Session Notes, PHQ-9, GAD-7, Follow-Up|1. Screening Tools: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Session Notes: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. PHQ-9: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. GAD-7: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+5. Follow-Up: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+70|OPD|Orthopedics|Fracture Log, Casting, Prosthetics, Implant Registry|1. Fracture Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Casting: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Prosthetics: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Implant Registry: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+71|OPD|Pediatrics|Growth Charts, Immunization, Milestone Tracking, NICU Follow-Up|1. Growth Charts: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Immunization: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Milestone Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. NICU Follow-Up: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+72|OPD|Geriatrics|Fall Risk Assessment, Cognitive Screen, Polypharmacy Review|1. Fall Risk Assessment: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Cognitive Screen: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Polypharmacy Review: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+73|OPD|Wound Care Clinic|Wound Assessment, Photo Log, Dressing Protocol, Healing Track|1. Wound Assessment: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Photo Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Dressing Protocol: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Healing Track: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+74|OPD|Pain Management|Pain Score, Block Log, Medication Titration, Outcome Track|1. Pain Score: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Block Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Medication Titration: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Outcome Track: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+75|OPD|Speech Therapy|Swallow Assessment, Articulation, Session Notes, Progress|1. Swallow Assessment: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Articulation: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Session Notes: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Progress: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+76|OPD|Referral Management|Internal/External Referral, Tracking, TAT, Feedback Loop|1. Internal/External Referral: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. TAT: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Feedback Loop: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+77|OPD|Second Opinion|Case Bundling, Expert Panel, Report Upload, Communication|1. Case Bundling: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Expert Panel: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Report Upload: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Communication: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+78|OPD|AYUSH / Alternative Medicine|Ayurveda/Homeo/Unani, Consultation, Herbal Rx, Therapy Log|1. Ayurveda/Homeo/Unani: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Consultation: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Herbal Rx: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Therapy Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+79|OPD|Patient Education Portal|Condition Guides, Pre/Post-Op Instructions, Video Library|1. Condition Guides: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Pre/Post-Op Instructions: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Video Library: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+80|IP |ICU / CCU Management|Ventilator Tracking, Hourly Vitals, APACHE/SOFA Score, Alerts|1. Ventilator Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Hourly Vitals: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. APACHE/SOFA Score: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Alerts: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+81|IP |NICU / PICU|Neonatal Vitals, Incubator Log, Feeding Chart, Growth Monitor|1. Neonatal Vitals: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Incubator Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Feeding Chart: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Growth Monitor: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+82|IP |HDU / Step-Down Unit|Step-Down Criteria, Monitoring, Escalation Protocols|1. Step-Down Criteria: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Monitoring: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Escalation Protocols: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+83|IP |Mortuary Management|Body Register, Embalming Log, Release Workflow, Death Certificate|1. Body Register: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Embalming Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Release Workflow: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Death Certificate: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+84|IP |Patient Transfer|Inter-Facility Transfer, Ambulance Link, Handover Docs, Consent|1. Inter-Facility Transfer: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Ambulance Link: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Handover Docs: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Consent: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+85|IP |Transplant Module|Donor Registry, Matching, Waitlist, Post-Transplant Follow-Up|1. Donor Registry: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Matching: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Waitlist: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Post-Transplant Follow-Up: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+86|IP |IP Pharmacy|Ward Stock, Unit Dose, Return Mgmt, Narcotic Control|1. Ward Stock: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Unit Dose: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Return Mgmt: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Narcotic Control: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+87|IP |Clinical Pathway Management|Protocol Templates, Variance Tracking, Outcome Metrics|1. Protocol Templates: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Variance Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Outcome Metrics: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+88|IP |IP Rehabilitation|Rehab Plan, Daily Progress, Functional Score, Discharge Goal|1. Rehab Plan: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Daily Progress: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Functional Score: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Discharge Goal: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+89|IP |IP Dialysis|IP Dialysis Schedule, Fluid Balance, Machine Assignment, Vitals|1. IP Dialysis Schedule: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Fluid Balance: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Machine Assignment: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Vitals: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+90|IP |IP Chemotherapy|IP Chemo Protocol, Infusion Tracking, Toxicity, Isolation Room|1. IP Chemo Protocol: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Infusion Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Toxicity: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Isolation Room: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+91|IP |Infection Control|HAI Surveillance, Antibiogram, Culture Reports, Alert Triggers|1. HAI Surveillance: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Antibiogram: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Culture Reports: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Alert Triggers: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+92|IP |Crash Cart Management|Cart Checklist, Expiry Alerts, Usage Log, Replenishment|1. Cart Checklist: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Expiry Alerts: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Usage Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Replenishment: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+93|Non Clinical |LAUNDRY MANAGEMENT|Linen Tracking, Wash Cycles, Ward-Wise Demand, Quality Check|1. Linen Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Wash Cycles: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Ward-Wise Demand: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Quality Check: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+94|Non Clinical |HOUSEKEEPING MANAGEMENT|Task Scheduling, Room Turnover, Inspection, Complaint Log|1. Task Scheduling: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Room Turnover: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Inspection: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Complaint Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+95|Non Clinical |SECURITY MANAGEMENT|Visitor Log, CCTV Dashboard, Incident Report, Access Control|1. Visitor Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. CCTV Dashboard: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Incident Report: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Access Control: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+96|Non Clinical |BIOMEDICAL ENGINEERING|Equipment Registry, AMC Tracking, Breakdown Log, Calibration|1. Equipment Registry: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. AMC Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Breakdown Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Calibration: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+97|Non Clinical |VENDOR MANAGEMENT|Vendor Register, Rate Contract, Performance Score, Blacklist|1. Vendor Register: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Rate Contract: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Performance Score: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Blacklist: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+98|Non Clinical |BUDGET & FINANCIAL PLANNING|Dept Budget, Capex/Opex Tracking, Variance Analysis, Forecast|1. Dept Budget: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Capex/Opex Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Variance Analysis: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Forecast: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+99|Non Clinical |LEGAL & COMPLIANCE|Licence Tracker, AERB/PCB/Fire, Legal Case Log, Audit Trail|1. Licence Tracker: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. AERB/PCB/Fire: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Legal Case Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Audit Trail: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+100|Non Clinical |QUALITY MANAGEMENT (NABH/JCI)|Indicator Tracking, SOP Repository, Internal Audit, Gap Analysis|1. Indicator Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. SOP Repository: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Internal Audit: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Gap Analysis: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+101|Non Clinical |WASTE MANAGEMENT|BMW Segregation, Daily Log, SPCB Reports, Vendor Pickup Track|1. BMW Segregation: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Daily Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. SPCB Reports: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Vendor Pickup Track: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+102|Non Clinical |TRANSPORT / FLEET MANAGEMENT|Vehicle Log, Trip Sheet, Fuel Tracking, Driver Assignment|1. Vehicle Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Trip Sheet: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Fuel Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Driver Assignment: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+103|Non Clinical |FACILITY MANAGEMENT|Room Booking, Maintenance Request, Energy Monitor, AMC Track|1. Room Booking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Maintenance Request: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Energy Monitor: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. AMC Track: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+104|Non Clinical |MARKETING & CRM|Lead Capture, Campaign Track, Patient Loyalty, Referral Bonus|1. Lead Capture: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Campaign Track: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Patient Loyalty: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Referral Bonus: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+105|Non Clinical |TRAINING & DEVELOPMENT|Training Calendar, Attendance, Certification Track, E-Learning|1. Training Calendar: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Attendance: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Certification Track: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. E-Learning: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+106|Non Clinical |HELP DESK / IT SUPPORT|Ticket Raise, SLA Tracking, Asset Issue Log, Resolution Track|1. Ticket Raise: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. SLA Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Asset Issue Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Resolution Track: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+107|Non Clinical |ATTENDANCE & BIOMETRIC|Punch-In/Out, Shift Mapping, Leave Integration, OT Calc|1. Punch-In/Out: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Shift Mapping: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Leave Integration: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. OT Calc: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+108|Non Clinical |DUTY ROSTER MANAGEMENT|Shift Planner, Swap Request, Auto-Assign, Dept-Wise View|1. Shift Planner: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Swap Request: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Auto-Assign: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Dept-Wise View: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+109|Non Clinical |CONTRACT MANAGEMENT|Contract Repository, Renewal Alerts, Milestone Tracking|1. Contract Repository: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Renewal Alerts: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Milestone Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+110|Non Clinical |PATIENT GRIEVANCE / FEEDBACK|Complaint Register, Escalation Matrix, Resolution TAT, Reports|1. Complaint Register: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Escalation Matrix: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Resolution TAT: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Reports: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+111|Non Clinical |DIETARY / KITCHEN MANAGEMENT|Diet Order Integration, Menu Planner, Meal Dispatch, Waste Log|1. Diet Order Integration: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Menu Planner: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Meal Dispatch: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Waste Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+112|Non Clinical |MORGUE / BODY HANDOVER|Release Register, NOK Verification, Documentation, Workflow|1. Release Register: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. NOK Verification: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Documentation: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Workflow: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+113|Enabler Modules|HL7 / FHIR INTEGRATION|HL7 v2 ADT/ORM, FHIR R4 API, Resource Mapping, Message Log|1. HL7 v2 ADT/ORM: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. FHIR R4 API: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Resource Mapping: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Message Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+114|Enabler Modules|ABDM / ABHA INTEGRATION|ABHA ID Creation, Health Locker, Consent Manager, HIP/HIU|1. ABHA ID Creation: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Health Locker: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Consent Manager: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. HIP/HIU: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+115|Enabler Modules|PAYMENT GATEWAY INTEGRATION|Razorpay/PayTM/UPI, Refund Workflow, Reconciliation, Ledger|1. Razorpay/PayTM/UPI: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Refund Workflow: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Reconciliation: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Ledger: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+116|Enabler Modules|BIOMETRIC INTEGRATION|Fingerprint/Iris, Staff Attendance, Patient ID Verification|1. Fingerprint/Iris: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Staff Attendance: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Patient ID Verification: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+117|Enabler Modules|CCTV INTEGRATION|Camera Feed Dashboard, Event Tagging, Playback, Alert Triggers|1. Camera Feed Dashboard: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Event Tagging: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Playback: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Alert Triggers: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+118|Enabler Modules|BACKUP & DISASTER RECOVERY|Auto Backup, DR Drill Log, RPO/RTO Config, Cloud Replication|1. Auto Backup: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. DR Drill Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. RPO/RTO Config: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Cloud Replication: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+119|Enabler Modules|CYBERSECURITY MODULE|Threat Monitor, Vulnerability Scan, Patch Mgmt, Incident Log|1. Threat Monitor: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Vulnerability Scan: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Patch Mgmt: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Incident Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+120|Enabler Modules|AUDIT TRAIL & LOGGING|User Activity Log, Data Change History, Login Audit, Reports|1. User Activity Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Data Change History: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Login Audit: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Reports: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+121|Enabler Modules|RBAC / ACCESS CONTROL|Role Config, Permission Matrix, Dept-Level Access, IP Whitelist|1. Role Config: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Permission Matrix: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Dept-Level Access: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. IP Whitelist: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+122|Enabler Modules|SINGLE SIGN-ON (SSO)|LDAP/AD Integration, OAuth 2.0, SAML, Session Management|1. LDAP/AD Integration: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. OAuth 2.0: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. SAML: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Session Management: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+123|Enabler Modules|API GATEWAY / ESB|API Registry, Rate Limiting, Transformation, Monitoring|1. API Registry: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Rate Limiting: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Transformation: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Monitoring: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+124|Enabler Modules|MASTER DATA MANAGEMENT|Facility Master, Drug Master, ICD/CPT Master, Sync Engine|1. Facility Master: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Drug Master: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. ICD/CPT Master: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Sync Engine: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+125|Enabler Modules|CONSENT MANAGEMENT|Digital Consent Forms, E-Sign, Consent Audit, Template Builder|1. Digital Consent Forms: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. E-Sign: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Consent Audit: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Template Builder: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+126|Enabler Modules|CLINICAL DECISION SUPPORT (CDSS)|Drug Interaction Alert, Allergy Check, Protocol Suggest, AI Triage|1. Drug Interaction Alert: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Allergy Check: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Protocol Suggest: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. AI Triage: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+127|Enabler Modules|PATIENT FEEDBACK & SURVEY|NPS Survey, Post-Visit Feedback, WhatsApp Survey, Analytics|1. NPS Survey: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Post-Visit Feedback: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. WhatsApp Survey: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Analytics: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+128|Enabler Modules|NABL INTEGRATION|QC Data Upload, EQA Tracking, Instrument Validation, Reports|1. QC Data Upload: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. EQA Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Instrument Validation: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Reports: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+129|Enabler Modules|E-SIGN / DIGITAL SIGNATURE|Aadhaar eSign, DSC Integration, Document Stamping, Verify|1. Aadhaar eSign: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. DSC Integration: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Document Stamping: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Verify: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+130|Enabler Modules|BARCODE / QR CODE MODULE|Label Printing, Wristband Generation, Asset Tag, Scan Verify|1. Label Printing: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Wristband Generation: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Asset Tag: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Scan Verify: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+131|Enabler Modules|EMAIL INTEGRATION|SMTP Config, Template Engine, Auto-Notify, Delivery Track|1. SMTP Config: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Template Engine: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Auto-Notify: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Delivery Track: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+132|Enabler Modules|IVR / CALL CENTER INTEGRATION|IVR Flow, Call Logging, Appointment via IVR, Call Recording|1. IVR Flow: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Call Logging: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Appointment via IVR: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Call Recording: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+133|Enabler Modules|KIOSK INTEGRATION|Self Check-In, Token Print, Payment Kiosk, Feedback Kiosk|1. Self Check-In: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Token Print: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Payment Kiosk: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Feedback Kiosk: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+134|Enabler Modules|RIS (RADIOLOGY INFO SYSTEM)|Worklist, Modality Integration, Report Dictation, DICOM|1. Worklist: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Modality Integration: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Report Dictation: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. DICOM: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+135|Revenue Cycle Mgmt|CLAIMS MANAGEMENT|Claim Submission, Tracking, Rejection Analysis, Resubmission|1. Claim Submission: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Rejection Analysis: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Resubmission: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+136|Revenue Cycle Mgmt|DENIAL MANAGEMENT|Denial Reason Log, Appeal Workflow, Root Cause, Trend Report|1. Denial Reason Log: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Appeal Workflow: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Root Cause: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Trend Report: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+137|Revenue Cycle Mgmt|AR FOLLOW-UP|Aging Report, Payer-Wise Outstanding, Auto Reminder, Write-Off|1. Aging Report: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Payer-Wise Outstanding: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Auto Reminder: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Write-Off: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+138|Revenue Cycle Mgmt|PRE-AUTHORIZATION|Prior Auth Request, Status Track, Document Upload, Approval|1. Prior Auth Request: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Status Track: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Document Upload: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Approval: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+139|Revenue Cycle Mgmt|REVENUE LEAKAGE AUDIT|Charge Capture Check, Unbilled Services, Variance Alert|1. Charge Capture Check: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Unbilled Services: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Variance Alert: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+140|Revenue Cycle Mgmt|TARIFF MANAGEMENT|Rate Master, Payer-Wise Tariff, Rate Revision, Comparison|1. Rate Master: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Payer-Wise Tariff: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Rate Revision: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Comparison: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+141|Patient Engagement|PATIENT PORTAL (WEB)|Login, Records View, Lab Reports, Appointments, Bill Pay|1. Login: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Records View: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Lab Reports: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Appointments: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+5. Bill Pay: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+142|Patient Engagement|HEALTH EDUCATION|Condition Library, Video, Multilingual Content, Push Notify|1. Condition Library: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Video: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Multilingual Content: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Push Notify: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+143|Patient Engagement|FOLLOW-UP MANAGEMENT|Auto Follow-Up Reminder, Recall List, No-Show Tracking|1. Auto Follow-Up Reminder: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Recall List: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. No-Show Tracking: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+144|Patient Engagement|PATIENT COMMUNITY|Support Groups, Forum, Doctor Q&A, Event Calendar|1. Support Groups: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Forum: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Doctor Q&A: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Event Calendar: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+145|Patient Engagement|LOYALTY & WELLNESS PROGRAM|Points System, Health Goals, Rewards, Annual Check-Up Remind|1. Points System: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Health Goals: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Rewards: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Annual Check-Up Remind: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+146|AI & Advanced Tech|AI VOICE ASSISTANT|Voice-Driven Navigation, Multilingual, Command Parsing, NLP|1. Voice-Driven Navigation: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Multilingual: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Command Parsing: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. NLP: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+147|AI & Advanced Tech|AI CHATBOT (INTELLIBOT)|Patient Query Bot, Symptom Checker, Appointment Bot, FAQ|1. Patient Query Bot: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Symptom Checker: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Appointment Bot: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. FAQ: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+148|AI & Advanced Tech|AI DOCUMENT EXTRACTION (DOCXTRACT)|Prescription OCR, Lab Report Parsing, Insurance Doc Extract|1. Prescription OCR: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Lab Report Parsing: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Insurance Doc Extract: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+149|AI & Advanced Tech|PREDICTIVE ANALYTICS|Readmission Risk, No-Show Prediction, Demand Forecast, LOS|1. Readmission Risk: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. No-Show Prediction: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Demand Forecast: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. LOS: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+150|AI & Advanced Tech|AI-ASSISTED CODING (ICD/CPT)|Auto Code Suggest, NLP Clinical Notes, DRG Grouper, Audit|1. Auto Code Suggest: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. NLP Clinical Notes: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. DRG Grouper: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Audit: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+151|AI & Advanced Tech|AI RADIOLOGY ASSIST|Image Annotation, Abnormality Flag, Report Draft, Priority Queue|1. Image Annotation: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+2. Abnormality Flag: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+3. Report Draft: User initiates → System processes → Result logged → Notification sent → Dashboard updated
+4. Priority Queue: User initiates → System processes → Result logged → Notification sent → Dashboard updated|
+|SUMMARY||||
+|Original Modules (Input)|60|||
+|New OPD Modules Added|19|||
+|New IP Modules Added|13|||
+|New Non Clinical Modules Added|20|||
+|New Enabler Modules Added|22|||
+|New Category: Revenue Cycle Mgmt|6|||
+|New Category: Patient Engagement|5|||
+|New Category: AI & Advanced Tech|6|||
+|TOTAL MODULES (Comprehensive HMS)|151|||
+=== SHEET Costed Proposal – OPD+IP+Trauma A1:L116
+VIMS ENTERPRISE — HMS Implementation Costing Proposal | OPD + IP + Trauma Center Ecosystem|||||||||||
+Client: FAMI CARE Hospital  |  Prepared By: VIMS ENTERPRISE  |  Date: April 2026  |  Version: 3.0  |  Confidential|||||||||||
+S.No|Category|Module ID|Module Name|Key Functions|Priority|Complexity|Dev Effort
+(Man-Days)|Dev Cost
+(₹ Lakhs)|AMC/Year
+(₹ Lakhs)|Implementation
+Weeks|Remarks
+  OPD CLINICAL MODULES|||||||||||
+1|OPD Clinical|OP-001|Front Office & Registration|Patient Registration, ABHA/ABDM, Appointments, Queue Mgmt, Token, Walk-In, Staff Mgmt, Doctor Schedule|Must Have|High|45|5.4|0.81|4|P0 – Core module, first to build
+2|OPD Clinical|OP-002|OPD / CPOE (Doctor Dashboard)|Live Queue, Consultation, ICD-10 Diagnosis, E-Prescription, Lab/Radiology Orders, Patient History, Templates|Must Have|High|55|6.6|0.99|5|P0 – Heart of clinical workflow
+3|OPD Clinical|OP-003|Pharmacy Management|E-Rx Dashboard, Dispensing, Barcode Scan, Inventory, Expiry Alerts, OTC, Narcotic Register, Drug Interaction|Must Have|High|50|6|0.9|4|P0 – Revenue-critical
+4|OPD Clinical|OP-004|Laboratory (LIS)|Orders, Sample Collection, Barcode, Result Entry, Auto-Flag, Critical Alert, PDF Report, TAT, QC|Must Have|High|55|6.6|0.99|5|P0 – NABL compliance needed
+5|OPD Clinical|OP-005|OP Billing & Revenue|Master Bill, Multi-Payment (Cash/Card/UPI/Razorpay), Digital Receipt, Revenue MIS, GST, Refund, Discount|Must Have|High|40|4.8|0.72|4|P0 – Revenue integrity
+6|OPD Clinical|OP-006|Emergency & Trauma Intake|Quick Registration, 5-Level Triage (ESI), Color-Coded Priority, ER Bed Mgmt, On-Call Alert, MLC, Ambulance Link|Must Have|Very High|60|7.8|1.17|5|P0 – TRAUMA CENTER CORE
+7|OPD Clinical|OP-007|Vital Room / Nursing Pre-Consult|BP, SpO2, Glucose, Temp, Pulse, Height/Weight/BMI, Abnormal Alert, Device Integration, Queue Link|Must Have|Medium|20|2.4|0.36|2|P0 – Pre-consultation prep
+8|OPD Clinical|OP-008|Radiology & Imaging|Orders, DICOM MWL, PACS Integration, Structured Reporting, Critical Findings Alert, Dose Tracking, TAT|Must Have|Very High|50|6.5|0.98|5|P0 – TRAUMA: X-Ray/CT critical
+9|OPD Clinical|OP-009|Orthopedic OPD Module|Fracture Registry, Implant Log, Casting/Splint Tracking, X-Ray Comparison, Post-Op Follow-Up, Rehab Referral|Must Have|High|45|5.85|0.88|4|P0 – ORTHO SPECIALTY CORE
+10|OPD Clinical|OP-010|Procedure Console|Scheduling, Pre-Procedure Checklist, Consent Capture, Documentation, Consumables, Photo/Video, Billing|Must Have|Medium|30|3.6|0.54|3|P1 – Minor procedures OP
+11|OPD Clinical|OP-011|Dietician Module|Nutritional Assessment, BMI, Diet Plans, Templates, IP Diet Coordination, Follow-Up, Progress Charts|Good to Have|Low|18|2.16|0.32|2|P2
+12|OPD Clinical|OP-012|Dialysis Module|Session Scheduling, Machine Assignment, Vitals Monitoring, Consumables, Water Quality, Billing|Good to Have|Medium|30|3.6|0.54|3|P2 – If dialysis unit exists
+13|OPD Clinical|OP-013|Vaccination Module|Schedule Generation, Administration, Batch/Expiry, Certificate, Reminder SMS, AEFI, CoWIN|Good to Have|Low|18|2.16|0.32|2|P2
+14|OPD Clinical|OP-014|Health Check-Up Packages|Package Config, Booking, Workflow Routing, Status Board, Consolidated Report, Health Score, Corporate|Good to Have|Medium|25|3|0.45|3|P2 – Revenue opportunity
+15|OPD Clinical|OP-015|Physiotherapy / Rehabilitation|Referral, Assessment, Treatment Plans, Session Scheduling, Exercise Library, Progress Tracking, Billing|Must Have|Medium|28|3.36|0.5|3|P1 – TRAUMA REHAB critical
+16|OPD Clinical|OP-016|Pain Management Clinic|Pain Scoring (NRS/VAS), Block Log, Medication Titration, Multimodal Therapy, Outcome Tracking|Must Have|Medium|22|2.86|0.43|2|P1 – TRAUMA pain pathway
+17|OPD Clinical|OP-017|Wound Care Clinic|Wound Assessment (BWAT), Photo Documentation, Dressing Protocol, Healing Trajectory, Follow-Up|Must Have|Medium|20|2.6|0.39|2|P1 – TRAUMA wound mgmt
+18|OPD Clinical|OP-018|Telemedicine|Video Consult (WebRTC), Waiting Room, E-Rx, Lab Orders, Recording, Consent, Follow-Up|Good to Have|High|40|4.8|0.72|4|P2
+19|OPD Clinical|OP-019|Doctor Mobile App (iOS & Android)|Queue View, Vitals Preview, Quick Consult, E-Rx, Lab Results, Push Alerts, Offline Mode, Earnings|Must Have|Very High|60|8.4|1.26|5|P1 – 2 platforms
+20|OPD Clinical|OP-020|Patient Mobile App (iOS & Android)|OTP Login, Booking, Queue Tracking, Records, Lab Reports, Bill Pay, Family Mgmt, Push Notifications|Must Have|Very High|60|8.4|1.26|5|P1 – Patient engagement
+21|OPD Clinical|OP-021|Referral Management|Internal/External Referral, Tracking, TAT Monitoring, Feedback Loop, Specialist Routing|Good to Have|Low|15|1.8|0.27|2|P2
+  TRAUMA CENTER SPECIFIC MODULES|||||||||||
+22|Trauma Center|TR-001|Trauma Triage & Assessment|START/JumpSTART Triage, Trauma Score (ISS/RTS/TRISS), Glasgow Coma Scale, Rapid Assessment, Color Coding|Must Have|Very High|45|5.85|0.88|4|P0 – TRAUMA CORE
+23|Trauma Center|TR-002|Orthopedic Fracture Registry|Fracture Classification (AO/OTA), Bone & Location Mapping, Severity Grading, X-Ray Timeline, Treatment Plan|Must Have|High|40|5.2|0.78|4|P0 – ORTHO CORE
+24|Trauma Center|TR-003|Implant & Prosthetics Management|Implant Registry (Serial/Batch), Vendor/Consignment Link, Patient-Implant Trace, Recall Alert, Regulatory|Must Have|High|35|4.55|0.68|3|P0 – Regulatory mandatory
+25|Trauma Center|TR-004|Trauma OT Coordination|Emergency OT Booking, WHO Checklist, Anesthesia Assessment, Intra-Op Documentation, Implant Log, C-Arm Track|Must Have|Very High|50|6.5|0.98|4|P0 – Emergency surgery flow
+26|Trauma Center|TR-005|Cast & Splint Tracking|Application Log, Material Used, Removal Schedule, Follow-Up X-Ray, Complication Monitoring, Billing|Must Have|Medium|18|2.34|0.35|2|P1 – Ortho workflow
+27|Trauma Center|TR-006|Trauma ICU Management|Ventilator Tracking, Hourly Vitals, APACHE II/SOFA Score, Sedation Score, Multi-Organ Dashboard, Alerts|Must Have|Very High|55|7.15|1.07|5|P0 – Critical care
+28|Trauma Center|TR-007|Polytrauma Coordination Dashboard|Multi-Specialty Case View, Surgical Priority Queue, Blood Requirement, Consent Tracking, Team Assignment|Must Have|High|35|4.55|0.68|3|P0 – Multi-injury coordination
+29|Trauma Center|TR-008|MLC & Forensic Documentation|MLC Register, Police Intimation, Injury Documentation (Body Map), Wound Photography, Chain of Custody, Court Reports|Must Have|Medium|22|2.86|0.43|2|P0 – Legal compliance
+30|Trauma Center|TR-009|Ambulance & Pre-Hospital Integration|108/112 Integration, GPS Tracking, Pre-Hospital Vitals Relay, ETA Display, ER Pre-Alert, Handover Docs|Must Have|High|35|4.55|0.68|3|P1 – Golden hour
+31|Trauma Center|TR-010|Trauma Rehabilitation Pathway|Rehab Assessment, Functional Scoring (FIM/Barthel), Physio/OT/Speech Scheduling, Progress Milestones, Return-to-Work|Must Have|Medium|28|3.64|0.55|3|P1 – Recovery pathway
+  IP / INPATIENT MODULES|||||||||||
+32|IP / Inpatient|IP-001|IP Admission & Bed Management|Admission Workflow, Bed Dashboard, Ward/Room/ICU Config, Deposit, Consent, Insurance Pre-Auth Trigger|Must Have|High|40|4.8|0.72|4|P0 – Core IP
+33|IP / Inpatient|IP-002|IP Discharge & Summary|Discharge Planning, Checklist, Final Bill Consolidation, Summary Generation, Follow-Up, Medication Reconciliation|Must Have|High|35|4.2|0.63|3|P0 – Core IP
+34|IP / Inpatient|IP-003|Nursing Station (IP)|Ward Dashboard, MAR, Vital Charting (Q1H/Q4H), Nursing Notes (SBAR), Shift Handover, Fall/Pressure Risk, Pain Scale|Must Have|High|45|5.4|0.81|4|P0 – Core IP nursing
+35|IP / Inpatient|IP-004|Nursing Mobile App (Android)|Bedside Vitals, Barcode Med Verify, Push Alerts, Wound Photos, Offline Sync, Task Completion|Must Have|High|35|4.55|0.68|3|P1 – Bedside care
+36|IP / Inpatient|IP-005|IP Billing|Auto Room Charge Posting, Per-Day Charges, Service/Consumable Billing, Interim Bill, Package Billing, TPA Pre-Auth|Must Have|High|40|4.8|0.72|4|P0 – Revenue critical
+37|IP / Inpatient|IP-006|Operation Theatre (OT)|OT Calendar, WHO Safety Checklist, Anesthesia Assessment, Surgery Notes, Implant Log, Consumables, Recovery Room|Must Have|Very High|55|7.15|1.07|5|P0 – TRAUMA surgery hub
+38|IP / Inpatient|IP-007|Blood Bank|Donor Register, Collection, Component Separation, Cross-Match, Issue, Transfusion Reaction Monitor, SBTC/NACO|Must Have|High|40|5.2|0.78|4|P0 – TRAUMA: blood critical
+39|IP / Inpatient|IP-008|IP Package Management|Surgery Bundles, Package Billing, Variance Tracking, Insurance Mapping, Profitability Dashboard|Must Have|Medium|25|3|0.45|3|P1
+40|IP / Inpatient|IP-009|ICU / CCU Management|Ventilator Tracking, Hourly Vitals, APACHE/SOFA Scoring, Sedation Scale, Multi-Organ Dashboard, Alert Cascade|Must Have|Very High|50|6.5|0.98|5|P0 – TRAUMA ICU
+41|IP / Inpatient|IP-010|Doctor IP Mobile (iOS & Android)|Ward Rounds View, IP Orders, Discharge Initiation, Push Alerts, Patient Chart, Dictation Mode|Must Have|High|40|5.2|0.78|4|P1
+42|IP / Inpatient|IP-011|Labour Room|Labour Admission, Partograph, FHR Monitor, Delivery Docs, Newborn Registration, APGAR, Birth Certificate|Good to Have|High|35|4.2|0.63|4|P2 – If maternity unit exists
+43|IP / Inpatient|IP-012|Infection Control|HAI Surveillance, Antibiogram, Culture Reports, Alert Triggers, Hand Hygiene Audit, Isolation Protocol|Must Have|Medium|22|2.86|0.43|2|P1 – Post-surgical infection
+44|IP / Inpatient|IP-013|Crash Cart Management|Cart Checklist, Expiry Alerts, Usage Log, Replenishment, Code Blue Protocol Documentation|Must Have|Low|12|1.44|0.22|1|P1 – Emergency readiness
+45|IP / Inpatient|IP-014|IP Pharmacy (Ward Stock)|Ward Stock, Unit Dose Dispensing, Return Management, Narcotic Control, Controlled Substance Double-Check|Must Have|Medium|25|3|0.45|3|P1
+  NON-CLINICAL / ADMINISTRATIVE MODULES|||||||||||
+46|Non Clinical|NC-001|Cash Counter|Multi-Counter, Shift Open/Close, Cash Reconciliation, Denomination Sheet, Advance/Refund, Daily Summary|Must Have|Medium|20|2.4|0.36|2|P0
+47|Non Clinical|NC-002|Asset Management|Asset Register, Barcode Tag, AMC/CMC, Depreciation, Preventive Maintenance, Audit, Disposal|Must Have|Medium|25|3|0.45|3|P1
+48|Non Clinical|NC-003|Digital MRD|Digital File, ICD Coding, Scan/Upload, Retrieval Log, Retention Policy, Medico-Legal Flag|Must Have|Medium|22|2.64|0.4|2|P1 – Compliance
+49|Non Clinical|NC-004|Document Management|Upload/Scan, Version Control, Role-Based Access, Approval Workflow, Expiry Alert, OCR Search|Good to Have|Medium|20|2.4|0.36|2|P2
+50|Non Clinical|NC-005|Purchase & Procurement|Indent, Quotation, Comparative Statement, PO, GRN, 3-Way Match, Rate Contract, Approval Matrix|Must Have|High|35|4.2|0.63|3|P1
+51|Non Clinical|NC-006|Stores / Inventory|Item Master, Stock Register, GRN, Issue/Return, Batch/Expiry (FEFO), ABC-VED, Inter-Store Transfer, Physical Count|Must Have|High|35|4.2|0.63|3|P0 – Supply chain core
+52|Non Clinical|NC-007|Consignment Management|Vendor Setup, Implant/Device Log, Usage-Based Billing, Auto-PO, Expiry Return, Reconciliation|Must Have|Medium|22|2.86|0.43|2|P0 – ORTHO implants
+53|Non Clinical|NC-008|Consumption Entry|Department-Wise Consumption, Ward Stock Issue, Auto-Deduct on Billing, Cost Centre, Variance Alert|Must Have|Low|15|1.8|0.27|2|P1
+54|Non Clinical|NC-009|Accounts & Finance|GL, AP, AR, Bank Reconciliation, TDS/GST, Trial Balance, P&L, Balance Sheet, Budget vs Actual|Must Have|Very High|55|6.6|0.99|5|P1 – Finance backbone
+55|Non Clinical|NC-010|HR & Payroll|Employee Master, Attendance/Biometric, Leave, Payroll, PF/ESI/PT, TDS, Loan, Full & Final, Form 16|Must Have|High|45|5.4|0.81|4|P1
+56|Non Clinical|NC-011|Reports & Analytics Engine|MIS Dashboard, Revenue/Clinical/Operational Reports, Custom Report Builder, Scheduled Email, Export|Must Have|High|35|4.2|0.63|3|P0
+57|Non Clinical|NC-012|B2B / Corporate Billing|Corporate Master, Credit Billing, Invoice Generation, SOA, Payment Follow-Up, TDS Certificate|Good to Have|Medium|22|2.64|0.4|2|P2
+58|Non Clinical|NC-013|Ambulance Management|Vehicle Register, Trip Sheet, Driver Assignment, GPS, Emergency Dispatch, Billing, Maintenance|Must Have|Medium|25|3.25|0.49|3|P1 – TRAUMA ambulance
+59|Non Clinical|NC-014|Mobile Apps – Staff Utility|Staff Directory, Attendance, Leave Apply, Payslip, Announcements, Help Desk, Document Upload|Good to Have|Medium|25|3.25|0.49|3|P2
+60|Non Clinical|NC-015|Quality Mgmt (NABH/JCI)|Indicator Tracking, SOP Repository, Internal Audit, Gap Analysis, Corrective Action, Dashboard|Good to Have|Medium|22|2.86|0.43|2|P2 – Accreditation
+61|Non Clinical|NC-016|Waste Management (BMW)|BMW Segregation, Daily Log, SPCB Reports, Vendor Pickup, Color-Code Compliance, Weight Tracking|Must Have|Low|12|1.44|0.22|1|P1 – Regulatory
+  ENABLER & INTEGRATION MODULES|||||||||||
+62|Enabler / Integration|EN-001|Data Analytics & BI|Real-Time Dashboard, KPI Scorecards, Drill-Down, Predictive Models, Benchmarking, Scheduled Reports|Must Have|High|35|4.55|0.68|3|P1
+63|Enabler / Integration|EN-002|Insurance / TPA Module|TPA Master, Tariff Mapping, Pre-Auth, Claim Submission, Cashless/Reimbursement, Rejection Handling, ROHINI|Must Have|High|40|5.2|0.78|4|P0 – Revenue critical
+64|Enabler / Integration|EN-003|CSSD Module|Instrument Wrap, Sterilization Cycle, Autoclave Monitor, Tray Barcode, Issue/Return, Biological Indicator, Recall|Must Have|Medium|25|3.25|0.49|3|P0 – OT dependency
+65|Enabler / Integration|EN-004|Lab Machine Integration (DIU)|HL7/ASTM Interface, Bi-Directional Flow, Auto-Validation, QC (Levy-Jennings), Error Handling|Must Have|High|30|3.9|0.59|3|P1
+66|Enabler / Integration|EN-005|Printer Integration|Thermal/Laser/Label Config, Template Mapping, Auto-Print Triggers, Barcode Labels, Network Discovery|Must Have|Low|10|1.2|0.18|1|P1
+67|Enabler / Integration|EN-006|Queue Management System|Token Generation, Multi-Dept Queues, Priority Queue, SMS/WhatsApp Call, Wait Time Analytics, TV Display|Must Have|Medium|22|2.86|0.43|2|P0
+68|Enabler / Integration|EN-007|System Admin & RBAC|User Master, Role/Permission Config, Password Policy, Audit Trail, Session Mgmt, Backup Config, License|Must Have|High|30|3.6|0.54|3|P0 – Security backbone
+69|Enabler / Integration|EN-008|PACS Integration|DICOM Viewer, Study Worklist, Cloud Archive, CD/Share, Tele-Radiology, MWL, Prior Comparison|Must Have|Very High|40|5.6|0.84|4|P0 – TRAUMA imaging
+70|Enabler / Integration|EN-009|SMS & WhatsApp Integration|Gateway Config, Template Master, Auto-Triggers, Delivery Tracking, DND Check, Bulk Messaging, Opt-In/Out|Must Have|Medium|18|2.34|0.35|2|P0
+71|Enabler / Integration|EN-010|Payment Gateway (Razorpay)|UPI/Card/Net Banking/QR, Refund Workflow, Reconciliation, Ledger Sync|Must Have|Medium|15|1.95|0.29|2|P0
+72|Enabler / Integration|EN-011|ABDM / ABHA Integration|ABHA ID Creation, Health Locker, Consent Manager, HIP/HIU, FHIR Mapping|Must Have|High|30|3.9|0.59|3|P0 – Government mandate
+73|Enabler / Integration|EN-012|Website Integration|Online Booking Widget, Doctor Profiles, Dept Listing, Lab Report Download, Chatbot, Payment Link, SEO|Good to Have|Medium|22|2.86|0.43|3|P2
+74|Enabler / Integration|EN-013|Barcode / QR Code Module|Label Printing, Wristband Generation, Asset Tag, Sample Label, Scan Verification|Must Have|Low|10|1.2|0.18|1|P0
+75|Enabler / Integration|EN-014|Complaint Management|Complaint Register, Category/Priority, Auto-Assignment, Escalation, SLA Timer, Resolution, Analytics|Good to Have|Low|15|1.8|0.27|2|P2
+76|Enabler / Integration|EN-015|Gate Pass & Visitor Mgmt|Visitor Entry, Gate Register, Vehicle Log, Material Gate Pass, Bystander Pass, QR Validation|Good to Have|Low|15|1.8|0.27|2|P2
+77|Enabler / Integration|EN-016|E-Sign / Digital Signature|Aadhaar eSign, DSC Integration, Document Stamping, Consent Forms, Verification|Good to Have|Medium|18|2.34|0.35|2|P2
+78|Enabler / Integration|EN-017|Integration Hub (ESB/API)|REST/SOAP/HL7/FHIR, API Registry, Rate Limiting, Data Mapping, Sync Config, Error Queue, Monitoring|Must Have|Very High|40|5.2|0.78|4|P1 – Middleware backbone
+  REVENUE CYCLE MANAGEMENT|||||||||||
+79|Revenue Cycle|RC-001|Claims Management|Claim Submission, Tracking, Rejection Analysis, Resubmission, Settlement Reconciliation|Must Have|High|30|3.9|0.59|3|P1
+80|Revenue Cycle|RC-002|Pre-Authorization Engine|Prior Auth Request, Document Upload, Status Tracking, Enhancement, Approval Amount Config|Must Have|Medium|18|2.34|0.35|2|P1
+81|Revenue Cycle|RC-003|Tariff Management|Rate Master, Payer-Wise Tariff, Rate Revision, Comparison Dashboard|Must Have|Medium|15|1.95|0.29|2|P0
+  PATIENT ENGAGEMENT|||||||||||
+82|Patient Engagement|PE-001|Patient Portal (Web)|Login, Records View, Lab Reports, Appointments, Bill Pay, Family Management, Feedback|Must Have|High|35|4.55|0.68|4|P1
+83|Patient Engagement|PE-002|Follow-Up Management|Auto Follow-Up Reminder, Recall List, No-Show Tracking, Post-Discharge Call Scheduling|Must Have|Low|12|1.44|0.22|1|P1
+  AI & ADVANCED TECHNOLOGY|||||||||||
+84|AI & Advanced Tech|AI-001|AI Chatbot (Intellibot)|Patient Query Bot, Symptom Checker, Appointment Bot, FAQ, Handoff to Human|Good to Have|High|35|4.9|0.74|4|P2
+85|AI & Advanced Tech|AI-002|AI Clinical Decision Support|Drug Interaction Alert, Allergy Check, Protocol Suggest, Triage Assist|Good to Have|Very High|40|5.6|0.84|4|P2 – High clinical value
+86|AI & Advanced Tech|AI-003|AI Document Extraction|Prescription OCR, Lab Report Parsing, Insurance Doc Extract, Auto-Fill|Good to Have|High|30|4.2|0.63|3|P2
+GRAND TOTAL — OPD + IP + Trauma Center HMS|||||||2713|343.7499999999999|51.600000000000044||
+Description|Module Count|Dev Cost (₹ Lakhs)|AMC/Year (₹ Lakhs)|Notes|||||||
+SUMMARY BREAKDOWN|||||||||||
+Must Have Modules|68|287.3799999999999|43.14000000000001|Phase 1 — Mandatory for Go-Live|||||||
+Good to Have Modules|18|56.36999999999999|8.459999999999999|Phase 2 — Post Go-Live Enhancement|||||||
+TOTAL PROJECT COST|86|343.7499999999999|51.60000000000001|One-Time + Annual|||||||
+ASSUMPTIONS & NOTES:|||||||||||
+1. Development rate: ₹12,000–14,000/man-day (blended rate across Full Stack, Mobile, DevOps, AI engineers)|||||||||||
+2. AMC = 15% of Development Cost per annum (includes bug fixes, patches, minor enhancements, server monitoring)|||||||||||
+3. Cloud infrastructure (AWS/Azure) costs are EXCLUDED — estimated separately at ₹1.5–2.5 Lakhs/year|||||||||||
+4. Third-party license costs (Razorpay, MSG91, WhatsApp Business API, PACS) are EXCLUDED — usage-based|||||||||||
+5. Hardware (Kiosks, Biometric, Printers, TV Displays, Barcode Scanners) — client-procured, specs provided by VIMS|||||||||||
+6. Training: 5 days on-site training included per module batch; additional training at ₹15,000/day|||||||||||
+7. All costs in Indian Rupees (₹ Lakhs). GST @18% applicable additionally|||||||||||
+8. Payment Terms: 30% Advance | 30% on UAT | 30% on Go-Live | 10% Post 30-Day Stabilization|||||||||||
+9. Trauma Center modules (TR-001 to TR-010) are MANDATORY for this client scope — priced as Must Have|||||||||||
+=== SHEET Added Modules (Trauma+Ortho) A1:H22
+MODULES ADDED BY HMS ARCHITECT — Trauma Center + Orthopedic Ecosystem + OPD/IP Gaps|||||||
+S.No|Category|Module ID|Module Name|Key Functions|Justification|Priority|Est. Cost (₹ L)
+1|Trauma Center|TR-001|Trauma Triage & Assessment|START Triage, ISS/RTS/TRISS Scoring, GCS, Rapid Assessment, Color-Code Priority|No triage module in original RFQ — critical for trauma center accreditation and golden hour compliance|Must Have|5.85
+2|Trauma Center|TR-002|Orthopedic Fracture Registry|AO/OTA Classification, Bone Mapping, Severity Grading, X-Ray Timeline, Treatment Plan Tracking|Original RFQ had generic Orthopedics — fracture registry is standard for Level II/III trauma centers|Must Have|5.2
+3|Trauma Center|TR-003|Implant & Prosthetics Management|Serial/Batch Registry, Vendor Link, Patient-Implant Traceability, Recall Alerts, Regulatory Compliance|Missing from original — mandatory for orthopedic hospitals per CDSCO implant traceability guidelines|Must Have|4.55
+4|Trauma Center|TR-004|Trauma OT Coordination|Emergency OT Override, WHO Checklist, C-Arm Tracking, Intra-Op Implant Documentation|Original OT module is general — trauma needs emergency override booking and C-Arm integration|Must Have|6.5
+5|Trauma Center|TR-005|Cast & Splint Tracking|Application Log, Material Used, Removal Schedule, Follow-Up X-Ray, Complication Watch|Not present in original — standard orthopedic outpatient workflow tracking|Must Have|2.34
+6|Trauma Center|TR-006|Trauma ICU Management|Ventilator, Hourly Vitals, APACHE II, SOFA Score, Sedation, Multi-Organ Dashboard|Original had generic ICU — trauma ICU needs injury-specific scoring and multi-organ monitoring|Must Have|7.15
+7|Trauma Center|TR-007|Polytrauma Coordination Dashboard|Multi-Specialty View, Surgical Priority Queue, Blood Requirement, Team Assignment|Missing — polytrauma patients require coordinated multi-specialty surgical scheduling|Must Have|4.55
+8|Trauma Center|TR-008|MLC & Forensic Documentation|MLC Register, Police Intimation, Body Map, Wound Photography, Chain of Custody|Partially covered in Emergency module — needs dedicated MLC workflow for trauma centers|Must Have|2.86
+9|Trauma Center|TR-009|Ambulance & Pre-Hospital Integration|108/112 Link, GPS, Pre-Hospital Vitals Relay, ETA Display, ER Pre-Alert|Original ambulance module is fleet-focused — needs clinical pre-hospital data integration|Must Have|4.55
+10|Trauma Center|TR-010|Trauma Rehabilitation Pathway|FIM/Barthel Scoring, Physio/OT/Speech Scheduling, Milestones, Return-to-Work Assessment|Missing — trauma recovery pathway is critical for patient outcomes and insurance documentation|Must Have|3.64
+11|OPD Clinical|OP-009|Orthopedic OPD Module|Fracture Registry, Implant Log, Casting Track, X-Ray Comparison, Post-Op Follow-Up, Rehab Referral|Not a separate module in original — orthopedic OPD needs dedicated workflows|Must Have|5.85
+12|OPD Clinical|OP-016|Pain Management Clinic|Pain Scoring (NRS/VAS), Block Log, Medication Titration, Multimodal Therapy|Missing — essential for trauma/post-surgical pain management|Must Have|2.86
+13|OPD Clinical|OP-017|Wound Care Clinic|Wound Assessment (BWAT), Photo Log, Dressing Protocol, Healing Trajectory|Missing — trauma wound management requires systematic tracking|Must Have|2.6
+14|IP / Inpatient|IP-009|ICU / CCU Management (Enhanced)|Ventilator, APACHE/SOFA, Sedation Scale, Multi-Organ Dashboard, Alert Cascade|Original ICU module was basic — enhanced for trauma-grade critical care|Must Have|6.5
+15|IP / Inpatient|IP-012|Infection Control|HAI Surveillance, Antibiogram, Culture Reports, Isolation Protocol, SSI Tracking|Missing — post-surgical infection monitoring critical for trauma/ortho patients|Must Have|2.86
+16|IP / Inpatient|IP-013|Crash Cart Management|Checklist, Expiry Alerts, Usage Log, Replenishment, Code Blue Protocol|Missing — emergency readiness requirement for trauma center certification|Must Have|1.44
+17|Revenue Cycle|RC-001|Claims Management|Claim Submission, Tracking, Rejection Analysis, Resubmission, Settlement|Not in original RFQ — critical for insurance revenue recovery in trauma cases|Must Have|3.9
+18|Revenue Cycle|RC-002|Pre-Authorization Engine|Prior Auth Request, Document Upload, Status Tracking, Enhancement|Missing — trauma cases often need emergency pre-auth workflows|Must Have|2.34
+19|Revenue Cycle|RC-003|Tariff Management|Rate Master, Payer-Wise Tariff, Rate Revision, Comparison|Missing — foundation for all billing and insurance operations|Must Have|1.95
+TOTAL ADDED MODULES COST|||||||77.49000000000001

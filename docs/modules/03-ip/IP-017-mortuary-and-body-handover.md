@@ -1,0 +1,191 @@
+# IP-017 — Mortuary & Body Handover (death declaration link, mortuary register, body tagging & cold-storage allocation, embalming log, MLC/police & post-mortem coordination, MCCD Form 4/4A & death certificate flow, NOK verification, release/handover, hearse, unclaimed bodies, brought-dead)
+
+| Field | Value |
+|---|---|
+| Domain | IP / Inpatient |
+| Module ID | IP-017 |
+| Phase | 7 |
+| Priority | P1 |
+| Complexity | Medium |
+| Depends on | IP-002 (death discharge: time/cause certification, death summary, brain-death path), IP-009 (brain-death certification, organ donation trigger → IP-019), OP-006 (brought-dead / ER deaths, MLC flag), TR-008 (MLC & forensic: police intimation, inquest, post-mortem requisition, chain of custody, body map), IP-001 (bed release, indoor register outcome), OP-001 (patient identity, NOK on file, ABHA), IP-005 (final bill/clearance policy for release; mortuary/embalming/hearse charges), EN-028 (consents: post-mortem/organ donation/body handover acknowledgement, release authorisation), EN-013 (body tags QR/wristband, cold-chamber labels), EN-005 (tag/label print), EN-016 (e-sign of certificates), EN-039 (MCCD Form 4/4A templates, death certificate, hearse pass), NC-013 (hearse/ambulance booking), NC-019/EN-015 (gate pass for body, security escort), NC-018 (mortuary cleaning, BMW NC-016), NC-020 (cold chamber assets, temperature via EN-042), NC-015 (mortality review, incidents), NC-003 (MRD: death file, retention), EN-009/EN-032 (NOK notifications), EN-037, EN-024, EN-011 (ABDM: death record close), IP-019 (organ retrieval coordination), NC-023 (legal), RC-007 (scheme death cases: PMJAY/JSSK requirements) |
+| Feature flag | `module.mortuary.enabled` (sub-flags: `mortuary.embalming`, `mortuary.crs_export`, `mortuary.chamber_sensors`, `mortuary.public_bodies`) |
+| Primary roles | Mortuary attendant / in-charge (custom role under 23/50 "Mortuary Staff"), MRD Officer (43), Nurse — Ward/ICU/ER (17/18/19), Doctor — IP (7), Emergency Physician (8), Security Officer (51), Receptionist/Front office (24: certificate desk), Cashier/Billing (26/27) |
+| Secondary roles | Forensic medicine doctor (custom under 6/12), MS (4), Intensivist (11), Transplant coordinator (IP-019), Police (external, paper/portal), NOK/Family (60), Quality (54), Legal (NC-023), Auditor (58) |
+| Regulatory | Registration of Births & Deaths Act 1969 & 2023 amendment (institutional death reporting to Registrar within 21 days; Form 2 death report; digital CRS portal), **MCCD** (Medical Certificate of Cause of Death: Form 4 hospital / 4A non-institutional, WHO ICD-10 cause chain Part I a/b/c/d & Part II, manner of death), CrPC 174/176 & BNSS 194/196 (police inquest for unnatural/suspicious deaths, MLC), Transplantation of Human Organs & Tissues Act 1994 (brain-death Form 10, donor consent), NABH 5th ed. COP.20/AAC (care of dying, death documentation), MTP Act (abortion/stillbirth reporting), stillbirth reporting (Form 3), Bio-Medical Waste Rules 2016 (anatomical waste), Anatomy Acts (unclaimed bodies to medical colleges), Clinical Establishments Act (death register), state mortuary rules (cold storage, embalming certificate for transport by air/rail: embalming + no-infection certificate), DPDP (deceased data disclosure to legal heirs), infectious body handling (COVID/other) SOPs |
+
+## 1. Purpose
+IP-017 manages everything after a death is declared: receiving the body into the mortuary register with a tamper-evident tag, allocating and monitoring cold-storage chambers, embalming and infectious-body handling, coordinating MLC/police inquest and post-mortem with forensic (TR-008), producing the MCCD (Form 4/4A) and death report to the Registrar (CRS) with cause-of-death coding, verifying next-of-kin identity and authorisation, running clearance (billing per policy, MLC clearance, documents) and the witnessed body handover with hearse arrangement, and handling brought-dead, unclaimed and donor bodies. It gives families a dignified, fast, transparent process and the hospital a legally complete audit trail.
+
+## 2. Users & Jobs-to-be-done
+- **Ward/ICU/ER nurse** (desktop/tablet): after doctor declares death (IP-002/OP-006), complete last-office checklist, request body shifting, print body tags (2: wrist/ankle + shroud), hand over belongings & valuables list, record time body left ward.
+- **Mortuary attendant/in-charge** (tablet/desktop; 24×7): receive body (scan tag → verify identity with escort nurse), allocate chamber, log temperature, embalming, viewing, police/forensic movements, release handover with NOK, chamber cleaning, daily census.
+- **Treating doctor** (desktop): certify death (IP-002), complete MCCD cause-of-death chain (ICD-10) ≤ 24 h, sign (e-sign), attend death review; ER doctor for brought-dead: declare & MLC.
+- **MRD / certificate desk** (desktop): verify MCCD completeness & coding, generate death report (Form 2) to Registrar/CRS portal, issue hospital death certificate copies to NOK, maintain death register, retention.
+- **Security** (phone/desktop): NOK verification at gate, hearse gate pass, escort.
+- **Billing/cashier**: clearance per policy (no bill hold on body release where policy/law forbids; charges for embalming/chamber/hearse).
+- **Forensic/police interface** (TR-008): inquest panchnama, PM requisition, body custody, release only on police clearance.
+- **NOK/family** (kiosk/portal/phone): status, documents needed, hearse booking, certificate download after registration.
+
+## 3. Core Workflows
+
+### 3.1 Death declaration → last office → body tag
+1. **Doctor** declares death in IP-002 (IP death) or OP-006 (ER/brought-dead: `arrival_status=brought_dead`, `mlc` typically true) → Event `ip.death.declared` {admission_id/er_visit_id, time_of_death, declared_by, mlc, infectious_flags, brain_death?, organ_donation_candidate?} → **System** creates **mortuary case** `status=declared` with case no. `MORT/{BR}/{FY}/{SEQ}`; auto-tasks: nurse last-office checklist, MCCD due 24 h (doctor), MLC → TR-008 police intimation task, organ donation → IP-019 coordinator (if brain death or DCD candidate), infection status pull (IP-012: isolation category e.g., airborne/contact/COVID/HIV/HBV → handling category).
+2. **Nurse** completes **last-office checklist** (EN-039 form): removal/leaving of lines & tubes (kept in situ if MLC/PM), wound dressing, body cleaned & positioned, eyes/mouth closed, identification band retained, valuables & belongings inventory (two-nurse sign, receipt for family; sealed pouch id), religious/cultural requests, infectious body wrapping (leak-proof bag; label), NOK informed (who/when), belongings handed to (name/relation/ID) → prints **two body tags** (EN-013 QR: case no., name, UHID, age/sex, ward, time of death, MLC flag, infection category colour) → **shifting request** (IP-001 transport task, discreet route policy) → Event `mortuary.body_shift.requested`.
+3. Bed release to IP-001 with `outcome=death` (housekeeping terminal clean if infectious).
+
+### 3.2 Mortuary receipt & cold-storage allocation
+1. **Attendant** scans body tag + escort nurse badge → **System** verifies match with case, records `received_at`, condition of body (`intact/injuries/decomposed`), items received (belongings pouch id, documents: death declaration slip, MLC papers), infection category → allocates **chamber** (`mortuary_chambers`: freezer/refrigerator, capacity, temp range −4 to 4 °C or −15 °C for long-term, reserved-for-MLC/infectious/paediatric) → chamber label printed → Event `mortuary.body.received`.
+2. **Chamber monitoring**: temperature log per chamber (manual q6h or EN-042 sensor `mortuary.chamber_sensors`), breach alerts (> 6 °C for 30 min) → in-charge + BME (NC-020 breakdown) → move body to another chamber (movement log). Occupancy dashboard: total/occupied/reserved/out-of-order.
+3. Body movements inside mortuary (viewing room, PM room, embalming room, chamber changes) logged with by/at/reason (chain of custody continues from TR-008 for MLC).
+
+### 3.3 MCCD (Form 4/4A) & Registrar death report
+1. **Treating doctor** (or ER doctor) fills **MCCD** in structured form: Part I (a) immediate cause, (b), (c), (d) antecedent/underlying with intervals; Part II (other significant conditions); ICD-10 codes each line (search; underlying cause selection per WHO rules helper), manner of death (natural/accident/suicide/homicide/pending investigation/undetermined), pregnancy status (women 15–49), whether autopsy done, place, date/time, tobacco/alcohol optional; for infants: Form 4 with maternal details; stillbirth → Form 3 path (IP-011). Validation: no ill-defined terms as sole cause (e.g., "cardiac arrest" without underlying → warning), interval order, sequence plausibility (EN-029 rule set), MLC → manner not "natural" unless police clearance says so.
+2. **Sign** (EN-016 e-sign or wet-sign scan) → immutable version; MRD verifies coding (`mccd_reviewed_by`) → generates **Form 2 (Death Report)** with hospital as informant → **submit to Registrar** (`mortuary.crs_export`: state CRS/e-Janma-type portal export CSV/PDF or manual portal entry with reference no. captured; API when available) within 21 days (default target 24–72 h) → tracker; **Registrar's death certificate** later uploaded/linked; hospital issues **"Death Intimation/Certificate of Death from hospital"** copies (numbered, watermark, count) to NOK on request; ABDM/EN-011: patient record marked deceased (`patient.deceased`) → stops OP-001 communications (PE-002 reminders) immediately on declaration.
+3. Brain-death: IP-009 Form 10 (THOTA) certification set (two examinations, panel of four) linked; time of death = second examination; MCCD reflects.
+
+### 3.4 MLC / police & post-mortem coordination (with TR-008)
+1. If `mlc=true` or unnatural/suspicious/brought-dead/death within 24 h of admission with unclear cause/medico-legal criteria → **System** blocks release (`release_block=police_clearance`) → TR-008 police intimation (station, DD entry no., officer, time) recorded; body custody with mortuary; inquest panchnama at mortuary (visitor log: police IDs); **PM requisition**: to in-house forensic (PM room booking, forensic doctor, PM no., report status) or transfer to government mortuary (transfer with police escort, movement record, receiving officer) → PM done → body returned/handed to police/NOK as per police release memo (`police_release_memo_no`, officer, uploaded scan) → block cleared.
+2. Chain of custody entries for body & specimens (viscera to FSL) in TR-008; mortuary shows status only.
+
+### 3.5 Embalming, infectious handling & viewing
+1. `mortuary.embalming`: **request** (NOK/hospital for transport by air/rail/long distance or delayed cremation) → consent + charge (IP-005/OP-005 counter bill for post-discharge services), embalmer (in-house/vendor), method (arterial/cavity), fluids used (batch), start/end, **embalming certificate** (EN-039; required by airlines with "no infectious disease" declaration by doctor + coffin sealing) → log; infectious bodies: handling per category (double-bagging, no embalming for certain infections per policy, restricted viewing), PPE log, BMW disposal (NC-016) of materials.
+2. **Viewing**: family viewing room slots, max persons, log (who/time), religious rites permitted per policy; photography restricted; counsellor availability (42).
+
+### 3.6 NOK verification, clearance & release/handover
+1. **Release request** (family at mortuary desk / kiosk / portal): **NOK verification** — relationship, ID document (Aadhaar/passport/DL; number masked, scan stored per DPDP with purpose "body handover"), photo capture, contact; if claimant differs from recorded NOK (OP-001), second ID + witness or police letter; disputes → MS/legal (NC-023) hold.
+2. **Clearance checklist** (auto): death declaration & MCCD signed ✓, MLC/police clearance ✓ (or N/A), organ retrieval completed (IP-019) ✓, PM completed ✓ (if any), belongings/valuables receipt signed ✓, billing status per policy (IP-005 final bill settled / waived / **policy option: never block body release for dues** — configurable; default: do not block, record dues & escalate to billing manager; many states mandate no detention of bodies), embalming certificate if transport, hearse arranged, gate pass. Every clearance item shows owner and status; blockers highlighted.
+3. **Handover**: attendant + NOK sign (touchscreen/e-sign/paper scan) **body handover acknowledgement** (EN-028 template) with tag numbers verified (scan tag → matches case), belongings pouch id, documents given (death intimation, MCCD copy where allowed, embalming/no-infection certificate, PM/police docs as applicable), time released, receiver photo → **hearse** (NC-013 booking with charges or private vehicle number logged) → gate pass (EN-015/NC-019) → security scans at gate → `status=released` → Event `mortuary.body.released` → chamber freed → cleaning task (NC-018) → MRD death file complete task.
+4. **Unclaimed bodies** (`mortuary.public_bodies`): no NOK within 72 h → police intimation, public notice, photo/fingerprint record via police, waiting period per state (e.g., 7–14 days) → disposal by municipal authority or donation to medical college under Anatomy Act with orders scanned → `status=disposed_unclaimed`.
+5. **Donor bodies**: IP-019 organ/tissue retrieval scheduling in OT/mortuary; after retrieval body reconstructed & released as above; whole-body donation (Anatomy Act consent) → handover to institution.
+
+### 3.7 Register, retention & review
+- Mortuary register (state format) & hospital death register auto-maintained; daily census; NC-003 death file (declaration, MCCD, summary, MLC docs, handover) retained permanently/per policy; monthly mortality review list (NC-015) with MCCD quality audit (ill-defined causes %, ≤ 24 h completion %).
+
+### 3.8 Exceptions
+- Wrong body identification risk: two-tag verification at every movement/handover; mismatch → hard-stop + incident.
+- Body kept > 48 h non-MLC → daily storage charge (policy) & MS review; > 7 days → legal escalation.
+- Chamber failure → auto-suggest transfer; if capacity full → vendor/nearby facility arrangement logged.
+- Family requests postponement/holding for relatives → extension recorded with charges.
+- Death of unknown/unregistered patient → temporary identity (OP-006) → police for identification.
+- Foreign national death → embassy intimation task (NC-023), embalming + certificates for repatriation (Form 4, no-infection, embalming, police NOC, coffin sealing certificate).
+
+## 4. Data Model (schema `ip`)
+- **ip.mortuary_cases** (id, hospital_id, branch_id, case_no unique, patient_id?, admission_id?, er_visit_id?, identity_status enum(known/unknown/provisional), death_declared_at, declared_by, place enum(ward/icu/er/ot/brought_dead/other), death_type enum(natural/mlc/brain_death/stillbirth/neonatal/other), mlc bool, mlc_case_id? (TR-008), infection_category enum(none/standard/contact/droplet/airborne/high_risk), organ_donor bool, brain_death_cert_id?, status enum(declared/awaiting_shift/received/in_storage/pm_pending/pm_done/embalming/awaiting_clearance/released/transferred_out/disposed_unclaimed/whole_body_donated), release_blocks jsonb [{code, cleared bool, by, at}], nok_name, nok_relation, nok_phone, chamber_id?, received_at, released_at, released_to jsonb {name, relation, id_type, id_masked, photo_file_id, signature_file_id}, hearse enum(hospital/private/none), hearse_ref?, gate_pass_id?, storage_days int, notes) — index (hospital_id, status), (patient_id).
+- **ip.mortuary_body_tags** (case_id, tag_no unique, type enum(wrist/shroud/chamber/temp), printed_at, printed_by, verified_events jsonb).
+- **ip.last_office_checklists** (case_id, items jsonb, valuables jsonb [{item, desc, pouch_id}], nurse1_id, nurse2_id, handed_to jsonb?, completed_at, form_version).
+- **ip.mortuary_chambers** (id, hospital_id, branch_id, code, type enum(refrigerated/freezer/open_tray), temp_min, temp_max, capacity int, reserved_for enum(any/mlc/infectious/paediatric), asset_id (NC-020), sensor_id?, status enum(available/occupied/reserved/out_of_order/cleaning)).
+- **ip.mortuary_chamber_temps** (chamber_id, at, temp_c, source enum(manual/sensor), by?, breach bool) — partition monthly.
+- **ip.mortuary_movements** (case_id, at, from_location, to_location enum(ward/transit/chamber/viewing/pm_room/embalming/gate/external), reason, by, escort?, tag_verified bool, custody_ref? (TR-008)).
+- **ip.mccd_certificates** (id, case_id, version, form enum(4/4A), part1 jsonb [{line, cause_text, icd10, interval}], part2 jsonb, underlying_cause_icd10, manner enum, pregnancy_status?, autopsy bool, place, dod, tod, certifier_id, signed_at, esign_ref, mrd_reviewed_by, mrd_reviewed_at, ill_defined_flag bool, sha256, status enum(draft/signed/amended)) — append-only versions.
+- **ip.death_reports** (case_id, form2_generated_at, informant, registrar_office, submitted_at, submission_mode enum(portal/api/manual/csv), reference_no, registrar_cert_no?, registrar_cert_file_id?, status enum(pending/submitted/registered/rejected), rejection_reason?).
+- **ip.hospital_death_certificates_issued** (case_id, copy_no, issued_to, issued_at, issued_by, purpose, watermark_id).
+- **ip.embalming_logs** (case_id, requested_by, consent_id, embalmer, vendor_id?, method, fluids jsonb, started_at, ended_at, certificate_file_id, no_infection_cert_by?, coffin_sealed bool, charge_line_id).
+- **ip.mortuary_viewings** (case_id, at, persons jsonb, room, by).
+- **ip.pm_coordinations** (case_id, pm_type enum(in_house/govt/none), requisition_no, forensic_doctor_id?, pm_room_booking, pm_at, pm_no, report_status, police_release_memo_no?, memo_file_id, transferred_to?, escort_officer?).
+- **ip.mortuary_release_checks** (case_id, item enum(mccd/police/pm/organ/belongings/billing/embalming/hearse/gate_pass/nok_id), status enum(pending/done/na/waived), by, at, note).
+- **ip.unclaimed_body_actions** (case_id, action enum(police_intimated/public_notice/photo_record/disposal_order/handover_municipal/anatomy_donation), at, ref, file_id, by).
+- Read models: `analytics.mv_mortuary_census` (chambers, occupancy, ageing), `analytics.mv_death_indicators_monthly` (deaths by ward/type, MCCD ≤ 24 h %, ill-defined %, CRS submission TAT, release TAT, MLC %, unclaimed).
+
+## 5. Business Rules & Validations
+- Mortuary case auto-created on any death declaration; no manual creation except brought-dead via OP-006.
+- Two-tag rule: body cannot be received/moved/released unless scanned tag matches case (hard-stop; incident on mismatch).
+- Release blocks: MLC without police release memo; PM pending; organ retrieval pending; MCCD unsigned (configurable: allow release with signed declaration but MCCD due ≤ 24 h — default block release until MCCD signed except with MS override); NOK identity unverified; **billing dues never block release if `mortuary.no_dues_detention=true` (default true)** — dues escalate to billing manager instead.
+- MCCD: ICD-10 required per line; underlying cause selected; ill-defined sole cause warns; manner must be `pending_investigation` for MLC until PM/police; signed MCCD immutable — amendments create new version with reason and MRD re-review; e-sign or scanned wet signature required.
+- Death report to Registrar within 21 days (target configurable 72 h); overdue → MRD & MS alerts; hospital certificate copies numbered and logged.
+- Chamber temperature breach > 30 min → alert; sensor gap > 6 h → manual reading task.
+- Infectious bodies: handling category drives PPE checklist, embalming restrictions (per hospital policy), gate pass note; BMW record for anatomical waste.
+- Storage charges (if any) computed daily after configurable free period; waived for MLC/unclaimed per policy.
+- Deceased flag propagates within 1 min to OP-001/PE-002/EN-009 (stop all reminders); DPDP: deceased records disclosed only to verified legal heirs/NOK with purpose logged.
+- Retention: register/MCCD/death file permanent (or state minimum); temp logs 3 y; handover media 10 y.
+
+## 6. API Surface (`/api/v1/mortuary`)
+| Method | Path | Purpose | Permission |
+|---|---|---|---|
+| GET | `/cases` (?status,ward,mlc,from,to; cursor) ; GET `/cases/{id}` | list/detail | `mortuary.case.read` |
+| POST | `/cases/brought-dead` (from OP-006 visit) | create case | `mortuary.case.create` |
+| POST | `/cases/{id}/last-office` ; POST `/cases/{id}/tags/print` | nurse checklist, tags | `mortuary.lastoffice.write` |
+| POST | `/cases/{id}/shift-request` | transport task | `mortuary.lastoffice.write` |
+| POST | `/cases/{id}/receive` (tag scan, escort, condition) ; POST `/cases/{id}/allocate-chamber` ; POST `/cases/{id}/move` | mortuary ops | `mortuary.body.operate` |
+| GET/POST/PATCH | `/chambers` ; POST `/chambers/{id}/temps` | chambers & temps | `mortuary.chamber.manage` / `.write` |
+| POST/PUT | `/cases/{id}/mccd` ; POST `/cases/{id}/mccd/sign` ; POST `/cases/{id}/mccd/review` ; GET `/cases/{id}/mccd.pdf` | MCCD | `mortuary.mccd.write` / `.sign` / `.review` |
+| POST | `/cases/{id}/death-report/generate|submit|update-status` | Form 2 / CRS | `mortuary.crs.manage` |
+| POST | `/cases/{id}/certificates/issue` ; GET `/cases/{id}/certificates` | hospital death certificate copies | `mortuary.certificate.issue` |
+| POST/GET | `/cases/{id}/embalming` ; GET `/cases/{id}/embalming/certificate.pdf` | embalming | `mortuary.embalming.write` |
+| POST | `/cases/{id}/viewings` ; POST `/cases/{id}/pm` ; PATCH `/cases/{id}/pm` | viewing, PM coordination | `mortuary.body.operate` / `mortuary.pm.write` |
+| GET | `/cases/{id}/release-checklist` ; POST `/cases/{id}/release-checks/{item}` | clearance | `mortuary.release.manage` |
+| POST | `/cases/{id}/nok-verify` ; POST `/cases/{id}/release` (signatures, tag scan, hearse, gate pass) | handover | `mortuary.release.manage` |
+| POST | `/cases/{id}/unclaimed/actions` | unclaimed workflow | `mortuary.release.manage` |
+| GET | `/census` ; GET `/register?from&to` (print) ; GET `/reports/indicators` | dashboards/register | `mortuary.report.read` |
+
+## 7. Domain Events (outbox)
+- `mortuary.case.created` {case_id, source, mlc, infection, donor} → tasks (nurse, doctor MCCD, TR-008, IP-019), OP-001 (`patient.deceased`), PE-002 stop, EN-009 stop.
+- `mortuary.body_shift.requested` → IP-001 transport; `mortuary.body.received` {chamber} → IP-001 (bed cleared confirmation), MRD.
+- `mortuary.chamber.temp_breach` {chamber, temp} → in-charge, BME (NC-020).
+- `mortuary.mccd.signed|amended|reviewed` {underlying_icd10} → NC-003, NC-015 (mortality review), death report generation.
+- `mortuary.death_report.submitted|registered|overdue` → MRD, MS.
+- `mortuary.certificate.issued` {copy_no} → audit.
+- `mortuary.embalming.completed` {certificate} → IP-005 charge, release checklist.
+- `mortuary.pm.requested|completed` , `mortuary.police_clearance.received` (from TR-008 event `mlc.body_release_cleared`) → release checklist.
+- `mortuary.release.blocked` {codes} / `mortuary.body.released` {released_to, hearse, at} → chamber free, NC-018 cleaning, NC-019 gate, IP-005 (dues escalation), NC-003 file close, IP-019 (donor case close), NC-015 indicators.
+- `mortuary.body.unclaimed` {days} → security/legal/MS; `mortuary.body.disposed_unclaimed`.
+- Consumed: `ip.death.declared` (IP-002), `er.brought_dead.declared` (OP-006), `icu.brain_death.certified` (IP-009), `mlc.police_intimated|body_release_cleared|pm_completed` (TR-008), `transplant.retrieval.completed` (IP-019), `bill.finalized` (IP-005), `device.temperature.breach` (EN-042).
+
+## 8. Screens (UI)
+- **Mortuary Console** (desktop + tablet at mortuary desk): case queue by status (awaiting shift / in storage / PM pending / awaiting clearance / released today), chamber map (grid with occupancy, temp, ageing colour), quick actions (receive `R`, move `M`, release `L`); live updates.
+- **Receive Body** (tablet with camera/scanner): scan tag → case match → escort badge → condition/items → chamber pick → print chamber label; offline: queue with tag verify against cached case list ≤ 10 min.
+- **Last-Office & Tag Print** (ward desktop/tablet within IP-002 death flow): checklist, valuables two-sign, print 2 tags (EN-005 label 100×50 mm, waterproof), shift request.
+- **MCCD Form** (doctor desktop/tablet): structured Part I/II with ICD-10 search, interval fields, WHO underlying-cause helper, validation panel, e-sign; print Form 4/4A (EN-039 exact layout); `Ctrl+S` save draft, `Ctrl+Enter` sign.
+- **MRD Death Desk** (desktop): MCCD review/coding, Form 2 generation, CRS submission tracker, certificate copy issue with fee (OP-005 counter), register print.
+- **Release & Handover** (tablet at desk/kiosk-assisted): NOK ID capture (camera, masked storage), clearance checklist with owners, signature pad, hearse booking (NC-013), gate pass QR print; blockers red with "call owner" action.
+- **PM / Police Panel** (desktop, shared with TR-008): requisition, memo upload, movements.
+- **Family status view** (PE-001/kiosk, optional): documents required, status "in process / ready for release", certificate download once registered.
+- **Reports** (desktop).
+
+## 9. Integrations
+- TR-008 (MLC engine) bidirectional events; NC-013 hearse; EN-015/NC-019 gate pass; EN-042 chamber sensors (Modbus/BLE via gateway); EN-016 e-sign (Aadhaar eSign/DSC) for MCCD; state CRS portal (CSV/PDF export or API via EN-017 when available; reference capture manual); EN-011 ABDM (patient deceased status); NC-003 MRD; NC-016 BMW; EN-005 waterproof labels; EN-039 templates (Form 4/4A, Form 2, embalming certificate, handover acknowledgement, no-infection certificate).
+
+## 10. Reports & Analytics
+- Deaths by ward/department/type/time-of-day; MCCD completion ≤ 24 h %; ill-defined underlying cause %; CRS submission TAT & pending; release TAT (declaration → release, receipt → release); MLC vs non-MLC; PM counts; embalming counts/revenue; chamber occupancy & temp breaches; unclaimed bodies; storage > 48 h list; mortality review list for NC-015 (with IP-002 death summaries).
+- MVs: `analytics.mv_mortuary_census`, `analytics.mv_death_indicators_monthly`.
+
+## 11. Notifications
+- Push/tasks: MCCD due/overdue (doctor, HOD at 24 h), body awaiting shift > 60 min (mortuary/ward), chamber temp breach, police clearance received, release ready, unclaimed 72 h.
+- SMS/WhatsApp to NOK (EN-009, consented, non-clinical): documents required for release, embalming/hearse confirmation, certificate ready for collection; strictly no cause-of-death text.
+- Email: MRD daily pending CRS list; MS weekly death & unclaimed summary.
+
+## 12. Permissions (RBAC keys)
+`mortuary.case.read` (mortuary staff, 43, 17–19, 7, 8, 4, 51 limited, 58), `mortuary.case.create` (8, 19, 24 for brought-dead), `mortuary.lastoffice.write` (17, 18, 19), `mortuary.body.operate` (mortuary staff, 22), `mortuary.chamber.manage` (mortuary in-charge, 3), `mortuary.chamber.write` (mortuary staff, 48), `mortuary.mccd.write` (7, 8, 11, 14 draft), `mortuary.mccd.sign` (7, 8, 11, 6; not 14), `mortuary.mccd.review` (43), `mortuary.crs.manage` (43), `mortuary.certificate.issue` (43, 24), `mortuary.embalming.write` (mortuary staff, 7 for certificate), `mortuary.pm.write` (forensic doctor, 8, TR-008 roles), `mortuary.release.manage` (mortuary in-charge, 43, 4 override), `mortuary.report.read` (4, 43, 54, 58).
+
+## 13. Non-functional
+- 2000-bed site: 5–15 deaths/day, 20–40 chambers; console p95 < 200 ms; tag scan verify < 100 ms; label print via EN-005 waterproof media.
+- Offline: receive/move/temps queue on tablet; release requires online (signature/legal). Print formats: Form 4/4A (state layouts configurable), Form 2, register (A4 landscape), tags 100×50 mm.
+- Privacy: NOK ID images encrypted, masked display, purpose-bound access; deceased data disclosure audited (DPDP). i18n: NOK-facing documents multilingual; forms in English + state language where mandated.
+
+## 14. Acceptance Criteria
+1. Given a death declared in IP-002 at 03:10 for an ICU patient, then a mortuary case is created within 5 s, nurse last-office task, doctor MCCD task (due 24 h) are generated, and PE-002/EN-009 reminders for the patient stop.
+2. Given the nurse completes last office with two-nurse valuables sign, then two body tags print with case QR and a shift transport task is created.
+3. Given the attendant scans a tag that does not match the selected case, then receipt is blocked, and an incident is created in NC-015.
+4. Given a body received and allocated to chamber C-04, when the sensor reports 8 °C for 35 min, then a breach alert reaches mortuary in-charge and BME and the console shows the chamber red.
+5. Given an MLC death, then release checklist shows `police` block until TR-008 emits clearance with memo number; attempting release returns 409 with block codes.
+6. Given a doctor enters MCCD with Part I(a) "cardiac arrest" only, then a validation warning requires an underlying cause; on sign, the record becomes immutable and MRD review task is created.
+7. Given MRD generates Form 2 and records CRS reference no., then status `submitted`; if not submitted within 72 h of death, MRD and MS get overdue alerts.
+8. Given `mortuary.no_dues_detention=true` and outstanding dues ₹45,000, when NOK verified and other checks done, then release proceeds and a dues-escalation task is created for billing manager.
+9. Given NOK verification with Aadhaar photo captured, then the stored ID number is masked in UI, full image access is audited with purpose.
+10. Given release completed with hearse from NC-013, then the gate pass QR validates at security, chamber becomes `cleaning`, and NC-018 cleaning task is created.
+11. Given a brought-dead in ER without identity, then case has `identity_status=unknown`, MLC true, and unclaimed workflow timers start after 72 h with police intimation task.
+12. Given an embalming request for air transport, then consent, charge line, embalming certificate and no-infection certificate PDF are generated and listed in the release checklist.
+13. Given a user with `mortuary.mccd.write` (resident), when calling `/mccd/sign`, then 403 (co-sign required by consultant).
+
+## 15. Enhancements / Later phases
+- Direct CRS/e-Janma API integration when states expose it (EN-017); RFID body tags & chamber door sensors; family self-service kiosk with document upload; hearse fleet GPS (NC-013); AI-assisted ICD-10 cause-of-death coding & ill-defined cause detection (AI-006); mortality dashboards with SMR (NC-015/EN-001); integration with municipal cremation/burial ground booking portals (market); grief counselling scheduling (42).
+
+## 16. Open Questions for the Hospital
+1. Mortuary capacity (chambers/freezers), sensor availability, in-house forensic/PM facility or government mortuary?
+2. State-specific MCCD/Form 2 layouts and CRS portal (name, export format, credentials, who submits)?
+3. Policy on body release vs pending dues (state rule/hospital policy)? Storage charges after free period?
+4. Embalming in-house or vendor? Airline/railway certificate formats used?
+5. MLC release process with local police (memo format), and PM transfer logistics?
+6. NOK identity verification standard (which IDs, photo capture, witness rules) and dispute escalation?
+7. Who issues hospital death certificate copies, fee, and count limits?
+8. Infectious body categories and handling SOP; religious/cultural practices to support (viewing, rites)?
+9. Organ/tissue/whole-body donation programme present (IP-019 link) and Anatomy Act procedures for unclaimed bodies?

@@ -1,0 +1,279 @@
+# EN-042 — Device Gateway / IoT (Device Registry, Protocol Adapters — HL7 Device Profiles, MQTT, Modbus, Serial, BLE, Vendor SDKs; Multi-para Monitor Vitals, Ventilators & Infusion Pumps, Cold-chain Sensors, RO Water & Autoclaves, Dialysis Machines, Weighing Scales & BP Kiosks; Buffering & Store-and-Forward, Time Sync, Clinical Validation before Charting, Alarm Handling & Alarm Fatigue, Biomedical Asset Link, Security & Segmentation)
+
+| Field | Value |
+|---|---|
+| Domain | Enabler |
+| Module ID | EN-042 |
+| Phase | 7 / 8 / 12 (matches `docs/12-module-index.md`: Phase 7 = ICU/ward monitor & ventilator/pump feeds for IP-009/IP-003, Phase 8 = specialty devices — dialysis, cold chain, RO/autoclave, kiosks, Phase 12 = predictive/alarm analytics) |
+| Priority | P2 |
+| Complexity | Very High |
+| Depends on | EN-017 (Integration Hub — transport, retries, DLQ, message log, MQTT/serial adapters), EN-019 (HL7 v2 ORU^R01 / FHIR `Observation`/`Device`/`DeviceMetric` semantics), EN-027 (device model master, parameter → LOINC/UCUM mapping), NC-020 (Biomedical Engineering — the asset registry, calibration, AMC, breakdown history that every device row links to), EN-007 (device service accounts, settings), EN-024 (audit), EN-037 (alerting & escalation), EN-023 (network segmentation, device certificates, vulnerability posture), EN-029 (CDSS consumes device-derived vitals for NEWS2/sepsis), EN-022 (buffer durability & retention) |
+| Consumed by | IP-003 (nursing flowsheets & vitals charting), IP-009/TR-006 (ICU flowsheet, ventilator, infusion), OP-007 (OPD vitals room), OP-012 (dialysis machine data), OP-013/IP-007/NC-006 (cold-chain for vaccines, blood, drugs), EN-003 (CSSD autoclave cycles), NC-006 (RO water quality, store temperatures), EN-031 (lab environment logs), EN-034 (kiosk-attached BP/weight devices), NC-020 (device telemetry for predictive maintenance), EN-001 (device utilisation analytics), AI-005 (predictive models) |
+| Feature flag | `module.device_gateway.enabled` (sub: `iot.vitals`, `iot.ventilator`, `iot.infusion`, `iot.cold_chain`, `iot.facility` (RO/autoclave/HVAC), `iot.ble`, `iot.dialysis`) |
+| Primary roles | Biomedical Engineer (48), IT Admin (56), Nurse — Ward/ICU (17/18 — validate and chart), Intensivist (11) |
+| Secondary roles | Nurse Supervisor (22), Lab Quality Manager (35 — environment logs), CSSD In-charge (38), Stores/Pharmacy (44/32 — cold chain), Facility/Maintenance (49 — RO, HVAC), Dialysis Technician (41), Blood Bank (37), Quality (54), DPO (57 — device data is health data), Auditor (58) |
+| Regulatory | **CDSCO Medical Device Rules 2017** (device registration, UDI, and the important boundary: an HMS that merely *records* device data is not itself a regulated medical device, but any software that *alarms on* or *acts upon* device data may be — see §5), **AERB** for radiological equipment (NC-020), **IEC 60601-1-8** (medical alarm systems — priority, audibility, latching) and **IEC 80001-1** (risk management of IT networks incorporating medical devices — the hospital must maintain a responsibility agreement between IT, biomedical and the vendor), **IHE PCD profiles** (DEC — Device Enterprise Communication, ACM — Alarm Communication Management, PIV — Point-of-care Infusion Verification), **ISO/IEEE 11073** device nomenclature, **CERT-In 2022 directions** (NTP synchronisation to NIC/NPL, 180-day logs), **DPDP Act 2023** (device readings tied to a patient are health data), **Drugs & Cosmetics / vaccine cold-chain norms** (2–8 °C with excursion documentation), **BMW Rules 2016** (autoclave validation records), **NABH/NABL** (equipment monitoring, environment control, alarm response) |
+
+## 1. Purpose
+EN-042 is the single, governed doorway for machine-generated data. It registers every connected device, speaks their protocols (HL7 device profiles, MQTT, Modbus TCP/RTU, serial RS-232/485, BLE, vendor SDKs and REST/OPC-UA), normalises readings into canonical observations with LOINC/UCUM codes, buffers them when the network or the HMS is unavailable, keeps device clocks honest, presents readings to a clinician for **validation before they enter the chart**, routes device alarms through the notification fabric without amplifying alarm fatigue, and does all of this on a segmented, certificate-authenticated network. Its founding principle: **a device reading is evidence, not truth — a human confirms before it becomes part of the clinical record.**
+
+## 2. Users & Jobs-to-be-done
+- **Nurse (17/18, tablet at the bedside, every hour)**: see the monitor's latest vitals pre-filled in the flowsheet, correct the obviously wrong ones (the SpO₂ probe was off during turning), confirm, and move on — saving 3–5 minutes per patient per round rather than transcribing numbers by hand.
+- **Intensivist (11)**: see ventilator settings and measured parameters trended alongside ABGs and infusions, with the device's own data rather than a nurse's periodic transcription.
+- **Biomedical engineer (48, desktop + phone)**: know which devices are connected and healthy, which have gone silent, which need calibration, and be able to onboard a new monitor in minutes without a developer.
+- **Pharmacy / stores / blood bank / lab (32/44/37/35)**: continuous temperature monitoring with excursion alerts that reach a human in time to save the stock, and an automatic excursion record with duration and impact assessment.
+- **CSSD in-charge (38)**: autoclave cycle data (temperature, pressure, time, Bowie-Dick/BI result) captured automatically against the load and the trays in it, so a recall can be reconstructed.
+- **Facility (49)**: RO water conductivity and dialysis water quality, HVAC/pressure differentials in OT and isolation rooms, generator and UPS status.
+- **IT/Security (56)**: an inventory of every network-connected device with firmware versions, on a segmented VLAN, with certificates and no default passwords.
+- **Quality (54)**: evidence that alarms were responded to, that cold-chain was maintained, and that autoclave cycles passed — without a clipboard.
+
+## 3. Core Workflows
+
+### 3.1 Device registry & onboarding
+1. A device is first an **asset in NC-020** (make, model, serial, purchase, AMC/CMC, calibration schedule, location, criticality). EN-042 adds the **connectivity record**: `iot_devices` links `asset_id` → protocol, endpoint (IP/port/serial path/MQTT client id/BLE MAC), credentials reference, device model profile, sampling policy, target bed/room/store, and clinical or facility purpose.
+2. **Device model profiles** (`iot_device_models`, shipped catalogue + hospital additions) carry the hard-won integration knowledge for each make/model: protocol dialect, message structure, **parameter map** (vendor code → canonical parameter → LOINC code → UCUM unit → scale/offset), alarm code map, expected reporting interval, known quirks (e.g. "sends −999 for no-signal", "temperature in tenths of °C", "resets sequence numbers on reboot"), and the recommended sampling policy. Onboarding a second identical monitor is then a 2-minute job.
+3. **Pairing & authentication**: a device is issued an identity — an X.509 client certificate (MQTT/TLS), an API key for gateway-mediated devices, or a physically scoped serial/Modbus binding — plus a **device service account** in EN-007 with permissions limited to publishing its own observations. Default vendor passwords are recorded as a compliance defect until changed.
+4. **Assignment to a patient/location**: bedside devices are bound to a **bed/room** (stable) and, through the bed, to whichever patient occupies it (dynamic, from IP-001). Portable devices are bound by **barcode scan at the point of use** (scan the wristband, scan the device) — this is the safest binding and is mandatory for any device that moves. A device with an ambiguous or stale patient binding **must not** chart to anyone (§5).
+5. **Commissioning test**: a scripted check (connect, receive N readings, verify units and value ranges, verify timestamps within tolerance, raise and clear a test alarm) produces a commissioning report before the device goes `live`. Recommissioning is required after firmware updates, relocation or repair (mirrors EN-031's instrument requalification).
+
+### 3.2 Protocol adapters
+| Protocol | Typical devices | Notes |
+|---|---|---|
+| **HL7 v2 ORU^R01 (MLLP)** with IHE PCD-01 semantics | multi-para monitors and central stations (Philips IntelliVue, GE CARESCAPE, Mindray, Nihon Kohden, Schiller), ventilators via a gateway | the most common enterprise path; EN-019 owns message semantics, EN-017 the transport |
+| **Vendor SDK / REST / proprietary TCP** | monitor central stations, infusion pumps (B.Braun, Fresenius, BD), dialysis machines (Fresenius 4008/5008, Nipro, B.Braun), anaesthesia workstations | packaged as EN-017 connector packages; version-pinned |
+| **MQTT (TLS, client certs)** | cold-chain loggers, room/fridge sensors, water and air quality, panic buttons, asset tags | topic namespace `hms/<hospital>/<branch>/<device_id>/<metric>`; QoS 1 with retained last-value |
+| **Modbus TCP / RTU** | RO plants, chillers, HVAC/BMS, generators, medical gas manifolds, autoclaves | register maps in the device model profile; polled, not pushed |
+| **Serial RS-232 / RS-485** | older monitors, weighing scales, autoclave printers, spirometers, autorefractors (OP-025) | via a small on-prem serial-to-network bridge; ASTM/proprietary framing |
+| **BLE / BLE-GATT** | home and kiosk BP monitors, glucometers, pulse oximeters, weighing scales, wearables | paired through the nurse's tablet or a kiosk (EN-034); GATT profiles for BP (0x1810), weight (0x181D), glucose (0x1808) |
+| **OPC-UA** | building-management and plant systems in newer facilities | read-only subscription |
+| **DICOM** | imaging modalities | **not** EN-042 — belongs to EN-008/EN-035 |
+| **File/CSV drop** | legacy loggers that export daily files | EN-017 file watcher; last resort |
+
+All adapters run inside `services/integration-hub` (LAN-resident on-prem) and emit into one canonical pipeline; no module ever speaks a device protocol directly.
+
+### 3.3 Ingestion, normalisation & the canonical observation
+1. Raw frames are stored briefly (`iot_raw_messages`, 7 days) for vendor escalation, then parsed by the model profile into **canonical readings**: `{device_id, source_timestamp, received_timestamp, parameter_code (LOINC), value, unit (UCUM), quality flag, alarm state, sequence, patient_binding, location}`.
+2. **Validation on ingest**: value within the device's physiologic/plausible range, unit convertible to the canonical unit, timestamp within clock tolerance, sequence not duplicated. Failures are quarantined with a typed reason — never silently dropped, never silently charted.
+3. **Sampling policy** per parameter and context: continuous streams (a monitor emits every 1–5 s) are **not** stored raw at full rate; the gateway stores a configurable cadence (e.g. 1-minute medians for trend, 5-minute values for the flowsheet) plus **event captures** (alarm onset, step changes beyond a threshold, manual snapshot, code-blue window at full fidelity). This is the difference between 20 GB/day and 200 GB/day, and it is a clinical decision, not a technical one.
+4. **Deduplication & ordering**: readings are idempotent on `(device_id, parameter, source_timestamp, sequence)`; out-of-order arrivals after a reconnect are re-sequenced by source time.
+5. Canonical readings land in `iot_readings` (time-series, partitioned) and are **not yet clinical data** — they become clinical only through §3.5.
+
+### 3.4 Buffering, store-and-forward & time sync
+- **Three buffer layers**: (a) the device's own memory where it has one (many loggers hold days of data), (b) the on-prem gateway's durable queue (disk-backed, sized for ≥72 h of the branch's device traffic), (c) the HMS ingestion queue. A WAN or HMS outage therefore loses nothing; on recovery the gateway drains in time order with a rate cap so it never floods the live pipeline.
+- **Backfill semantics**: readings arriving late are inserted at their **source timestamp**, marked `backfilled`, and — critically — **do not retroactively fire alarms** (an alarm for a 4-hour-old desaturation is noise and can mislead); instead a "gap filled" summary notice is raised so the clinician knows data appeared for a period they were blind to.
+- **Time sync is a first-class problem**: device clocks drift and are often wrong by hours. Every reading carries both `source_timestamp` and `received_timestamp` plus the device's **measured clock offset**. Devices that support NTP/SNTP are pointed at the hospital NTP source (CERT-In requires NTP sync to NIC/NPL); devices that cannot sync have their offset measured at commissioning and monitored — an offset beyond tolerance (default ±30 s for clinical, ±5 min for facility) raises a defect and readings are stamped with a corrected time plus a `time_corrected` flag. **A reading whose time cannot be trusted is never charted silently.**
+- **Gap detection**: an expected-traffic device that stops reporting beyond its expected interval × tolerance raises `iot.device.silent` — silence is a failure mode, not an absence of news.
+
+### 3.5 Clinical validation before charting (the safety gate)
+1. Device readings appear in the nurse's flowsheet as **proposed values** — visually distinct (device icon, grey/italic), with the source device and timestamp.
+2. The nurse **confirms** (one tap for a whole vitals set, or per-parameter), **edits** (with the original device value retained alongside and a reason for material differences), or **rejects** (with a reason: probe off, patient moving, artefact, wrong patient). Only on confirmation does the value become a charted observation owned by IP-003/OP-007/IP-009, and only then does EN-029 score NEWS2/PEWS or evaluate rules on it.
+3. **Auto-charting is permitted only under narrow, explicitly configured conditions** and never by default: a stable, high-confidence parameter (e.g. continuous ICU heart rate at a 5-minute cadence into a trend row) may auto-populate the *trend* while the *formal hourly flowsheet entry* still requires confirmation. Any auto-charted value is flagged `unvalidated` in the record and in reports.
+4. **Patient binding is re-verified at confirmation**: the UI shows which bed/device the values came from, and confirming values for a patient whose bed binding changed within the reading window forces an explicit re-check. Wrong-patient charting is the highest-severity failure mode in this module and is designed against at every step.
+5. **Bulk validation** is supported for a shift's worth of a single stable parameter, but never across patients, and never without displaying the values being accepted.
+6. Rejected readings remain in `iot_readings` with their rejection reason — useful for device-quality analytics and for proving what the device actually said.
+
+### 3.6 Domain workflows
+- **Multi-para monitor vitals → IP-003 / IP-009 / OP-007**: HR, NIBP/ABP, SpO₂, RR, temperature, EtCO₂, CVP, ICP mapped to LOINC; the flowsheet shows device-proposed values at the charting cadence; a code-blue event switches the device to full-fidelity capture for the event window and attaches the strip to the resuscitation record.
+- **Ventilators → IP-009 / TR-006**: mode, set and measured tidal volume, RR, PEEP, FiO₂, peak/plateau pressure, compliance, MV, I:E — charted at the ICU cadence, trended against ABGs, and feeding ventilator-day counts for VAP surveillance (IP-012).
+- **Infusion pumps → IP-003 / IP-014 (IHE PIV)**: drug, concentration, rate, VTBI, volume infused, alarms; the valuable direction is *bidirectional* — the MAR's verified order programs the pump ("auto-programming") and the pump confirms back, eliminating keypad errors. Phase 1 is read-only telemetry; auto-programming is an enhancement requiring the pump vendor's certified interface and a formal risk assessment.
+- **Cold chain → OP-013 / IP-007 / NC-006 / EN-031**: continuous 2–8 °C (and −20/−80 °C) monitoring per fridge/freezer with configurable limits, **excursion detection with duration and mean kinetic temperature**, immediate alert to the custodian with escalation, an automatic excursion record requiring an impact assessment on the stored vaccines/blood/reagents, and auto-quarantine of affected batches in NC-006 when the stability window is exceeded. Door-open sensors and battery/power-fail alerts are part of the same picture.
+- **RO water & dialysis water → OP-012 / NC-006 / Facility**: conductivity, TDS, hardness, chlorine, pressure, tank levels via Modbus; dialysis water microbiology and endotoxin remain manual lab entries (EN-031) but are shown together with the continuous data.
+- **Autoclaves & washer-disinfectors → EN-003**: cycle number, programme, temperature/pressure/time profile, Bowie-Dick and biological-indicator results, load contents from the CSSD tray barcodes — producing an auditable cycle record and enabling a precise recall ("every tray in cycles 412–418").
+- **Dialysis machines → OP-012**: session parameters (blood flow, dialysate flow, UF rate and volume, conductivity, arterial/venous pressures, Kt/V where computed), alarms, and machine disinfection cycles.
+- **Weighing scales, BP kiosks, glucometers → OP-007 / EN-034 / PE-001**: BLE or serial capture at the vitals station or kiosk, bound to the patient by scan, with the same validation gate; home-device readings (patient app) are stored in a clearly separated "patient-reported device data" stream and never mixed with clinically validated observations.
+- **Facility & safety**: OT/isolation-room pressure differentials, temperature/humidity, medical gas manifold pressures, generator/UPS status, panic buttons — routed to Facility and Security with their own escalation, and visible on the ops board (EN-018).
+
+### 3.7 Alarm handling & alarm fatigue
+1. Device alarms arrive as typed events (`iot_alarms`) with the device's own priority (per IEC 60601-1-8: high/medium/low), parameter, threshold, value and latch state.
+2. EN-042 **does not simply forward every alarm**. It applies a governed policy: (a) **only alarms configured for remote annunciation** leave the bedside — the bedside device remains the primary annunciator and EN-042 is secondary (an IHE ACM principle and a safety requirement: the HMS must never be relied upon as the sole alarm path); (b) **delay filters** suppress transient alarms that self-resolve within N seconds (the single biggest source of alarm noise); (c) **deduplication and coalescing** per device/parameter; (d) **escalation** through EN-037 to the assigned nurse → nurse-in-charge → duty doctor with acknowledgement and timeout.
+3. **Alarm fatigue metrics** are first-class, mirroring EN-029: alarms per patient per shift, per-parameter distribution, % self-resolving within the delay window, % acknowledged, median time to acknowledge, and the **top offending devices/parameters/thresholds** — with a monthly alarm-management committee pack (a Joint Commission/NABH-style requirement). Threshold changes are approved (EN-038) and audited, because loosening an alarm limit is a clinical decision.
+4. **Technical alarms** (probe off, battery low, disconnection, sensor fault) route to biomedical/nursing support, not to the clinical escalation ladder.
+5. **The system states its limits plainly**: the UI and the commissioning document record that EN-042 is a *secondary* alarm-notification path with a stated latency, that it must not be used as a primary alarm system, and that this is agreed with biomedical and the vendor under IEC 80001-1.
+
+### 3.8 Device health, biomedical link & lifecycle
+- Every device has a **health record**: last seen, uptime, message rate vs expected, error rate, clock offset, firmware version, battery, and a RAG status. Silence, error spikes and clock drift raise incidents linked to NC-020 work orders.
+- **Predictive signals** (message-rate degradation, rising error rate, drifting calibration-sensitive readings) feed NC-020's preventive-maintenance planning and, later, AI-005 models.
+- **Firmware/config changes** are recorded; a firmware change triggers recommissioning and a re-verification of the parameter map (vendors do change units and codes between versions — this has caused real harm elsewhere and is guarded here).
+- **Decommissioning**: a device is retired with its certificate revoked, its bindings cleared, and its historical readings retained.
+
+### 3.9 Security
+- Devices live on a **segmented VLAN** with an explicit allow-list to the gateway only; no device reaches the internet or the clinical application network directly (EN-023 owns the policy, EN-042 owns the inventory that makes it enforceable).
+- **Mutual TLS with per-device certificates** for MQTT and modern REST devices; certificate lifecycle (issue, rotate, revoke) is managed here with expiry alerts. Legacy serial/Modbus devices are protected by physical and network segmentation, and are explicitly recorded as "authentication not supported by device" so the risk is visible rather than assumed away.
+- **Read-only by default**: the gateway does not write to devices unless a specific, risk-assessed control path is enabled (infusion auto-programming, dialysis parameter push) — such paths require vendor certification, a documented risk assessment and a separate permission.
+- Default credentials, unsupported firmware and unencrypted protocols are tracked as **device vulnerabilities** with owners and remediation dates, feeding EN-023's posture reporting.
+- Device data is health data: readings tied to a patient are PHI, encrypted at rest, access-controlled and audited.
+
+### 3.10 Exceptions
+- **Wrong-patient risk**: bed reassignment, a portable device moved without a scan, or a stale binding → readings are held in an **unassigned** state, are never charted, and appear in a reconciliation queue for the nurse to bind or discard.
+- **Implausible values** (SpO₂ 5 %, HR 300, temperature 45 °C) → flagged `implausible`, shown but never auto-charted, and excluded from CDSS scoring until confirmed.
+- **Device flooding** (a faulty device emitting thousands of messages/second) → per-device rate limiter trips, the device is quarantined, and biomedical is alerted; one bad device can never take down the pipeline.
+- **Gateway failure** → devices buffer where capable; the ward is told which devices are not being captured so staff revert to manual charting knowingly rather than assuming coverage.
+- **Vendor protocol change after an update** → schema-drift detection (EN-017) flags the parameter map mismatch and quarantines readings rather than charting misinterpreted numbers.
+
+## 4. Data Model (schema `device`, prefix `iot_`)
+- `iot_device_models` — id, hospital_id?, vendor, model, category enum(monitor/ventilator/infusion_pump/dialysis/anaesthesia/cold_chain/environment/autoclave/water/scale/bp/glucometer/ecg/spirometer/other), protocol enum(hl7_mllp/vendor_sdk/mqtt/modbus_tcp/modbus_rtu/serial/ble/opc_ua/rest/file), parameter_map jsonb (vendor_code → {canonical_code, loinc, ucum, scale, offset, plausible_range, sampling}), alarm_map jsonb, expected_interval_sec, quirks jsonb, firmware_versions jsonb, control_capable bool, commissioning_checklist jsonb, version, active.
+- `iot_devices` — id, hospital_id, branch_id, asset_id (NC-020), model_id, code citext, serial_no, protocol_config jsonb (ip/port/serial path/mqtt client/ble mac/unit id), credentials_ref, cert_ref, cert_expires_at, location_id, bed_id?, store_id?, purpose enum(clinical_bedside/clinical_portable/cold_chain/facility/lab/cssd/dialysis/kiosk), binding_mode enum(bed/scan/fixed_location/none), sampling_policy jsonb, expected_interval_sec, timezone, clock_offset_ms, clock_tolerance_ms, status enum(registered/commissioning/live/quarantined/maintenance/retired), last_seen_at, firmware_version, health enum(green/amber/red), notes; UNIQUE(hospital_id, code); index (branch_id, status), (bed_id).
+- `iot_device_bindings` — id, device_id, patient_id?, encounter_id?, bed_id?, bound_by, bound_method enum(bed_occupancy/barcode_scan/manual), bound_at, unbound_at, unbound_reason; the audit of who was connected to what and when — the answer to "whose reading was this?".
+- `iot_readings` — id, hospital_id, branch_id, device_id, binding_id?, patient_id?, parameter_code (LOINC), value numeric, value_text?, unit (UCUM), source_timestamp timestamptz, received_timestamp, time_corrected bool, quality enum(valid/implausible/artefact/no_signal/backfilled/unassigned), sequence bigint, alarm_state?, validation_status enum(proposed/confirmed/edited/rejected/auto_charted), validated_by, validated_at, edited_value numeric?, reject_reason, charted_ref (the clinical observation id created on confirmation); **partitioned monthly, sub-partitioned by branch for large tenants**; indexes (hospital_id, device_id, source_timestamp desc), (patient_id, parameter_code, source_timestamp desc), (validation_status) partial where proposed.
+- `iot_readings_rollup` — device_id/patient_id, parameter_code, bucket (1 min / 5 min / 1 h), bucket_start, min, max, avg, median, count, first, last; continuous-aggregate style read model that keeps trend charts fast without scanning raw rows.
+- `iot_alarms` — id, device_id, binding_id?, patient_id?, parameter_code, priority enum(high/medium/low/technical), condition, threshold, value, started_at, ended_at, duration_sec, self_resolved bool, annunciated bool, suppressed_reason, notification_id (EN-037), acknowledged_by, acknowledged_at, response_time_sec; partitioned monthly; index (device_id, started_at desc), (patient_id, started_at desc).
+- `iot_alarm_policies` — id, hospital_id, scope (device_model/device/ward/parameter), parameter_code, priority, remote_annunciate bool, delay_sec, dedupe_window_sec, escalation_ladder_id (EN-037), threshold_override jsonb, approved_by, effective_from, active.
+- `iot_environment_excursions` — id, device_id, location_id, parameter enum(temp/humidity/pressure/conductivity/co2), limit_low, limit_high, started_at, ended_at, duration_min, min_value, max_value, mkt numeric (mean kinetic temperature), affected_batches jsonb (NC-006 refs), impact_assessment jsonb, action_taken, closed_by, closed_at, status enum(open/assessing/closed); links EN-031 and NC-006.
+- `iot_cycles` (autoclave/washer/dialysis disinfection) — id, device_id, cycle_no, programme, started_at, ended_at, profile jsonb (temp/pressure/time series summary), result enum(pass/fail/aborted), bd_test, bi_result, load_ref (EN-003 trays), operator_id, verified_by.
+- `iot_raw_messages` — id, device_id, direction, protocol, payload_ref (encrypted), parsed bool, parse_error, received_at; **7-day retention**, for vendor escalation only.
+- `iot_device_health` — device_id, day, expected_messages, received_messages, error_count, silent_minutes, clock_offset_ms_max, uptime_pct, battery_min, firmware_version, health.
+- `iot_incidents` — id, device_id, kind enum(silent/flood/parse_error/clock_drift/binding_conflict/cert_expiring/firmware_change/vulnerability/tamper), severity, opened_at, closed_at, work_order_ref (NC-020), ticket_ref (NC-028), note.
+- `iot_vulnerabilities` — device_id, kind enum(default_credentials/unsupported_firmware/unencrypted_protocol/no_auth_supported/known_cve), cve?, severity, discovered_at, owner, remediation_plan, due_at, status; feeds EN-023.
+- Retention: raw messages 7 days; readings — **charted/confirmed values live with the clinical record (10 years) via their clinical observation; unconfirmed raw readings 90 days, rollups 2 years**; alarms 3 years (alarm-management evidence); environment excursions 5 years (regulatory); cycles per CSSD/BMW retention.
+
+## 5. Business Rules & Validations
+- **A device reading is not a clinical observation until a human confirms it** (§3.5). Auto-charting exists only where explicitly configured per parameter and is permanently flagged `unvalidated` in the record and in reports.
+- **No reading is charted without an unambiguous patient binding.** Ambiguous, stale or missing bindings hold readings in `unassigned`; portable devices require a barcode scan; a bed reassignment within the reading window forces re-verification. This is the module's highest-severity rule.
+- **Implausible values are never auto-charted** and never feed CDSS scoring until a clinician confirms them.
+- **EN-042 is a secondary alarm path, never primary.** The bedside device remains the primary annunciator; the system's alarm latency is documented and displayed; the hospital's IEC 80001-1 responsibility agreement is recorded against the deployment.
+- **Backfilled readings do not retroactively fire alarms**; a gap-filled summary is raised instead so clinicians know when they were blind.
+- **Time integrity**: every reading stores source and received timestamps plus the measured device clock offset; a reading whose time is outside tolerance is corrected and flagged, never silently accepted. Devices are NTP-synced to the hospital source where capable (CERT-In).
+- **Alarm threshold changes are clinical decisions**: they require approval (EN-038), are versioned and audited, and appear in the monthly alarm-management pack.
+- **Control paths are off by default.** Writing to a device (infusion auto-programming, dialysis parameter push) requires vendor certification, a documented risk assessment, a separate permission and full audit; the default posture is read-only.
+- **A faulty device may not degrade the system**: per-device rate limits, quarantine on flooding or parse-error storms, and per-device queues so one device cannot starve others.
+- **Silence is a failure**: an expected-traffic device that stops reporting raises an incident; wards are told explicitly which devices are not being captured so manual charting resumes knowingly.
+- **Sampling policy is a clinical configuration**, not a default: what cadence is stored, what is kept at full fidelity (alarms, code events), and what is discarded is decided by clinical leadership and recorded.
+- **Firmware or configuration change forces recommissioning** and re-verification of the parameter map before the device returns to `live`.
+- **Device data is PHI once bound to a patient**: encrypted at rest, access-audited, and excluded from analytics exports unless anonymised (EN-036).
+- **Regulatory boundary**: the system records and displays device data and provides secondary notification; it does not perform closed-loop control or diagnosis. Any feature that would alarm as a primary system or act automatically on device data requires a formal assessment of medical-device software regulation (CDSCO/MDR) before it is built.
+
+## 6. API Surface (`/api/v1/devices`)
+| Method | Path | Purpose | Permission | Notes |
+|---|---|---|---|---|
+| GET/POST/PATCH | /models ; /models/:id | device model profiles & parameter maps | `iot.model.manage` (Biomedical 48, IT 56) | versioned |
+| GET/POST/PATCH | /devices ; /devices/:id | device registry | `iot.device.manage` | links NC-020 asset |
+| POST | /devices/:id/commission ; /recommission | run the commissioning checklist | `iot.device.manage` | report retained |
+| POST | /devices/:id/quarantine \| /release \| /retire | lifecycle | `iot.device.manage` | reason |
+| POST | /devices/:id/certificate/issue \| /rotate \| /revoke | device identity | `iot.device.security` (IT 56) | expiry alerts |
+| POST | /bindings {deviceId, patientId\|bedId, method} ; DELETE /bindings/:id | patient/bed binding | `iot.binding.manage` (Nurse 17/18) | scan-based preferred |
+| GET | /readings?device&patient&parameter&from&to&status | readings query | `iot.reading.read` (clinical roles for own patients) | cursor; rollups for wide ranges |
+| GET | /readings/proposed?patientId | pending values for the flowsheet | `iot.reading.read` | drives the validation UI |
+| POST | /readings/validate {ids[], action: confirm\|edit\|reject, values?, reason?} | the clinical validation gate | `iot.reading.validate` (Nurse, Doctor) | creates clinical observations |
+| POST | /ingest (internal) | adapter → pipeline | device/service token | idempotent on (device, parameter, ts, seq) |
+| GET | /alarms?device&patient&priority&from&to | alarm log | `iot.alarm.read` | |
+| POST | /alarms/:id/acknowledge | acknowledge | `iot.alarm.ack` | feeds response-time metrics |
+| GET/POST/PATCH | /alarm-policies | annunciation, delay, thresholds | `iot.alarm.policy` (+ EN-038 approval) | audited |
+| GET | /environment/live ; GET /environment/excursions ; POST /excursions/:id/assess \| /close | cold chain & environment | `iot.environment.manage` (Pharmacy 32, Stores 44, Blood 37, Lab 35) | impact assessment mandatory |
+| GET | /cycles?device&from&to ; GET /cycles/:id | autoclave/dialysis cycles | `iot.cycle.read` (CSSD 38, Dialysis 41) | links EN-003/OP-012 |
+| GET | /health ; GET /devices/:id/health ; GET /incidents | fleet health & incidents | `iot.health.read` (Biomedical, IT, ward leads) | WS `iot:health` |
+| GET | /vulnerabilities ; PATCH /vulnerabilities/:id | security posture | `iot.device.security` (IT, EN-023) | |
+| POST | /devices/:id/control {command, params} | write to a device (auto-programming) | `iot.device.control` (restricted; disabled by default) | risk-assessed, audited, vendor-certified |
+| GET | /reports/alarm-fatigue ; /reports/utilisation ; /reports/coverage | analytics | `iot.report.read` | read models |
+
+## 7. Domain Events (outbox)
+- `iot.reading.received` (internal, high volume — not published to the general bus; rollups and confirmations are) ; `iot.reading.validated` → IP-003/IP-009/OP-007 clinical observation creation, EN-029 evaluation.
+- `iot.reading.unassigned` → nurse reconciliation queue.
+- `iot.alarm.raised|resolved|acknowledged|escalated` → EN-037, ward board (EN-018), alarm-fatigue metrics.
+- `iot.environment.excursion_started|ended` → EN-037 to custodian, NC-006 batch quarantine, EN-031 lab environment log, NC-020 work order.
+- `iot.cycle.completed|failed` → EN-003 (CSSD load release/recall), OP-012 (dialysis disinfection record).
+- `iot.device.online|silent|quarantined|flooding|clock_drift|firmware_changed|cert_expiring|binding_conflict` → Biomedical & IT alerts, NC-020 work orders, NC-028 tickets.
+- `iot.device.commissioned|recommissioned|retired` → NC-020 asset status, EN-024.
+- `iot.vulnerability.detected` → EN-023 posture, remediation task.
+- Consumes: `bed.occupancy.changed` (rebinding), `patient.discharged|transferred` (unbind), `asset.serviced` (recommissioning requirement), `cssd.load.created` (cycle load linkage), `stock.batch.received` (cold-chain custody).
+
+## 8. Screens (UI)
+- **Bedside vitals validation** (tablet, the screen that matters most): the flowsheet column for the current time with device-proposed values in a distinct style, each showing the source device and timestamp; a prominent patient banner and a **"values from Monitor BED-12 (bound 08:15 by scan)"** provenance line; per-value edit and reject with a reason picker; a single `Confirm all` for a clean set. Implausible values are struck through with a warning and cannot be confirmed without an explicit override. Offline: proposed values cached, confirmations queued.
+- **Unassigned readings queue** (tablet/desktop, ward): readings with no or ambiguous binding, grouped by device, with `Bind to patient` (scan) or `Discard` (reason) — the safety net that prevents wrong-patient charting.
+- **ICU device dashboard** (desktop, dual-monitor + TV): per-bed tiles with live vitals, ventilator settings, running infusions and alarm state; trends over 1/4/12/24 h from rollups; a device-health strip showing which beds are not being captured. Real-time via WS with a visible "last update" age on every tile — a stale tile must look stale.
+- **Cold-chain board** (desktop + phone, Pharmacy/Stores/Blood/Lab): fridge/freezer tiles with current temperature, limit bands, battery/power status, door state, and a 24-hour sparkline; excursions listed with duration, MKT and assessment status; a red banner for any open excursion. Phone view is alert-first for the on-call custodian.
+- **Excursion assessment** (desktop): timeline of the excursion, affected batches pulled from NC-006, stability-window comparison, decision (use/quarantine/discard) with justification, and a closure that cannot be saved without an impact assessment.
+- **Device Registry & Health** (desktop, Biomedical/IT): grid of devices with RAG health, last seen, message rate vs expected, clock offset, firmware, certificate expiry, location and bound bed; filters by ward/category/status; row actions (quarantine, recommission, work order); red devices float to the top. A **coverage view** answers "which beds have monitor integration and which do not".
+- **Device Model Profile editor** (desktop, Biomedical/IT): parameter map table (vendor code → canonical → LOINC → UCUM → scale/range), alarm map, sampling policy, quirks notes, and a **live capture tester** that shows raw frames beside parsed values so a new model can be onboarded by inspection rather than guesswork.
+- **Alarm Management** (desktop, Nursing leadership + Biomedical): alarms per patient per shift, distribution by parameter and device, self-resolving %, acknowledgement rate and median response, top offenders, and threshold/delay policy editing with approval — the screen that drives the monthly alarm committee.
+- **Facility board** (desktop + TV, Facility/Security): RO water quality, OT/isolation pressure differentials, medical gas manifold pressures, generator/UPS, panic-button events.
+- **Cycle records** (desktop, CSSD/Dialysis): cycle list with pass/fail, profile chart, BI/BD results, load contents and a recall action that lists every tray in a failed cycle range.
+- Empty/error states: "No device bound to this bed — chart manually or scan a device", "Monitor BED-07 has not reported for 12 minutes — vitals are not being captured; chart manually", "This reading arrived 4 hours late and has been filed at its original time; no alarm was raised for the gap", "Firmware changed on Ventilator ICU-3 — recommission before the data is charted".
+
+## 9. Integrations
+- **NC-020** is the asset system of record (every `iot_device` links to an asset; calibration, AMC, breakdowns and work orders live there); **EN-017** provides transport, retries, DLQ and the message log for every adapter; **EN-019** defines HL7/FHIR semantics (`Device`, `DeviceMetric`, `Observation` with `device` reference); **EN-027** holds the parameter → LOINC/UCUM mapping and the device-model master.
+- **Vendor ecosystems**: Philips IntelliVue (HL7/Data Warehouse Connect), GE CARESCAPE (Unity/HL7), Mindray/Nihon Kohden/Schiller gateways, B.Braun Space/Fresenius Agilia/BD Alaris infusion, Fresenius/Nipro dialysis, Dräger/GE anaesthesia, Getinge/Steris autoclaves, cold-chain platforms (Berlinger, Sensitech, Tempgenius) and Indian IoT vendors, BMS/SCADA via Modbus/OPC-UA.
+- **IHE PCD** profiles (DEC, ACM, PIV) as the interoperability target; **ISO/IEEE 11073** nomenclature for parameter identity.
+- **EN-037** for all clinical alerting and escalation (EN-042 never builds its own notification path); **EN-018** for ward and facility boards; **EN-023** for network segmentation, certificate policy and vulnerability posture; **EN-022** for buffer durability and reading retention.
+- **EN-034** for kiosk-attached BP/weight devices; **OP-020/PE-001** for patient home-device data (kept in a separate stream).
+
+## 10. Reports & Analytics
+- **Coverage & adoption**: beds with device integration vs total, readings auto-proposed vs manually entered, nurse time saved (estimated from validated-vs-typed volumes), % of vitals sets originating from devices.
+- **Data quality**: confirmation rate, edit rate and typical edit magnitude per parameter and device model (a device whose values are always corrected is a device to investigate), rejection reasons, implausible-value rate, unassigned-reading rate, clock-drift distribution.
+- **Alarm management**: alarms per patient-day by ward, by parameter, by device model; self-resolving %; acknowledgement rate and median response time; threshold changes over time; the monthly alarm-committee pack.
+- **Device health**: uptime by device and model, silent episodes and their duration, error and parse-failure rates, firmware distribution, certificate expiry pipeline, incidents and MTTR (with NC-020).
+- **Cold chain**: excursions by unit and month, duration and MKT distribution, stock affected and disposition, door-open events, power-failure events, and compliance % for vaccine storage.
+- **Facility & CSSD**: RO water parameter trends vs limits, autoclave cycle pass rate and failure causes, dialysis machine disinfection compliance.
+- **Utilisation**: ventilator-days and infusion-hours per bed (feeding IP-012 VAP/CLABSI denominators and NC-020 usage-based maintenance).
+- Read models: `analytics.mv_iot_device_health_daily`, `analytics.mv_iot_alarm_ward_daily`, `analytics.mv_iot_coldchain_monthly`.
+
+## 11. Notifications
+- **Clinical (via EN-037)**: high-priority device alarms that pass the annunciation policy, with escalation to nurse → in-charge → duty doctor; gap-filled data notice; unassigned readings awaiting binding.
+- **Cold chain**: excursion started (immediate to custodian and on-call, overriding quiet hours for vaccine/blood storage), excursion continuing at 15/30/60 minutes, power/battery failure, door left open, excursion closed without assessment after 24 h.
+- **Biomedical/IT**: device silent, flooding, parse-error storm, clock drift, certificate expiring (30/14/7 days), firmware change detected, vulnerability discovered, commissioning overdue after repair.
+- **CSSD/Dialysis**: cycle failed (immediate, with the load contents), BI positive, disinfection missed.
+- **Facility/Security**: RO parameter out of limits, OT pressure differential lost, medical gas low, generator on load, panic button pressed.
+- **Leadership**: monthly alarm-fatigue and device-coverage summary.
+
+## 12. Permissions (RBAC keys)
+`iot.model.manage` (Biomedical Engineer 48, IT Admin 56) · `iot.device.manage` (Biomedical, IT) · `iot.device.security` (IT Admin — certificates, vulnerabilities) · `iot.device.control` (**restricted, disabled by default** — only for risk-assessed control paths, Biomedical + clinical lead, fully audited) · `iot.binding.manage` (Nurse 17/18/19, Dialysis Technician 41, OPD Nurse 16) · `iot.reading.read` (clinical roles for their patients via ABAC; Biomedical for device diagnostics without patient identity) · `iot.reading.validate` (Nurse, Doctor — the charting gate) · `iot.alarm.read` / `iot.alarm.ack` (clinical roles) · `iot.alarm.policy` (Nurse Supervisor 22 + Intensivist 11 + Biomedical, via EN-038 approval) · `iot.environment.manage` (Pharmacy In-charge 32, Stores 44, Blood Bank 37, Lab Quality 35, Facility 49) · `iot.cycle.read` (CSSD 38, Dialysis 41, Quality 54) · `iot.health.read` (Biomedical, IT, ward leads) · `iot.report.read` (Admin, Quality, Biomedical, Nursing leadership).
+
+## 13. Non-functional
+- **Volumes (2000-bed enterprise, mature deployment)**: ~250 ICU/HDU beds with continuous monitors, ~120 ventilators, ~600 infusion pumps, ~150 cold-chain and environment sensors, ~30 autoclaves/washers, ~40 dialysis machines, plus OPD vitals stations and kiosks. At raw device rates this is **>50 000 readings/second**; the **sampling policy reduces stored volume to ~2000–5000 readings/second** (≈150–400 M rows/day at full ICU coverage) — which is precisely why sampling is a designed clinical decision and not an afterthought.
+- **Storage strategy**: `iot_readings` partitioned monthly and sub-partitioned by branch, with 90-day retention for unconfirmed raw readings and continuous rollups (1 min / 5 min / 1 h) retained 2 years; confirmed values live with the clinical record. Budget ≈ 40–80 GB/month for a large tenant after sampling and compression. TimescaleDB-style hypertables or native partitioning + BRIN indexes on time; raw payloads in object storage for 7 days only.
+- **Latency**: device → gateway → canonical reading p95 **< 2 s**; alarm event → EN-037 dispatch p95 **< 3 s** (documented as secondary-path latency, never presented as real-time bedside alarming); flowsheet proposed-values query p95 < 200 ms; 24-hour trend chart from rollups p95 < 500 ms.
+- **Buffering**: on-prem gateway holds ≥72 h of device traffic on disk; drain on recovery is rate-capped (default 5× normal rate) so it never floods live ingestion; no data loss on gateway or HMS restart.
+- **Isolation & resilience**: per-device queues and rate limits; a single flooding device is quarantined within 10 seconds; adapters run as separate processes so a vendor SDK crash cannot take down the pipeline.
+- **Time**: gateway and servers NTP-synced (CERT-In, NIC/NPL sources); device clock offsets measured continuously; tolerance ±30 s clinical, ±5 min facility.
+- **Availability**: the gateway runs on-prem and continues capturing during a WAN outage; wards see an explicit "not being captured" state rather than a silent absence of data — the failure mode must be visible.
+- **Security**: device VLAN with allow-listed egress to the gateway only; mutual TLS with per-device certificates where supported; read-only by default; no device credentials in logs; PHI encrypted at rest and audited on access.
+- **Accessibility & i18n**: validation UI is tablet-first with ≥44 px targets, high-contrast trend colours that are not colour-only (line style + label), screen-reader labels on every proposed value including its provenance; alarm priorities conveyed by icon + text + colour; staff-facing device UI may be English while patient-facing derivatives are localised.
+- **Testing**: a device simulator harness replays recorded traces from each supported model (including malformed frames, clock jumps, disconnections and floods) in CI; a wrong-patient-binding test suite is mandatory and blocking.
+
+## 14. Acceptance Criteria
+1. **Given** a monitor bound to Bed 12 by barcode scan, **when** it reports a vitals set, **then** the values appear in the flowsheet as **proposed** with the device name and timestamp, and are not part of the clinical record until a nurse confirms them.
+2. **Given** proposed values, **when** the nurse edits SpO₂ from 88 % to 96 % with reason "probe off", **then** the charted observation is 96 %, the original device value and the reason are retained and visible, and both are auditable.
+3. **Given** a patient is moved from Bed 12 to Bed 5, **when** readings from the Bed 12 monitor arrive after the move, **then** they are not charted to the transferred patient; they are held as `unassigned` and appear in the reconciliation queue.
+4. **Given** a portable device with no scan binding, **when** it reports, **then** its readings are `unassigned` and cannot be charted to any patient until a scan-based binding is made.
+5. **Given** an implausible value (HR 300), **when** it is ingested, **then** it is flagged `implausible`, is excluded from CDSS scoring, and cannot be confirmed without an explicit clinician override.
+6. **Given** the WAN is down for 4 hours, **when** connectivity returns, **then** all buffered readings arrive filed at their original source timestamps, are marked `backfilled`, **no retrospective alarms fire**, and a gap-filled summary notice is raised for the affected period.
+7. **Given** a device whose clock is 12 minutes fast, **when** readings arrive, **then** the offset is measured, the reading is stored with both timestamps and a `time_corrected` flag, and a clock-drift incident is raised for biomedical.
+8. **Given** a device that stops reporting for longer than its expected interval tolerance, **when** the monitor evaluates, **then** an `iot.device.silent` incident is raised, the ward sees "not being captured" for that bed, and biomedical is notified.
+9. **Given** a transient SpO₂ alarm that self-resolves in 4 seconds and a delay filter of 15 seconds, **when** the alarm occurs, **then** it is recorded but not annunciated remotely, and it counts toward the self-resolving metric.
+10. **Given** a high-priority alarm configured for remote annunciation, **when** it persists past the delay, **then** it reaches the assigned nurse within 3 seconds via EN-037, escalates on non-acknowledgement, and the response time is recorded.
+11. **Given** the alarm policy, **when** a user attempts to widen a clinical alarm threshold, **then** the change requires approval through EN-038, is versioned, and appears in the monthly alarm-management pack.
+12. **Given** a vaccine refrigerator rises above 8 °C, **when** the excursion begins, **then** an alert reaches the custodian immediately (overriding quiet hours), continues at 15/30/60 minutes, the excursion record captures duration and MKT, affected batches are listed from NC-006, and the excursion cannot be closed without an impact assessment.
+13. **Given** an autoclave cycle fails its biological indicator, **when** the cycle record is created, **then** CSSD is alerted, every tray in that load is flagged, and a recall list for the affected cycle range is available in one action.
+14. **Given** a faulty device emitting 5000 messages per second, **when** the rate limit trips, **then** the device is quarantined within 10 seconds, biomedical is alerted, and other devices' ingestion is unaffected.
+15. **Given** a firmware update on a ventilator, **when** the change is detected, **then** the device moves to `commissioning`, its readings are held rather than charted, and it returns to `live` only after a passed recommissioning that re-verifies the parameter map.
+16. **Given** a vendor protocol change that alters a unit (°C to tenths of °C), **when** readings arrive outside the plausible range for the mapped unit, **then** they are quarantined with a schema-drift reason rather than charted, and the parameter map mismatch is reported.
+17. **Given** a device with mutual-TLS support, **when** its certificate is within 30 days of expiry, **then** IT is alerted, and an expired certificate prevents connection without affecting other devices.
+18. **Given** a control path (infusion auto-programming) that has not been risk-assessed and enabled, **when** any control command is attempted, **then** it is refused — the gateway is read-only by default.
+19. **Given** the ICU dashboard, **when** a device's last update is older than its expected interval, **then** its tile visibly renders as stale with the age shown, rather than displaying old values as if current.
+20. **Given** the device simulator harness in CI, **when** it replays malformed frames, clock jumps, disconnections and floods for every supported model, **then** no reading is mis-charted, no wrong-patient binding occurs, and the pipeline remains available.
+
+## 15. Enhancements / Later phases
+- **Bidirectional infusion auto-programming (IHE PIV)**: the verified MAR order programs the pump and the pump confirms back — a large medication-safety win, requiring vendor certification, a formal risk assessment and probably a regulatory review.
+- **Continuous surveillance analytics** on high-fidelity waveforms: early-warning models beating periodic NEWS2, arrhythmia detection, sepsis prediction from continuous vitals (AI-005), each with explicit provenance and human confirmation.
+- **Waveform capture and storage** (ECG, ABP, EtCO₂, EEG) for code-blue reconstruction and research, with a separate storage tier and retention policy.
+- **Smart-bed and nurse-call integration** (bed exit, weight, positioning) and RTLS asset/patient tracking converging with EN-021/EN-020.
+- **Wearables and remote patient monitoring**: post-discharge vitals from consumer devices into PE-001 with a clearly separated trust level and clinician-configured escalation.
+- **Predictive maintenance** from device telemetry (compressor cycles, sensor drift, error patterns) feeding NC-020's PM planning and spare-parts forecasting.
+- **Digital twin of the facility**: HVAC, water, power and gas modelled together for energy optimisation and outbreak/airflow analysis.
+- **Full IHE PCD conformance testing** and participation in a Connectathon; ISO/IEEE 11073 nomenclature adoption end-to-end.
+- **Device-agnostic middleware replacement**: where hospitals already own Capsule/Bernoulli/Cerner CareAware, EN-042 becomes a consumer of that middleware rather than a direct device integrator (a supported topology from day one).
+
+## 16. Open Questions for the Hospital
+1. What is the **complete device inventory** to integrate at go-live — make, model, firmware, quantity, location, and whether each supports HL7/serial/MQTT/vendor SDK output (please include the vendor's integration datasheet)?
+2. Is there an **existing device middleware** (Capsule, Bernoulli, Cerner CareAware, a monitor vendor's central station) that should remain the integration layer, with the HMS consuming from it?
+3. Which parameters must be **charted automatically versus confirmed by a nurse**, and at what **cadence** should continuous data be stored (this determines both safety posture and storage cost)?
+4. How are portable devices bound to patients today, and is **barcode scan binding** operationally acceptable for every portable device?
+5. Which alarms should be **annunciated remotely**, at what priority, with what delay filter, and to whom — and does nursing leadership accept that the HMS is a *secondary* alarm path?
+6. Who owns **alarm threshold policy**, and is there an existing alarm-management committee (a NABH/JCI expectation)?
+7. What are the **cold-chain assets** (fridges, freezers, cold rooms, transport boxes), their limits, current logging method, and who is the custodian and on-call responder for each?
+8. Are **RO water, HVAC, medical gas and generator systems** on Modbus/BMS, and does Facility want them in the HMS or in a separate BMS?
+9. Which **autoclaves and washer-disinfectors** support electronic cycle output, and what does the CSSD's current recall procedure require?
+10. What is the **network topology** for medical devices — is there a segmented VLAN, who owns it, and is there an IEC 80001-1 responsibility agreement between IT, biomedical and vendors?
+11. Which devices support **NTP** and which have unsettable clocks (this determines how much time-correction machinery is needed)?
+12. Is any **write-back to devices** (infusion auto-programming, dialysis parameter push) desired, and is the hospital prepared for the vendor certification and risk assessment it requires?
+13. What **retention** is required for raw device readings versus charted values versus alarms (default: raw 90 days, rollups 2 years, alarms 3 years, charted with the clinical record)?
+14. Who is the **biomedical on-call** for device incidents out of hours, and what is the expected response time for a silent ICU monitor?

@@ -1,0 +1,185 @@
+# IP-018 — Patient Transfer (intra-facility handover engine, inter-facility / inter-branch transfer-out & transfer-in, receiving-hospital acceptance, transfer consent & risk, SBAR/ISBAR handover documents, transfer summary bundle, ambulance link, escort & equipment checklist, tracking, referral feedback)
+
+| Field | Value |
+|---|---|
+| Domain | IP / Inpatient |
+| Module ID | IP-018 |
+| Phase | 7 |
+| Priority | P1 |
+| Complexity | Medium–High |
+| Depends on | IP-001 (bed transfers, transport tasks, admission source `transfer_in`, indoor register), IP-002 (discharge type `referred/transfer_out`, interim/discharge summary, medication reconciliation), IP-003 (SBAR transfer note, nursing handover, MAR/last-dose times), IP-009/IP-016/IP-006/IP-024 (ICU/HDU/OT/PACU handovers using the same engine), OP-006 (ER transfer-out & receiving pre-alert), TR-009 (ambulance & pre-hospital: 108/112, GPS, vitals relay, ER pre-alert), NC-013 (ambulance & fleet booking, charges, trip sheet), OP-021 (referral management: external referral records, feedback), EN-028 (transfer consent / refusal, high-risk transfer consent), EN-041 (multi-branch: inter-branch transfer with shared MPI, bed lookup in sister branch), IP-005 (interim bill, transfer charges, settlement rules; scheme cases RC-007 transfer rules), RC-002/EN-002 (insurer intimation of transfer/cashless continuity), EN-011 (ABDM: care-context sharing/HIU consent for receiving hospital), EN-019 (HL7 ADT A02/A03, FHIR bundle export), EN-039 (transfer forms), EN-016 (e-sign), EN-009/EN-032 (family/receiving-hospital messages), EN-037, EN-024, NC-015 (transfer incidents), TR-008 (MLC transfer: police intimation), IP-017 (body transfer), IP-015 (neonatal transport checklist), IP-025 (command centre transfer queue) |
+| Feature flag | `module.patient_transfer.enabled` (sub-flags: `transfer.inter_facility`, `transfer.inter_branch`, `transfer.abdm_share`, `transfer.receiving_portal`, `transfer.tracking`) |
+| Primary roles | Doctor — IP (7), Emergency Physician (8), Intensivist (11), Resident (14), Nurse — Ward/ICU/ER (17/18/19), Nurse Supervisor (22), Ambulance Dispatcher/EMT (52), Receptionist/Admission desk (24), Billing IP (27) |
+| Secondary roles | Surgeon/Anaesthetist (9/10), Bed manager (IP-025), Insurance/TPA (28), MRD (43), Security (51), Ward Boy (23), MS (4), Referring/receiving doctor (15 via portal), Family (60), Quality (54), Auditor (58) |
+| Regulatory | NABH 5th ed. AAC.7 (transfer of patients within/outside organisation: transfer criteria, receiving acceptance, documented handover, escort & equipment appropriate to condition), AAC.8 (referral: reason, condition, care given, receiving org accepts), PRE (informed consent for transfer incl. risks), COP.3/COP.4 (emergency care & ambulance: stabilise before transfer — cf. EMTALA-style duty), MTP/CrPC/BNSS (MLC transfer intimation), Clinical Establishments Act (stabilisation & referral), PMJAY/RC-007 (referral/transfer rules for scheme beneficiaries), IRDAI (transfer notification), ABDM (consent-based record sharing), DPDP (data shared with receiving facility on consent/necessity), Motor Vehicle rules for ambulances (NC-013/TR-009) |
+
+## 1. Purpose
+IP-018 makes every hand-off of a patient safe and documented — bed-to-bed within the hospital (ward↔ICU/HDU/OT/PACU/dialysis/radiology), between branches of a group, and to/from external hospitals. It standardises the ISBAR handover with condition-appropriate escort/equipment checklists, captures transfer consent and risk, obtains and records receiving acceptance (internal unit or external hospital contact), assembles a transfer summary bundle (summary, MAR/last doses, results, images, allergies, code status, devices), links ambulance dispatch and tracking, updates the ADT/bed state and billing, and closes the loop with arrival confirmation and referral feedback. It also receives inbound transfers with a pre-arrival package so beds, teams and pre-auth are ready before the ambulance arrives.
+
+## 2. Users & Jobs-to-be-done
+- **Doctor** (desktop/IP-010): decide transfer (indication, urgency, destination unit/hospital), record stabilisation status & risk category, obtain receiving doctor acceptance, sign transfer summary, order escort level (doctor/nurse/EMT), monitoring & equipment (monitor, O2, ventilator, pumps, defibrillator).
+- **Ward/ICU nurse** (desktop/tablet): ISBAR handover note, pre-transfer checklist (identity band, IV access, drains, lines secured, meds & last-dose times, belongings, documents), MAR hand-off, escort, receiving-nurse bedside acknowledgement.
+- **Admission/transfer desk / bed manager**: internal bed sourcing (IP-001/IP-025), inter-branch bed lookup (EN-041), external hospital coordination log, insurer intimation (RC-002), interim bill (IP-005), documents pack print.
+- **Ambulance dispatcher/EMT** (NC-013/TR-009 app): trip creation from transfer, crew/vehicle/equipment, en-route vitals relay, arrival confirmation, handover to receiving staff.
+- **Receiving unit/hospital** (internal console / receiving portal): view pre-arrival package, accept/decline with reason, prepare bed/team, acknowledge arrival & condition.
+- **Family**: consent, cost/ambulance information, tracking link (`transfer.tracking`) & ETA.
+- **Quality**: transfer incidents (deterioration en route, missing docs), TAT (decision → departure), unplanned ICU transfers.
+
+## 3. Core Workflows
+
+### 3.1 Intra-facility transfer with clinical handover (any unit change)
+1. Trigger: IP-001 transfer request (ward→ICU/HDU/ward), IP-006 (ward→OT→PACU→ward), IP-009/IP-016 step-down/up, dialysis/radiology trips (temporary "away" moves — bed retained) → **System** creates `transfer_episodes` `type=intra`, `subtype=(unit_change|temporary_away)`, links the IP-001 request/bed hold.
+2. **Sending nurse** completes **pre-transfer checklist** (template by destination & acuity: identity band verified, allergies/isolation flag, IV lines patent & labelled, drains/tubes secured, O2 requirement & cylinder duration calc (flow × time vs cylinder litres), monitor attached, infusions with pump batteries, restraint/sedation status, pressure areas, belongings, chart/consents/imaging, MAR with last-dose times & due-in-transit doses, blood products in transit (IP-007 cold chain), NPO status, valuables) + **ISBAR note** (Identity, Situation, Background, Assessment (latest vitals/NEWS2 auto-pulled), Recommendation) → escort level auto-suggested by acuity (NEWS2/ICU status: none / ward boy / nurse / nurse+doctor) & equipment.
+3. **Transport** task (IP-001 `transport_tasks`) with start/arrive timestamps; deterioration en route → IP-013 activation from phone.
+4. **Receiving nurse** at bedside: scan wristband → verify identity → reviews ISBAR → **acknowledges** (`received_at`, condition on arrival, discrepancies e.g., missing drug chart) → IP-003 care profile switches; IP-005 charge class change from `received_at`; Event `transfer.intra.completed`. Unacknowledged > 30 min after arrival → supervisor alert. Temporary-away returns close the episode with `returned_at` (bed retained; IP-025 shows "away — CT").
+
+### 3.2 Inter-facility transfer-out (external hospital) (`transfer.inter_facility`)
+1. **Doctor** initiates transfer-out: reason (higher centre / speciality unavailable / patient or family request / insurance network / bed unavailability / scheme referral), urgency (emergency/urgent/elective), **stabilisation status** (airway/breathing/circulation stable? unresolved risks), risk category (low/medium/high/critical → mandates doctor escort & ALS ambulance for critical), destination hospital (master of hospitals with contacts; free-text new), speciality/unit, receiving doctor name/phone, mode (hospital ambulance NC-013 / 108 / private / air), family informed.
+2. **Receiving acceptance**: desk/doctor calls receiving hospital → records `accepted_by`, designation, phone, time, bed confirmed y/n, conditions; optional **receiving portal** (`transfer.receiving_portal`: OP-021 external referral portal link with time-bound token to view pre-arrival package & accept) — Event `transfer.acceptance.recorded`. Emergency transfers where acceptance cannot be obtained → recorded reason (`no_acceptance_reason`) with MS awareness for high-risk (NABH AAC.7 requires acceptance; document exception).
+3. **Consent** (EN-028 template "Transfer consent" or "Refusal of transfer / DAMA transfer"): risks explained, alternatives, ambulance/cost info, patient/NOK signature, doctor witness → linked; MLC → TR-008 police intimation of transfer; scheme (RC-007) → referral slip format (e.g., PMJAY referral) generated.
+4. **Transfer summary bundle** auto-assembled: interim discharge/transfer summary (IP-002 template `transfer_out`: diagnosis, course, procedures, current condition, vitals, meds with last-dose times & running infusions, allergies, code status, isolation, pending results, advice), MAR extract, lab/radiology reports (OP-004/OP-008), imaging share (EN-008 DICOM link/CD), consent copies, ID, insurance/pre-auth papers, ambulance trip sheet template; **ABDM share** (`transfer.abdm_share`: care-context consent request to receiving HIU or patient-driven "scan & share" bundle) and/or **FHIR R4 document bundle** (EN-019 Composition/Bundle) exported/printed; e-signed (EN-016) by doctor.
+5. **Ambulance link**: creates NC-013/TR-009 trip (`purpose=inter_facility_transfer`, ALS/BLS/neonatal/ICU-on-wheels type by risk, equipment list, crew incl. escort doctor/nurse from roster NC-030, pickup ward/bed, destination geo, ETA), charges estimate to IP-005 (or scheme-free); tracking link to family (`transfer.tracking`, GPS via TR-009); vitals relay en route to sending doctor's dashboard (optional).
+6. **Departure**: nurse pre-transfer checklist done, escort assigned, documents pack (printed/USB/QR) → **IP-002 discharge** with `type=referred/transfer_out` (bill settlement per policy: interim bill; scheme/insurer continuity notification RC-002 `transfer_out`), bed release; Event `transfer.out.departed` {ambulance_trip_id}.
+7. **Arrival & handover at receiving hospital**: EMT/escort records arrival time, receiving staff name/designation, condition on arrival (vitals), documents handed, signature (app) → Event `transfer.out.arrived`; en-route events (deterioration, CPR, diversion to another hospital) logged; **feedback** loop (OP-021): outcome request to receiving hospital at 72 h (portal/phone) → recorded.
+8. Family notification (EN-009): departure with ambulance no., ETA/tracking; arrival confirmation.
+
+### 3.3 Inter-branch transfer (`transfer.inter_branch`, EN-041)
+1. Same as §3.2 but destination = sister branch: **bed lookup** across branches (IP-001 read model via EN-041), acceptance by receiving branch's admitting doctor/bed manager inside the system, **admission pre-created** in destination branch (`source=transfer_in`, `admission_requests` with linked episode, pre-auth continuity RC-002, deposit rules per group policy), record continuity (shared MPI; clinical documents visible under group consent policy), IP number series of destination branch; on arrival, receiving nurse acknowledges → destination admission active; source admission closes as `transferred_out (intra_group)`. Billing: source interim bill closes; group-level transfer pricing rules (IP-005/NC-012) — configurable "single bill across branches" (later phase) vs separate bills.
+
+### 3.4 Transfer-in (receiving from external hospital / 108 / branch)
+1. Sources: OP-021 external referral, phone call to ER/transfer desk, TR-009 pre-alert (108/112 en-route package), inter-branch episode, receiving-portal request → **Transfer desk/ER** creates `transfer_in_requests`: patient demographics (provisional), referring hospital/doctor/contact, diagnosis, condition/risk, support needed (ventilator/ICU/isolation/dialysis/OT/blood), ETA, documents received (uploads/photos), payer.
+2. **Acceptance decision** (on-call speciality/intensivist/bed manager): bed availability (IP-001/IP-025), team readiness → accept (bed hold created `hold_reason=transfer_in`, expected time), accept-with-conditions, or decline with reason & alternative suggestion (logged; NABH requires reason) → response communicated (portal/phone/SMS to referring doctor) → Event `transfer.in.accepted|declined`.
+3. **Pre-arrival preparation**: tasks — ER/ICU bay ready, blood group/crossmatch if indicated (IP-007), pre-auth start (RC-002) with documents, MLC continuity (TR-008), isolation prep (IP-012), OT/cath lab notification (IP-006/OP-029), pre-registration (OP-001 provisional UHID / ABHA fetch with consent).
+4. **Arrival**: ER quick registration or direct admission (IP-001 `source=transfer_in`), **handover from ambulance crew** (TR-009 handover form: pre-hospital vitals, interventions, drugs given, times), receiving doctor documents condition on arrival & completeness of documents; discrepancies/incidents (e.g., unstable transfer, missing consent) → NC-015; referral acknowledgement back to referrer (OP-021 feedback with outcome later; PE-007 referring doctor portal).
+5. No-show/cancelled inbound → hold released after configurable time (default 4 h) with dispatcher check.
+
+### 3.5 Special transfers
+- **Neonatal** (IP-015 checklist: transport incubator temp, glucose, airway, lines, mother's status/consent, breast milk), **paediatric**, **obstetric** (labour status, FHR — IP-011), **ICU-on-wheels** (ventilator settings, pumps, oxygen calc), **MLC** (police escort/permission for custody patients), **psychiatric** (MHCA: restraint/consent rules), **body transfer** (IP-017 with police for MLC), **isolation/infectious** (ambulance decontamination task NC-013).
+- Dialysis/radiology/procedure trips: temporary away with time budget; overdue return alert.
+
+### 3.6 Exceptions
+- Patient/family refuses transfer advised → DAMA-transfer refusal consent (EN-028), documented risks, continue care.
+- Receiving hospital declines after departure/diversion → EMT records diversion, doctor informed, new destination acceptance captured; family informed.
+- Deterioration en route → IP-013 style event in trip app; return to sending hospital option; incident.
+- Missing acceptance for critical transfer → MS notified; allowed only with reason (life-saving) & audit.
+- Documents incomplete at departure (checklist unmet mandatory items) → hard-stop unless MS/consultant override with reason.
+- Insurer network constraints (cashless only at network hospital) → TPA desk task before elective transfer.
+
+## 4. Data Model (schema `ip`)
+- **ip.transfer_episodes** (id, hospital_id, branch_id, episode_no (series `TRF/{BR}/{FY}/{SEQ}`), type enum(intra/inter_branch/out_external/in_external/temporary_away), patient_id, admission_id?, er_visit_id?, from_location jsonb {ward, bed, unit}, to_location jsonb {ward?, bed?, unit?, hospital_id?/external_hospital_id?, external_name?, speciality}, reason_code enum(higher_centre/speciality_unavailable/patient_request/insurance_network/bed_unavailable/scheme_referral/step_up/step_down/procedure/other), reason_text, urgency enum(emergency/urgent/elective), risk_category enum(low/medium/high/critical), stabilisation jsonb {airway, breathing, circulation, notes}, escort_level enum(none/attendant/nurse/nurse_doctor/emt_als), equipment jsonb, mode enum(trolley/wheelchair/hospital_ambulance/108/private/air/other), ambulance_trip_id?, initiated_by, initiated_at, consent_id?, consent_refused bool, acceptance jsonb {accepted_by, designation, phone, at, bed_confirmed, conditions, method(portal/phone/internal), no_acceptance_reason?}, checklist_id?, handover_note_id?, summary_document_id?, bundle jsonb {docs[], fhir_bundle_file_id?, abdm_txn_id?}, departed_at, arrived_at, received_by jsonb {name, designation, signature_file_id}, condition_on_arrival jsonb, returned_at? (temporary), status enum(requested/accepted/prepared/departed/arrived/completed/cancelled/declined/diverted), cancel_reason?, incidents jsonb, feedback jsonb {requested_at, outcome, received_at}, ip_discharge_id?, dest_admission_id? (inter-branch/in), version) — index (hospital_id, status, initiated_at), (patient_id), (ambulance_trip_id).
+- **ip.transfer_checklists** (id, episode_id, template_id, items jsonb [{code, label, mandatory, done bool, value?, by, at}], completed_by, completed_at, overrides jsonb).
+- **ip.transfer_checklist_templates** (hospital_id, code, name, applies_to jsonb {type, destination_unit_types, acuity}, items jsonb, version, active).
+- **ip.transfer_handovers** (episode_id, note_id (clinical.nursing_notes type=transfer ISBAR), sending_nurse_id, receiving_nurse_id?, sending_doctor_id?, receiving_doctor_id?, bedside_ack_at, discrepancies jsonb, wristband_verified bool).
+- **ip.external_hospitals** (id, hospital_id (tenant), name, type enum(govt/private/trust/branch_of_group), address, geo, phones jsonb, specialities jsonb, contacts jsonb [{name, role, phone}], hfr_id? (ABDM HFR), empanelments jsonb, active) — shared with OP-021.
+- **ip.transfer_in_requests** (id, hospital_id, branch_id, request_no, source enum(referral/phone/108_prealert/portal/inter_branch), referring_hospital_id?, referring_doctor, contact, patient_provisional jsonb {name, age, sex, uhid?, abha?}, diagnosis, condition, risk, support_needed jsonb, eta, documents jsonb, payer jsonb, decision enum(pending/accepted/accepted_conditions/declined), decided_by, decided_at, decline_reason?, alternative_suggested?, bed_hold_id?, prep_tasks jsonb, arrived_at?, admission_id?, er_visit_id?, arrival_handover jsonb, episode_id?, status enum(open/arrived/no_show/cancelled/closed)) — index (hospital_id, status).
+- **ip.transfer_events** (episode_id, at, type enum(created/accepted/consent/checklist_done/departed/en_route_vitals/deterioration/diverted/arrived/received/feedback/cancelled/note), detail jsonb, by, source enum(app/emt/portal/system)) — append-only.
+- Read models: `analytics.mv_transfer_kpis_monthly` (counts by type/reason, decision→departure TAT, checklist compliance, acceptance documented %, en-route incidents, transfer-in acceptance rate/decline reasons, unplanned ICU transfers), `analytics.mv_transfer_queue` (IP-025).
+
+## 5. Business Rules & Validations
+- Every unit change or exit creates exactly one open episode; intra transfers link IP-001 `transfer_requests`; temporary away moves retain the bed and must return/close within time budget (default 4 h) else alert.
+- Mandatory checklist items (per template) must be complete before `departed` (hard-stop; consultant/MS override with reason & audit); ISBAR note required for all intra unit changes and all outbound transfers.
+- Escort & ambulance type minimums by risk: high → nurse escort + ALS; critical → doctor + nurse + ALS/ICU ambulance; neonatal → transport incubator & trained nurse (configurable matrix).
+- Receiving acceptance (name/designation/time) required for external/inter-branch transfers before departure except documented emergency exception (MS notified).
+- Transfer consent (or refusal) mandatory for outbound transfers; DAMA-transfer path per IP-002; MLC → police intimation logged before departure (TR-008) unless life-threatening emergency (post-hoc within 1 h).
+- Summary bundle must include: diagnosis, current condition/vitals, meds with last-dose times, allergies, code status, isolation status, pending results — validation before sign; e-sign or wet signature scan.
+- Oxygen sufficiency calc: cylinder litres / (flow × (est. minutes × 1.5 safety)) must be ≥ 1 else warning.
+- Inter-branch: destination admission cannot activate before source `departed`; source closes only after destination acknowledges arrival (or 12 h auto-close with alert).
+- Transfer-in decline must carry reason; declines reported monthly (NABH); bed hold auto-release after `eta + 4 h` no-show.
+- Data sharing with external facility only via consented bundle/ABDM/printed pack; portal token expiry ≤ 72 h; audit of every access (DPDP).
+- Numbering `TRF/{BR}/{FY}/{SEQ:6}`; episodes immutable after `completed` (append events only); retention as clinical record.
+
+## 6. API Surface (`/api/v1/transfers`)
+| Method | Path | Purpose | Permission | Idem. |
+|---|---|---|---|---|
+| POST | `/episodes` (type, from/to, reason, urgency, risk…) | initiate | `transfer.episode.create` | yes |
+| GET | `/episodes` (?type,status,ward,from,to; cursor) ; GET `/episodes/{id}` | list/detail | `transfer.episode.read` | pag |
+| PATCH | `/episodes/{id}` | edit before departure | `transfer.episode.write` | – |
+| POST | `/episodes/{id}/acceptance` | record receiving acceptance | `transfer.episode.write` | yes |
+| POST | `/episodes/{id}/consent` (link EN-028) | consent/refusal | `transfer.episode.write` | yes |
+| GET/POST | `/episodes/{id}/checklist` | pre-transfer checklist | `transfer.checklist.write` | yes |
+| POST | `/episodes/{id}/handover` ; POST `/episodes/{id}/receive` (wristband scan, ack) | ISBAR & bedside ack | `transfer.handover.write` / `transfer.handover.receive` | yes |
+| POST | `/episodes/{id}/bundle/build` ; GET `/episodes/{id}/bundle` ; POST `/episodes/{id}/bundle/sign` ; POST `/episodes/{id}/bundle/share` (abdm/portal/email) | summary bundle | `transfer.bundle.write` / `.share` | yes |
+| POST | `/episodes/{id}/ambulance` (create NC-013/TR-009 trip) | link trip | `transfer.ambulance.link` | yes |
+| POST | `/episodes/{id}/depart` , `/arrive` , `/return` , `/divert` , `/cancel` | state transitions | `transfer.episode.write` (arrive also EMT 52) | yes |
+| POST | `/episodes/{id}/events` | en-route events (EMT/escort) | `transfer.event.write` | yes |
+| POST | `/episodes/{id}/feedback` | outcome from receiving | `transfer.episode.write` | – |
+| GET/POST/PATCH | `/external-hospitals` | master | `transfer.hospital.manage` | – |
+| GET/POST/PATCH | `/checklist-templates` | templates | `transfer.template.manage` | – |
+| POST | `/inbound` ; PATCH `/inbound/{id}` ; POST `/inbound/{id}/decide` ; POST `/inbound/{id}/arrived` ; GET `/inbound` (?status) | transfer-in | `transfer.inbound.manage` / `.decide` | yes |
+| GET | `/branches/bed-availability?class=&speciality=` (EN-041) | inter-branch lookup | `transfer.episode.create` | – |
+| GET | `/queue` (IP-025 feed) ; GET `/reports/kpis` | | `transfer.report.read` | – |
+| Public (token) | `GET /portal/transfers/{token}` , `POST /portal/transfers/{token}/accept|decline` | receiving portal | token-scoped | – |
+
+## 7. Domain Events (outbox)
+- `transfer.episode.created` {type, urgency, risk, from, to} → IP-025 queue, EN-037 (receiving unit/desk), IP-001 (bed hold/transfer request link).
+- `transfer.acceptance.recorded` / `transfer.acceptance.missing_critical` → MS, desk.
+- `transfer.consent.captured|refused` → IP-002 (DAMA path), audit.
+- `transfer.checklist.completed|override` → supervisor (override), IP-025.
+- `transfer.bundle.signed|shared` {mode} → EN-011/EN-019/OP-021, MRD (NC-003).
+- `transfer.ambulance.linked` {trip_id} → NC-013/TR-009; consumed back `ambulance.trip.dispatched|arrived_pickup|departed|arrived_destination|diverted` (TR-009/NC-013).
+- `transfer.intra.completed` {from, to, received_at} → IP-003 (care profile), IP-005 (class), IP-025, EN-018.
+- `transfer.out.departed` {episode_id, admission_id, destination, trip_id} → IP-002 (discharge type transfer_out), IP-001 (bed release), IP-005 (interim/final), RC-002 (insurer intimation), TR-008 (MLC), EN-009 (family), OP-021 (referral record).
+- `transfer.out.arrived` {condition, received_by} / `transfer.out.diverted` / `transfer.deterioration` → doctor, quality (NC-015), family SMS.
+- `transfer.in.requested|accepted|declined|arrived|no_show` → IP-001 (hold), OP-006, RC-002, IP-007, IP-012, OP-021/PE-007 (referrer feedback), IP-025.
+- `transfer.temporary_away.overdue` {minutes} → ward in-charge.
+- `transfer.feedback.received` → OP-021, referring doctor.
+
+## 8. Screens (UI)
+- **Transfer Workbench** (desktop; transfer desk / bed manager): tabs Outbound / Inbound / Intra-today / Temporary-away; each row: patient, from→to, urgency, risk, status chips (acceptance, consent, checklist, bundle, ambulance), timers (decision→departure); actions; live updates; keyboard `N` new, `A` acceptance, `C` checklist, `D` depart.
+- **Initiate Transfer** (doctor desktop/IP-010 phone): stepper — reason/urgency/risk → destination (internal bed picker / branch bed lookup / external hospital search) → escort & equipment matrix (auto-suggest) → acceptance capture → consent (EN-028 tablet signature) → summary bundle preview & sign → ambulance request → depart.
+- **Pre-Transfer Checklist & ISBAR** (nurse tablet/desktop; offline-capable draft): auto-pulled vitals/NEWS2, meds & last-dose times, O2 calc widget, hard-stop indicator for mandatory items; print handover sheet.
+- **Receive Patient** (receiving nurse tablet/IP-004): wristband scan → ISBAR view → condition on arrival → ack; discrepancy capture.
+- **Inbound Request Console** (ER/transfer desk desktop; phone for on-call decision): request card with support needed, bed availability panel (IP-025), accept/decline with reasons, prep task list, ETA countdown, TR-009 pre-alert vitals stream.
+- **Receiving Portal** (external, token link, mobile-friendly): read-only package, accept/decline, contact; no login (token), watermark, expiry.
+- **Family tracking page** (PE-001/link): ambulance ETA/map (TR-009), status.
+- **Reports** (desktop).
+
+## 9. Integrations
+- NC-013/TR-009 ambulance (trip API, GPS, vitals relay), OP-021 referral records & feedback, EN-041 branch bed availability & admissions, EN-011 ABDM (HIP consent artefacts / scan-and-share), EN-019 FHIR Bundle (Composition: Discharge/Transfer summary), EN-008 imaging share (DICOM link/CD), EN-028 consent, EN-016 e-sign, RC-002 insurer notification (email/portal), TR-008 MLC, EN-009 family messages, EN-039 print templates (transfer form, referral slip, PMJAY referral).
+- Retries via outbox; portal tokens signed (JWT, 72 h), rate-limited.
+
+## 10. Reports & Analytics
+- Transfers by type/reason/destination; decision→departure & request→acceptance TAT; checklist compliance & overrides; acceptance documented %; consent %; ambulance type vs risk compliance; en-route incidents & diversions; inbound acceptance rate & decline reasons; transfer-in source mix (108/referrals/branches); unplanned ICU transfers within 24 h of ward admission (with IP-016/NC-015); referral feedback closure %; revenue: ambulance/transfer charges.
+- MVs: `analytics.mv_transfer_kpis_monthly`, `analytics.mv_transfer_queue`.
+
+## 11. Notifications
+- Push: new inbound request (on-call/bed manager), acceptance recorded, checklist blocking items, receiving ack pending > 30 min, temporary-away overdue, arrival at destination (sending doctor), en-route deterioration.
+- SMS/WhatsApp (EN-009): family — departure with ambulance/tracking link, arrival; referring doctor — acceptance/decline, arrival, outcome (PE-007).
+- Email: receiving hospital package link (portal), insurer transfer intimation (RC-002).
+
+## 12. Permissions (RBAC keys)
+`transfer.episode.create` (7, 8, 11, 14, 9, 10, 24 desk for logistics), `transfer.episode.read` (clinical, 24, 27, 28, 43, 52, 58), `transfer.episode.write` (7, 8, 11, 14, 24, 22), `transfer.checklist.write` (17–20, 22), `transfer.handover.write` (17–20), `transfer.handover.receive` (17–20), `transfer.bundle.write` (7, 8, 11, 14 draft), `transfer.bundle.share` (7, 8, 11, 43, 24), `transfer.ambulance.link` (24, 22, 52, 7, 8), `transfer.event.write` (52, escorts 17/18/7), `transfer.hospital.manage` (3, 24 lead), `transfer.template.manage` (3, 22, 54), `transfer.inbound.manage` (24, 8, 19, 22), `transfer.inbound.decide` (8, 11, 7 on-call, bed manager), `transfer.report.read` (4, 22, 54, 58).
+
+## 13. Non-functional
+- Volumes: 2000-bed site ~300 intra moves/day, 20–40 outbound, 20–60 inbound requests/day; workbench p95 < 200 ms; bundle build (PDF + FHIR) < 10 s async with progress; portal page < 2 s on 3G.
+- Offline: checklist/ISBAR drafts on tablet; EMT app (TR-009) offline events sync.
+- Print: transfer summary A4, checklist, referral slips, PMJAY referral format; multilingual consent (EN-028).
+- Security: portal tokens single-purpose, IP-rate-limited, watermark with viewer identity; PHI in SMS avoided (links only).
+
+## 14. Acceptance Criteria
+1. Given a ward→ICU transfer request accepted in IP-001, then an intra episode is created, the sending nurse must complete the ICU checklist template and ISBAR before transport, and the receiving ICU nurse's wristband-scan acknowledgement sets `received_at`, switching care profile and charge class.
+2. Given a mandatory checklist item (IV access labelled) is unchecked, when the nurse taps Depart, then a hard-stop is shown; a consultant override with reason is recorded and reported.
+3. Given a critical-risk external transfer without recorded acceptance, when the doctor tries to mark departed, then the system requires either acceptance details or an emergency-exception reason and notifies MS.
+4. Given transfer consent captured on tablet with NOK signature, then the consent id is linked and the printed pack includes it.
+5. Given the summary bundle is built, then it contains meds with last-dose times, allergies, code status, isolation and pending results; missing any → validation error before sign; on sign, a FHIR Bundle file and PDF are stored and hash-chained.
+6. Given `transfer.abdm_share` on and patient consent, when shared, then the ABDM transaction id is stored and the receiving hospital can fetch via HIU flow; alternatively the portal token link is emailed and every open is audited.
+7. Given ambulance trip linked, when TR-009 emits `arrived_destination` with receiving signature, then the episode becomes `arrived`, family SMS is sent, and sending doctor is notified.
+8. Given a temporary away for CT exceeding 4 h without return, then ward in-charge receives an alert and IP-025 shows the patient as away-overdue.
+9. Given an inbound 108 pre-alert with ventilated patient, when on-call intensivist accepts, then an ICU bed hold with `transfer_in` reason is created, prep tasks (ventilator ready, blood group, pre-auth) appear, and ETA countdown shows on the ER board.
+10. Given inbound accepted but no arrival by ETA + 4 h, then hold auto-releases after dispatcher confirmation prompt and status `no_show`.
+11. Given an inter-branch transfer, then destination branch admission request is pre-created with the same UHID (shared MPI), activates only after source departure, and source closes when destination acknowledges arrival.
+12. Given a decline of an inbound request, then a reason is mandatory and appears in the monthly transfer report.
+13. Given a user with `transfer.episode.read` only, when calling POST /episodes/{id}/depart, then 403 and audit.
+
+## 15. Enhancements / Later phases
+- Real-time regional bed-availability exchange with partner hospitals/108 networks (EN-017), receiving-hospital API acceptance, tele-consult before transfer (OP-018) to avoid unnecessary moves, AI transfer-risk scoring & escort recommendation (AI-005), video handover recording, RFID/BLE patient location for temporary-away tracking (EN-042), group-wide single bill for inter-branch transfers (IP-005/NC-012), auto-population of state referral portals (e.g., PMJAY referral) via API.
+
+## 16. Open Questions for the Hospital
+1. Which internal moves need full checklist + ISBAR (all unit changes? OT/PACU? radiology trips?) and templates per destination?
+2. Escort/ambulance matrix by risk category, and who owns transfer coordination (transfer desk, ER, nursing supervisor)?
+3. Do you have (or want) a receiving-hospital portal, or is phone acceptance recording sufficient? Frequently used external hospitals list?
+4. ABDM sharing enabled for transfers? Print/USB/CD imaging preferences?
+5. Inter-branch policies: shared UHID, deposit/pre-auth carry-over, billing (single vs separate)?
+6. Inbound flow: who decides acceptance per speciality/time; bed hold duration; 108/112 integration availability (TR-009)?
+7. Insurer/scheme notification formats for transfers (PMJAY referral slip, TPA email)?
+8. Consent templates & languages for transfer/refusal; MLC transfer intimation practice with local police?

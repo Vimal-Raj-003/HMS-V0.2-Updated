@@ -1,0 +1,220 @@
+# TR-011 — Trauma Registry & Quality (NTDB/TQIP-style registry, mortality & morbidity review, quality indicators, benchmarking, exports)
+
+| Field | Value |
+|---|---|
+| Domain | Trauma & Orthopaedics |
+| Module ID | TR-011 |
+| Phase | 11 |
+| Priority | P1 |
+| Complexity | High |
+| Depends on | TR-001 (episodes, mechanism, injuries/AIS/ISS, RTS/TRISS, activations, KPI timestamps), TR-002 (fractures, complications, outcomes), TR-003 (implants), TR-004 (OT timings, WHO compliance, C-arm), TR-006 (ICU stays, ventilator days, scores, HAI links), TR-007 (consult SLAs, sequencing, closure & M&M flag), TR-008 (MLC category, intent), TR-009 (pre-hospital times), TR-010 (functional outcomes, RTW), OP-006 (ER visits, dispositions), IP-001/IP-002 (LOS, discharge/death), IP-012 (HAI), IP-017 (deaths/MCCD), NC-003 (MRD coding, ICD-10), NC-015 (Quality management — incidents, CAPA, NABH indicators; TR-011 supplies trauma indicators), NC-011/EN-001 (analytics engine, report builder, benchmarking), EN-019 (FHIR export), EN-017 (registry connectors), EN-036 (bulk import of legacy registry), EN-016 (e-sign of M&M minutes), EN-041 (multi-branch benchmarking), EN-024, EN-028/DPDP (research consent/pseudonymisation) |
+| Feature flag | `module.trauma_registry.enabled` (sub: `registry.mm_review`, `registry.tqip_indicators`, `registry.external_export`, `registry.research_cohorts`, `registry.abstractor_queue`) |
+| Primary roles | Trauma registrar / data abstractor (MRD coder 43 with trauma scope), Trauma programme manager / Quality Manager (54), Trauma director / Medical Superintendent (4/9), Emergency physician (8) |
+| Secondary roles | Surgeons/intensivists (9/11, M&M presenters), Nursing leadership (22), Research coordinator, Hospital admin (2), Registry bodies (external: ICMR NTR/state trauma registry/TQIP-like), Auditor (58) |
+| Regulatory | NABH 5th ed. PSQ (quality indicators, mortality/morbidity review, clinical audit) & CQI chapters, MoHFW NPPMTBI trauma-centre reporting, ICMR National Trauma Registry / Indian Trauma Registry data dictionaries, ACS-COT NTDB National Trauma Data Standard (NTDS) & TQIP methodology (adopted as reference), WHO International Registry for Trauma & Emergency Care (WHO IRTEC) minimum dataset, ICD-10 external cause (V01–Y98) & place/activity codes, AIS licensing (AAAM), Utstein-style trauma template, ICMR National Ethical Guidelines & New Drugs and Clinical Trials Rules 2019 (research use — IEC approval, consent/waiver), DPDP Act 2023 (purpose limitation, pseudonymisation), Clinical Establishments Act (record standards), MLC (TR-008) for legal restrictions on data sharing |
+
+## 1. Purpose
+TR-011 turns the operational trauma modules into a **trauma registry and quality programme**: it assembles a validated, coded record for every trauma patient (NTDS/ICMR-NTR-aligned dataset: demographics, pre-hospital, ED, injuries with AIS/ISS, procedures with timing, ICU/ventilator, complications, outcomes, discharge/functional status), runs an **abstractor queue** for completion within deadlines, computes **quality indicators** (TQIP-style: time-to-CT/OT/craniotomy, VTE prophylaxis, unplanned ICU admission/re-intubation/return-to-OT, mortality by ISS band, TRISS W/Z/M statistics, over/under-triage, missed injuries, HAI rates), risk-adjusts and **benchmarks** across branches/time, powers structured **mortality & morbidity (M&M) reviews** with preventability classification and CAPA (NC-015), and produces exports to national/state registries and research cohorts with pseudonymisation and consent controls.
+
+## 2. Users & Jobs-to-be-done
+- **Trauma registrar/abstractor** (desktop, dual monitor): work the queue of episodes awaiting completion; verify/enter missing data elements from the record (auto-populated ≥ 80 %), finalise AIS/ISS with TR-001, code external cause (ICD-10 V–Y), procedures (ICD-10-PCS/ICHI/hospital codes), complications (NTDS list), discharge disposition and functional status (GOS-E/Barthel from TR-010), submit record; resolve validation errors; ≥ 25 records/day.
+- **Trauma programme manager / quality** (desktop): monitor completeness & timeliness, indicator dashboards, outliers, prepare M&M agenda, track CAPA, submit registry exports, NABH indicator packs.
+- **Trauma director/MS** (desktop/tablet): review risk-adjusted mortality (O/E), audit filters, chair M&M, sign preventability decisions, approve research data releases.
+- **Clinicians** (phone/desktop): receive M&M case assignments, submit case summaries, respond to audit filters (e.g. "delay to OT > 60 min for Class 1"), see own performance (restricted).
+- **Research coordinator** (desktop): define cohorts (criteria builder), request pseudonymised extracts with IEC approval reference, track approvals.
+- **External registry** (system): receive periodic exports (CSV/FHIR Bundle) per data dictionary.
+
+## 3. Core Workflows
+
+### 3.1 Registry inclusion & record assembly
+1. **Inclusion rules** (config; default NTDS-like): ICD-10 injury diagnosis (S00–S99, T07–T34, T79) AND (admitted / died in ER / transferred / observed ≥ 23 h / trauma activation) — excluding isolated superficial injuries, late effects (T90–T98), isolated hip fracture > 65 y from ground-level fall (configurable include), drowning/poisoning without injury (separate registers) → **System** creates `registry_records` on OP-006 disposition or IP admission with linkage to trauma episode (TR-001) → status `auto_populated` → Event `registry.record.created`.
+2. **Auto-population** from modules (mapping table `registry_field_sources`): demographics (OP-001), pre-hospital (TR-009: EMS times, field vitals, interventions), ED (OP-006/TR-001: arrival vitals, GCS, activation, ESI, times, procedures), injuries (TR-001 AIS/ISS, TR-002 fractures), procedures (TR-004/IP-006 op-notes with times), ICU (TR-006: LOS, vent days, scores), blood (IP-007), complications (TR-002/TR-006/IP-012/NC-015 incidents mapped to NTDS list), outcome (IP-002 discharge/IP-017 death, disposition, GOS-E/Barthel from TR-010, RTW), MLC/intent (TR-008), payer; each field with provenance (source module, timestamp) → completeness % computed.
+3. **Abstractor queue** (`registry.abstractor_queue`): records ordered by discharge date/deadline (default complete within 30 days of discharge; ISS lock ≤ 72 h from TR-001), missing/invalid fields highlighted, side-by-side chart viewer (OP-002 timeline, documents, imaging), quick coders (ICD-10 external cause picker with place/activity, procedure codes, complication list, AIS from TR-001) → save → **validation** (rules: ranges, logic e.g. death without ISS, vent days > ICU days, dates order, AIS/ISS consistency, mandatory by disposition) → status `complete` → **QA sample** (10 % inter-rater re-abstraction; discrepancy log) → `validated` → Event `registry.record.completed|validated`.
+4. Corrections after validation → new version with reason; late outcomes (30-day mortality via PE-002 follow-up call, readmission) append.
+
+### 3.2 Quality indicators & risk adjustment (`registry.tqip_indicators`)
+- **Process indicators** (auto from timestamps): door-to-triage/physician/CT/OT (Class 1 ≤ 60 min), time to craniotomy for EDH/SDH with GCS ≤ 8, time to laparotomy in hypotensive abdominal trauma, time to angio-embolisation, hip fracture surgery ≤ 48 h, open fracture antibiotics ≤ 1 h & debridement ≤ 24 h, VTE prophylaxis initiation ≤ 48 h (from MAR IP-003), tertiary survey ≤ 72 h, MTP ratio, WHO checklist compliance (TR-004), tourniquet times, pre-alert coverage (TR-009), consult SLA (TR-007), rehab first contact (TR-010), MLC intimation ≤ 1 h (TR-008), ISS lock ≤ 72 h & registry completion ≤ 30 d.
+- **Outcome indicators**: mortality (overall, by ISS band 1–8/9–15/16–24/≥ 25, by mechanism/age), **TRISS**: W (excess survivors per 100), Z, M statistics; **O/E ratio** with logistic risk adjustment (age, ISS/NISS, GCS motor, SBP, mechanism, comorbidities — hospital-configurable model; TQIP-like); complications: unplanned ICU admission, unplanned re-intubation, unplanned return to OT, VAP/CLABSI/CAUTI/SSI (IP-012), pressure injury, DVT/PE, AKI, missed injuries (tertiary survey), non-union/implant failure (TR-002/TR-003), ICU/hospital LOS, ventilator days, readmission ≤ 30 d, functional outcome (GOS-E, Barthel gain), RTW rate, LAMA/absconded, over/under-triage (Cribari), transfer-out rate/time.
+- **Audit filters** (configurable): each breach creates `registry_audit_flags` for review (e.g. death with ISS < 15, delay > 60 min to OT for Class 1, re-intubation < 48 h, unplanned return to OT, missed injury) → routed to M&M or peer review.
+- Dashboards (NC-011/EN-001 read models) with drill-down to episode; branch benchmarking (EN-041) & trend control charts (p-charts, funnel plots by surgeon/unit — restricted).
+
+### 3.3 Mortality & morbidity review (`registry.mm_review`)
+1. **Case selection**: all deaths (auto), TRISS unexpected deaths (Ps > 0.5) & unexpected survivors (Ps < 0.25), audit-filter breaches, complications above threshold, incidents (NC-015), random sample → `mm_cases` created → **assignment**: presenter (treating consultant/resident), reviewer(s) (peer from another unit), due date → **case summary** template (timeline auto-built from events: pre-hospital→ED→OT→ICU→outcome with timestamps and KPI breaches; injuries; scores; interventions; complications) → presenter adds narrative & self-assessment; reviewer completes **structured review**: care phase issues (pre-hospital/ED/OT/ICU/ward), category (delay in diagnosis/treatment, technique, judgement, system/process, communication, documentation, none), **preventability** (non-preventable / potentially preventable / preventable — with rationale; based on ACS-COT/Utstein definitions), contributing factors, learning points → **M&M meeting** (agenda, attendees, minutes, decisions: CAPA (NC-015), protocol change (EN-039 template/EN-029 rule), education (NC-027), peer feedback (confidential), no action) → chair signs (EN-016) → Event `registry.mm.closed`; loop closure tracked (CAPA effectiveness at 90 d).
+2. Confidentiality: M&M records privileged (`registry.mm.read` restricted; not part of patient chart; excluded from patient/legal exports unless court order via MS/legal); de-identified learning summaries publishable internally.
+
+### 3.4 Exports & external registries (`registry.external_export`)
+- Data dictionary versions (ICMR NTR / state trauma registry / NTDS-like / WHO IRTEC / hip fracture registry / ortho implant registry from TR-002/TR-003) as mapping configs; scheduled or on-demand **export batches** (CSV/XML/FHIR Bundle via EN-019 with profiles), pseudonymisation (hash UHID with per-registry salt; remove direct identifiers; MLC restrictions), validation against dictionary, transmission via EN-017 (SFTP/API/portal upload), acknowledgment/error handling & resubmission; NABH indicator pack to NC-015 monthly; MoHFW/NPPMTBI reporting formats.
+
+### 3.5 Research cohorts (`registry.research_cohorts`)
+- Cohort builder (criteria on registry fields: mechanism, ISS band, procedures, outcomes, dates), counts first (k-anonymity ≥ 5), request extract with **IEC approval ref**, PI, purpose, DPDP basis (consent/waiver/anonymised) → approval workflow (MS/DPO/EN-038) → pseudonymised extract generation with data-use agreement acknowledgement, watermarked, expiry; access log; re-identification only via registrar with approval (break-glass).
+
+### 3.6 Registry dataset (core elements to seed — NTDS/ICMR-NTR aligned)
+- **Demographics**: age/DOB, sex, residence pincode/district, payer, ABHA (pseudonymised in exports).
+- **Injury event**: date/time (estimated flag), place (ICD-10 Y92), activity (Y93), external cause (V01–Y98), intent, mechanism detail (helmet/seatbelt/airbag/alcohol suspicion), work-related, MLC flag.
+- **Pre-hospital**: mode of transport, EMS operator, call/dispatch/scene/depart/arrival times, field vitals & GCS, field interventions, pre-alert Y/N, referring facility & transfer times.
+- **ED**: arrival vitals (SBP, HR, RR, SpO2, temp, GCS E/V/M, pupils), ESI/START, activation tier & time, team leader arrival, procedures (airway, ICD, MTP, TXA…) with times, imaging (CT time), ED disposition & time, ED LOS.
+- **Diagnoses/injuries**: AIS codes/severity per injury, ISS/NISS, ICD-10 injury codes, comorbidities (Charlson-like list), pregnancy, anticoagulants.
+- **Procedures**: codes, dates/times (incision), urgency class, surgeon specialty, damage-control flag, implants (TR-003 count/type), blood products.
+- **ICU**: admission/discharge times, LOS, ventilator days, APACHE II/SOFA admission, tertiary survey done, HAI events.
+- **Complications** (NTDS list + ortho): unplanned intubation/ICU/return to OT, VAP, CLABSI, CAUTI, SSI, DVT/PE, AKI, ARDS, cardiac arrest, stroke, pressure injury, missed injury, non-union, implant failure, compartment syndrome, osteomyelitis.
+- **Outcome**: hospital disposition (home/rehab/transfer/LAMA/died), death date/time & cause/manner (IP-017/TR-008), hospital LOS, discharge GCS, GOS-E/Barthel at discharge & 3/6/12 m, RTW status, 30-day mortality/readmission (PE-002 follow-up), preventability (from M&M, privileged).
+- **Quality**: KPI timestamps and breaches, WHO checklist compliance, over/under-triage classification, registry completion dates.
+
+### 3.7 Exceptions & edge cases
+1. **Patient merge/unmerge** (OP-001): registry records re-point; duplicates flagged for registrar; exported records with changed pseudonym → correction batch.
+2. **Transfer-in with incomplete referral data**: pre-hospital/referring times marked `unknown` (dictionary-allowed) rather than blank; completeness computed accordingly.
+3. **Late death after discharge (≤ 30 d)**: PE-002 follow-up call/death registry link updates outcome; indicators for the period restated with flag.
+4. **Records under legal hold** (TR-008): still included in indicators; exports exclude free text; research extracts exclude unless approved.
+5. **Dictionary version change mid-year**: records tagged with version; exports per version; indicators use canonical internal fields.
+6. **Abstractor leaves**: queue re-assigned; in-progress records unlocked after 24 h idle.
+7. **AIS licence lapse**: AIS entry disabled; ISS from stored codes still reported; alert to programme manager.
+
+### 3.8 Data governance
+- Field-level provenance & versioning; completeness/timeliness KPIs per abstractor; inter-rater reliability (kappa on AIS/ISS & complications); dictionary version control; annual data-quality report; legacy import (EN-036) with mapping & quality flags; retention: registry permanent (pseudonymised research copies per approval).
+
+## 4. Data Model (schema `trauma`, prefix `registry_`; analytics marts in `analytics`)
+- **registry_records**: id, hospital_id, branch_id, patient_id, trauma_episode_id? (TR-001), er_visit_id, admission_id?, inclusion_reason enum(admitted/died_er/transfer/observation_23h/activation/manual), inclusion_rule_version, dictionary_version, status enum(auto_populated/in_progress/complete/validated/excluded/needs_correction), assigned_abstractor_id, due_at, completed_at, validated_at, validated_by, exclusion_reason?, completeness_pct numeric(5,2), validation_errors jsonb, version, mm_flag bool, mm_case_id?, research_opt_out bool.
+- **registry_record_fields**: record_id, field_code (dictionary), value jsonb, source_module, source_ref, source_at, entered_by?, entered_at, is_manual bool, prior_value jsonb? (versioned corrections in `registry_field_versions`).
+- **registry_dictionaries**: id, name enum(icmr_ntr/state/ntds_like/who_irtec/hip_fracture/implant/custom), version, fields jsonb ([{code, label, type, allowed_values, mandatory_when, validation}]), effective_from.
+- **registry_field_sources** (config): dictionary_id, field_code, source_module, source_path (JSONPath/SQL view), transform.
+- **registry_validation_rules**: dictionary_id, code, expression (EN-029 DSL), severity enum(error/warning), message.
+- **registry_qa_samples**: record_id, sampled_at, re_abstractor_id, discrepancies jsonb, kappa_contrib, resolved.
+- **registry_indicators** (config): code, name, type enum(process/outcome/structure), numerator_sql/expression, denominator, target, direction, risk_adjusted bool, model_id?, nabh_code?, active.
+- **registry_indicator_values** (materialised monthly/weekly): indicator_code, period, branch_id, unit?, numerator, denominator, value, ci_low, ci_high, target_met, computed_at.
+- **registry_risk_models**: id, name, version, type enum(triss/logistic_custom), coefficients jsonb, calibration jsonb, effective_from.
+- **registry_audit_flags**: id, record_id, filter_code, detail jsonb, raised_at, status enum(open/reviewed/referred_mm/closed), reviewer_id, decision, closed_at.
+- **mm_cases**: id, hospital_id, branch_id, record_id, selection_reason enum(death/unexpected_death/unexpected_survivor/audit_filter/complication/incident/random/manual), presenter_id, reviewers uuid[], due_at, summary_doc_id (auto timeline + narrative), status enum(assigned/summary_submitted/reviewed/scheduled/discussed/closed), meeting_id?, confidentiality_level enum(privileged), created_at.
+- **mm_reviews**: mm_case_id, reviewer_id, phase_issues jsonb ({phase, category, description}), preventability enum(non_preventable/potentially_preventable/preventable/undetermined), rationale, contributing_factors text[], learning_points text[], recommendations jsonb, signed_at.
+- **mm_meetings**: id, at, chair_id, attendees uuid[], agenda jsonb (mm_case_ids), minutes_doc_id, decisions jsonb ([{mm_case_id, decision_type enum(capa/protocol_change/education/peer_feedback/no_action), ref_id (NC-015 capa id etc.), owner, due}]), signed_by, signed_at, sha256.
+- **registry_export_batches**: id, dictionary_id, period_from, period_to, record_count, file_ids uuid[], pseudonymisation_salt_ref, generated_by, generated_at, transmitted_at, transmission_ref, ack_status enum(pending/accepted/rejected/partial), errors jsonb, resubmission_of?.
+- **research_cohorts**: id, name, criteria jsonb, count_cached, created_by, created_at; **research_extract_requests**: cohort_id, pi_name, iec_ref, purpose, dpdp_basis enum(consent/waiver/anonymised), fields_requested text[], status enum(requested/approved/rejected/generated/expired), approvals jsonb, extract_file_id?, expires_at, access_log jsonb[].
+- **registry_dq_reports**: period, completeness_by_field jsonb, timeliness jsonb, irr_kappa jsonb, abstractor_stats jsonb, generated_at.
+- Read models: `analytics.mv_trauma_registry_flat` (one row per record, wide), `analytics.mv_trauma_indicators`, `analytics.mv_triss_oe`, `analytics.mv_mm_summary`, `analytics.mv_registry_dq`.
+- Indexes: registry_records (hospital_id, status, due_at), (trauma_episode_id) unique, (patient_id); record_fields (record_id, field_code) unique; audit_flags (status, raised_at); mm_cases (status, due_at). RLS + ABAC (`registry.mm.read` privileged, research extracts by approval). Retention permanent; M&M records privileged, excluded from patient chart exports.
+
+## 5. Business Rules & Validations
+- Inclusion evaluated automatically at disposition/admission; exclusions require reason; manual inclusion allowed (e.g. transfers) with reason.
+- Auto-populated fields carry provenance; manual override requires reason and is versioned; validation errors block `complete`; warnings allowed with acknowledgement.
+- Deadlines: ISS locked ≤ 72 h (TR-001 rule; TR-011 nags), record complete ≤ 30 days post-discharge/death (config), validated ≤ 45 days; overdue → programme manager escalation; abstractor workload balancing (round-robin/assignment).
+- QA: ≥ 10 % random re-abstraction monthly; kappa reported for AIS/ISS, complications, dispositions; kappa < 0.7 → retraining task (NC-027).
+- Indicators computed from validated + complete records only (or flagged "provisional" including in-progress); denominators/exclusions per indicator definition; risk-adjusted metrics require ≥ 30 cases per stratum for display; funnel plots by surgeon restricted to trauma director/MS and the surgeon themselves.
+- TRISS coefficient set from TR-001; O/E computed with 95 % CI; unexpected death Ps > 0.5, unexpected survivor Ps < 0.25 (config) → auto M&M selection.
+- M&M: every in-hospital trauma death reviewed within 30 days; preventability requires ≥ 1 independent reviewer; meeting minutes signed by chair; decisions with CAPA linked to NC-015 and tracked to closure; M&M content privileged (not in patient record; excluded from PE-001/RTI/legal exports unless MS/legal approval logged).
+- Exports: pseudonymised by default (salted hash), MLC records exported without free text; direct identifiers only where registry legally requires and DPDP basis recorded; each batch validated against dictionary before transmission; failed acks → resubmission workflow.
+- Research: counts < 5 suppressed; extract requires IEC ref + approvals; extracts expire (default 180 d), watermarked; re-identification break-glass audited.
+- Multi-branch: group-level benchmarking uses `app.hospital_ids` policies; each branch sees own + anonymised peers (config).
+- Numbering: registry record no `TRG`, M&M case no `MM`.
+
+## 6. API Surface (`/api/v1/trauma/registry`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| GET | /records?status=&due_before=&abstractor= | abstractor queue | registry.record.list | – | cursor |
+| GET | /records/{id} | record with fields/provenance/errors | registry.record.read | – | – |
+| POST | /records | manual inclusion | registry.record.create | Y | – |
+| PATCH | /records/{id}/fields | set/override fields (reason) | registry.record.write | Y | – |
+| POST | /records/{id}/validate, /complete, /exclude, /reopen | lifecycle | registry.record.write / registry.record.validate | Y | – |
+| POST | /records/{id}/refresh | re-pull auto fields | registry.record.write | Y | – |
+| POST | /qa/samples, PATCH /qa/samples/{id} | QA re-abstraction | registry.qa.manage | Y | cursor |
+| GET | /indicators?period=&branch=&unit= | indicator values | registry.indicator.read | – | – |
+| POST | /indicators/recompute | recompute period | registry.indicator.manage | Y | – |
+| GET | /indicators/{code}/drilldown?period= | episodes behind a value | registry.indicator.read | – | cursor |
+| GET | /audit-flags?status=, PATCH /audit-flags/{id} | audit filter review | registry.audit.review | Y | cursor |
+| POST | /mm/cases, PATCH /mm/cases/{id} | create/assign M&M case | registry.mm.manage | Y | – |
+| GET | /mm/cases?status=&mine= | M&M worklist | registry.mm.read | – | cursor |
+| POST | /mm/cases/{id}/summary, /reviews | presenter summary; reviewer review | registry.mm.present / registry.mm.review | Y | – |
+| POST | /mm/meetings, /meetings/{id}/minutes, /sign | meetings | registry.mm.manage / registry.mm.chair | Y | – |
+| POST | /exports/batches, GET /exports/batches/{id}, POST /exports/batches/{id}/transmit|resubmit | external exports | registry.export.manage | Y | cursor |
+| POST/GET | /research/cohorts, /research/cohorts/{id}/count | cohort builder | registry.research.build | Y | – |
+| POST | /research/extracts, /extracts/{id}/approve|generate|revoke | extract requests | registry.research.request / approve | Y | – |
+| GET | /dq/reports?period= | data-quality report | registry.dq.read | – | – |
+| GET/PUT | /config/inclusion-rules, /dictionaries, /field-sources, /validation-rules, /indicators, /risk-models, /audit-filters | config | registry.configure | Y | – |
+
+## 7. Domain Events (outbox)
+- `registry.record.created|updated|completed|validated|excluded|reopened` → abstractor queue, dashboards, TR-007 closure checklist.
+- `registry.record.overdue` {days} → programme manager.
+- `registry.indicator.computed` {period} → NC-015 (NABH pack), EN-001 dashboards, EN-041 benchmarking.
+- `registry.audit_flag.raised|closed` → reviewers.
+- `registry.mm.case_created|assigned|summary_due|reviewed|scheduled|closed` → clinicians (EN-037), NC-015 (CAPA), NC-027 (education).
+- `registry.export.generated|transmitted|acknowledged|rejected` → programme manager, IT.
+- `registry.research.extract_requested|approved|generated|expired` → DPO/MS.
+- `registry.dq.report_generated`.
+- Consumes: `trauma.score.locked|updated`, `trauma.kpi.breached`, `trauma.team.activated` (TR-001); `ortho.fracture.*` (TR-002); `implant.used|explanted` (TR-003); `ot.case.completed|checklist.*` (TR-004); `icu.*` (TR-006); `polytrauma.case.closed` (TR-007); `mlc.case.opened` (TR-008); `ambulance.handover.completed` (TR-009); `rehab.pathway.discharged|score.recorded|rtw.assessed` (TR-010); `er.disposition.*` (OP-006); `ip.discharged|death` (IP-002/IP-017); `infection.case.opened` (IP-012); `incident.reported` (NC-015); `followup.outcome.recorded` (PE-002: 30-day status).
+
+## 8. Screens (UI)
+- **Abstractor workbench** (desktop dual-monitor): left queue (due dates, completeness bars), centre record form grouped by NTDS sections with provenance chips (auto/manual), inline validation errors, right chart viewer (timeline, docs, images via EN-008); coders (ICD-10 external cause with place/activity, procedures, complications, AIS link to TR-001); shortcuts `Ctrl+Enter` complete, `V` validate, `R` refresh auto fields, `E` exclude; autosave; offline not required.
+- **Programme manager dashboard** (desktop): completeness/timeliness, abstractor productivity, QA kappa, indicators heat-map vs targets, audit flags open, M&M pipeline, export status.
+- **Indicator explorer** (desktop; NC-011 widgets): trend/control charts, funnel plots (restricted), filters (branch/unit/mechanism/ISS band), drill-down to episodes; export (audited).
+- **M&M workspace** (desktop/tablet): case list, auto-generated timeline summary, presenter narrative editor, reviewer structured form (preventability), meeting agenda builder, minutes & sign, decisions → CAPA links; privileged banner; presentation mode (TV/projector, de-identified toggle).
+- **Export console** (desktop): dictionary versions, batch builder, validation results, transmit, ack log, resubmission.
+- **Research cohort builder** (desktop): criteria tree, counts (suppressed < 5), extract request wizard (IEC ref, DPDP basis), approvals, download with watermark & expiry.
+- **Config admin**: inclusion rules, dictionaries, field-source mapping, validation rules, indicators, risk models, audit filters.
+- Print: registry record summary, indicator pack (NABH), M&M minutes (privileged watermark), export manifest.
+
+## 9. Integrations
+- Internal event streams from TR-001..TR-010, OP-006, IP-*, NC-015; NC-011/EN-001 analytics & report builder; EN-019 FHIR (Patient/Encounter/Condition/Procedure/Observation profiles for registry bundles); EN-017 connectors (SFTP/API/portal for ICMR NTR/state registries); EN-036 legacy import; EN-016 signatures; EN-028/DPO consent registry for research; NC-027 education tasks; EN-041 group benchmarking; optional TQIP-like external benchmarking service.
+- Fallbacks: export endpoint down → batch stored, retry, manual upload file; dictionary mismatch → mapping task.
+
+## 10. Reports & Analytics
+- Registry completeness/timeliness by abstractor & field; IRR kappa; inclusion volumes by mechanism/intent/age/sex/place; injury severity distribution; process indicators vs targets (monthly, control charts); outcomes: crude & risk-adjusted mortality (O/E, TRISS W/Z/M), complications, LOS, vent days, functional outcomes, RTW; over/under-triage matrix; audit filter volumes & closure; M&M: cases reviewed, preventability distribution, CAPA closure & effectiveness; export/ack status; research requests; NABH indicator pack; annual trauma report (auto-generated PDF: epidemiology, performance, outcomes, improvement actions).
+- Read models as §4; refreshed nightly (indicators) and event-driven (queue).
+
+## 11. Notifications
+- Abstractors: new/overdue records, validation errors, QA discrepancies; Programme manager: overdue, kappa low, indicator target breaches, export failures; Clinicians: M&M assignments/due dates, audit flags on their cases (confidential), CAPA tasks; Trauma director/MS: unexpected deaths, monthly indicator digest, research approval requests; DPO: research extract requests/expiries; IT: export transmission errors.
+
+## 12. Permissions (RBAC keys)
+`registry.record.list|read|create|write|validate`, `registry.qa.manage`, `registry.indicator.read|manage`, `registry.audit.review`, `registry.mm.read|manage|present|review|chair`, `registry.export.manage`, `registry.research.build|request|approve`, `registry.dq.read`, `registry.configure`, `registry.report.export`.
+Defaults: Trauma registrar/abstractor (43-trauma): record.*, qa.manage (participate), dq.read; Programme manager/Quality (54): record.list/read/validate, qa.manage, indicator.*, audit.review, mm.manage, export.manage, dq.read, report.export; Trauma director/MS (4/9): indicator.read (incl. funnel), mm.chair/read, research.approve, report.export; Clinicians: mm.present/review (assigned), indicator.read (own/unit), audit.review (own cases); Research coordinator: research.build/request; DPO: research.approve; Admin: configure; Auditor: read (non-privileged).
+
+## 13. Non-functional
+- Volumes: 15k–25k registry records/year for a 2000-bed trauma centre; 500 fields/record; indicator recompute over 5 y (100k records) < 5 min nightly; abstractor form load < 400 ms with provenance; queue < 200 ms.
+- Storage: permanent; wide analytics mart partitioned by year; exports encrypted at rest; research extracts in separate bucket with expiry lifecycle.
+- Availability: batch/analytics workloads on read replica; no impact on clinical p95.
+- Accessibility/i18n: dashboards WCAG AA (colour + pattern); reports in English (+ local language summaries optional).
+- Security: privileged M&M ABAC; pseudonymisation with per-registry salts in KMS; audit all exports/extracts/re-identification; DPDP purpose logging.
+
+- Seed data: default inclusion rules, an internal dictionary v1 aligned to NTDS/ICMR-NTR core fields (§3.6), field-source mappings for TR-001..TR-010/OP-006/IP-*, validation rules (≈ 60), indicator definitions (≈ 40 process/outcome), TRISS/logistic risk model config, audit filters (≈ 15), M&M templates (summary, review, minutes), export mapping stubs (ICMR-NTR CSV, FHIR Bundle), pseudonymisation salt provisioning.
+- Test fixtures: 500 synthetic episodes with realistic timestamps/outcomes (from TR-001..TR-010 seeds), known-answer sets for TRISS W/Z/M, O/E and indicator numerators; QA sample scenario; export validation failure case; research cohort with suppression.
+- Observability: queue depth/overdue counts, nightly indicator job duration, export ack latency, extract downloads; alerts if nightly job > 30 min or fails.
+- Feature-flag defaults: `registry.abstractor_queue=true`, `registry.tqip_indicators=true`, `registry.mm_review=true`, `registry.external_export=false` until dictionary/connector configured, `registry.research_cohorts=false` until IEC/DPO process configured.
+- Read replica: all registry analytics queries pinned to `DATABASE_URL_RO`; abstractor writes to primary.
+
+## 14. Acceptance Criteria
+1. Given an ER visit disposed "admitted" with ICD-10 S72.0 and trauma activation, then a registry record is auto-created with ≥ 80 % fields auto-populated (demographics, EMS times, ED vitals, ISS, procedures) each showing provenance, and appears in the abstractor queue with a 30-day due date.
+2. Given a patient with isolated superficial abrasion discharged from ER, then no registry record is created (inclusion rule), and the decision is logged.
+3. Given a record with ISS missing and disposition "died", then validation blocks completion with error "ISS required for death"; after TR-001 lock, refresh pulls ISS and validation passes.
+4. Given an abstractor overrides auto-populated "arrival SBP" 84 → 88 with reason, then a field version is stored, provenance shows manual, and the prior value remains viewable.
+5. Given 10 % QA re-abstraction shows AIS disagreement in 3 of 20 records, then discrepancies are logged, kappa computed, and if < 0.7 a retraining task is created in NC-027.
+6. Given the monthly indicator run, then "Class 1 emergency OT ≤ 60 min" = numerator/denominator computed from TR-004 timestamps on validated records and matches manual recomputation on test data; drill-down lists the breached episodes.
+7. Given TRISS Ps values for 200 blunt cases with 20 deaths, then W, Z, M statistics and O/E with 95 % CI are computed per formula and displayed with the coefficient set version.
+8. Given a death with Ps 0.82, then an M&M case is auto-created (reason unexpected_death), the presenter assigned from the treating team, a timeline summary generated (pre-hospital→ED→OT→ICU), and a reviewer from another unit assigned; the case is invisible to users without `registry.mm.read`.
+9. Given a reviewer marks "potentially preventable — delay to OT" and the meeting decides CAPA, then an NC-015 CAPA is created and linked; the minutes are e-signed by the chair and immutable; a later effectiveness check task appears at 90 days.
+10. Given a patient's record export request (PE-001) or legal copy (TR-008), then M&M content is excluded automatically.
+11. Given an ICMR-NTR export for last quarter, then only validated records are included, UHIDs are salted-hashed, MLC free text removed, the file validates against the dictionary version, and the batch/ack status is tracked; a rejected ack enables resubmission with corrections.
+12. Given a research cohort "motorcycle RTA, ISS ≥ 16, 2025" returning 4 records, then the count is suppressed (< 5); with 120 records, an extract request requires IEC ref and approvals, generates a watermarked pseudonymised file expiring in 180 days, and every download is audited.
+13. Given a branch user viewing benchmarking, then peers appear anonymised unless group policy allows names; funnel plots by surgeon are visible only to trauma director/MS and the surgeon for own data.
+14. Given a record 31 days after discharge still `in_progress`, then `registry.record.overdue` is emitted and the programme manager notified; the dashboard shows timeliness < target.
+15. Given a hip fracture in a 70-year-old from ground-level fall and inclusion config set to include, then a record is created and the hip-fracture registry export includes time-to-surgery.
+16. Given the annual trauma report generation, then the PDF contains epidemiology, indicator tables, O/E, M&M summary (de-identified) and is stored in NC-004 with signature.
+17. Given a PE-002 follow-up call records death on day 20 after discharge, then the record's 30-day mortality updates, the affected period's indicators are restated with a flag, and TR-011 lists the case for M&M selection review.
+18. Given a transfer-in with unknown scene times, then those fields are stored as `unknown` per dictionary, completeness excludes them from "missing", and the export validates.
+19. Given two registry records for the same episode after a patient merge, then the duplicate is flagged in the abstractor queue and cannot both be exported; resolution keeps one with full provenance.
+20. Given an abstractor's in-progress record idle for 24 h, then the lock releases and the programme manager can reassign it.
+
+## 15. Enhancements / Later phases
+- (market) No Indian competitor HMS offers a trauma registry; TR-011 is a differentiator. Later: NLP-assisted abstraction from notes/imaging reports (AI-003/AI-006, Phase 12) with human validation; automated AIS coding suggestions (with TR-001); external risk-adjusted benchmarking network across Vim's HMS tenants (opt-in, EN-041); real-time dashboards for state trauma systems (EN-019); linkage to police/MoRTH iRAD road-crash data for prevention analytics; predictive quality alerts (AI-005); mobile M&M participation; injury prevention programme tracker (community outreach, NC-035 camps).
+
+## 16. Open Questions for the Hospital
+1. Registry participation targets (ICMR NTR, state registry, WHO IRTEC, hip fracture/implant registries) and their data dictionaries/submission cadence.
+2. Inclusion criteria preferences (elderly ground-level falls, isolated hip fractures, burns, drowning/poisoning) and completion deadlines.
+3. Abstractor staffing (dedicated trauma registrars vs MRD coders) and AIS licence/training status.
+4. Indicator set to start with (NABH mandatory + which TQIP-like ones), targets, and risk-adjustment model preference (TRISS-only vs custom logistic).
+5. M&M governance: frequency, chair, confidentiality/privilege policy, CAPA ownership; peer-review confidentiality rules.
+6. Research: IEC process, DPO involvement, data-use agreements, cohort access roles.
+7. Benchmarking across branches/group: named vs anonymised peers.
+8. Legacy registry data to import (format, years) and mapping.
+9. Annual trauma report format & audience (board, NABH, state).
+10. Comorbidity list and coding standard for risk adjustment (Charlson vs custom).
+11. 30-day follow-up method (PE-002 calls, WhatsApp) and consent for outcome contact.
+12. Privilege policy for M&M under state law/hospital bylaws; who may access after litigation notice.
+13. Preferred visualisation of surgeon-level data (funnel plots) and disclosure to surgeons.
+14. Registry record retention and archival for pseudonymised research copies.

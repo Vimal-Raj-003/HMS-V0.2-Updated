@@ -1,0 +1,220 @@
+# TR-001 — Trauma Triage & Assessment (START/JumpSTART, ESI, GCS, RTS/ISS/TRISS/AIS, Mass Casualty)
+
+| Field | Value |
+|---|---|
+| Domain | Trauma & Orthopaedics |
+| Module ID | TR-001 |
+| Phase | 6 |
+| Priority | P0 |
+| Complexity | Very High |
+| Depends on | OP-006 (ER intake, ER board, bays, on-call paging, MCI incident record — TR-001 is the clinical scoring/assessment engine that OP-006 embeds), OP-007 (vitals & device capture), OP-001 (MPI/UHID, tag-ID merge), OP-002 (CPOE order sets in ER mode), OP-008/EN-008 (FAST/CT/X-ray trauma series, image timeline), OP-004 (trauma labs: ABG, lactate, cross-match, TEG), IP-007 (massive transfusion protocol), TR-007 (polytrauma board consumes scores/priorities), TR-008 (MLC auto-flag from mechanism), TR-009 (pre-hospital vitals/handover feed), TR-006/IP-009 (ICU hand-off with scores), TR-002 (fracture entries from secondary survey), TR-011 (registry consumes AIS/ISS/TRISS), EN-029 (rules engine hosts calculators & activation criteria), EN-013 (wristbands/MCI tags), EN-018 (trauma bay TV), EN-037 (paging/escalation), EN-039 (survey form templates), NC-030 (trauma team roster), EN-024 (audit) |
+| Feature flag | `module.trauma_triage.enabled` (sub: `trauma.mci_mode`, `trauma.jumpstart`, `trauma.triss_coefficients_local`, `trauma.ais_licensed`) |
+| Primary roles | Nurse — ER/Triage (19), Doctor — Emergency Physician (8), Trauma team leader (Surgeon 9 with trauma scope), Resident (14, co-sign), Anaesthetist (10) |
+| Secondary roles | Intensivist (11), Orthopaedic surgeon (9), Radiologist (12, FAST/CT read), Blood bank (37), Nurse Supervisor (22, MCI command), Quality Manager (54, TQIP indicators), Medical Superintendent (4), Ambulance EMT (52, pre-hospital START), MRD coder (43, AIS coding), Auditor (58) |
+| Regulatory | NABH 5th ed. AAC.6/COP.3/COP.4 (initial assessment, emergency & triage documentation, time-bound), ATLS 10th ed. primary/secondary survey standard, ESI v4 handbook (AHRQ), START (Simple Triage and Rapid Treatment) & JumpSTART paediatric MCI protocol, AIS 2005 update 2008 / AIS 2015 (licensed dictionary — hospital procures AAAM licence; TR-001 stores codes, not dictionary text), ISS/NISS (Baker), RTS (Champion), TRISS (MTOS coefficients; India-local coefficients configurable), GCS (Teasdale, incl. GCS-P), MoHFW National Programme for Prevention & Management of Trauma & Burn Injuries (NPPMTBI) trauma-centre levels, MoHFW Trauma Registry / ICMR National Trauma Registry data element alignment, Disaster Management Act 2005 & NDMA hospital MCI guidelines (HDMP), Motor Vehicles Act §162 golden-hour scheme, CrPC/BNSS MLC duties (via TR-008), DPDP Rules 2025 |
+
+## 1. Purpose
+TR-001 is the trauma-specific clinical engine of the emergency department: structured field and in-hospital triage (START/JumpSTART for mass casualty, ESI 5-level for routine ER, colour coding), trauma team activation on defined criteria, ATLS primary/secondary survey templates with golden-hour timers, and automatic computation of every trauma severity score (GCS with paediatric variant, RTS, AIS body-region coding, ISS/NISS, TRISS probability of survival, shock index, MGAP/GAP) from data captured once. It runs on tablets and phones at the trauma bay, works offline during network loss or an MCI surge, and feeds the polytrauma board (TR-007), ICU (TR-006), MLC (TR-008) and the trauma registry (TR-011). OP-006 owns arrival, registration, bays and the ER board; TR-001 owns triage algorithms, scores, surveys, activation and MCI clinical triage.
+
+## 2. Users & Jobs-to-be-done
+- **ER triage nurse** (tablet at triage; phone in bays): complete ESI triage in ≤ 2 min with device vitals, get auto-suggested level, apply trauma activation criteria in one tap, print colour tag; in MCI: START/JumpSTART in ≤ 30 s per casualty by scanning a pre-printed tag.
+- **Emergency physician / trauma team leader** (tablet in bay, desktop in doctor room): run ATLS primary survey (ABCDE) with time stamps, order trauma order-set (STAT), record secondary survey head-to-toe with injuries pinned on body diagram, see RTS/ISS/TRISS/probability of survival update live, decide disposition/priority for TR-007, hand over to OT/ICU with scores.
+- **Trauma team members** (surgeon, anaesthetist, ortho, neurosurgery, blood bank; phone): receive activation page with tier (Level 1 full / Level 2 partial), acknowledge, ETA, arrive-scan.
+- **Ambulance EMT** (phone, TR-009 app): pre-hospital START tag and vitals relayed into TR-001 pre-arrival record; on handover, scores continue from field values.
+- **MCI triage officer / nurse supervisor** (rugged tablet, offline): declare/receive MCI, triage at the door with tags, view category counters, re-triage, run capacity board with OP-006.
+- **Registry coder / quality** (desktop): finalise AIS codes post-imaging/operative findings, lock ISS, review TRISS unexpected survivors/deaths (TR-011).
+
+## 3. Core Workflows
+
+### 3.1 ESI triage (routine ER, embedded in OP-006 triage form)
+1. **Nurse** opens triage for an ER visit (from OP-006 board `T`) → **System** pre-fills vitals from OP-007 device capture (BP, HR, RR, SpO2, temp, GRBS, pain NRS, weight for paeds) and pre-hospital vitals from TR-009 if present.
+2. Nurse answers ESI decision points: **A** requires immediate life-saving intervention? (airway, pulseless, unresponsive, severe respiratory distress) → ESI-1; **B** high-risk situation / new confusion-lethargy-disorientation / severe pain-distress (NRS ≥ 7 with objective signs) → ESI-2; **C** resource count (0 → 5, 1 → 4, ≥ 2 → 3); **D** danger-zone vitals by age band (adult HR > 100, RR > 20, SpO2 < 92 %; paeds tables 0–3 m, 3 m–3 y, 3–8 y, > 8 y) → up-triage 3 → 2 consideration → **System** computes suggested ESI + colour (1 Red, 2 Orange, 3 Yellow, 4 Green, 5 Blue) → nurse confirms/overrides with reason → colour tag & wristband print (EN-013) → Event `trauma.triage.esi_recorded` (OP-006 updates board and target timers).
+3. **Trauma activation check** runs on every triage save (§3.3). **GCS** captured E/V/M with auto total and paediatric verbal scale (< 5 y); intubated → V = 1T flag; GCS-P (pupil-reactivity subtraction) optional.
+4. **Re-triage** any time (nurse or doctor): new record in `triage_assessments`, prior kept; NEWS2/PEWS deterioration alerts (EN-029) prompt re-triage.
+5. Exception: patient arrives in cardiac arrest → ESI-1 auto, code call (IP-013), triage form minimal (time, rhythm), rest completed later.
+
+### 3.2 START / JumpSTART mass-casualty triage (`trauma.mci_mode`)
+1. **Nurse supervisor / EM physician** declares MCI in OP-006 (or receives declaration from TR-009/108 control room) → **System** switches ER tablets to **MCI mode**: single-screen START wizard, tag scanning, no registration required.
+2. **Triage officer** scans pre-printed MCI tag barcode (`MCI-<incident>-<seq>`, printed in advance in EN-013 batches; four-colour tear-off tags) → wizard: *Walks?* → Minor (Green); *Breathing?* no → open airway → still no → Expectant/Deceased (Black); yes → *RR* > 30 (adult) → Immediate (Red); *Perfusion* cap refill > 2 s / no radial pulse → Immediate; *Mental status* cannot obey commands → Immediate; else Delayed (Yellow). **JumpSTART** (child < 8 y or looks like a child): apnoeic with pulse → 5 rescue breaths → breathing → Immediate; RR < 15 or > 45 → Immediate; AVPU P (inappropriate)/U → Immediate → **System** stores category, timestamp, GPS (if field), triage officer, creates a **tag-based temporary ER visit** in OP-006 (`ER-TAG` series linked to MCI tag) with photo option → Event `trauma.mci.casualty_triaged`.
+3. **Re-triage** at each stage (door → treatment zone → pre-OT): category history kept; SALT variant (Sort-Assess-Lifesaving-Treatment) selectable per hospital protocol.
+4. **Capacity board** (OP-006 MCI screen + TV): counters by category, casualties in each zone, blood O-neg stock (IP-007), OT rooms free (TR-004), ICU beds (TR-006), ventilators (NC-020); family information desk list (tag/photo/description) with privacy control.
+5. Post-stabilisation: full registration & merge tag → UHID (OP-001 merge keeps all TR-001 records); stand-down → MCI after-action report (casualty count by category, time to triage, over/under-triage vs final ISS).
+6. **Offline**: tablets cache tag ranges + wizard; records queue in IndexedDB with device clock + monotonic seq; sync resolves duplicates by tag number (last-writer wins on category, all versions kept in history).
+
+### 3.3 Trauma team activation (tiered)
+1. On triage save, pre-alert (TR-009) or doctor action, **System** evaluates configurable **activation criteria** (EN-029 rule set): *Level 1 (full)*: SBP < 90 (adult) / age-adjusted, GCS ≤ 8 with mechanism, RR < 10 or > 29, intubated from field, penetrating injury to head/neck/torso/proximal extremity, gunshot wound, flail chest, ≥ 2 long-bone fractures, pelvic fracture suspected, paralysis, amputation proximal to wrist/ankle, burns > 20 % TBSA with trauma, transfer patients receiving blood; *Level 2 (partial)*: fall > 6 m (adult) / > 3 m (child), high-risk auto crash (intrusion, ejection, death in same vehicle, rollover), auto vs pedestrian/cyclist thrown, motorcycle > 30 km/h, age > 55 / < 5, anticoagulants, pregnancy > 20 wks, dialysis, EMS judgement.
+2. Criteria met → **activation** with tier → pages (EN-037 + NC-030 roster) trauma surgeon, EM physician, anaesthetist, ortho, neurosurgery (Level 1), radiology tech (portable X-ray/CT standby), blood bank (MTP standby, uncross-matched O-neg), OT coordinator (TR-004 emergency slot hold), ICU (bed hold) → acknowledgement/ETA/arrival tracked (reuse OP-006 `on_call_alerts`) → **golden-hour clock** starts at injury time (estimated) and door time → Event `trauma.team.activated`.
+3. Under-/over-triage review: activation tier vs final ISS (> 15 without activation = under-triage; activation with ISS < 9 discharged = over-triage) computed for TR-011 (Cribari matrix).
+
+### 3.4 ATLS primary survey with golden-hour timers
+1. **Team leader/nurse** opens **Primary Survey** (tablet, large buttons, one-hand): **A** airway patent/at risk/obstructed, c-spine immobilised (collar time), interventions (jaw thrust, OPA/NPA, ETT size/depth/time/operator, surgical airway) → **B** RR, SpO2, breath sounds L/R, chest wall, tension pneumothorax → needle decompression / ICD (side, size, time, output) → **C** HR, BP, cap refill, external haemorrhage control (tourniquet time!, pelvic binder time), IV/IO access sites, fluid/blood volumes, FAST (positive/negative/indeterminate per window; images to EN-008), MTP activation → **D** GCS, pupils (size/reactivity), lateralising signs, glucose → **E** exposure/temperature, hypothermia prevention, log-roll findings.
+2. Each intervention writes a timestamped `trauma_interventions` row; **timers** shown: time since injury, door time, tourniquet on-time (alarm at 90/120 min), pelvic binder, collar, time to CT (target ≤ 30 min from door for Level 1), time to OT (damage-control target ≤ 60 min), MTP cooler out-time.
+3. **Adjuncts**: trauma order-set (OP-002 ER mode: ABG, lactate, Hb, coag/TEG, group & cross-match, urine, eFAST, portable chest/pelvis X-ray, CT trauma series) with one tap; tetanus prophylaxis prompt (open wound), TXA prompt within 3 h of injury (CRASH-2/3), antibiotics for open fracture within 1 h (TR-002 Gustilo).
+4. **Shock index**, **RTS** (coded GCS, SBP, RR) and **MGAP/GAP** compute live and display in banner; deterioration re-computes.
+5. Event `trauma.primary_survey.updated`; interventions billed via OP-005/IP-005 charge intents.
+
+### 3.5 Secondary survey, injury list & AIS/ISS coding
+1. **Doctor** records AMPLE history (Allergies, Medications, Past history/pregnancy, Last meal, Events/mechanism), **mechanism** structured (RTA: role occupant/2-wheeler/pedestrian, helmet/seatbelt, speed band, ejection; fall height; assault weapon; burn; blast; crush; sports; industrial; animal; self-harm) — mechanism drives TR-008 MLC auto-suggest and registry fields.
+2. **Head-to-toe** with **body diagram** (front/back/lateral, adult/paeds SVG): tap region → injury type (laceration, abrasion, contusion, fracture, penetrating, burn, amputation, degloving), size, depth, side, photo (TR-008 chain-of-custody capture if MLC) → each injury row gets **AIS body region** (Head/Neck, Face, Chest, Abdomen-pelvic contents, Extremities/pelvic girdle, External) and **AIS severity 1–6** (coder-entered from licensed AIS dictionary code list `trauma.ais_codes` loaded by hospital; provisional severity by doctor allowed) → **System** computes **ISS** (sum of squares of the three highest AIS in *different* regions; any AIS 6 → ISS 75) and **NISS** (three highest regardless of region), flags *provisional* until coder locks post-imaging/operative findings.
+3. Fractures identified → create TR-002 registry entry inline (bone, side, open/closed, Gustilo) → `trauma.injury.recorded`.
+4. **TRISS**: Ps = 1/(1+e^-b), b = b0 + b1·RTS + b2·ISS + b3·AgeIndex (age ≥ 55 = 1), blunt/penetrating coefficient sets (MTOS default; hospital may load local/Indian coefficients under `trauma.triss_coefficients_local`, versioned) → displayed with coefficient set version; recomputed when ISS locked; ASCOT optional later.
+5. Injuries + scores render on TR-007 polytrauma board; disposition (OT / ICU / ward / transfer / mortuary) via OP-006 disposition wizard with **trauma handover sheet** (scores, interventions with times, pending results, MLC status).
+
+### 3.6 Paediatric, burns & special populations
+- Paediatric: JumpSTART, PEWS, age-based vitals thresholds, paediatric GCS, weight-based fluid (20 mL/kg boluses) and drug doses (Broselow colour from length → tape colour stored), PTS (Paediatric Trauma Score) optional.
+- Burns: Lund-Browder / rule-of-nines TBSA calculator on body diagram, Parkland formula (fluid plan with 8 h/16 h split from *injury time*), inhalation injury flags, referral criteria; ABSI optional.
+- Pregnancy > 20 wks: left lateral tilt reminder, obstetric page (IP-011), Rh status prompt.
+- Elderly/anticoagulated: reversal-agent prompt, low threshold CT head, frailty flag.
+- Spinal: ASIA impairment scale grid (motor/sensory levels) with auto A–E grade.
+
+### 3.7 Golden-hour KPI capture & closure
+- Auto timestamps: injury (estimated), 108 call, scene arrival/departure (TR-009), door, triage, team arrival, first blood, CT, OT incision, ICU admission; breaches raise `trauma.kpi.breached` (to Quality NC-015/TR-011). Trauma episode closes at disposition; scores lock when coder finalises AIS (default within 72 h; TR-011 nags).
+
+### 3.8 Trauma handover, transfer-out and death
+1. **Handover to OT/ICU/ward**: team leader taps *Handover* → **System** generates SBAR trauma handover sheet (mechanism, ABCDE findings, interventions with times, blood given, imaging status, pending results, scores, MLC status, belongings, NOK contact) → receiving nurse/doctor scans patient wristband to acknowledge (`trauma.handover.acknowledged`) → episode disposition set; TR-006 receives arrival GCS/RTS/ISS for APACHE II baseline; TR-004 receives implant/blood needs; TR-007 card moves lane.
+2. **Transfer-out** (higher centre/neurosurgery unavailable): IP-018 transfer packet auto-includes trauma sheet + images link (EN-008 share), TR-009 ambulance booking with pre-alert to receiving hospital, stability statement signed by doctor; MLC → police informed of transfer (TR-008).
+3. **Death in ER / brought dead**: declaration in OP-006 → TR-001 records outcome, TRISS Ps captured for M&M, MLC/inquest mandatory for unnatural death (TR-008), body to IP-017; brought-dead episodes get mechanism + external injuries only (no scores except AIS external for registry).
+4. **Re-activation**: patient in observation deteriorates → nurse taps *Re-activate* → new activation row, pages, timers restart from now (door time unchanged).
+
+### 3.9 Configuration & governance
+- Hospital admin/quality edit activation criteria, ESI danger-zone tables (age bands), START/SALT selection, KPI targets, TRISS coefficient sets, AIS import, body-diagram variants (adult/paeds/burns), order-set links, tag templates — all versioned with effective dates; changes audited and shown in reports (criteria version per activation).
+
+## 4. Data Model (schema `trauma`)
+- **trauma_episodes**: id, hospital_id, branch_id, er_visit_id (OP-006), patient_id?, temp_tag_id?, mci_incident_id?, mci_tag_no?, injury_at (estimated) , injury_time_source enum(patient/ems/estimated), door_at, mechanism jsonb (category, sub-type, details, protective_devices, speed_band, height_m, weapon), intent enum(unintentional/assault/self_harm/undetermined/legal_intervention), place_of_injury (ICD-10 Y92 code), activity (Y93), transport_mode enum(108/112/private_ambulance/police/private_vehicle/walk_in/transfer_in), referred_from_facility?, activation_level enum(none/level_2/level_1), activated_at, activated_by, activation_criteria_met text[], is_mlc bool, mlc_id? (TR-008), pregnancy_weeks?, is_paediatric bool, weight_kg, broselow_colour?, gcs_arrival smallint, rts_arrival numeric(4,3), sbp_arrival, rr_arrival, shock_index numeric(4,2), iss smallint?, niss smallint?, iss_status enum(provisional/locked), iss_locked_by, iss_locked_at, triss_ps numeric(5,4)?, triss_coeff_set_id, tbsa_pct?, asia_grade?, disposition enum(ot/icu/ward/observation/discharged/transfer_out/died_er/brought_dead/lama), disposition_at, outcome_30d enum(alive/dead/unknown)?, status enum(open/closed), notes. Unique (hospital_id, er_visit_id).
+- **triage_assessments** (shared with OP-006 — TR-001 owns columns): + esi_decision jsonb {a,b,c_resources[],d_flags[]}, esi_suggested, esi_final, override_reason, gcs_e/v/m/total, gcs_verbal_scale enum(adult/paediatric), intubated bool, pupils jsonb, avpu, pain_nrs, news2, pews, start_category enum(minor/delayed/immediate/expectant/deceased)?, start_algorithm enum(start/jumpstart/salt), start_answers jsonb, triaged_at, triaged_by, device_id, offline_captured bool, client_seq.
+- **mci_tags**: id, hospital_id, incident_id (OP-006 `mci_incidents`), tag_no unique per hospital, printed_batch_id, status enum(printed/issued/triaged/merged/void), er_visit_id?, current_category, category_history jsonb[], photo_file_id, description text, location_zone, last_seen_at.
+- **trauma_activations**: id, episode_id, level, criteria_met text[], triggered_by enum(rule/manual/prealert), triggered_at, paged_roles jsonb, ack_summary jsonb (per role: sent/ack/eta/arrived), stood_down_at, stand_down_reason.
+- **primary_surveys**: id, episode_id, version, airway jsonb, breathing jsonb, circulation jsonb (fast_result, mtp_activated_at, tourniquets[], binder_at), disability jsonb, exposure jsonb, recorded_by, recorded_at, signed_at, sha256, prev_sha256 (append-only versions).
+- **trauma_interventions**: id, episode_id, type enum(intubation/surgical_airway/needle_decompression/icd/tourniquet_on/tourniquet_off/pelvic_binder/iv_access/io_access/blood_uncrossmatched/mtp/txa/tetanus/antibiotic/splint/reduction/log_roll/other), side?, size?, at, performed_by, details jsonb, charge_intent_id?, consumables jsonb.
+- **secondary_surveys**: id, episode_id, version, ample jsonb, findings_by_region jsonb, recorded_by, recorded_at, signed_at.
+- **trauma_injuries**: id, episode_id, seq, body_region_ais enum(head_neck/face/chest/abdomen/extremities/external), body_site_snomed, side, injury_type, description, icd10, ais_code (from `ais_codes`), ais_severity smallint (1–6), ais_status enum(provisional/final), source enum(clinical/imaging/operative/autopsy), fracture_id? (TR-002), photo_file_ids uuid[], diagram_x, diagram_y, diagram_view, entered_by, entered_at.
+- **ais_codes** (hospital-loaded, licensed): hospital_id, ais_version, code, region, severity, description_hash (text stored only if licence permits), is_active.
+- **trauma_scores** (append-only history): id, episode_id, at, gcs, rts, iss, niss, triss_ps, shock_index, mgap, gap, pts, tbsa, computed_by enum(system/user), inputs jsonb, coeff_set_id.
+- **triss_coefficient_sets**: hospital_id?, name, mechanism enum(blunt/penetrating), b0..b3 numeric(8,5), source, effective_from, is_default.
+- **activation_criteria** (config, versioned): hospital_id, level, code, expression (EN-029 DSL), description, is_active.
+- **trauma_kpi_timestamps**: episode_id, event enum(injury/ems_call/scene_arrival/scene_departure/door/triage/activation/team_leader_arrived/first_blood/ct_start/ct_reported/ot_incision/icu_admit/disposition), at, source enum(auto/manual/ems), by.
+- **burn_assessments**: episode_id, method enum(rule_of_nines/lund_browder), regions jsonb, tbsa_pct, depth_map jsonb, inhalation_suspected, parkland_plan jsonb, weight_kg.
+- **asia_assessments**: episode_id, at, motor jsonb, sensory jsonb, neurological_level, grade enum(A/B/C/D/E), by.
+- Indexes: trauma_episodes (hospital_id, branch_id, door_at desc), (patient_id), (mci_incident_id), (activation_level, door_at); trauma_injuries (episode_id); mci_tags (hospital_id, tag_no) unique; trauma_scores (episode_id, at desc); trauma_kpi_timestamps (episode_id, event). RLS on all; `trauma_scores`, `trauma_interventions` monthly partitions optional (high-write in MCI). Retention: permanent for MLC-linked; ≥ 10 y otherwise.
+
+## 5. Business Rules & Validations
+- ESI: suggestion is computed server-side (shared Zod schema/algorithm in `packages/contracts/scores`); nurse may override only with `trauma.triage.override` and reason; ESI-1/2 auto-evaluate activation criteria; ESI level cannot be blank on save; triage within 5 min of door (OP-006 rule) — TR-001 raises breach event.
+- GCS: E 1–4, V 1–5 (paediatric scale if age < 5 y or flagged), M 1–6; if intubated V recorded as 1T and total flagged "T"; RTS uses coded GCS bands (13–15 = 4, 9–12 = 3, 6–8 = 2, 4–5 = 1, 3 = 0), SBP bands (> 89 = 4, 76–89 = 3, 50–75 = 2, 1–49 = 1, 0 = 0), RR bands (10–29 = 4, > 29 = 3, 6–9 = 2, 1–5 = 1, 0 = 0); RTS = 0.9368·GCSc + 0.7326·SBPc + 0.2908·RRc; **arrival** values (first complete set) frozen for TRISS.
+- ISS: only one AIS per region counts (highest); regions per ISS grouping (Head/Neck incl. c-spine, Face, Chest incl. t-spine, Abdomen/pelvic contents incl. l-spine, Extremities/pelvic girdle, External); AIS 6 in any region → ISS = 75; AIS 9 (unknown) excluded and ISS marked *incomplete*; NISS computed alongside. ISS provisional until locked by user with `trauma.score.lock` (coder/EM consultant); post-lock edits create new version with reason (audit).
+- TRISS: computed only when RTS arrival, ISS (locked or provisional-flagged) and age exist; mechanism blunt vs penetrating mandatory; coefficient set version stored with result; Ps < 0.5 survivors and Ps > 0.5 deaths auto-listed for TR-011 M&M.
+- Activation criteria are hospital-configurable but seeded from ACS-COT/NPPMTBI defaults; Level 1 page cannot be silenced; stand-down requires team leader + reason.
+- Tourniquet time > 2 h → red banner + page surgeon; TXA prompt suppressed after 3 h from injury; antibiotics for open fracture > 1 h → KPI breach.
+- MCI: tag numbers unique per hospital; category change requires reason ≥ 3 chars (can be "reassess"); Expectant category needs physician confirmation within zone; deceased in field → TR-008 brought-dead / inquest flow; family desk list shows tag no/photo/description only until identity confirmed and consent (or MS approval) for release.
+- MLC: mechanism in (RTA, assault, burns unexplained, self-harm, firearm, industrial, fall from height, animal attack per SOP, unknown patient) → MLC suggested; doctor must accept/decline with reason; acceptance calls OP-006/TR-008 flag flow.
+- Body diagram injuries: side mandatory for paired regions; photo capture routes through TR-008 evidence service when MLC (hash, custody), else clinical media store (OP-022).
+- Offline: triage/START/primary survey forms usable offline; server timestamps recorded on sync with client offset; conflicting edits to the same primary survey version → both stored, latest by server time shown, conflict banner for team leader.
+- Numbering: none new (uses `ER_NO`, `ER_TAG`, `MCI` tag batches via EN-013). Signatures: surveys signed by doctor (resident → consultant co-sign ≤ 24 h).
+
+## 6. API Surface (`/api/v1/trauma`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| POST | /episodes | open trauma episode for ER visit (auto from activation/mechanism) | trauma.episode.create | Y | – |
+| GET | /episodes/{id} | full episode (scores, surveys, injuries, timeline) | trauma.episode.read | – | – |
+| GET | /episodes?from=&status=&level=&mci= | list/search | trauma.episode.list | – | cursor |
+| POST | /episodes/{id}/triage | ESI/GCS record (or re-triage) | trauma.triage.create | Y | – |
+| POST | /scores/esi/suggest | stateless ESI suggestion (used by OP-006 form) | trauma.triage.create | – | – |
+| POST | /episodes/{id}/activation | activate/stand-down (level, criteria) | trauma.activation.manage | Y | – |
+| POST | /episodes/{id}/primary-survey | new version | trauma.survey.write | Y | – |
+| POST | /episodes/{id}/interventions | add intervention (tourniquet, ICD…) | trauma.survey.write | Y | – |
+| POST | /episodes/{id}/secondary-survey | new version | trauma.survey.write | Y | – |
+| POST/PATCH/DELETE | /episodes/{id}/injuries[/{injuryId}] | injury list & AIS | trauma.injury.write | Y | – |
+| POST | /episodes/{id}/scores/recompute | recompute RTS/ISS/NISS/TRISS | trauma.score.compute | Y | – |
+| POST | /episodes/{id}/scores/lock | lock ISS/AIS | trauma.score.lock | Y | – |
+| POST | /episodes/{id}/burns, /asia | special assessments | trauma.survey.write | Y | – |
+| POST | /episodes/{id}/kpi | manual KPI timestamp | trauma.episode.update | Y | – |
+| POST | /mci/tags/batches | print tag batch | trauma.mci.manage | Y | – |
+| POST | /mci/incidents/{id}/triage | START/JumpSTART record by tag (creates ER-TAG visit) | trauma.mci.triage | Y (tag+seq) | – |
+| GET | /mci/incidents/{id}/board | counters/zones read model | trauma.mci.read | – | – |
+| POST | /mci/sync | bulk offline upload | trauma.mci.triage | Y | – |
+| GET/PUT | /config/activation-criteria, /config/triss-coefficients, /config/ais-codes (import) | config | trauma.configure | Y | – |
+| GET | /reports/kpi?from=&to= | golden-hour KPIs | trauma.report.read | – | – |
+
+## 7. Domain Events (outbox)
+- `trauma.triage.esi_recorded` {er_visit_id, esi, colour, gcs, news2} → OP-006 board/timers, EN-018.
+- `trauma.team.activated` {episode_id, level, criteria} → EN-037 pages, TR-004 (OT hold), IP-007 (MTP standby), TR-006 (ICU bed hold), OP-008 (CT standby), TR-007 (board card).
+- `trauma.team.stood_down`, `trauma.activation.acknowledged|arrived` → KPIs.
+- `trauma.primary_survey.updated`, `trauma.intervention.recorded` {type, at} → TR-007 board, OP-005/IP-005 charge intents, IP-007 (uncrossmatched issue), NC-008 consumption.
+- `trauma.injury.recorded` {region, ais, fracture_id?} → TR-002 (fracture create), TR-008 (body-map mirror when MLC), TR-007.
+- `trauma.score.updated` {rts, iss, niss, triss_ps, status} → TR-007, TR-006, TR-011, OP-006 card.
+- `trauma.score.locked` → TR-011 registry record ready.
+- `trauma.mci.casualty_triaged` {incident_id, tag_no, category, er_visit_id} → OP-006 MCI board, EN-018, TR-009 (field feed).
+- `trauma.mlc.suggested|accepted` → OP-006/TR-008.
+- `trauma.kpi.breached` {episode_id, kpi, target, actual} → NC-015 incidents, TR-011.
+- Consumes: `er.patient.arrived`, `er.mci.declared|stand_down` (OP-006), `ambulance.prealert|handover` (TR-009), `vitals.recorded` (OP-007), `rad.study.completed` (OP-008 → prompt AIS update), `ot.case.incision` (TR-004), `icu.admitted` (TR-006), `lab.result.critical` (lactate/Hb).
+
+## 8. Screens (UI)
+- **Triage form (ESI)** — tablet (also desktop): device vitals auto-fill, ESI wizard A→B→C→D with live suggested level chip, GCS keypad (E/V/M big buttons, paediatric toggle), activation banner ("Level 1 criteria met: SBP 84 — Activate?"), print tag; shortcuts `1–5` set ESI, `G` GCS, `A` activate, `Enter` save; offline queue indicator; error: device vitals stale > 10 min flagged.
+- **START/JumpSTART MCI wizard** — rugged tablet/phone, one question per screen, colour result full-screen with tag number, camera photo, "next casualty" in one tap; category counters at top; works fully offline; sync status; TV variant of counters (EN-018).
+- **Trauma bay workspace** — tablet (bay wall mount) & desktop: header banner (tag/UHID, age/sex, MLC, allergies), **timers rail** (injury, door, tourniquet, binder, MTP, CT target), ABCDE cards with intervention buttons, FAST grid, order-set button, live scores chip (GCS/RTS/SI/ISS prov/TRISS); shortcuts `Ctrl+1..5` A–E sections, `I` intervention, `O` order-set, `S` scores; real-time multi-user (nurse + doctor edit different sections; section lock indicator).
+- **Secondary survey & body diagram** — tablet: SVG body (adult/paeds, front/back/side), tap-to-add injury with AIS region auto, photo capture (custody when MLC), injury table with AIS/ISS panel; `+` add injury, `F` create fracture (TR-002).
+- **Scores panel/detail** — desktop: RTS/ISS/NISS/TRISS calculations with inputs shown, coefficient set, lock button, history graph of GCS/SI.
+- **Activation console** — phone (team members): page with tier/summary, Ack/ETA/Arrived buttons; desktop list for ER charge.
+- **Trauma KPI dashboard** — desktop/TV: activations today, door-to-CT, door-to-OT, tourniquet times, under/over-triage %, MCI status.
+- Print: triage tag (colour, ESI/START), trauma handover sheet (A4), MCI tag batches (EN-013 ZPL), primary survey PDF.
+
+## 9. Integrations
+- OP-007/EN-042 monitors (HL7 ORU vitals) for auto-fill; TR-009 pre-hospital record (FHIR Bundle/JSON via EN-017) → pre-arrival episode; EN-013 tag/wristband printers (ZPL local agent); EN-037/EN-009/EN-033 paging (push, SMS, WhatsApp, IVR fallback); OP-008/EN-008 FAST clip upload & CT status; IP-007 MTP; EN-029 rules DSL for criteria/thresholds; TR-011 registry export (ICMR NTR/NTDB-like CSV/FHIR); AIS dictionary import (CSV licensed by hospital); GPS (browser geolocation) for field triage.
+- Fallbacks: rules engine down → local default criteria table; printer down → on-screen colour tag + handwritten tag no entry; monitors offline → manual vitals; sync conflicts surfaced not silently overwritten.
+
+## 10. Reports & Analytics
+- Activation log & tier compliance; under-/over-triage (Cribari); door-to-triage/team/CT/OT/ICU medians and breach %; tourniquet/binder durations; ISS distribution; TRISS observed vs expected (W, Z, M statistics) → TR-011; MCI after-action (time per casualty, category flow, re-triage changes); ESI mix per shift; GCS trend adherence (q15 min for GCS ≤ 8); paediatric vs adult; mechanism/intent epidemiology (RTA hotspots by place-of-injury pincode).
+- Read models: `analytics.mv_trauma_episode_daily`, `analytics.mv_trauma_kpi`, `analytics.mv_mci_incident_summary`, `analytics.mv_triss_oe`.
+
+## 11. Notifications
+- Team pages (activation tier, bay, summary — no full name), escalation ladder per EN-037; tourniquet/binder/MTP timer alarms (in-app + bay TV); KPI breach to ER in-charge; MCI declaration/stand-down broadcast (staff call-in via NC-030/EN-009); score lock reminder to coder at 48 h/72 h; family desk SMS template for MCI helpline (no PHI); Quality: unexpected death (TRISS) flagged.
+
+## 12. Permissions (RBAC keys)
+`trauma.episode.create|read|list|update`, `trauma.triage.create|override`, `trauma.activation.manage|respond`, `trauma.survey.write|sign`, `trauma.injury.write`, `trauma.score.compute|lock`, `trauma.mci.manage|triage|read`, `trauma.report.read|export`, `trauma.configure`.
+Defaults: ER nurse (19): triage.create, survey.write (nursing sections), activation.respond, mci.triage, episode.read; EM physician (8)/Trauma surgeon (9): all clinical incl. triage.override, activation.manage, survey.sign, injury.write, score.compute; Resident (14): write with co-sign; Coder (43)/EM consultant: score.lock; Nurse supervisor (22): mci.manage; Quality (54)/MS (4): report.*; Hospital admin: configure; EMT (52): mci.triage (field), episode.read (own trip); Auditor: read.
+
+## 13. Non-functional
+- Volumes: 60–120 trauma activations/day at a 2000-bed Level I-equivalent centre; 300–500 ER triages/day; MCI surge 100 casualties in 60 min across 6 tablets.
+- p95: ESI suggest < 50 ms (pure function), triage save < 200 ms, START record < 150 ms (server) and < 20 ms local offline, score recompute < 100 ms, activation page dispatch < 5 s.
+- Offline: PWA caches triage/START/primary-survey forms, tag ranges, criteria; IndexedDB queue with idempotency keys; sync within 10 s of reconnect; ER edge/on-prem API recommended (OP-006 §13).
+- Devices: tablets 10" (bay wall mount), phones for pages, TV boards; camera; barcode scanner; glove-friendly 48 px targets.
+- Accessibility/i18n: colour + text + icon for categories; high-contrast; audible alarms mutable per bay; tag text bilingual (en + state language).
+- Security: photos of injuries encrypted at rest; MLC media via TR-008 custody service; no PHI in pages; audit every score lock/override.
+
+## 14. Acceptance Criteria
+1. Given adult with HR 118, RR 24, SpO2 90 %, alert, when nurse answers A=no, B=no, resources ≥ 2, then system suggests ESI-3 → danger-zone flag prompts up-triage → nurse accepts ESI-2 (Orange) and reason is stored with the D-flag list.
+2. Given GCS E2 V(intubated) M4, then total shows "7T", RTS uses coded GCS band 2, and Level 1 activation criteria (GCS ≤ 8 with mechanism) fire a page to the trauma team within 5 s.
+3. Given SBP 84 mmHg on triage, then Level 1 activation is proposed; on confirm, OT hold (TR-004), MTP standby (IP-007) and ICU bed hold (TR-006) events are emitted, and acknowledgements/ETA appear on the activation console.
+4. Given tourniquet applied at 10:05, then bay timer alarms at 11:35 (90 min) and 12:05 (120 min) and the surgeon on the team is paged at 120 min.
+5. Given injuries AIS: head 4, chest 3, abdomen 3, extremities 2, external 1, then ISS = 16+9+9 = 34 and NISS = 16+9+9 = 34; adding a second chest AIS 4 makes ISS = 16+16+9 = 41 and NISS = 16+16+16 = 48.
+6. Given any injury AIS 6, then ISS = 75 regardless of others and TRISS uses ISS 75.
+7. Given blunt mechanism, age 60, RTS 5.967, ISS 25, then TRISS Ps is computed with the default MTOS blunt coefficients (b0 −0.4499, b1 0.8085, b2 −0.0835, b3 −1.7430) = documented value ± 0.001, coefficient set id stored.
+8. Given ISS provisional and coder locks after CT findings changing head AIS 3 → 5, then a new score version is created, TRISS recomputed, `trauma.score.locked` emitted, and prior version remains visible.
+9. Given MCI declared and tablet offline, when triage officer scans tag MCI-INC7-014 and completes START (RR 34), then Immediate/Red is shown in < 1 s, record queued, and after reconnect an ER-TAG visit exists in OP-006 with category Red and no duplicate on re-sync.
+10. Given a 6-year-old apnoeic casualty with a pulse in JumpSTART, then the wizard requires 5 rescue breaths step; if breathing resumes → Immediate; if not → Deceased with physician confirmation required.
+11. Given RTA mechanism recorded, then MLC is auto-suggested; declining requires reason; accepting flags OP-006 visit and TR-008 register entry is created.
+12. Given open tibia fracture recorded in secondary survey at 11:00 and no antibiotic intervention logged by 12:00, then `trauma.kpi.breached` (antibiotic ≤ 1 h) is emitted and shown to team leader.
+13. Given a Level 1 activated patient with final ISS 6 discharged from ER, then the episode is counted as over-triage in the Cribari report; a non-activated patient with ISS 20 is counted as under-triage.
+14. Given a nurse without `trauma.triage.override` edits ESI from 2 to 3, then the request is rejected (403) and audited.
+15. Given burns 27 % TBSA (Lund-Browder) weight 70 kg injury at 09:00, then Parkland plan shows 7560 mL total, 3780 mL by 17:00 and remainder by 09:00 next day, adjusted for fluids already given from field.
+16. Given resident signs primary survey, then consultant co-sign task is created; unsigned after 24 h → escalation to HOD.
+17. Given handover to ICU, then the SBAR trauma sheet PDF is generated with all interventions/timestamps, ICU nurse wristband scan records acknowledgement, and TR-006 shows arrival GCS/RTS/ISS in the admission summary.
+18. Given a patient in observation whose SBP falls to 82 mmHg, when nurse taps Re-activate, then a new activation row is created, Level 1 pages fire again, and the episode timeline shows both activations.
+19. Given two users edit the primary survey offline (nurse: circulation; doctor: airway) and sync, then both sections merge into the latest version without loss; if both edited the same section, a conflict banner shows both values for team-leader resolution.
+20. Given TRISS Ps 0.92 for a patient who dies in ICU, then the case appears in the TR-011 unexpected-death list within 1 h of `ip.discharge.death` event.
+
+## 15. Enhancements / Later phases
+- From VIMS sheet (ER row 6): mass casualty START protocol (Phase 6 here), trauma scoring auto-calc (here), forensic templates (TR-008), poison info centre (OP-006 Phase 8), ER-to-IP seamless transfer (OP-006/IP-001).
+- (market) Emergency → IPD data sync & triage notes (SmartHospital) covered; add: AI-assisted AIS coding from radiology reports & op notes (AI-006, Phase 12); voice-driven primary survey (AI-004); wearable/monitor auto-scores; tele-trauma consult with higher centre (OP-018); ASCOT/TRISS-India recalibration (TR-011 research); geospatial injury heat-map for road-safety authorities (EN-001); PTS/PECARN head-CT rules (EN-029); REBOA/whole-blood protocol logs; RFID casualty tracking in MCI; integration with NDMA/State EOC incident feeds.
+
+## 16. Open Questions for the Hospital
+1. Trauma centre level (NPPMTBI Level I/II/III) and team composition per activation tier; who is team leader by shift?
+2. Activation criteria to adopt (ACS-COT defaults vs local); Level 2 age thresholds; anticoagulant criteria.
+3. MCI protocol: START vs SALT vs Sieve/Sort; JumpSTART for paeds; number of pre-printed tags to stock; MCI tablets available; family info desk policy.
+4. AIS dictionary licence (AAAM AIS 2015) available? Who codes (EM consultant vs MRD coder) and within what deadline?
+5. TRISS coefficients: MTOS default or local/ICMR set? Report Ps to families? Use NISS in M&M?
+6. Golden-hour KPI targets (door-to-CT, door-to-OT, antibiotics for open fractures) for NABH indicators.
+7. Photo policy for injuries (all vs MLC only), storage retention, who can view.
+8. Paediatric ER: Broselow tape in use? PEWS/PTS adoption?
+9. Burns unit present? Lund-Browder vs rule-of-nines default; Parkland vs modified Brooke.
+10. Registry participation (ICMR NTR, state trauma registry) — data elements to capture from day one (TR-011).
+11. Bay hardware: wall tablets, barcode scanners, printers, TV boards; connectivity/edge server plan for offline resilience.

@@ -1,0 +1,28 @@
+{
+  "name": "@vims/integration-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EN-017 skeleton: connector registry, adapter interface, mapping DSL, DLQ, circuit breakers, health checks, PHI-redacted message log. No live connectors in Phase 0.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vims/contracts": "workspace:*",
+    "@vims/db": "workspace:*",
+    "bullmq": "^6.1.2",
+    "ioredis": "^6.0.0",
+    "pino": "^10.3.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "vitest": "^4.1.10"
+  }
+}

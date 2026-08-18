@@ -1,0 +1,9 @@
+node_modules
+dist
+.next
+.turbo
+generated
+coverage
+pnpm-lock.yaml
+docs/_source-vims-master-sheet.txt
+packages/db/prisma/migrations

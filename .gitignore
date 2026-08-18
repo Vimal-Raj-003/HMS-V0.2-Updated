@@ -1,0 +1,47 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+build/
+.next/
+out/
+generated/
+*.tsbuildinfo
+
+# turbo
+.turbo/
+
+# env & secrets — NEVER commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!packages/db/prisma/**/*.sql
+secrets/
+*.lic
+
+# test output
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.nyc_output/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.recommended.json
+
+# local infra volumes
+infra/docker/volumes/

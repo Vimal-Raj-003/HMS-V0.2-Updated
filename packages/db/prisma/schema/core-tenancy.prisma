@@ -1,0 +1,448 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Tenancy: group → hospital → branch → unit → location  (EN-041 §3.1)
+//
+// NAMING DECISION (recorded in docs/DECISIONS.md as D-15): `docs/03 §Schemas`
+// and `docs/prompts/phase-00-foundation.md` §0.2 both call the table
+// `core.branches`, while `EN-041 §4` calls it `org_branches`. One canonical name
+// is used — `core.branches` — because the tenancy anchor having two names in one
+// codebase is a real hazard, not a cosmetic one. EN-041's other `org_*` tables
+// keep their prefix.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum HospitalStatus {
+  active
+  suspended
+  closed
+
+  @@schema("core")
+}
+
+enum BranchKind {
+  hospital
+  branch
+  satellite
+  collection_centre
+  daycare
+  polyclinic
+  warehouse
+
+  @@schema("core")
+}
+
+enum BranchStatus {
+  provisioning
+  live
+  suspended
+  closed
+
+  @@schema("core")
+}
+
+enum ModuleProfile {
+  full_hospital
+  opd_only
+  collection_centre
+  daycare
+
+  @@schema("core")
+}
+
+enum AccessScope {
+  branch
+  entity
+  group
+
+  @@schema("core")
+}
+
+/// The legal / brand parent. Optional: a single-hospital customer has none.
+model OrgGroup {
+  id              String   @id @db.Uuid
+  name            String   @db.VarChar(200)
+  legalName       String   @map("legal_name") @db.VarChar(300)
+  brand           String?  @db.VarChar(120)
+  logoFileId      String?  @map("logo_file_id") @db.Uuid
+  defaultCurrency String   @default("INR") @map("default_currency") @db.Char(3)
+  defaultTimezone String   @default("Asia/Kolkata") @map("default_timezone") @db.VarChar(64)
+  hqAddress       Json?    @map("hq_address")
+  status          HospitalStatus @default(active)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String?  @map("created_by") @db.Uuid
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?  @map("updated_by") @db.Uuid
+  version         Int      @default(0)
+
+  hospitals Hospital[]
+
+  @@map("org_groups")
+  @@schema("core")
+}
+
+/// The tenant boundary and the RLS anchor. A group of several legal entities is
+/// several `Hospital` rows sharing a `groupId` (EN-041 §3.1).
+model Hospital {
+  id             String  @id @db.Uuid
+  groupId        String? @map("group_id") @db.Uuid
+  code           String  @db.VarChar(24)
+  legalName      String  @map("legal_name") @db.VarChar(300)
+  displayName    String  @map("display_name") @db.VarChar(200)
+  entityType     String? @map("entity_type") @db.VarChar(64)
+
+  // Statutory identity (EN-007 §3.1.1)
+  primaryGstin   String? @map("primary_gstin") @db.VarChar(15)
+  pan            String? @db.VarChar(10)
+  tan            String? @db.VarChar(10)
+  cin            String? @db.VarChar(21)
+  /// Clinical Establishment / NABH / NABL / drug licence numbers with validity.
+  registrations  Json    @default("{}")
+  rohiniId       String? @map("rohini_id") @db.VarChar(32)
+  /// ABDM Health Facility Registry id (EN-011).
+  hfrId          String? @map("hfr_id") @db.VarChar(64)
+
+  timezone       String  @default("Asia/Kolkata") @db.VarChar(64)
+  locale         String  @default("en-IN") @db.VarChar(16)
+  /// Subset of the 12 supported locales this hospital offers. `en-IN` always present.
+  languages      String[] @default(["en-IN"])
+  currency       String  @default("INR") @db.Char(3)
+  booksCurrency  String  @default("INR") @map("books_currency") @db.Char(3)
+  /// April for the Indian financial year.
+  fyStartMonth   Int     @default(4) @map("fy_start_month") @db.SmallInt
+  residencyZone  String  @default("in") @map("residency_zone") @db.VarChar(8)
+
+  address        Json    @default("{}")
+  contacts       Json    @default("{}")
+  /// DPDP Act 2023 requires a published Data Protection Officer.
+  dpo            Json    @default("{}")
+  /// DPDP Act 2023 requires a published grievance officer.
+  grievanceOfficer Json  @default("{}") @map("grievance_officer")
+
+  logoLightFileId String? @map("logo_light_file_id") @db.Uuid
+  logoDarkFileId  String? @map("logo_dark_file_id") @db.Uuid
+
+  isTenantBoundary Boolean @default(true) @map("is_tenant_boundary")
+  status         HospitalStatus @default(active)
+
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy      String?  @map("created_by") @db.Uuid
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy      String?  @map("updated_by") @db.Uuid
+  version        Int      @default(0)
+
+  group    OrgGroup? @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  branches Branch[]
+
+  @@unique([code])
+  @@index([groupId, status])
+  @@map("hospitals")
+  @@schema("core")
+}
+
+/// The operational boundary — one physical site with its own registrations,
+/// GSTIN, numbering series and stock. EN-041 §3.1.
+model Branch {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  groupId       String? @map("group_id") @db.Uuid
+  code          String  @db.VarChar(16)
+  name          String  @db.VarChar(200)
+  shortName     String  @map("short_name") @db.VarChar(40)
+  /// `group.hospital.branch` — ltree, so ancestor/descendant queries are index-fast.
+  path          String? @db.VarChar(512)
+  parentBranchId String? @map("parent_branch_id") @db.Uuid
+  kind          BranchKind @default(branch)
+  /// A collection centre that sends samples to a parent branch's lab.
+  servesFromBranchId String? @map("serves_from_branch_id") @db.Uuid
+
+  address       Json    @default("{}")
+  stateCode     String? @map("state_code") @db.Char(2)
+  /// Invoice series are legally per GSTIN and may never be shared across them
+  /// (EN-041 §3.6). Two branches on different GSTINs get different series.
+  gstin         String? @db.VarChar(15)
+  timezone      String  @default("Asia/Kolkata") @db.VarChar(64)
+  currency      String  @default("INR") @db.Char(3)
+  residencyZone String  @default("in") @map("residency_zone") @db.VarChar(8)
+  hfrId         String? @map("hfr_id") @db.VarChar(64)
+  rohiniId      String? @map("rohini_id") @db.VarChar(32)
+  workingHours  Json    @default("{}") @map("working_hours")
+  bedCount      Int     @default(0) @map("bed_count")
+  moduleProfile ModuleProfile @default(full_hospital) @map("module_profile")
+  /// docs/06 §4.1 / EN-041 §3.7: a persistent colour band so nobody orders for
+  /// the wrong site. A semantic token name, never a hex literal.
+  colourToken   String  @default("branch-1") @map("colour_token") @db.VarChar(32)
+
+  goLiveAt      DateTime? @map("go_live_at") @db.Timestamptz(6)
+  status        BranchStatus @default(provisioning)
+  closedAt      DateTime? @map("closed_at") @db.Timestamptz(6)
+  successorBranchId String? @map("successor_branch_id") @db.Uuid
+
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy     String?  @map("created_by") @db.Uuid
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy     String?  @map("updated_by") @db.Uuid
+  version       Int      @default(0)
+
+  hospital       Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  parentBranch   Branch?  @relation("BranchHierarchy", fields: [parentBranchId], references: [id], onDelete: Restrict)
+  childBranches  Branch[] @relation("BranchHierarchy")
+  units          OrgUnit[]
+  registrations  BranchRegistration[]
+  userAccess     UserBranchAccess[]
+  onboarding     BranchOnboarding?
+
+  @@unique([hospitalId, code])
+  @@index([hospitalId, status])
+  @@index([groupId, status])
+  @@map("branches")
+  @@schema("core")
+}
+
+enum OrgUnitKind {
+  ward
+  icu
+  ot_complex
+  block
+  floor
+  wing
+  department_unit
+
+  @@schema("core")
+}
+
+model OrgUnit {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  code       String  @db.VarChar(32)
+  name       String  @db.VarChar(160)
+  kind       OrgUnitKind
+  path       String? @db.VarChar(512)
+  capacity   Int?
+  active     Boolean @default(true)
+
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy  String?  @map("created_by") @db.Uuid
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy  String?  @map("updated_by") @db.Uuid
+  version    Int      @default(0)
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+
+  @@unique([branchId, code])
+  @@index([hospitalId, branchId, active])
+  @@map("org_units")
+  @@schema("core")
+}
+
+/// Per-facility licences. EN-041 §Regulatory: "Clinical Establishments Act and
+/// state licensing are **per facility** … NABH/NABL accreditation is per site,
+/// never group-wide." Expiry drives escalating alerts at 90/60/30/7 days.
+enum RegistrationKind {
+  clinical_establishment
+  drug_licence
+  bmw_authorisation
+  aerb_licence
+  pcpndt_registration
+  fire_noc
+  nabh
+  nabl
+  abdm_hfr
+  gstin
+  pollution
+  lift
+  blood_bank
+  other
+
+  @@schema("core")
+}
+
+model BranchRegistration {
+  id                String  @id @db.Uuid
+  hospitalId        String  @map("hospital_id") @db.Uuid
+  branchId          String  @map("branch_id") @db.Uuid
+  kind              RegistrationKind
+  number            String  @db.VarChar(120)
+  issuingAuthority  String? @map("issuing_authority") @db.VarChar(200)
+  validFrom         DateTime? @map("valid_from") @db.Date
+  validTo           DateTime? @map("valid_to") @db.Date
+  documentFileId    String? @map("document_file_id") @db.Uuid
+  status            String  @default("valid") @db.VarChar(24)
+  renewalOwnerUserId String? @map("renewal_owner_user_id") @db.Uuid
+
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy  String?  @map("created_by") @db.Uuid
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy  String?  @map("updated_by") @db.Uuid
+  version    Int      @default(0)
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, branchId, kind])
+  // Powers the licence-expiry board a group compliance officer lives on.
+  @@index([hospitalId, validTo])
+  @@map("org_branch_registrations")
+  @@schema("core")
+}
+
+/// EN-041 §3.2: the declarative source of which domains are shared across the
+/// group and which are strictly isolated. Making this configuration rather than
+/// scattered code is what makes the choice auditable.
+enum SharingMode {
+  group
+  entity
+  branch
+
+  @@schema("core")
+}
+
+enum ResidencyConstraint {
+  none
+  same_zone
+  aggregate_only
+
+  @@schema("core")
+}
+
+model OrgDataDomain {
+  id                 String  @id @db.Uuid
+  hospitalId         String? @map("hospital_id") @db.Uuid
+  domainKey          String  @map("domain_key") @db.VarChar(64)
+  sharingMode        SharingMode @map("sharing_mode")
+  overridePolicy     Json    @default("{}") @map("override_policy")
+  consentRequired    Boolean @default(false) @map("consent_required")
+  residencyConstraint ResidencyConstraint @default(none) @map("residency_constraint")
+  notes              String? @db.Text
+
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy  String?  @map("updated_by") @db.Uuid
+  version    Int      @default(0)
+
+  @@unique([hospitalId, domainKey])
+  @@map("org_data_domains")
+  @@schema("core")
+}
+
+/// EN-041 §3.7: one identity, explicit per-branch grants. The role a person
+/// holds may legitimately differ per branch (consultant at A, HOD at B).
+model UserBranchAccess {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  userId     String  @map("user_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  roles      String[] @default([])
+  scope      AccessScope @default(branch)
+  isPrimary  Boolean @default(false) @map("is_primary")
+  fromAt     DateTime @map("from_at") @db.Timestamptz(6)
+  toAt       DateTime? @map("to_at") @db.Timestamptz(6)
+  grantedBy  String? @map("granted_by") @db.Uuid
+  reason     String? @db.VarChar(500)
+
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version    Int      @default(0)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, branchId, fromAt])
+  @@index([hospitalId, userId])
+  @@index([hospitalId, branchId])
+  @@map("org_user_branch_access")
+  @@schema("core")
+}
+
+/// EN-041 §3.4: every cross-branch clinical access is an event, not a right.
+/// Partitioned monthly; 7-year retention (DPDP / audit).
+enum CrossBranchBasis {
+  care_relationship
+  consent
+  break_glass
+  group_role
+
+  @@schema("core")
+}
+
+model CrossBranchAccessLog {
+  id             String  @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  actorUserId    String  @map("actor_user_id") @db.Uuid
+  actorBranchId  String  @map("actor_branch_id") @db.Uuid
+  /// No FK: `patient.patients` arrives in Phase 1. The column exists now so the
+  /// disclosure log is complete from the first cross-branch read.
+  patientId      String  @map("patient_id") @db.Uuid
+  targetBranchId String  @map("target_branch_id") @db.Uuid
+  targetEntityId String? @map("target_entity_id") @db.Uuid
+  basis          CrossBranchBasis
+  consentRef     String? @map("consent_ref") @db.Uuid
+  reason         String? @db.Text
+  /// What was viewed — resource types and counts, never the content.
+  resources      Json    @default("{}")
+  occurredAt     DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  reviewedBy     String? @map("reviewed_by") @db.Uuid
+  reviewedAt     DateTime? @map("reviewed_at") @db.Timestamptz(6)
+
+  @@id([id, occurredAt])
+  @@index([hospitalId, patientId, occurredAt(sort: Desc)])
+  @@index([hospitalId, actorUserId, occurredAt(sort: Desc)])
+  @@index([hospitalId, basis, occurredAt(sort: Desc)])
+  @@map("org_cross_branch_access_log")
+  @@schema("core")
+}
+
+/// EN-041 §3.9: the onboarding wizard, with an elapsed-time counter so the
+/// "<24 h per branch" target is auditable rather than aspirational.
+model BranchOnboarding {
+  id                    String  @id @db.Uuid
+  hospitalId            String  @map("hospital_id") @db.Uuid
+  branchId              String  @unique @map("branch_id") @db.Uuid
+  templateSourceBranchId String? @map("template_source_branch_id") @db.Uuid
+  /// Ordered steps with status, owner, completion time and notes.
+  steps                 Json    @default("[]")
+  /// Scripted verification results, including the RLS-isolation check that gates go-live.
+  smokeTest             Json    @default("{}") @map("smoke_test")
+  goLiveReportFileId    String? @map("go_live_report_file_id") @db.Uuid
+  startedAt             DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt           DateTime? @map("completed_at") @db.Timestamptz(6)
+  elapsedMinutes        Int?    @map("elapsed_minutes")
+
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version    Int      @default(0)
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId])
+  @@map("org_branch_onboarding")
+  @@schema("core")
+}
+
+/// EN-041 §3.11: cross-zone data rules, intersected with role scope so a group
+/// finance user in one country cannot read another's patient-level rows.
+enum ResidencyPatientDataRule {
+  allow
+  aggregate_only
+  deny
+
+  @@schema("core")
+}
+
+model OrgResidencyPolicy {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  groupId       String? @map("group_id") @db.Uuid
+  fromZone      String  @map("from_zone") @db.VarChar(8)
+  toZone        String  @map("to_zone") @db.VarChar(8)
+  patientData   ResidencyPatientDataRule @map("patient_data")
+  legalBasis    String? @map("legal_basis") @db.Text
+  dpaRef        String? @map("dpa_ref") @db.VarChar(200)
+  approvedBy    String? @map("approved_by") @db.Uuid
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version    Int      @default(0)
+
+  @@unique([hospitalId, fromZone, toZone, effectiveFrom])
+  @@map("org_residency_policies")
+  @@schema("core")
+}

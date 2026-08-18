@@ -1,0 +1,281 @@
+# EN-029 — Clinical Decision Support (Rules Engine: Allergy, Drug–Drug/Food/Disease Interaction, Duplicate Therapy, Dose Range & Renal/Hepatic/Weight/Age Dosing, Pregnancy/Lactation, Schedule H1/NDPS Guardrails, Critical & Delta Lab Alerts, NEWS2/PEWS/MEWS, Sepsis Screening, VTE Prophylaxis, Antibiotic Stewardship, Care Gaps, Order Sets, Alert-Fatigue Governance)
+
+| Field | Value |
+|---|---|
+| Domain | Enabler |
+| Module ID | EN-029 |
+| Phase | 2 |
+| Priority | P0 |
+| Complexity | Very High |
+| Depends on | EN-027 (drug/allergen/test/diagnosis masters, LOINC/SNOMED/ATC, value sets, concept maps), EN-007 (roles, settings, secrets), EN-024 (audit — every fired & overridden alert), EN-037 (Notification Centre — asynchronous alert delivery & escalation), EN-038 (rule-publication approval workflow), EN-039 (rule-authoring form widgets, alert-card templates), EN-017 (knowledge-base vendor feed ingestion), EN-036 (bulk load of local formulary rules), EN-041 (group vs branch rule scope) |
+| Consumed by | OP-002 (CPOE/e-Rx — synchronous checks at order entry), OP-003 (pharmacy dispensing check), IP-014 (ward-stock/unit-dose check), IP-003 (MAR administration check, NEWS2 charting), IP-009 (ICU deterioration & sepsis), OP-004 (lab critical/delta values), OP-006/TR-001 (ER triage & trauma), IP-006 (pre-op/VTE), IP-012 (infection control, antibiogram-driven stewardship), IP-020 (clinical pathways & order sets), OP-013 (vaccination due), PE-002 (preventive recall), AI-002 (LLM layer that *proposes* rules and explanations, never replaces them) |
+| Feature flag | `module.cdss.enabled` (sub: `cdss.interactions`, `cdss.dosing`, `cdss.lab_alerts`, `cdss.deterioration`, `cdss.sepsis`, `cdss.stewardship`, `cdss.care_gaps`, `cdss.order_sets`, `cdss.vendor_kb`) |
+| Primary roles | Doctor — Consultant/IP/Emergency (6/7/8), Resident (14), Pharmacist (30/31/32), Nurse — Ward/ICU/ER (17/18/19), Intensivist (11) |
+| Secondary roles | Medical Superintendent (4 — rule governance & override review), Pharmacy In-charge (32 — formulary rule authoring), Lab Quality Manager (35 — critical value table), Infection Control Nurse (21) & Clinical Pharmacologist (stewardship rules), Quality Manager NABH (54 — indicator reporting), IT Admin (56 — KB feed health), Auditor (58) |
+| Regulatory | NABH 6th edn **MOM** (medication ordering safety, high-alert & LASA drugs, verbal-order rules), **COP** (early-warning/critical-care escalation, sepsis and deterioration response), **PSQ** (medication error & sentinel event reporting), NABL 112 (critical/panic value read-back & call-back documentation — EN-031), **Drugs & Cosmetics Rules** Schedule H/H1/X prescribing & register obligations, **NDPS Act & Rules** for narcotic/psychotropic orders, DPCO/NPPA (generic-substitution prompts), CDSCO PvPI (ADR reporting trigger), MCI/NMC prescription-legibility & generic-name norms, DPDP Act 2023 (clinical rule evaluation is processing of health data — purpose-limited, audited), EHR Standards India 2016 (SNOMED CT/LOINC bindings) |
+
+## 1. Purpose
+EN-029 is the hospital's single **rules-based clinical decision support** engine: one place where medication-safety, dosing, laboratory, deterioration, prophylaxis, stewardship and preventive-care rules are authored, versioned, effective-dated, tested and executed — synchronously inside the ordering transaction (allergy, interaction, dose) and asynchronously on clinical events (critical results, NEWS2, sepsis screens, care gaps). It exists to prevent harm without drowning clinicians: every rule declares its interruption level (hard-stop / soft-stop / passive), every alert is auditable, every override captures a coded reason, and alert-fatigue metrics are first-class product data. It is deliberately **deterministic and explainable**; AI-002 sits *above* EN-029 and may only propose, never fire, an alert.
+
+## 2. Users & Jobs-to-be-done
+- **Doctor (OPD, desktop/tablet; IP, tablet; ER, desktop)**: while prescribing, be told within a keystroke that the patient is allergic to the drug class, that it doubles the INR, that the dose exceeds the renal-adjusted maximum, or that this antibiotic needs de-escalation on day 3 — with a one-line reason, an evidence link and a way to proceed with justification when clinically right.
+- **Resident / Junior doctor (14)**: get order sets and pathway-linked bundles so the first 60 minutes of sepsis or polytrauma care is not improvised; a hard-stop cannot be bypassed by a resident (requires consultant countersign).
+- **Pharmacist (30/31/32)**: run the same checks again at verification/dispensing (independent double-check), see the prescriber's override reason before dispensing, and maintain formulary-local rules (LASA, tall-man, high-alert, look-up substitution).
+- **Nurse (17/18/19, tablet/phone)**: receive NEWS2/PEWS/MEWS escalation prompts when vitals are charted, sepsis screen prompts, and a 5-Rights check at administration (max-daily-dose, duplicate-dose-within-window).
+- **Lab (13/33/35)**: critical & panic values raise an alert with a mandatory read-back/call-back record and a delta-check flag when a result swings implausibly.
+- **Infection control & clinical pharmacology (21)**: define restricted-antibiotic pre-authorisation, day-3 de-escalation and IV→PO switch rules driven by IP-012 antibiogram.
+- **Medical Superintendent / Quality (4/54)**: review the monthly override report, retire rules with >90 % override rate, approve new rules, and evidence NABH indicators.
+- **Clinical informaticist / rule author (custom role)**: author a rule in a form-driven builder, run it against a stored patient cohort in the test harness, schedule its effective date, and roll it back in one click if it misfires.
+
+## 3. Core Workflows
+
+### 3.1 Rule taxonomy (what EN-029 fires)
+| # | Rule family | Trigger point | Default interruption | Key inputs |
+|---|---|---|---|---|
+| 1 | **Drug–allergy / cross-sensitivity** | order entry, verify, administer | **hard-stop** (documented allergy, severity anaphylaxis) / soft-stop (intolerance) | `patient.allergies` (substance + class via ATC/SNOMED), cross-reactivity map (penicillin↔cephalosporin, sulfa group, NSAID class) |
+| 2 | **Drug–drug interaction (DDI)** | order entry, verify | severity-graded: **contraindicated → hard-stop**, major → soft-stop, moderate → passive, minor → suppressed by default | active med list (OPD Rx + IP MAR + home meds), KB interaction pairs with severity, onset, mechanism, management text |
+| 3 | **Drug–food / drug–alcohol** | order entry, discharge Rx | passive (patient-instruction) | KB, diet order (OP-011) |
+| 4 | **Drug–disease / condition** | order entry | soft-stop | active problem list (ICD-10/SNOMED), e.g. NSAID in CKD-4, beta-blocker in asthma, metformin in eGFR<30 |
+| 5 | **Drug–lab** | order entry + on new result | soft-stop / async alert | latest K⁺, eGFR, LFT, INR, QTc, platelet count with recency window |
+| 6 | **Duplicate therapy** | order entry | soft-stop | same generic, same ATC-4 class, same therapeutic intent (e.g. two PPIs, two NSAIDs) |
+| 7 | **Dose range** (single dose, frequency, max daily, max course) | order entry | soft-stop below/above range, **hard-stop >200 % of max daily** or above absolute ceiling | drug master dose bands by indication, age band, weight, BSA |
+| 8 | **Renal / hepatic / weight / age dosing** | order entry | soft-stop with suggested adjusted dose | eGFR (CKD-EPI 2021, creatinine-based; Schwartz for paediatrics), Child-Pugh where recorded, actual/ideal/adjusted body weight, BSA (Mosteller), age bands (neonate/infant/child/adult/geriatric ≥65) |
+| 9 | **Pregnancy / lactation** | order entry | hard-stop for category X / known teratogen, soft-stop for D | pregnancy flag & LMP/EDD (IP-011), lactation flag, KB category + India-specific notes |
+| 10 | **Schedule H1 / X / NDPS guardrails** | order entry, dispense | hard-stop on missing prescriber registration or missing register fields; soft-stop on quantity > limit | drug schedule from EN-027, prescriber NMC reg no., indication, H1 register fields, NDPS 2-person + quantity/day cap |
+| 11 | **High-alert & LASA** | order entry, dispense, administer | confirmation step (type-to-confirm) + independent double-check | ISMP high-alert list localised, LASA pairs with tall-man lettering |
+| 12 | **Critical / panic lab & imaging values** | on result verified (async) | must-acknowledge notification + call-back record | test-level critical low/high per age/sex (EN-027), radiology critical-finding codes (OP-008) |
+| 13 | **Delta check** | on result verified | passive flag to lab, blocks auto-release | prior result within N days, absolute/percent delta per analyte |
+| 14 | **Deterioration scores — NEWS2 (adult), PEWS (paediatric), MEWS (obstetric/general)** | on vitals save (async, <5 s) | score-banded escalation ladder | RR, SpO₂ + scale-2 for hypercapnic, O₂ supplement, SBP, HR, consciousness (ACVPU), temperature |
+| 15 | **Sepsis screening (qSOFA + SIRS + suspected infection)** | on vitals/lab/med event | must-acknowledge sepsis alert with 1-hour bundle order set | qSOFA (RR≥22, SBP≤100, GCS<15), SIRS ≥2, lactate, culture ordered, antibiotic given |
+| 16 | **VTE risk & prophylaxis** | on admission +24 h, post-op, daily | soft-stop on discharge/handover if unassessed | Padua (medical) / Caprini (surgical) score, bleeding-risk (IMPROVE), contraindications |
+| 17 | **Antibiotic stewardship** | order entry, day 3, day 7 | pre-auth hard-stop for restricted agents; passive de-escalation prompt | formulary restriction tiers, culture & sensitivity from OP-004/IP-012, IV→PO switch criteria, duration caps |
+| 18 | **Care gaps & preventive reminders** | on encounter open (async, cached) | passive banner + task | overdue HbA1c, BP recheck, immunisation due (OP-013), cancer screening, post-MI statin, follow-up not booked (PE-002) |
+| 19 | **Order sets & pathway prompts** | on diagnosis/problem add, on triage | passive suggestion → one-click bundle | IP-020 pathway definitions, EN-039 order-set forms |
+| 20 | **Radiology appropriateness & dose** | imaging order entry | passive/soft-stop | repeat CT within N days, pregnancy + ionising radiation (hard-stop without documented justification), contrast + eGFR/metformin |
+| 21 | **Blood product safety** | transfusion order | soft-stop | Hb threshold policy, prior transfusion reaction (IP-007) |
+| 22 | **Contrast & procedure prerequisites** | order entry | soft-stop | fasting, consent (EN-028), anticoagulant hold |
+
+### 3.2 Synchronous evaluation at order entry (the hot path)
+1. **Doctor/Resident** composes an order in OP-002 CPOE (or discharge Rx, IP order, MAR change) → the client sends a **draft order bundle** (patient context id + candidate orders) to `POST /api/v1/cdss/evaluate` **before** persistence.
+2. Engine assembles the **evaluation context** from a pre-warmed, per-encounter **patient snapshot** (Redis, TTL 60 s, invalidated on allergy/problem/result/med events): demographics (age in days for neonates, sex, weight, height, BSA), allergies, active problems, active & recent meds (including home meds reconciled at admission), latest relevant labs with timestamps, pregnancy/lactation flags, renal & hepatic function, isolation/infection flags, care-team, encounter type, branch.
+3. Rules whose **applicability predicate** matches (rule scope: branch, department, encounter type, role, age band) are executed in a deterministic order by family, then by severity.
+4. Results return as an **alert set**: `{ruleId, ruleVersion, family, severity, interruption, title, oneLineReason, detail, evidenceRefs[], suggestedActions[], overrideRequired, overrideReasonSet}`.
+5. Client renders alerts inline per order line (not as a modal wall): passive = grey chip, soft-stop = amber card requiring `Acknowledge` or `Override + reason`, hard-stop = red card that disables the Sign button.
+6. **Doctor** overrides where clinically justified → picks a coded reason (`benefit_outweighs_risk`, `patient_tolerated_previously`, `dose_intentional_titration`, `allergy_reported_not_true_allergy`, `will_monitor_levels`, `specialist_advice`, `other + free text ≥ 20 chars`) → order signs → Event `cdss.alert.overridden`.
+7. **Hard-stop bypass** is not an override: it requires either (a) a different order, or (b) a **countersign by an authorised role** (consultant/Medical Superintendent, or Clinical Pharmacologist for restricted antibiotics) captured as a second signature — Event `cdss.hardstop.countersigned`.
+8. Every alert shown, acknowledged, overridden or auto-suppressed is written to `cdss_alert_events` (append-only) → EN-024 audit.
+9. **Independent re-check at verification** (pharmacist) and at **administration** (nurse, 5-Rights): the same rule set runs with the then-current context; a new alert appearing at administration (e.g. K⁺ came back at 6.8) is a must-acknowledge stop.
+
+**Exceptions**
+- **Engine unavailable / timeout (>150 ms)**: the client shows a visible degraded banner "Safety checks unavailable — proceed with caution"; ordering is **not blocked** (blocking care is the greater harm) except that hard-stop families cached locally (allergy list, pregnancy X list, NDPS caps) still evaluate client-side from the cached snapshot. The degraded evaluation is recorded on the order (`cdss_status = degraded`), and a background re-evaluation runs when the engine returns, raising an async alert if a hard-stop would have fired.
+- **Offline PWA (ward round, poor Wi-Fi)**: allergy, duplicate-therapy, max-daily-dose and pregnancy-X checks run from the cached snapshot + a compact offline rule pack (< 2 MB); the order is queued and fully re-evaluated on sync, before it becomes actionable to pharmacy.
+
+### 3.3 Asynchronous / event-driven evaluation
+1. Domain events (`vitals.recorded`, `lab.result.verified`, `rad.report.finalised`, `patient.admitted`, `med.administered`, `problem.added`, `encounter.opened`, `shift.changed`, daily cron) land on Redis Streams.
+2. The **CDSS evaluator worker** loads the affected patient snapshot, runs the async rule families (12–19, 22), and produces alerts with a **delivery policy**: in-app card in the patient's alert rail, task to the responsible role, EN-037 notification with escalation ladder, TV/ward-board flag (EN-018) for code-level events.
+3. **NEWS2 example**: nurse saves vitals → score computed and stored on the vitals row (never recomputed differently later) → band `0`, `1–4`, `5–6 or any single 3`, `≥7` → response per hospital policy (e.g. ≥7 = immediate critical-care outreach + must-ack by doctor within 15 min, else escalate to Intensivist then Medical Superintendent) → Events `cdss.news2.scored`, `cdss.deterioration.alert`.
+4. **Sepsis example**: qSOFA ≥2 **and** an infection signal (culture ordered, antibiotic given, temp <36/>38, ICD infection code) → sepsis alert with a one-click **Sepsis 1-Hour Bundle** order set (lactate, blood cultures ×2 before antibiotics, broad-spectrum antibiotic per antibiogram, 30 mL/kg crystalloid if hypotensive/lactate ≥4, vasopressor if MAP<65) → bundle-element completion is tracked with timestamps for the NABH/quality indicator.
+5. **Critical value example**: lab verifies K⁺ 6.9 → alert to ordering doctor + ward nurse + on-call (NC-030 roster) → mandatory **read-back/call-back** record (who called, who received, time, read-back confirmed) → unacknowledged in 10 min escalates; unacknowledged in 20 min pages the duty Medical Superintendent → Event `cdss.critical_value.acknowledged` closes the loop. (Result production and the call-back register belong to OP-004/EN-031; EN-029 owns the alert, escalation and acknowledgement contract.)
+6. **Care gaps** are computed nightly into `cdss_care_gaps` per patient and surfaced passively when an encounter opens, so no live joins run on the hot path.
+
+### 3.4 Rule authoring, versioning & effective dating
+1. **Author** (clinical informaticist/steward) creates a rule in the **Rule Builder**: metadata (name, family, clinical rationale, evidence citation/URL, owner, scope: group/hospital/branch/department, applicable roles & encounter types, age/sex/pregnancy filters), **condition** (visual predicate builder over a typed context schema: `patient.egfr < 30 AND order.drug.atc startsWith 'A10BA'`), **action** (interruption level, title, one-line reason, detail markdown, suggested actions incl. alternative drug/dose/order set, override reason set, delivery policy for async rules), and **suppression policy** (per patient/per encounter/per N hours; snooze allowed?).
+2. **Test harness** (mandatory before publish): run against (a) hand-written unit fixtures, (b) a **de-identified retrospective cohort** (last 90 days of orders/results in the tenant, replayed) → reports *would-fire count*, *estimated alerts/1000 orders*, *predicted override rate* (from similar rules), *top 20 example patients* (de-identified) and a **diff vs the previous version**. A rule projected above the tenant's alert-budget threshold (default 30 alerts/1000 orders for a single rule) cannot be published as soft-stop without Medical Superintendent sign-off.
+3. **Approval** via EN-038: rule family determines the matrix — medication rules = Pharmacy In-charge + Medical Superintendent; lab critical values = Lab Quality Manager + Pathologist; deterioration/sepsis = Intensivist + Nursing Superintendent + Quality; hard-stops always require Medical Superintendent. Proposer ≠ approver.
+4. **Publish with effective dating**: `effective_from` (future-datable, e.g. after ward training), optional `effective_to`; publishing creates an immutable `cdss_rule_versions` row. Every alert record stores the exact `rule_version_id`, so an audit three years later can reconstruct precisely what the clinician was shown.
+5. **Rollback / emergency disable**: one-click `Disable rule` (reason mandatory, effective immediately, propagated to all evaluators in <30 s via Redis pub/sub) available to Medical Superintendent and IT Admin on-call — used when a misfiring rule storms the wards. Rollback to a prior version keeps history.
+6. **Shadow mode**: any rule can run `passive_shadow` — evaluated and logged, never shown — for 2–4 weeks to measure real fire rate before going live. This is the default for new tenant-authored rules.
+
+### 3.5 Knowledge base sourcing & licensing
+- The engine separates **KB facts** (interaction pairs, dose bands, pregnancy categories, cross-sensitivity classes) from **hospital rules** (how loudly to speak). KB facts arrive from a pluggable provider:
+  - **Provider adapters**: commercial (First Databank / FDB Multilex, Medi-Span, Micromedex, Cerner Multum, BMJ Best Practice) and India-specific (**CIMS India**, MIMS India, IndiaMART-free NLEM/DPCO lists), plus **local formulary rules** authored in-house.
+  - Each provider load creates a versioned `cdss_kb_releases` row with checksum, licence key ref, expiry and coverage stats; loading is via EN-017 (SFTP/API) and EN-036 (initial bulk).
+  - Local mapping: KB drug identifiers ↔ EN-027 `mdm_drugs`/`mdm_drug_brands` via ATC + RxNorm/SNOMED concept maps; a **coverage report** lists formulary drugs with no KB mapping (these fall back to local rules only and are flagged in the UI as "limited checking").
+- **Licensing is an explicit open question (§16)**: commercial KBs are per-bed or per-provider annual licences with redistribution restrictions; the product must run acceptably on a **local-formulary-only** configuration (allergy, duplicate therapy, dose range from the hospital drug master, schedule guardrails, lab/deterioration rules — all of which need no third-party licence) and light up DDI/pregnancy/food content when a licensed KB is present. Licence entitlement is enforced through EN-040; KB content is never exported through EN-026 APIs.
+- KB releases are staged: load → diff report (new/changed/removed interactions, severity changes) → clinical review of severity upgrades that would create new hard-stops → publish with effective date.
+
+### 3.6 Order sets & clinical pathways
+- Order sets are authored in EN-039 (form/bundle designer) and owned operationally by IP-020 (pathways, phases, variance). EN-029's job is (a) to **suggest** the right order set at the right moment (diagnosis added, triage level assigned, sepsis alert, post-op day 0), (b) to run all safety rules across the whole bundle *before* it is signed (so a 14-line sepsis bundle produces one consolidated alert review, not 14 modals), and (c) to record which suggested set was accepted/declined for pathway-adherence analytics.
+- Bundle-level rules: mutually exclusive items, mandatory items (cannot uncheck without reason), auto-adjust doses from weight/eGFR at insertion time.
+
+### 3.7 Alert-fatigue governance (a first-class workflow)
+1. Every rule version accumulates: fires, displays (a fire may be suppressed by policy), acknowledgements, overrides, override reason distribution, time-to-dismiss (median ms), and downstream signal (order changed after alert = "effective alert").
+2. **Monthly CDSS Governance Review**: the system generates a pack — rules with override rate >90 % (candidates for retirement or downgrade), rules with 0 fires in 90 days (candidates for removal), alerts/1000 orders by rule/prescriber/department vs the tenant budget, median dismiss time <2 s (evidence of reflexive dismissal), and top 10 alerts by volume. Committee decisions are recorded against the rule (`governance_decision`, minutes ref) → Event `cdss.rule.governance_reviewed`.
+3. **Tiering & suppression** are the levers: downgrade severity, restrict scope (e.g. fire only in IP), add suppression window (same alert not repeated for the same patient+drug within 72 h unless context changed), or move to passive.
+4. **Prescriber-level feedback**: each doctor sees their own override rate vs department median in their dashboard (never publicly ranked); outliers are handled by the Medical Superintendent, not by the system.
+
+### 3.8 Exceptions & safety-critical behaviours
+- **Alert on a signed order** (context changed after signing — new allergy, new critical lab): an async alert goes to the prescriber and the ward, and the order is flagged `safety_review_pending` on the MAR; it is **not** auto-cancelled.
+- **Emergency override switch** (code blue / mass casualty): a declared emergency (OP-006/TR-007) can put the encounter into `emergency_mode` where soft-stops become passive for a bounded window (default 60 min, extendable with reason) — hard-stops for allergy-anaphylaxis, pregnancy-X and NDPS caps **never** relax. Every emergency-mode order is listed for retrospective review.
+- **Paediatric/neonatal**: dose rules require weight; a missing weight is a **hard-stop for weight-based drugs** in patients <18 y (safer to block than to guess).
+- **Rule storm protection**: if a single rule fires >N times/minute tenant-wide (default 200), it auto-throttles to passive and pages the on-call informaticist (`cdss.rule.storm_detected`) — a misconfigured rule must never take the wards down.
+- **Contradictory rules**: when two rules produce conflicting suggested actions on the same order, the higher severity wins for interruption, and both reasons are shown; conflicts are logged for governance.
+
+## 4. Data Model (schema `clinical`, prefix `cdss_`)
+- `cdss_rules` — id, hospital_id (null = system/global), branch_id?, key citext, name, family enum(allergy/ddi/drug_food/drug_disease/drug_lab/duplicate_therapy/dose_range/organ_dosing/pregnancy/schedule_guardrail/high_alert_lasa/critical_value/delta_check/deterioration/sepsis/vte/stewardship/care_gap/order_set_prompt/imaging/blood/prereq), scope enum(system/group/hospital/branch/department), owner_role, clinical_rationale text, evidence jsonb (citations, urls, guideline + year), status enum(draft/in_review/approved/active/shadow/disabled/retired), current_version int, alert_budget_per_1000 numeric, created…; UNIQUE(hospital_id, key).
+- `cdss_rule_versions` — id, rule_id, version int, condition jsonb (typed predicate AST), action jsonb (interruption enum(passive/soft_stop/hard_stop/shadow), title, one_liner, detail_md, suggested_actions[], alternatives[], override_reason_set_id, delivery_policy jsonb), applicability jsonb (encounter types, roles, age band, sex, departments), suppression jsonb (scope, window_hours, snooze_allowed, max_per_encounter), effective_from timestamptz, effective_to timestamptz?, published_by, published_at, approval_ref (EN-038), test_report jsonb, checksum, immutable; UNIQUE(rule_id, version); index (rule_id, effective_from desc).
+- `cdss_override_reason_sets` / `cdss_override_reasons` — code, label, requires_free_text, sort, active, family_scope.
+- `cdss_alert_events` — id uuidv7, hospital_id, branch_id, patient_id, encounter_id, rule_id, rule_version_id, family, severity enum(info/low/moderate/major/contraindicated), interruption, trigger enum(order_entry/verify/administer/result/vitals/scheduled/encounter_open/manual), context_ref jsonb (order_id, order_line_id, result_id, vitals_id), fired_at, displayed bool, displayed_at, latency_ms, outcome enum(shown_passive/acknowledged/overridden/hard_stop_blocked/countersigned/auto_suppressed/expired/order_changed), override_reason_code, override_note, actor_user_id, actor_role, time_to_action_ms, snapshot_digest (hash of the evaluation inputs, for reproducibility), degraded bool; **partitioned monthly**; indexes (hospital_id, fired_at desc), (rule_version_id, fired_at), (patient_id, fired_at desc), (outcome, fired_at).
+- `cdss_patient_snapshots` (cache mirror, not source of truth) — patient_id, encounter_id, built_at, expires_at, payload jsonb (demographics, allergies, problems, meds, labs, flags), digest; Redis primary, Postgres row kept only for audit reproduction of alerts.
+- `cdss_kb_releases` — id, provider enum(fdb/medispan/micromedex/multum/cims_india/mims_india/local), release_version, licence_ref, loaded_at, checksum, coverage jsonb (drugs mapped %, interactions, dose bands), status enum(staged/reviewed/active/superseded), diff_report_ref, expires_at.
+- `cdss_kb_interactions` — id, kb_release_id, subject_a (drug/class/food/condition ref), subject_b, severity enum(contraindicated/major/moderate/minor), onset enum(rapid/delayed), documentation enum(excellent/good/fair), mechanism_md, management_md, source_ref; index on (subject_a, subject_b).
+- `cdss_kb_dose_rules` — id, kb_release_id?, drug_key, route, indication_code?, population enum(neonate/infant/child/adolescent/adult/geriatric/pregnancy/dialysis), basis enum(flat/per_kg/per_m2), min_dose, max_dose, unit, max_daily, max_course_days, freq_min, freq_max, renal_bands jsonb (egfr ranges → adjustment), hepatic_bands jsonb (Child-Pugh), notes.
+- `cdss_allergy_cross_map` — allergen_class, member_substance, cross_class[], cross_reactivity_pct, source.
+- `cdss_critical_values` — test_id (EN-027), age_band, sex, critical_low, critical_high, panic_low, panic_high, delta_abs, delta_pct, delta_window_hours, callback_required bool, escalation_policy_id; effective-dated.
+- `cdss_scores` — id, patient_id, encounter_id, score_type enum(news2/pews/mews/qsofa/sirs/padua/caprini/improve_bleed/gcs_trend), value numeric, band, components jsonb, source_ref (vitals_id/labs), computed_at, computed_by enum(engine/manual), rule_version_id; partitioned monthly; index (encounter_id, computed_at desc).
+- `cdss_care_gaps` — id, hospital_id, patient_id, gap_code, description, due_date, severity, status enum(open/addressed/dismissed/not_applicable), addressed_by_ref, last_evaluated_at; index (hospital_id, patient_id, status).
+- `cdss_stewardship_reviews` — id, patient_id, encounter_id, antibiotic_order_id, day_of_therapy, review_type enum(preauth/day3/day7/iv_po/de_escalation), recommendation, culture_ref, decision enum(accepted/declined/pending), decided_by, decided_at.
+- `cdss_emergency_modes` — encounter_id, activated_by, reason, started_at, expires_at, extended_count.
+- `cdss_rule_metrics` (read model, refreshed 15-min) — rule_version_id, day, fires, displays, overrides, acks, blocks, median_time_to_action_ms, orders_evaluated, alerts_per_1000_orders, effective_alert_pct.
+- Retention: alert events retained **10 years** (medico-legal, matches clinical record); scores live with the clinical record; snapshots 90 days; KB releases retained for the life of any alert referencing them.
+
+## 5. Business Rules & Validations
+- **No rule fires without an active, effective-dated version.** Alert rows are immutable and always carry `rule_version_id` + `snapshot_digest`; a rule can be disabled but its history is never rewritten.
+- **Interruption ladder is policy, not code**: only Medical Superintendent (with EN-038 approval) may create or raise a rule to `hard_stop`. Downgrades require the same approval but may be executed immediately in a storm (`emergency disable`) with retrospective ratification within 72 h.
+- **Hard-stop families that can never be configured away** (product-level floor): documented anaphylaxis to the exact substance; pregnancy category X in a confirmed pregnancy; NDPS quantity/frequency statutory caps; missing weight for weight-dosed drugs in under-18s; dose >200 % of the absolute ceiling. These may be *acknowledged with countersign*, never silently bypassed.
+- **Override reason is mandatory and coded**; free text alone is not accepted; `other` requires ≥20 characters. Overrides by residents on major/contraindicated severities require consultant countersign before the order becomes actionable to pharmacy.
+- **Evaluation must not silently fail**: any engine error, timeout or missing input that prevents a family from evaluating is recorded on the order as `degraded` with the list of un-evaluated families, is visible in the UI, and triggers async re-evaluation.
+- **Latency budget is a hard requirement**: synchronous evaluation p95 < 100 ms, p99 < 150 ms, hard timeout 250 ms (return whatever fired so far, mark the rest degraded).
+- **Determinism & reproducibility**: given the same snapshot digest and rule version, evaluation must produce identical output; a `POST /cdss/replay` endpoint reproduces a historical alert exactly for medico-legal review.
+- **No PHI leaves the engine's boundary**: rule test harness cohorts are de-identified (EN-036 anonymisation); KB provider calls are local/offline loads, never per-patient lookups against a vendor cloud unless explicitly configured and DPDP-approved.
+- **Suppression never applies to hard-stops or critical values.** Snooze is time-bounded, never permanent, and snoozes are counted as displays for fatigue metrics.
+- **Alerts are additive to, not a substitute for, the clinician's judgement**: every alert card must show the *reason* and the *evidence*, and must offer at least one constructive action (alternative drug, adjusted dose, order the missing lab, view the pathway).
+- **Critical value acknowledgement SLA** is configurable per tenant (default 10 min ack, 20 min escalate, 30 min Medical Superintendent) and its breach is a NABH-reportable indicator; unacknowledged critical values may never be auto-closed by the system.
+- **Antibiotic pre-authorisation**: restricted-tier agents are hard-stopped outside approved indications until Clinical Pharmacology/ID approval is recorded; a 24-hour emergency supply is permitted once per encounter with automatic review task.
+- **Shadow-mode rules are invisible to clinicians** and must never appear in patient-facing documents or exports.
+- Rule condition ASTs are validated against a typed context schema at publish time; any reference to a field the snapshot cannot supply blocks publication.
+
+## 6. API Surface (`/api/v1/cdss`)
+| Method | Path | Purpose | Permission | Notes |
+|---|---|---|---|---|
+| POST | /evaluate | synchronous evaluation of a draft order bundle | `cdss.evaluate` (service + clinical roles) | idempotent by draft hash; p95 <100 ms; never cached across context changes |
+| POST | /evaluate/bundle | evaluate a whole order set before signing | `cdss.evaluate` | consolidated alert review |
+| POST | /alerts/:id/acknowledge \| /override \| /countersign | record clinician response | `cdss.alert.respond` | reason code mandatory on override |
+| GET | /alerts?patient&encounter&rule&outcome&from&to | alert history | `cdss.alert.read` | cursor; PHI-audited |
+| POST | /alerts/replay/:id | reproduce a historical alert from its snapshot digest | `cdss.alert.replay` (MS, Auditor, DPO) | audited |
+| GET | /patients/:id/snapshot | current evaluation context (debug/clinical view) | `cdss.snapshot.read` | PHI read audited |
+| GET | /patients/:id/care-gaps ; POST /care-gaps/:id/dismiss | preventive care | `cdss.caregap.read` / `.manage` | dismiss reason |
+| GET | /patients/:id/scores?type ; POST /scores/compute | NEWS2/PEWS/MEWS/qSOFA etc. | `cdss.score.read` / `cdss.score.compute` | compute is idempotent per vitals row |
+| POST | /sepsis/screen/:encounterId ; POST /sepsis/bundle/:alertId/apply | sepsis screen & 1-hour bundle | `cdss.sepsis.manage` | bundle timestamps tracked |
+| GET/POST | /stewardship/reviews ; POST /stewardship/:id/decide | day-3 / IV-PO / de-escalation | `cdss.stewardship.manage` (ID/Clinical Pharmacology) | |
+| GET/POST/PATCH | /rules ; /rules/:id | rule authoring | `cdss.rule.manage` | draft only; publish is separate |
+| POST | /rules/:id/test | run test harness (fixtures + retrospective cohort) | `cdss.rule.test` | returns projected alerts/1000 orders |
+| POST | /rules/:id/publish \| /shadow \| /disable \| /rollback | lifecycle | `cdss.rule.publish` (+ EN-038 approval) | reason mandatory on disable |
+| GET | /rules/:id/versions ; GET /rules/:id/diff?from&to | version history & diff | `cdss.rule.read` | |
+| GET/POST | /kb/releases ; POST /kb/releases/:id/review \| /activate | knowledge-base loads | `cdss.kb.manage` (Pharmacy In-charge + IT) | diff report gated |
+| GET | /kb/coverage | formulary drugs without KB mapping | `cdss.kb.read` | |
+| GET/PUT | /critical-values | critical/panic/delta table | `cdss.criticalvalue.manage` (Lab Quality Manager) | effective-dated |
+| POST | /emergency-mode/:encounterId ; DELETE | declare/clear emergency mode | `cdss.emergency.declare` (ER lead, MS) | time-boxed, audited |
+| GET | /governance/pack?month ; POST /governance/decisions | alert-fatigue review pack | `cdss.governance.read` / `.manage` | PDF/CSV export |
+| GET | /metrics/alerts-per-1000 ; /metrics/override-rate ; /metrics/effectiveness | fatigue KPIs | `cdss.report.read` | read models |
+
+## 7. Domain Events (outbox)
+- `cdss.alert.fired` → EN-024 audit, EN-001 analytics, EN-037 (async families only).
+- `cdss.alert.overridden` / `cdss.alert.acknowledged` / `cdss.hardstop.blocked` / `cdss.hardstop.countersigned` → audit, governance read model, prescriber feedback.
+- `cdss.critical_value.raised` → EN-037 escalation ladder, OP-004/EN-031 call-back register, EN-018 ward board; `cdss.critical_value.acknowledged` closes it.
+- `cdss.news2.scored` / `cdss.deterioration.alert` → IP-003/IP-009 flowsheets, rapid-response team notification, NC-030 on-call roster.
+- `cdss.sepsis.alert` / `cdss.sepsis.bundle_applied` / `cdss.sepsis.bundle_completed` → IP-020 pathway, quality indicators.
+- `cdss.vte.assessment_due` / `cdss.vte.prophylaxis_missing` → IP-003 task, discharge checklist (IP-002).
+- `cdss.stewardship.review_due` / `cdss.stewardship.de_escalation_recommended` → IP-012, pharmacy worklist.
+- `cdss.caregap.detected` / `cdss.caregap.closed` → PE-002 recall, OP-013 immunisation.
+- `cdss.rule.published|disabled|rolled_back|governance_reviewed` / `cdss.rule.storm_detected` → EN-024, EN-037 (informaticist on-call), EN-007 change log.
+- `cdss.kb.release_activated` → pharmacy notice, coverage report refresh.
+- Consumes: `vitals.recorded`, `lab.result.verified`, `rad.report.finalised`, `rx.created`, `order.signed`, `med.administered`, `patient.allergy.added`, `problem.added`, `patient.admitted|discharged`, `encounter.opened`, `culture.sensitivity.available`.
+
+## 8. Screens (UI)
+- **Inline alert rail in CPOE** (desktop primary, tablet): alerts render *beside* the order line — grey chip (passive), amber card (soft-stop), red card (hard-stop) with title, one-line reason, "Why?" expander (mechanism, evidence, KB source + version), and action buttons (`Use alternative`, `Adjust dose to X`, `Order the missing lab`, `Acknowledge`, `Override…`). Consolidated header shows "3 safety checks — 1 requires action". Shortcuts: `Alt+A` acknowledge focused alert, `Alt+O` override, `Alt+W` why, `Esc` returns focus to the order. Sign button is disabled with a red hint while any hard-stop is unresolved. Never a full-screen modal stack.
+- **Override dialog** (desktop/tablet): reason radio list + note, shows what the hospital's policy says, and warns "this override will be reviewed" for contraindicated severity. 2-field, ≤4 s to complete.
+- **Patient Safety Panel** (right context rail, all clinical screens, desktop/tablet): allergies (red), active alerts, latest NEWS2 with trend sparkline, open care gaps, VTE status chip, isolation & MLC flags. Real-time via WS; updates <2 s of a new result.
+- **Deterioration / Sepsis alert card** (nurse tablet + ward TV EN-018 for code-level): score band with colour, contributing components, required response with countdown timer to acknowledgement, `Acknowledge & attend`, `Escalate now`, `Apply sepsis bundle`. Offline: last score cached and shown with a staleness badge.
+- **Critical Value Acknowledgement** (desktop/phone): result, prior value, delta, call-back form (called whom, at, read-back confirmed by), and a visible SLA countdown; cannot be dismissed without action.
+- **Rule Builder** (desktop, wide): metadata pane; visual condition builder (drag context fields, operators, value sets from EN-027) with a raw-AST/JSON toggle for experts; action pane with a live **alert-card preview**; suppression & delivery pane; right rail shows the test harness results. Shortcuts `Ctrl+T` test, `Ctrl+S` save draft, `Ctrl+Shift+P` request publish.
+- **Test Harness / Simulator** (desktop): pick fixtures or a retrospective date range → run → results table (would-fire count, per-department breakdown, projected alerts/1000 orders, predicted override rate, sample de-identified cases with the exact card the clinician would see), and a **diff vs previous version** panel.
+- **Rule Catalogue** (desktop): all rules with family, status chips (active/shadow/disabled), fire count 30 d, override rate, last reviewed; filters; bulk shadow/disable; red badge on rules above alert budget.
+- **CDSS Governance Dashboard** (desktop, Medical Superintendent/Quality): alerts per 1000 orders trend vs budget, top 10 alerts by volume, override-rate leaderboard by rule (not by doctor publicly), median dismiss time, "effective alert" percentage, 0-fire rules, and the monthly review pack export.
+- **Knowledge Base Console** (desktop, Pharmacy + IT): provider, release version, licence expiry countdown, coverage %, unmapped formulary drugs list, staged-release diff review with severity-upgrade approvals.
+- **My Alerts** (doctor dashboard widget, desktop/phone): own override rate vs department median, alerts that changed an order, pending countersign requests.
+- Empty/error states: "Safety checks unavailable — orders are being placed without interaction checking" (persistent red banner, dismiss disabled), "No KB licensed — local formulary rules only (allergy, duplicate, dose range, schedules)", "Weight required before this drug can be ordered for a paediatric patient".
+
+## 9. Integrations
+- **EN-027** for every code (ATC, SNOMED CT, LOINC, ICD-10, UCUM units) and for drug/test/diagnosis masters; value sets drive the condition builder.
+- **KB vendors** via EN-017 (SFTP/API loads with checksum + licence key from EN-040 entitlement): FDB/Medi-Span/Micromedex/Multum internationally, **CIMS/MIMS India** locally; offline-first loads only.
+- **OP-002/OP-003/IP-014/IP-003** as the ordering, verification and administration call sites; **OP-004/EN-031** for critical values, delta checks and the call-back register; **OP-008** for imaging appropriateness and critical findings; **IP-012** for the antibiogram feeding stewardship rules; **IP-020** for pathways and order sets; **EN-039** for order-set/alert-card templates.
+- **EN-037** for asynchronous alert delivery, escalation ladders and must-acknowledge guarantees; **NC-030** for the on-call roster resolution; **EN-018** for ward/ICU board flags.
+- **AI-002** (Phase 12): consumes EN-029's structured context to *propose* rules, explain interactions in plain language, and rank alerts by predicted relevance — all outputs are suggestions routed through the same authoring/approval pipeline; the AI layer can never publish a rule or fire an alert directly.
+- **PvPI/ADR**: an override of an allergy or a suspected reaction can raise an ADR report draft (CDSCO PvPI form) — the report itself lives with pharmacy/quality.
+
+## 10. Reports & Analytics
+- **Safety**: alerts fired/displayed/overridden by family, department, prescriber grade, shift; hard-stops blocked (harm prevented proxy); allergy alerts overridden with subsequent reaction (linked outcome review); critical-value acknowledgement SLA compliance & escalation counts; delta-check catches.
+- **Fatigue**: alerts per 1000 orders (tenant, department, prescriber), override rate by rule, median time-to-dismiss, % alerts that changed an order ("effective alerts"), rules above budget, 0-fire rules, snooze usage.
+- **Clinical outcome linkage**: NEWS2 ≥7 → time to review → ICU transfer/cardiac arrest rate; sepsis bundle 1-hour compliance and mortality; VTE prophylaxis rate and VTE incidence; antibiotic days-of-therapy per 1000 patient-days, de-escalation rate, IV→PO switch rate, restricted-agent pre-auth turnaround.
+- **Coverage**: formulary drugs with KB mapping %, rules by family, tests with critical values defined %, patients with weight recorded (paediatric).
+- NABH indicators: medication-error rate, critical-value reporting time, sepsis bundle compliance, VTE prophylaxis rate, antibiotic policy adherence.
+- Read models: `analytics.mv_cdss_rule_daily`, `analytics.mv_cdss_prescriber_monthly`, `analytics.mv_cdss_outcome_link` refreshed by `pg_cron`.
+
+## 11. Notifications
+- **Critical value**: in-app must-ack + SMS/WhatsApp to ordering doctor + ward phone; escalation ladder 10/20/30 min (EN-037).
+- **Deterioration (NEWS2 ≥7, PEWS red, MEWS ≥5)**: push to ward nurse + duty doctor + rapid-response team; TV ward board flag; escalate on no-ack in 15 min.
+- **Sepsis alert**: push to duty doctor + nurse-in-charge; bundle timer reminders at 20/40/55 min.
+- **Stewardship**: day-3 review task to prescriber and ID team; restricted-drug pre-auth request to Clinical Pharmacology (with 2-hour SLA).
+- **VTE**: 24-hour post-admission task if unassessed; discharge blocker prompt.
+- **Care gaps**: bundled into PE-002 patient recall messaging (never a separate SMS storm).
+- **Governance**: monthly pack to Medical Superintendent & Quality; immediate page on `cdss.rule.storm_detected`; KB licence expiring 60/30/7 days to Pharmacy In-charge & IT.
+
+## 12. Permissions (RBAC keys)
+`cdss.evaluate` (all clinical roles + service tokens) · `cdss.alert.read` (clinicians for own patients via ABAC; MS/Quality/Auditor tenant-wide) · `cdss.alert.respond` (prescribers, pharmacists, nurses per family) · `cdss.alert.replay` (MS 4, Auditor 58, DPO 57) · `cdss.snapshot.read` (clinician for own patient, IT for debug with PHI audit) · `cdss.score.read` / `cdss.score.compute` (nurses, doctors) · `cdss.sepsis.manage` (doctors, intensivist) · `cdss.stewardship.manage` (ID/Clinical Pharmacology, Pharmacy In-charge) · `cdss.caregap.read` / `.manage` · `cdss.criticalvalue.manage` (Lab Quality Manager 35, Pathologist 13) · `cdss.rule.read` (clinical leads) · `cdss.rule.manage` (clinical informaticist) · `cdss.rule.test` · `cdss.rule.publish` (Medical Superintendent 4 + EN-038 approval) · `cdss.kb.read` / `cdss.kb.manage` (Pharmacy In-charge 32, IT Admin 56) · `cdss.emergency.declare` (ER lead 8, MS 4) · `cdss.governance.read` / `.manage` (MS 4, Quality 54) · `cdss.report.read`.
+
+## 13. Non-functional
+- **Volumes (2000-bed enterprise)**: ~5000 OPD visits/day × ~2.5 orderable lines + 1200 IP patients × ~18 med administrations/day + 20 000 lab results/day + ~35 000 vitals sets/day ⇒ **≈ 250 000 synchronous evaluations/day** (peak 40/s in the 10:00–13:00 OPD window) and **≈ 120 000 asynchronous evaluations/day**.
+- **Latency**: sync p50 < 35 ms, p95 < 100 ms, p99 < 150 ms, hard timeout 250 ms; async alert generation to notification dispatch p95 < 5 s; NEWS2 computed and visible < 2 s after vitals save.
+- **Throughput/scale**: stateless evaluator pods, rule set compiled to an in-memory decision structure per tenant and hot-reloaded on `cdss.rule.published` (<30 s propagation); patient snapshot cache hit rate target > 90 %; KB tables read-only and fully memory-resident (interaction pairs ~1.5 M rows ≈ 400 MB — sharded by drug key).
+- **Availability**: engine failure must degrade, never block; local hard-stop pack (allergy/pregnancy-X/NDPS caps/max-dose) is bundled into the PWA (< 2 MB, refreshed daily) for offline and degraded operation.
+- **Storage**: alert events ≈ 15 M rows/year for a 2000-bed hospital; monthly partitions, 10-year retention with cold-tier archival after 2 years.
+- **Accessibility**: alert cards are not colour-only (icon + text + severity word), WCAG 2.2 AA contrast, screen-reader announces severity first; all alert actions keyboard-reachable; no alert may auto-dismiss.
+- **i18n**: alert title, one-liner and suggested actions are translatable (`next-intl`); clinical evidence text may remain English; patient-facing derivatives (drug–food advice on the printed Rx) are localised to the patient's preferred language.
+- **Testing**: every shipped rule has fixtures; a golden-path Playwright test asserts hard-stop blocking; k6 load test at 60 evaluations/s sustained; a nightly regression replays 1000 historical alerts and asserts identical output for unchanged rule versions.
+
+## 14. Acceptance Criteria
+1. **Given** a patient with a documented anaphylactic penicillin allergy, **when** a doctor orders Amoxicillin-Clavulanate, **then** a red hard-stop appears within 100 ms, the Sign button is disabled, and the order can only proceed after a consultant countersignature that is recorded with reason and both signatures.
+2. **Given** a patient on Warfarin, **when** Fluconazole is ordered, **then** a major-severity DDI soft-stop appears showing mechanism, management advice and the KB source/version, and signing requires a coded override reason of at least 20 characters when `other` is chosen.
+3. **Given** an adult with eGFR 22 mL/min/1.73 m², **when** Metformin 1 g BD is ordered, **then** a drug–disease/organ-dosing alert fires with the suggested action "contraindicated below eGFR 30 — consider alternative", and accepting the suggestion replaces the order line.
+4. **Given** a 4-year-old with no weight recorded, **when** a weight-based antibiotic is ordered, **then** the order is hard-stopped with "Weight required" and a shortcut to the vitals entry, and no dose calculation is attempted.
+5. **Given** a nurse charts RR 24, SpO₂ 92 % on 2 L O₂, SBP 96, HR 112, temp 38.4, ACVPU=V, **when** the vitals are saved, **then** NEWS2 is computed as ≥7 within 2 seconds, stored on the vitals row with its components, an escalation notification reaches the duty doctor and rapid-response team, and non-acknowledgement within 15 minutes escalates to the intensivist.
+6. **Given** qSOFA ≥2 with a suspected-infection signal, **when** the sepsis rule evaluates, **then** a must-acknowledge sepsis alert is raised with a one-click 1-hour bundle, bundle-element completion timestamps are captured, and the bundle order set is safety-checked as a single consolidated review rather than one modal per line.
+7. **Given** a verified potassium of 6.9 mmol/L, **when** the result is released, **then** a critical-value alert fires, the acknowledgement screen forces a call-back record (called whom, at, read-back confirmed), the SLA countdown is visible, and breach at 20 minutes escalates automatically.
+8. **Given** a rule author edits a soft-stop rule, **when** they run the test harness against the last 90 days, **then** the report shows the would-fire count, projected alerts per 1000 orders and a diff versus the previous version, and publishing is blocked if the projection exceeds the tenant alert budget without Medical Superintendent sign-off.
+9. **Given** a published rule version, **when** an alert fired under it three years earlier is replayed, **then** the system reproduces the identical alert card from the stored snapshot digest and rule version, even if the rule has since been changed or disabled.
+10. **Given** a rule that begins firing 300 times per minute tenant-wide, **when** the storm threshold is crossed, **then** the rule auto-downgrades to passive, the on-call informaticist is paged, and no clinical screen is blocked.
+11. **Given** the CDSS service is unreachable, **when** a doctor prescribes, **then** ordering continues with a persistent red "safety checks unavailable" banner, the offline hard-stop pack still blocks documented-allergy and pregnancy-X orders, the order is marked `degraded`, and a full re-evaluation runs automatically on recovery.
+12. **Given** a rule with a 92 % override rate over 90 days, **when** the monthly governance pack is generated, **then** the rule is listed as a retirement/downgrade candidate with its override-reason distribution and median dismiss time.
+13. **Given** a restricted carbapenem is ordered without pre-authorisation, **when** the order is signed, **then** it is hard-stopped pending Clinical Pharmacology approval, except that a single 24-hour emergency supply may be released with an automatic review task.
+14. **Given** an emergency mode is declared for a code-blue encounter, **when** orders are placed within the 60-minute window, **then** soft-stops render as passive, anaphylaxis/pregnancy-X/NDPS hard-stops still block, and every order placed in emergency mode is listed for retrospective review.
+15. **Given** no commercial knowledge base is licensed, **when** a doctor prescribes, **then** allergy, duplicate-therapy, dose-range and schedule guardrail checks still operate from the local formulary, and the UI states plainly that interaction and pregnancy-category checking is unavailable.
+16. **Given** a shadow-mode rule, **when** it evaluates, **then** its fires are logged to `cdss_alert_events` with outcome `auto_suppressed`, nothing is shown to the clinician, and no notification is sent.
+17. **Given** any alert is displayed, **when** the audit trail is inspected, **then** it records rule version, severity, actor, latency, outcome, override reason and the snapshot digest, and the row cannot be updated or deleted.
+18. **Given** a patient's allergy is added after an order is signed, **when** the async re-evaluation runs, **then** the prescriber and ward are alerted, the order is flagged `safety_review_pending` on the MAR, and the order is not auto-cancelled.
+
+## 15. Enhancements / Later phases
+- **AI-002 layer**: LLM-generated plain-language alert explanations, patient-specific risk ranking to suppress low-value alerts, protocol suggestion from the note, and draft rule authoring from a guideline PDF — all human-approved (source enhancement: "Protocol Suggest, AI Triage").
+- **CDS Hooks / FHIR Clinical Reasoning**: expose `order-sign`, `order-select`, `patient-view` hooks and consume external CDS services; publish rules as FHIR `PlanDefinition`/`Library` (CQL) so guidelines can be imported from national repositories.
+- **Genomics/pharmacogenomics** (CYP2C19 → clopidogrel, TPMT → azathioprine, HLA-B*15:02 → carbamazepine) once a PGx result store exists.
+- **Predictive deterioration** (ML early-warning beating NEWS2), readmission and AKI prediction models, feeding the same alert pipeline with an explicit "model" provenance badge.
+- **Closed-loop outcome linkage**: automatically correlate overridden allergy alerts with subsequent documented reactions to quantify real-world alert value.
+- **Patient-facing CDSS**: drug–food advice, adherence nudges and red-flag symptom checks in PE-001/OP-020.
+- **Antimicrobial resistance dashboard** driven by local antibiogram with automatic empiric-therapy rule updates.
+- **Rule marketplace**: curated, peer-reviewed rule packs (ICU, paediatrics, obstetrics, ortho/trauma) installable per tenant with attribution and version tracking.
+
+## 16. Open Questions for the Hospital
+1. **Knowledge base**: will the hospital licence a commercial drug KB (FDB / Medi-Span / Micromedex / CIMS India), and who pays the annual per-bed/per-provider fee? If not, do they accept local-formulary-only checking at go-live (no DDI/pregnancy-category content)?
+2. Who chairs the **CDSS governance committee**, how often does it meet, and who has authority to create or disable a hard-stop out of hours?
+3. What is the acceptable **alert budget** (alerts per 1000 orders) and the initial interruption policy per family — which of DDI-major, drug–disease, duplicate therapy should start as soft-stop versus passive?
+4. Which deterioration score is standard here — **NEWS2 for adults, PEWS variant (which one?), MEWS/obstetric MEOWS** — and what exact escalation ladder (who, within how many minutes, and what happens on no-response)?
+5. What is the **critical-value list** per test with age/sex bands, and the mandated call-back/read-back procedure and SLA (NABL 112 requires documentation)?
+6. **Sepsis protocol**: which screening criteria (qSOFA, SIRS, or a local screen), which antibiotic per the local antibiogram, and who owns the 1-hour bundle audit?
+7. **Antibiotic policy**: which agents are restricted, who authorises them, what is the emergency-supply rule, and is there an existing antimicrobial stewardship committee whose rules we should encode?
+8. **VTE tool**: Padua or Caprini (or a local tool), the prophylaxis regimen table, and whether unassessed patients should block discharge.
+9. Which drugs are on the hospital's **high-alert and LASA** lists, and are tall-man lettering conventions already defined?
+10. **Paediatric/neonatal** ordering: is there a separate paediatric dose reference the hospital trusts, and how are neonatal doses (per kg per dose vs per day) to be expressed?
+11. Should **override reason free text** be mandatory for all severities or only for contraindicated, and is per-doctor override reporting acceptable to the medical staff (and to whom is it visible)?
+12. What retention is required for alert records, and does the legal team want the replay capability preserved for the full 10 years?
+13. Are there existing **order sets and clinical pathways** (Word/PDF) to be digitised at go-live, and who is their clinical owner (also relevant to IP-020 and EN-039)?
+14. Does the hospital want **emergency mode** (bounded soft-stop relaxation) at all, and if so which roles may declare it and for how long?

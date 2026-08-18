@@ -1,0 +1,24 @@
+{
+  "name": "@vims/flags",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Feature-flag and licence-entitlement client. Fails open for clinical, closed for commercial (EN-040 §3.2).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@vims/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@vitest/coverage-v8": "^4.1.10",
+    "vitest": "^4.1.10"
+  }
+}

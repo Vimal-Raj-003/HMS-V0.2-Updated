@@ -1,0 +1,73 @@
+{
+  "name": "vims-hms",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vim's HMS by VIMS ENTERPRISE — enterprise multi-tenant, cloud + on-prem Hospital Management System",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "test:safety": "turbo run test:safety",
+    "test:e2e": "playwright test --config=apps/web/playwright.config.ts",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css,yaml,yml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,css,yaml,yml}\"",
+    "db:generate": "pnpm --filter @vims/db generate",
+    "db:migrate": "pnpm --filter @vims/db migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @vims/db migrate:deploy",
+    "db:reset": "pnpm --filter @vims/db reset",
+    "db:seed": "pnpm --filter @vims/db seed",
+    "seed:minimal": "pnpm --filter @vims/db seed:minimal",
+    "seed:demo": "pnpm --filter @vims/db seed:demo",
+    "seed:hospital": "pnpm --filter @vims/db seed:hospital",
+    "seed:volume": "pnpm --filter @vims/db seed:volume",
+    "infra:up": "docker compose -f infra/docker/docker-compose.dev.yml up -d",
+    "infra:down": "docker compose -f infra/docker/docker-compose.dev.yml down",
+    "infra:logs": "docker compose -f infra/docker/docker-compose.dev.yml logs -f",
+    "infra:nuke": "docker compose -f infra/docker/docker-compose.dev.yml down -v",
+    "boundaries:check": "node scripts/check-module-boundaries.mjs",
+    "permissions:check": "node scripts/check-permission-keys.mjs",
+    "tokens:check": "node scripts/check-hex-literals.mjs",
+    "specs:check": "node scripts/check-table-ownership.mjs",
+    "prepare": "husky || true"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.6.1",
+    "@commitlint/config-conventional": "^19.6.0",
+    "@eslint/js": "^9.18.0",
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^22.10.5",
+    "eslint": "^9.18.0",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-plugin-import": "^2.31.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.3.0",
+    "prettier": "^3.4.2",
+    "turbo": "^2.10.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.20.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "prettier --write",
+      "eslint --fix --max-warnings=0"
+    ],
+    "*.{json,md,css,yaml,yml}": [
+      "prettier --write"
+    ]
+  },
+  "pnpm": {
+    "overrides": {
+      "typescript": "5.9.3"
+    }
+  }
+}

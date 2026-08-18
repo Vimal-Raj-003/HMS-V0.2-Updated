@@ -1,0 +1,241 @@
+# RC-007 — Government Schemes (PMJAY/Ayushman Bharat, CGHS, ECHS, ESIC, State Schemes — Empanelment, Beneficiary Verification, Package Master, TMS Pre-Auth & Claims, No-Cash Blocking, Reconciliation, Statutory Reporting)
+
+| Field | Value |
+|---|---|
+| Domain | Revenue Cycle Management |
+| Module ID | RC-007 |
+| Phase | 5 (empanelment, package master, beneficiary verification, pre-auth/claim workflow) → 11 (portal/API automation, NHA audit exchange, statutory reporting) |
+| Priority | P1 |
+| Complexity | Very High |
+| Depends on | EN-002 (payer master — schemes are payers of type `government_scheme`), RC-003 (scheme rate/package imports and mapping — HBP 2022, CGHS rate list, ECHS/ESIC), RC-002 (pre-auth state machine — TMS mirrors it), RC-001 (claim lifecycle, pack, transport), RC-004 (deductions, objections, scheme grievance rungs), RC-005 (scheme receivables — the slowest AR in the hospital), RC-006 (package-inclusive items must not be double-counted), RC-008 (estimator must show ₹0 patient share for beneficiaries), IP-001/IP-005 (admission, package billing, no-cash rule), IP-002 (discharge, mandatory documents), OP-005 (OP scheme services, CGHS OPD), IP-006 (surgery evidence, intra-op photographs), TR-003 (implants — most schemes have separate implant rules), EN-020 (biometric/Aadhaar authentication through a licensed AUA/KUA with RD devices — beneficiary verification), EN-011 (ABHA; ABHA-based verification where the scheme accepts it), EN-016 (e-sign), EN-039 (scheme forms), EN-017 (portal/API adapters), NC-004 (circulars, empanelment documents), NC-003 (MRD), NC-015 (quality/NABH — accreditation drives scheme rates), NC-009 (scheme receivables, TDS, shortfall write-offs), EN-038 (approvals), EN-037 (alerts), EN-024 (audit), PE-001 (beneficiary status) |
+| Feature flag | `module.gov_schemes.enabled` (sub: `scheme.pmjay`, `scheme.cghs`, `scheme.echs`, `scheme.esic`, `scheme.state_schemes`, `scheme.biometric_verification`, `scheme.tms_api`, `scheme.audit_exchange`) |
+| Primary roles | Scheme Coordinator / **Arogya Mitra / Pradhan Mantri Arogya Mitra (PMAM)** (custom role in the Insurance-desk 28 family), Insurance/TPA Desk (28), Billing Executive (27) |
+| Secondary roles | Treating Doctor (6/7/9 — clinical justification, specialist declarations), MRD Coder (43), Front office (24 — beneficiary identification at first contact), Ward nurse (17 — documents & photographs), Finance Manager (46 — reconciliation, shortfall), Quality (54 — NABH status affects rates), Medical Superintendent (4 — scheme audit responses), Hospital Admin (2), Auditor (58), Patient/Beneficiary (59) |
+| Regulatory | **Ayushman Bharat PM-JAY** (National Health Authority): empanelment under **NHA Health Benefit Package (HBP) 2022** (≈1,949 procedures across 27 specialties, package codes, stratification, pre-/post-hospitalisation days, NABH/NABL and aspirational-district incentives), **Transaction Management System (TMS)** workflow (beneficiary verification → package selection → pre-auth → admission → claim → audit), **Beneficiary Identification System (BIS)** with Aadhaar/ration card/family ID verification, **zero-cash policy — no payment of any kind may be taken from a beneficiary for a covered package**, mandatory display of the "Ayushman Bharat empanelled hospital" board and beneficiary rights, NHA **anti-fraud framework** (NAFU/SAFU — up-coding, phantom billing, unbundling attract de-empanelment, penalty and FIR), medical audit and de-duplication rules; **CGHS** (Ministry of Health — empanelment MoA, CGHS rate list with NABH/non-NABH and city classification A/B/C, prior permission for planned procedures, credit facility for pensioners and specified categories, package rates, 30-day claim submission norms); **ECHS** (Ex-Servicemen Contributory Health Scheme — referral-based, ECHS smart card, CGHS-linked rates, 65-A/64-KB bill formats); **ESIC** (Employees' State Insurance — tie-up hospitals, referral letter/e-Pehchan card, IP number verification, super-speciality referral rules, ESIC rate contracts); **state schemes** — CMCHIS (Tamil Nadu), MJPJAY/PMJAY-MJPJAY (Maharashtra), Aarogyasri (Telangana/AP), Ayushman Bharat convergence variants, Biju Swasthya Kalyan Yojana (Odisha), Chief Minister's schemes in other states — each with its own portal, package list, empanelment terms and grievance mechanism; **Aadhaar Act & UIDAI regulations** (authentication only through a licensed AUA/KUA using registered devices, consent, no storage of biometrics — EN-020); **DPDP Act 2023 & Rules 2025**; **NABH** accreditation status determines package rate tiers |
+
+## 1. Purpose
+RC-007 makes government-funded care work as a first-class revenue stream instead of an unmanaged charity ward. It holds each scheme's empanelment record, package master and rules; identifies and verifies beneficiaries (Aadhaar/biometric/ration card/family ID/ABHA/smart card/referral letter) before the encounter starts; enforces the **zero-cash rule** so no beneficiary is ever asked for money for a covered package; drives scheme pre-authorisation and claims through the scheme's own workflow (PMJAY TMS, CGHS/ECHS/ESIC formats, state portals); tracks approvals, deductions and shortfalls; reconciles the slow, partial settlements these schemes make; responds to NHA/state medical audits; and produces the statutory reporting and evidence pack that keeps the hospital empanelled.
+
+## 2. Users & Jobs-to-be-done
+- **Scheme coordinator / Arogya Mitra** (desktop + biometric device + camera, at the scheme help desk near the entrance): identify and verify beneficiaries, explain entitlement, select the right package with the doctor, raise pre-auth on the scheme portal, collect the documents and photographs the scheme demands, submit claims, chase settlements. This role exists in every PMJAY hospital and the system must fit their day exactly.
+- **Front office**: recognise a potential beneficiary at registration (card seen, scheme declared) and route them to the scheme desk *before* any deposit is taken.
+- **Treating doctor**: choose the correct HBP/CGHS package, provide the clinical justification and specialist declarations, sign the discharge summary; be warned when a package is blocked or requires a specific specialty.
+- **Billing executive**: bill at package rates, keep patient share at zero, handle the genuinely non-covered items under the scheme's own rules.
+- **Finance manager**: scheme receivables (often 60–180 days), deductions and shortfalls, hospital's scheme profitability, NABH status impact on rates.
+- **Medical superintendent / Quality**: respond to scheme medical audits, defend up-coding allegations with the record, maintain empanelment compliance (board display, beneficiary rights, staff availability).
+- **Beneficiary**: know they owe nothing, see their status, and have a grievance route if asked for money.
+
+## 3. Core Workflows
+
+### 3.1 Scheme & empanelment master
+1. Admin registers each **scheme**: code, name, type enum(central_insurance/central_assurance/state/statutory), sponsor (NHA/MoHFW/Ministry of Defence/ESIC/state health agency), implementing agency (insurer/trust/hybrid — PMJAY runs in insurance, trust or mixed mode by state, and this changes who pays), portal URL, API availability, contact matrix, grievance rungs, claim submission window, payment cycle, TDS applicability.
+2. **Empanelment record** per branch: empanelment id/hospital code at the scheme (e.g. PMJAY hospital ID, CGHS empanelment number, ESIC tie-up number), specialties empanelled (schemes empanel by specialty, not wholesale), packages permitted and **blocked** for this hospital, bed/infrastructure conditions, NABH/NABL status and validity (drives the rate tier), agreement/MoA documents, validity dates, renewal alerts at 90/60/30 days, suspension/de-empanelment history, mandatory display obligations checklist (Ayushman board, beneficiary rights, rate list, help desk).
+3. **Package master** imported per scheme (RC-003 §3.3): HBP 2022 package code, name, specialty, stratification/implant carve-out, base rate, NABH/aspirational multipliers, pre-/post-hospitalisation days, permitted LOS, whether pre-auth is mandatory, whether it is a *blocked* or *reserved* package (some HBP packages are reserved for public hospitals), documentation requirements, and the mapping to hospital services/procedures. CGHS/ECHS/ESIC rate lists similarly, with city class and NABH columns.
+
+### 3.2 Beneficiary identification & verification
+1. **Identification** at first contact (front office or scheme desk): patient declares or presents a card — PMJAY (Ayushman card/e-card, family id, Aadhaar, ration card), CGHS (CGHS card with beneficiary id and entitlement ward), ECHS (ECHS 64-KB smart card, service number, referral from a polyclinic), ESIC (e-Pehchan card, insurance number, referral letter from ESI dispensary/hospital), state scheme cards.
+2. **Verification** (`scheme.biometric_verification`): PMJAY BIS-style flow — search by family id/Aadhaar/name+state → match the family record → verify the individual by **Aadhaar biometric or OTP through a licensed AUA/KUA with a UIDAI-registered device** (EN-020; biometrics never stored, consent screen shown), or by the scheme's approved alternate (ration card + photo id) → capture the beneficiary's photograph as the scheme requires → **golden record** created linking the scheme beneficiary id to the hospital UHID (OP-001 MPI), with a de-duplication check against prior scheme admissions (schemes penalise duplicate/parallel admissions).
+3. Verification outcome and evidence (reference number, timestamp, operator, photograph) are stored; a failed or unavailable verification is recorded with the fallback used — an unverified beneficiary treated as a beneficiary is the most common cause of a rejected scheme claim.
+4. **Entitlement**: family cover balance (PMJAY ₹5 lakh/family/year — remaining balance queried where the portal permits), ward entitlement (CGHS/ECHS by pay level), referral validity (ESIC/ECHS), scheme-specific waiting or eligibility rules → shown on the patient banner and to the doctor at the point of package selection.
+
+### 3.3 Package selection & pre-authorisation (with RC-002)
+1. Doctor and coordinator select the **package** from the scheme's master, guided by the diagnosis and planned procedure: the system shows permitted packages for this hospital's empanelled specialties, the rate, the LOS allowance, whether the package is blocked for private hospitals, whether implants are inside or outside, and the mandatory documentation. Unbundling attempts (selecting two packages that the scheme requires to be billed as one) are flagged.
+2. **Pre-auth** is raised through RC-002's state machine with the scheme's form: clinical justification, investigation evidence, the beneficiary's verified photograph, and — where the scheme requires — **intra-operative/pre-operative photographs** and specialist declarations. Submission is via the scheme portal (manual, reference captured), or API where available (`scheme.tms_api`).
+3. Scheme decisions (approve/query/reject with the scheme's own reason codes) are mirrored into RC-002; the approved package rate becomes the credit limit in IP-005, and the encounter is marked `no_patient_collection = true`.
+4. Emergency admissions under a scheme follow the scheme's emergency provisions (treat first, pre-auth within the permitted window); the system tracks that window separately.
+
+### 3.4 Zero-cash enforcement
+- On a verified scheme encounter, the system **hard-blocks**: deposits (IP-001), advance collection (NC-001), patient-share payment lines (OP-005/IP-005), pharmacy counter sales for in-package drugs (OP-003), and estimator output showing a patient payable (RC-008 renders ₹0 with an explanatory note).
+- The only permitted patient-facing charges are those the scheme itself allows (e.g. genuinely non-covered elective add-ons, room upgrades where the scheme explicitly permits a differential, or services outside the package after documented informed consent) — each requires an authorised override with a reason and generates a **compliance record** reviewed monthly. Any blocked attempt is logged as an incident with the user, because "the counter asked for ₹2,000" is exactly what gets a hospital de-empanelled.
+- A visible beneficiary-facing message (portal/SMS/printed slip) states: "Your treatment under <scheme> is cashless. If anyone asks you for money, call <helpline>."
+
+### 3.5 Treatment, documentation and discharge
+- Scheme-mandated evidence is collected during the stay through a **scheme document checklist**: beneficiary photograph with the treating doctor/ward as required, admission and discharge photographs, intra-operative photographs for surgical packages, implant stickers/invoices, investigation reports, daily case sheets, and the discharge summary in the scheme's format. Ward staff upload from tablets; missing items block claim submission.
+- Discharge: the scheme's discharge format (with package code, dates, outcome), the beneficiary's signature/thumb impression on the claim declaration, and the "no money taken" declaration where the scheme prescribes it.
+
+### 3.6 Scheme claim submission & tracking (with RC-001)
+- Claims are packed in the scheme's format (fields, file naming, photograph requirements, digital signature) and submitted on the scheme portal/API within the scheme's window (commonly 7–30 days from discharge; NHA rules per state). RC-001 owns the lifecycle; RC-007 supplies the format, validations and portal specifics.
+- Scheme-specific scrub rules (published into RC-001's scrubber): package permitted for this hospital; pre-auth approved and matching the claimed package; LOS within the package allowance; mandatory photographs present and timestamped; implant details where the package carves implants out; no parallel admission of the same beneficiary elsewhere in the window; no unbundling; discharge summary signed by an empanelled specialist.
+
+### 3.7 Deductions, shortfall and reconciliation
+1. Scheme payments are typically **partial and delayed**: the payment advice (or portal statement) lists claim-wise approved, deducted and paid amounts with scheme reason codes. RC-007 imports/records these, maps scheme reason codes to the RC-004 taxonomy, and computes the **shortfall** per claim (package rate approved vs paid, deductions for documentation, LOS, package downgrade, audit findings).
+2. **Reconciliation** against the hospital's scheme AR (RC-005): claim-wise, batch-wise and month-wise; unmatched credits parked; TDS where applicable; interest/penalty clauses in some state schemes (delayed-payment interest is claimable — most hospitals never claim it, and the system should compute it).
+3. **Shortfall handling**: appeal/representation through the scheme's grievance rung (district grievance cell → state grievance redressal committee → NHA/state health agency), or acceptance with a coded write-off (RC-004/RC-005). Beneficiaries are never billed for a shortfall.
+
+### 3.8 Scheme medical audit & anti-fraud response (`scheme.audit_exchange`)
+- Schemes audit aggressively (desk audit, field audit, beneficiary call-back verification). RC-007 maintains an **audit register**: notice received, claims under audit, queries, the evidence pack assembled from the record (case sheet, photographs, implant UDI, investigation reports, staff duty roster proving the specialist was present), responses submitted, outcome (accepted/deduction/penalty/warning/de-empanelment risk), and CAPA (NC-015).
+- Internal pre-emptive checks mirror the schemes' fraud triggers: up-coding (higher package than the documented procedure), unbundling, phantom billing (claim without matching clinical evidence — RC-006 already computes this), abnormal package mix for the specialty, unusually short LOS for high-value packages, repeat admissions of the same beneficiary, and admissions on days when the required specialist was not on duty (NC-030 roster cross-check). These are surfaced to the MS **before** the scheme finds them.
+
+### 3.9 Statutory & scheme reporting
+- Monthly/quarterly returns as each scheme requires: claims submitted/approved/paid, beneficiary counts, package mix, average claim value, TAT, grievances, and the mandatory registers; NHA/state MIS formats; NABH/infrastructure compliance declarations; the display-obligation checklist evidence (photographs of the boards, with dates). Exports are signed and archived.
+
+### 3.10 Exceptions
+- Beneficiary verified but the family cover is exhausted → counselling, conversion to self-pay or another scheme with documented consent, never a silent charge.
+- Package approved but the surgery changes intra-operatively → package revision request per the scheme's rules, with documentation.
+- Scheme portal down at admission → provisional verification with the fallback evidence, mandatory reconciliation within 24 h.
+- De-empanelment or suspension of the hospital or of a specialty → block new scheme admissions for that specialty with a clear message, keep existing cases running.
+- Death/DAMA/referral out → scheme-specific formats and intimation timelines.
+- Offline: verification requires connectivity to the scheme/UIDAI; the desk records a provisional entry with the reason and a mandatory follow-up.
+
+## 4. Data Model (schema `billing`, prefix `scheme_`; package rates in `mdm` via RC-003)
+- **schemes** — id, hospital_id, code, name, type enum(central_insurance/central_assurance/state/statutory), sponsor, implementing_mode enum(insurance/trust/hybrid), state_code?, portal_url, api_available bool, claim_window_days, payment_cycle_days, tds_applicable bool, grievance_rungs jsonb, helpline, active, audit cols.
+- **scheme_empanelments** — id, hospital_id, branch_id, scheme_id, hospital_code_at_scheme, empanelment_no, specialties text[], packages_permitted text[]?, packages_blocked text[]?, nabh_status enum(nabh_full/nabh_entry/non_nabh), nabh_valid_till date, nablstatus?, city_class enum(A/B/C)?, aspirational_district bool, valid_from, valid_to, agreement_file_id, status enum(active/expiring/expired/suspended/de_empanelled), suspension_reason, display_obligations jsonb (board/rate list/rights/helpdesk with evidence file ids and last verified date), renewal_alerts_sent jsonb. UNIQUE(hospital_id, branch_id, scheme_id, empanelment_no).
+- **scheme_packages** (mirror of the imported master; rates live in `mdm.tariff_packages`) — id, hospital_id, scheme_id, package_code, name, specialty, stratification, base_rate, nabh_multiplier, implant_included bool, pre_hosp_days, post_hosp_days, max_los_days, preauth_required bool, reserved_for_public bool, mandatory_documents text[], mandatory_photographs text[], mapped_service_ids uuid[], mapped_procedure_codes text[], circular_ref, effective_from, effective_to, active.
+- **scheme_beneficiaries** (golden record) — id, hospital_id, patient_id (UHID link), scheme_id, beneficiary_id (scheme's id), family_id, card_no, card_type enum(ayushman/cghs/echs/esic/state/other), name_on_card, relation, entitlement_ward?, referral_no?, referral_valid_till?, cover_limit, cover_used?, cover_balance?, verification_status enum(verified/provisional/failed/expired), verification_method enum(aadhaar_biometric/aadhaar_otp/ration_card/family_id/smart_card/referral_letter/abha/manual), verification_ref, verified_at, verified_by, photo_file_id, aadhaar_last4?, consent_id (EN-028/EN-020), duplicate_check_result jsonb, audit cols. Indexes (hospital_id, scheme_id, beneficiary_id), (patient_id). **No biometric template is ever stored.**
+- **scheme_verifications** — beneficiary_id, attempt_no, channel enum(portal/aua_kua_api/manual), request_ref, response jsonb (PII-minimised), result, device_id (RD device), operator_id, at, failure_reason.
+- **scheme_cases** — id, hospital_id, branch_id, scheme_id, encounter_id, admission_id?, patient_id, beneficiary_record_id, package_code, package_rate, preauth_request_id (RC-002), claim_id (RC-001), status enum(identified/verified/preauth_pending/approved/in_treatment/discharged/claim_submitted/settled/short_settled/rejected/closed), no_patient_collection bool default true, emergency bool, los_days, outcome enum(recovered/referred/dama/death), scheme_ref_no, audit cols. Index (hospital_id, scheme_id, status), (encounter_id) UNIQUE per scheme.
+- **scheme_case_documents** — case_id, doc_type enum(beneficiary_photo/admission_photo/intraop_photo/discharge_photo/case_sheet/investigation/implant_sticker/implant_invoice/discharge_summary/declaration/referral_letter/other), file_id, captured_at, captured_by, geotag?, required bool, verified bool, scheme_upload_ref?.
+- **scheme_compliance_incidents** — id, hospital_id, case_id?, type enum(cash_collection_attempt/deposit_attempt/patient_share_posted/display_obligation_missing/unverified_treatment/package_mismatch/parallel_admission), detail jsonb, user_id, amount?, occurred_at, severity, status enum(open/reviewed/action_taken/closed), reviewed_by, action_note. (The zero-cash evidence trail.)
+- **scheme_settlements** — id, hospital_id, scheme_id, advice_ref, period, received_at, gross_amount, deducted_amount, tds_amount, net_amount, statement_file_id, status enum(unmatched/partially_matched/matched); **scheme_settlement_lines** — settlement_id, claim_id, package_code, claimed, approved, deducted, paid, scheme_reason_code, mapped_denial_reason_id (RC-004), shortfall, dispute_id?, interest_claimable?.
+- **scheme_audits** — id, hospital_id, scheme_id, audit_ref, type enum(desk/field/beneficiary_callback/special), notice_date, claims uuid[], queries jsonb, evidence_pack_file_id, response_submitted_at, outcome enum(accepted/deduction/penalty/warning/de_empanelment_notice), amount_impact, capa_id (NC-015), closed_at, handled_by.
+- **scheme_fraud_flags** (internal pre-emptive) — case_id, flag_type enum(upcoding/unbundling/phantom/short_los/repeat_admission/specialist_absent/package_mix_outlier), evidence jsonb, detected_at, reviewed_by, disposition enum(false_positive/corrected/self_reported), note.
+- **scheme_reports** — scheme_id, report_type, period, file_id, submitted_at, submitted_by, acknowledgement_ref, signed_hash.
+- RLS on `hospital_id`; beneficiary and document rows are PHI with read audit; Aadhaar numbers are never stored in full (last 4 only, with a reference token from the AUA/KUA channel). Retention per scheme contract (commonly 5–8 years) and NHA audit requirements.
+
+## 5. Business Rules & Validations
+- **Zero-cash is a hard system rule**, not a policy note: on a case with `no_patient_collection = true`, NC-001/OP-005/IP-005/IP-001/OP-003 reject deposit, advance, patient-share and counter-sale postings; every attempt writes a `scheme_compliance_incidents` row with the user and amount. Overrides exist only for scheme-permitted charges, require `scheme.collection.override` (Scheme lead/MS) plus a reason and beneficiary consent document, and are reported monthly to the MS and Admin.
+- Treatment under a scheme without a completed verification is permitted only in emergency, must be flagged `provisional`, and must be reconciled within 24 h; unreconciled provisional cases block claim submission.
+- Package selection is constrained to the hospital's empanelled specialties and permitted package list; blocked/reserved packages are unselectable with the reason shown; unbundling combinations are rejected by rule.
+- Claimed package must equal the pre-authorised package unless a documented revision was approved; LOS beyond the package allowance requires the scheme's extension approval.
+- NABH status drives the rate tier (RC-003); an expired NABH certificate silently downgrades every package rate — the system alarms at 90/60/30 days and blocks claiming at the higher tier after expiry.
+- Mandatory scheme photographs must carry a capture timestamp within the admission window (and geotag where the scheme requires); uploaded images that fail the timestamp check are rejected at claim scrub.
+- De-duplication: a beneficiary with an open admission under the same scheme elsewhere (where the portal exposes it) or a second admission within the scheme's cooling window is flagged before pre-auth.
+- Beneficiaries are **never** billed for deductions, shortfalls or write-offs; RC-005 hard-blocks patient recovery on scheme accounts.
+- Claim submission must be within the scheme's window; late claims require Finance approval and are reported as an amount-at-risk.
+- Empanelment expiry blocks new scheme admissions for the affected specialty with a clear front-office message; existing cases continue.
+- Aadhaar authentication only through the licensed AUA/KUA channel with a registered device, with consent captured; no biometric template, and no Aadhaar number, is persisted (EN-020 rule inherited).
+- Fraud flags are internal and confidential (MS/Admin/Quality only) and are never exposed to scheme portals automatically; self-reporting a corrected claim is an explicit, approved action.
+- Segregation: the coordinator who submits a claim may not approve a shortfall write-off; the user who records a compliance incident may not close it.
+
+## 6. API Surface (`/api/v1/schemes`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| GET/POST/PATCH | /schemes, /schemes/{id} | scheme master | scheme.master.configure | Y | cursor |
+| GET/POST/PATCH | /empanelments | empanelment per branch | scheme.empanelment.configure | Y | cursor |
+| POST | /empanelments/{id}/display-evidence | upload board/rate-list photos | scheme.empanelment.configure | Y | – |
+| GET | /packages?scheme=&specialty=&q= | package master search | scheme.package.read | – | cursor |
+| POST | /packages/import | import HBP/CGHS/state list (→ RC-003) | scheme.package.import | Y | – |
+| POST | /beneficiaries/search | search by family id/card/Aadhaar (AUA/KUA) | scheme.beneficiary.search | Y | – |
+| POST | /beneficiaries/{id}/verify | biometric/OTP/alternate verification | scheme.beneficiary.verify | Y | – |
+| GET/PATCH | /beneficiaries/{id} | golden record | scheme.beneficiary.read/update | Y | – |
+| GET | /beneficiaries/{id}/entitlement | cover balance, ward, referral validity | scheme.beneficiary.read | – | – |
+| POST | /cases | create scheme case for an encounter | scheme.case.create | Y (encounter, scheme) | – |
+| GET/PATCH | /cases/{id} | case detail | scheme.case.read/update | Y | – |
+| POST | /cases/{id}/package | select/revise package | scheme.case.update | Y | – |
+| POST | /cases/{id}/preauth | raise scheme pre-auth (→ RC-002) | preauth.request.create | Y | – |
+| GET/POST | /cases/{id}/documents | scheme document checklist | scheme.document.upload | Y | cursor |
+| POST | /cases/{id}/claim | create scheme claim (→ RC-001) | claims.claim.create | Y | – |
+| GET | /cases?status=&scheme=&ward= | scheme worklist | scheme.case.list | – | cursor |
+| POST | /collection-override | permit a scheme-allowed charge | scheme.collection.override | Y | – |
+| GET | /compliance/incidents ; POST /{id}/review | zero-cash incident register | scheme.compliance.read/review | Y | cursor |
+| POST | /settlements ; POST /settlements/{id}/match | settlement import & matching | scheme.settlement.manage | Y | cursor |
+| GET | /settlements/shortfalls?scheme=&period= | shortfall analysis | scheme.report.read | – | cursor |
+| GET/POST | /audits ; POST /audits/{id}/respond | scheme audit register | scheme.audit.manage | Y | cursor |
+| GET | /fraud-flags | internal pre-emptive flags | scheme.fraud.read | – | cursor |
+| GET | /reports/mis?scheme=&period= ; POST /reports/submit | statutory returns | scheme.report.read / .submit | Y | – |
+| GET | /public/beneficiary-rights?scheme= | rights & helpline display content | public | – | – |
+
+## 7. Domain Events (outbox)
+- `scheme.beneficiary.identified|verified|verification_failed` {scheme, method, ref} → OP-001 banner, IP-001 admission, PE-001.
+- `scheme.case.created` {scheme, package, rate} → IP-005 (package billing + `no_patient_collection`), RC-002 (pre-auth), RC-008 (₹0 estimate).
+- `scheme.package.selected|revised` → IP-005, RC-001 scrub context.
+- `scheme.no_cash.violation_attempt` {module, user, amount} → **compliance register, MS & Admin alert (immediate)**.
+- `scheme.collection.overridden` {amount, reason, approver} → monthly compliance review.
+- `scheme.claim.submitted|deducted|settled|short_settled` → RC-001, RC-004 (reason mapping), RC-005 (AR), NC-009.
+- `scheme.settlement.received|matched` {advice, net, deducted} → RC-005, NC-009.
+- `scheme.audit.notice_received|responded|closed` {outcome, impact} → MS, Quality (CAPA), Finance.
+- `scheme.fraud_flag.raised` {type, case} → MS review queue (confidential).
+- `scheme.empanelment.expiring|expired|suspended` {scheme, specialty} → Admin, front office block, Quality.
+- `scheme.nabh.expiring` → Quality, Finance (rate tier impact).
+- Consumes: `ip.admission.created`, `ip.discharge.completed`, `preauth.approved|denied` (RC-002), `claim.*` (RC-001), `denial.recorded` (RC-004), `nabh.accreditation.updated` (NC-015), `roster.published` (NC-030 — specialist-presence cross-check), `implant.used` (TR-003).
+
+## 8. Screens
+- **Scheme Help Desk / Beneficiary Verification** (desktop + biometric RD device + camera, positioned at the entrance): search (family id / card no / Aadhaar / name+district), family member list with photographs, verify button with device status, consent screen, capture photograph, entitlement card (cover balance, ward entitlement, referral validity), link-to-UHID action, duplicate warning. Large, simple, bilingual — this is often operated by a non-clinical Arogya Mitra. Shortcuts: `F2` new search, `F4` verify, `F8` link to patient, `Enter` next.
+- **Scheme Case Worklist** (desktop): tabs *To verify*, *Pre-auth pending*, *In treatment*, *Documents incomplete*, *To claim*, *Submitted*, *Deducted/shortfall*, *Under audit*. Columns: beneficiary, scheme, package, ward, LOS vs allowance, approved rate, document completeness %, days since discharge, scheme reference. Real-time; SLA chips for the claim window.
+- **Package Selector** (desktop/tablet, used with the doctor): search by procedure/diagnosis, filtered to empanelled specialties, showing rate, LOS allowance, implant inclusion, mandatory documents and photographs, and blocked-package reasons; unbundling warning; "why this package" note captured for audit defence.
+- **Scheme Document Checklist** (tablet, ward/OT): required photographs and documents with capture buttons (camera with timestamp watermark), completeness meter, and a blocking indicator for claim submission. Offline-capable.
+- **Zero-Cash Compliance Register** (desktop, MS/Admin/Finance): incident list (who tried to take money, when, how much, which module), overrides with reasons, monthly trend, display-obligation evidence with last-verified dates. A hospital that can show this register survives an NHA audit.
+- **Settlement & Shortfall workspace** (desktop): advice import, claim-wise matching grid (claimed/approved/deducted/paid), scheme reason code → RC-004 mapping, shortfall totals by package and by reason, interest-claimable computation, dispute/appeal actions.
+- **Scheme Audit workspace** (desktop, MS/Quality): audit notices, claims under audit, query list, evidence-pack builder (auto-assembles case sheet, photographs, implant UDI, roster proof), response submission, outcome and CAPA.
+- **Fraud pre-check board** (desktop, MS only, confidential): internal flags with evidence and disposition.
+- **Scheme dashboard** (desktop/TV admin dark theme): cases and revenue by scheme, package mix, average claim value, approval and deduction rates, claim TAT, receivable aging by scheme (usually the worst in the hospital), profitability per package (scheme rate vs cost from NC-008), empanelment and NABH validity countdown.
+- **Beneficiary-facing** (kiosk/portal/print, EN-018/EN-034/PE-001): "Your treatment is cashless under <scheme>", entitlement summary, rights and helpline, status timeline, grievance link — in the local language, large type.
+
+## 9. Integrations
+- **PMJAY**: BIS (beneficiary identification) and **TMS** (pre-auth, claim, audit) — portal-driven today for most hospitals; API adapters via EN-017 where the state/NHA provides them (`scheme.tms_api`); NHA circulars and HBP master imported as files (RC-003).
+- **Aadhaar authentication** through the hospital's or an aggregator's **AUA/KUA licence with UIDAI-registered devices** (EN-020) — consent screen, no biometric storage, audit of every authentication.
+- **CGHS / ECHS / ESIC**: rate lists and formats as files; portals manual; ESIC referral verification; ECHS smart-card reading where hardware exists.
+- **State schemes**: per-state portal adapters and file formats (CMCHIS, MJPJAY, Aarogyasri and others), each configured as a scheme with its own package master and claim format.
+- **Internal**: RC-003 (package rates), RC-002 (pre-auth), RC-001 (claims/scrub), RC-004 (deduction reasons, grievance rungs), RC-005 (AR), RC-006 (package double-billing checks), IP-005 (package billing, no-cash), TR-003 (implants), NC-030 (specialist roster proof), NC-015 (NABH status, CAPA), NC-009 (receivables, TDS), EN-039 (scheme forms), EN-016 (e-sign), NC-004 (circulars/agreements), EN-037 (alerts).
+- Fallbacks: portal outage → provisional verification/queued submission with mandatory reconciliation; AUA/KUA outage → scheme-approved alternate identification recorded with the reason.
+
+## 10. Reports & Analytics
+- Scheme-wise volume, revenue, package mix, average claim value, and share of total hospital revenue; beneficiary counts and demographics (for state MIS).
+- Claim funnel: verified → pre-auth approved → discharged → claim submitted → approved → paid, with drop-off and TAT at each stage; submission within window %.
+- Deduction and shortfall analysis by scheme, package, reason code; recovery after representation; **realisation rate** (paid ÷ claimed) per scheme — the number that decides whether a scheme is worth continuing.
+- **Profitability per package** (scheme rate vs delivered cost from NC-008) with a loss-making package list; case-mix impact.
+- Receivable aging by scheme with the payment-cycle benchmark; delayed-payment interest claimable.
+- Compliance: zero-cash incidents and overrides, display-obligation status, unverified-treatment count, document-completeness rate, NABH/empanelment validity.
+- Audit: notices, outcomes, financial impact, CAPA closure; internal fraud-flag dispositions.
+- Read models: `analytics.mv_scheme_funnel`, `mv_scheme_realisation`, `mv_scheme_package_margin`, `mv_scheme_aging`, `mv_scheme_compliance`.
+
+## 11. Notifications
+- **Scheme coordinator**: beneficiary awaiting verification, pre-auth due, document checklist incomplete for a discharged patient, claim window closing in 3 days, scheme query received, settlement advice received.
+- **Doctor**: package requires your declaration/signature, package blocked — choose an alternative, intra-op photograph required for this package.
+- **Ward/OT**: photograph or document pending for a scheme case (blocking the claim).
+- **MS / Admin (immediate)**: cash-collection attempt on a scheme beneficiary, scheme audit notice, de-empanelment or suspension notice, internal fraud flag raised.
+- **Finance**: scheme receivable aging breach, shortfall above threshold, delayed-payment interest claimable, monthly realisation summary.
+- **Quality/Admin**: NABH certificate expiring (rate tier impact), empanelment renewal at 90/60/30 days, display-obligation verification due.
+- **Beneficiary** (SMS/WhatsApp, local language): "Your treatment under <scheme> is cashless — you should not pay anything. Helpline <number>"; approval and discharge confirmations.
+
+## 12. Permissions (RBAC keys)
+`scheme.master.configure`, `scheme.empanelment.configure` (Hospital Admin, Scheme lead) · `scheme.package.read` (all clinical/billing) / `scheme.package.import` (Scheme lead, Tariff admin) · `scheme.beneficiary.search|verify|read|update` (Scheme coordinator/Arogya Mitra, Front office; verify additionally gated by the AUA/KUA operator role and device binding) · `scheme.case.list|create|read|update` (Scheme coordinator, Insurance desk, Billing) · `scheme.document.upload` (Coordinator, Ward nurse, OT nurse, MRD) · `scheme.collection.override` (Scheme lead / MS only — every use audited and reported) · `scheme.compliance.read|review` (MS, Admin, Finance, Quality, Auditor) · `scheme.settlement.manage` (Finance, Scheme lead) · `scheme.audit.manage` (MS, Quality, Scheme lead) · `scheme.fraud.read` (MS, Admin only — confidential) · `scheme.report.read|submit|export` (Finance, Admin, Scheme lead, Auditor).
+
+## 13. Non-functional
+- **Volumes**: at a 2000-bed hospital with meaningful scheme participation, 20–40 % of admissions may be scheme-funded → 30–60 scheme admissions/day, 900–1,800 claims/month, 5,000+ documents and photographs/month; PMJAY HBP master ≈ 1,949 packages; CGHS list ≈ 2,000 lines.
+- **Performance**: beneficiary search and verification round-trip < 5 s (external dependency — with a clear progress state and a timeout path); package selector search over 2,000 packages < 150 ms (trigram + specialty filter); scheme worklist p95 < 200 ms; document upload direct to S3 presigned from tablets; claim pack with 40 photographs < 60 s.
+- **Availability**: scheme portals and UIDAI are external and unreliable; every workflow has a documented provisional path with mandatory reconciliation, and no clinical care ever waits on a portal.
+- **Offline**: ward/OT photograph capture works offline and syncs; verification does not.
+- **Printing**: beneficiary entitlement slip, cashless declaration, scheme discharge format, claim forms, rights/helpline poster, display-obligation evidence sheet.
+- **Accessibility/i18n**: beneficiary-facing screens and messages in the state language by default with large type and simple wording; coordinator screens bilingual; WCAG 2.2 AA.
+- **Security & privacy**: Aadhaar handled strictly through the licensed channel with consent, no biometric or full Aadhaar storage, EN-020 rules; beneficiary photographs are PHI with read audit; fraud flags restricted; every scheme portal credential in Vault with per-operator attribution.
+
+## 14. Acceptance Criteria
+1. Given a patient presenting an Ayushman card, when the coordinator searches by family id and verifies by Aadhaar biometric through the AUA/KUA channel, then a beneficiary golden record is created linked to the UHID with the verification reference, photograph and consent, and no biometric template or full Aadhaar number is persisted.
+2. Given a verified PMJAY beneficiary is admitted, then the encounter is marked `no_patient_collection`, the estimator (RC-008) shows ₹0 payable with an explanatory note, and IP-005 switches to package billing at the HBP rate for the hospital's NABH tier.
+3. Given a cashier attempts to collect a ₹5,000 deposit on that admission, then the collection is blocked, a compliance incident is recorded with the user and amount, and the MS and Admin are alerted immediately.
+4. Given a scheme-permitted non-covered add-on, when the Scheme lead records an override with a reason and the beneficiary's consent document, then the charge is allowed, appears in the monthly compliance review, and the beneficiary receives the cashless-rights message regardless.
+5. Given a package that is blocked for private hospitals, when a doctor tries to select it, then selection is prevented with the reason displayed and permitted alternatives suggested.
+6. Given the hospital's NABH certificate expires, then package rates fall to the non-NABH tier automatically for service dates after expiry, claiming at the higher tier is blocked, and Quality and Finance were alerted at 90/60/30 days.
+7. Given a surgical package requiring intra-operative photographs, when the claim is scrubbed without them (or with photographs timestamped outside the admission window), then submission is blocked with the specific requirement named.
+8. Given a claim is not submitted within the scheme's window, then it is flagged late, submission requires Finance approval, and it appears in the amount-at-risk report.
+9. Given a settlement advice listing 80 claims with deductions, when imported, then each line matches its claim, scheme reason codes map to RC-004 codes, shortfall per claim is computed, and RC-005 aging updates.
+10. Given a shortfall, when anyone attempts to bill the beneficiary for it, then the action is hard-blocked with a compliance entry.
+11. Given a scheme audit notice covering 12 claims, then an audit record is created, an evidence pack is auto-assembled (case sheets, photographs, implant UDI, duty roster for the operating specialist), and the response with its outcome and financial impact is tracked to closure.
+12. Given a case where the claimed package is higher than the documented procedure, then an internal `upcoding` fraud flag is raised for MS review before submission, visible only to MS/Admin.
+13. Given a beneficiary with an open admission under the same scheme at another hospital (where the portal exposes it), then a duplicate warning is raised before pre-auth.
+14. Given the scheme portal is unavailable at admission, then a provisional verification is recorded with the reason, treatment proceeds, and the case is blocked from claim submission until reconciled within 24 h.
+15. Given the empanelment for cardiology is suspended, then new cardiology scheme admissions are blocked with a clear front-office message while existing cases continue unaffected.
+16. Given the beneficiary opens the portal, then they see "Your treatment is cashless under <scheme>", the helpline and a grievance link in the state language.
+17. Given a user without `scheme.fraud.read`, when accessing the fraud board, then 403 and an audit entry are recorded.
+18. Given the monthly statutory MIS is generated, then the numbers reconcile to the claim and settlement tables and the export is signed with a hash and archived.
+19. Given an item included in the package price, then RC-006 does not treat its absence from the itemised bill as recoverable leakage (expected value ₹0).
+20. Given a beneficiary's family cover is exhausted, then the system counsels and requires documented consent before any conversion to self-pay, and never posts a silent charge.
+
+## 15. Enhancements / Later phases
+- Origin: architect-added (M) — the VIMS sheet has no government-scheme module, yet PMJAY/CGHS/ESIC often account for 20–40 % of Indian hospital admissions; competitor SmartHospital advertises only "Ayushman Bharat pre-configured packages, claim format support, state scheme variants, empanelment-ready exports", which this module far exceeds.
+- Later: **TMS/BIS API automation** as NHA opens interfaces (`scheme.tms_api`) including cover-balance query and claim status polling; ABHA-based beneficiary verification (EN-011) as schemes accept it; automatic HBP circular ingestion with change alerts to affected specialties; **package recommendation** (AI-006) from the operative note with an up-coding guard; photograph quality/timestamp validation and face-match to the verified beneficiary photo (AI-007, with strict privacy controls); scheme profitability optimiser (which packages to actively pursue); state-scheme adapter marketplace so a new state can be added by configuration; automated delayed-payment interest claims; beneficiary feedback loop (did anyone ask you for money?) via IVR/WhatsApp as an anti-corruption control; integration with the state's grievance portal; predictive audit-risk scoring per claim before submission.
+
+## 16. Open Questions for the Hospital
+1. Which schemes are you empanelled for (PMJAY, CGHS, ECHS, ESIC, state schemes), under which specialties, and can we have the empanelment letters, hospital codes and validity dates?
+2. In your state, is PMJAY run in insurance mode, trust mode or hybrid — and who actually pays you?
+3. Do you have a scheme help desk / Arogya Mitra? How many, on which shifts, and what hardware (biometric device, camera, card reader) is available?
+4. Is Aadhaar authentication done through your own AUA/KUA licence, an aggregator, or only at the scheme's own kiosk? Which registered devices are in use?
+5. Your NABH/NABL status and validity per branch — and who tracks the renewal? (This directly changes every package rate.)
+6. Which packages do you actually perform, and are any blocked or reserved for your hospital?
+7. What is your current claim submission window compliance, and what percentage of scheme claims get deducted — with the top deduction reasons?
+8. What is your average scheme payment cycle in days, and has delayed-payment interest ever been claimed?
+9. Have you faced a scheme medical audit? What was asked, and what evidence did you have to produce?
+10. Which photographs and documents does each scheme demand at your hospital today (they vary by state), so we can configure the checklists?
+11. Are there any circumstances in which you charge a scheme beneficiary anything at all? (We will hard-block by default; every exception needs to be named and approved.)
+12. Who responds to scheme audits and grievances — MS, quality, or the scheme coordinator? And what is the escalation path in your state?

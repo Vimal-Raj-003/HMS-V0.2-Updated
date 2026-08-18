@@ -1,0 +1,28 @@
+{
+  "name": "@vims/print-templates",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HTML/CSS print templates (A4/A5), ESC/POS thermal and ZPL label templates. Templates are data, never code (EN-039 §5).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./html": "./src/html/index.ts",
+    "./escpos": "./src/escpos/index.ts",
+    "./zpl": "./src/zpl/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vims/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "vitest": "^4.1.10"
+  }
+}

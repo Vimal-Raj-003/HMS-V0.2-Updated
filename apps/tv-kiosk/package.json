@@ -1,0 +1,31 @@
+{
+  "name": "@vims/tv-kiosk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next.js display client: token boards, ward boards and kiosk self-service. Device-token paired, no cursor, no chrome.",
+  "scripts": {
+    "dev": "next dev --port ${TV_KIOSK_PORT:-3001}",
+    "build": "next build",
+    "start": "next start --port ${TV_KIOSK_PORT:-3001}",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vims/contracts": "workspace:*",
+    "@vims/ui": "workspace:*",
+    "next": "15.5.23",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "socket.io-client": "^4.8.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "tailwindcss": "^4.3.3",
+    "@tailwindcss/postcss": "^4.3.3",
+    "vitest": "^4.1.10"
+  }
+}

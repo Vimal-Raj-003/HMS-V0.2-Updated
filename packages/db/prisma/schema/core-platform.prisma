@@ -1,0 +1,361 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Platform: settings, numbering, flags, files, idempotency, outbox, DR drills
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// EN-007 §3.1.2: declared in code (`packages/contracts/settings`), synced here so
+/// the admin console can validate and the audit diff can describe each key.
+model SettingDefinition {
+  key          String  @id @db.VarChar(128)
+  module       String  @db.VarChar(16)
+  label        String  @db.VarChar(200)
+  description  String  @db.Text
+  scopes       String[] @default([])
+  /// JSON Schema derived from the Zod definition, for the admin form renderer.
+  jsonSchema   Json    @map("json_schema")
+  defaultValue Json    @map("default_value")
+  sensitivity  String  @db.VarChar(16)
+  requiresApproval Boolean @default(false) @map("requires_approval")
+  dualControl  Boolean @default(false) @map("dual_control")
+
+  syncedAt DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  settings Setting[]
+
+  @@index([module])
+  @@map("setting_definitions")
+  @@schema("core")
+}
+
+/// Effective value resolution is hierarchical: user → department → branch →
+/// hospital → definition default. A NULL at a narrower scope means "inherit",
+/// which is why every scope column is nullable rather than defaulted.
+model Setting {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String? @map("branch_id") @db.Uuid
+  departmentId String? @map("department_id") @db.Uuid
+  userId       String? @map("user_id") @db.Uuid
+  key          String  @db.VarChar(128)
+  value        Json
+  /// Set for `sensitivity = 'secret'` keys; `value` then holds only a masked hint.
+  valueEncrypted String? @map("value_encrypted") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  definition SettingDefinition @relation(fields: [key], references: [key], onDelete: Restrict)
+
+  // A partial unique index per scope combination is added in SQL, because Prisma
+  // cannot express uniqueness over a nullable tuple the way Postgres needs.
+  @@index([hospitalId, key])
+  @@index([hospitalId, branchId, key])
+  @@index([userId, key])
+  @@map("settings")
+  @@schema("core")
+}
+
+/// EN-007 §3.1.3: hospital/branch holiday calendars. Affects appointment slots
+/// (OP-001), SLA timers (EN-038) and payroll (NC-010).
+model Holiday {
+  id         String   @id @db.Uuid
+  hospitalId String   @map("hospital_id") @db.Uuid
+  branchId   String?  @map("branch_id") @db.Uuid
+  date       DateTime @db.Date
+  name       String   @db.VarChar(200)
+  kind       String   @db.VarChar(16)
+  /// Which departments observe it — an emergency department observes none.
+  appliesTo  Json     @default("{}") @map("applies_to")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, branchId, date, name])
+  @@index([hospitalId, date])
+  @@map("holidays")
+  @@schema("core")
+}
+
+enum NumberingResetPolicy {
+  fy
+  year
+  month
+  day
+  never
+
+  @@schema("core")
+}
+
+/// docs/03 §Numbering series. `gapless` is the load-bearing flag: invoices and
+/// receipts are legally required to have no holes, which forces a row-locked
+/// allocation inside the business transaction. Tokens use a plain sequence
+/// because a gap in a queue token harms nobody and the throughput matters.
+model NumberingSeries {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String? @map("branch_id") @db.Uuid
+  key          String  @db.VarChar(48)
+  /// e.g. `{BR}/{FY}/{SEQ:6}`
+  pattern      String  @db.VarChar(120)
+  scope        String  @db.VarChar(16)
+  /// Financial year the current counter belongs to, e.g. `2026-27`.
+  fy           String? @db.VarChar(9)
+  currentValue BigInt  @default(0) @map("current_value")
+  gapless      Boolean @default(false)
+  resetPolicy  NumberingResetPolicy @default(fy) @map("reset_policy")
+  /// EN-007 §5: "pattern change never affects issued numbers"; a change creates a
+  /// new version effective from the next financial year.
+  version      Int     @default(1)
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  /// Set once the series has issued a number; the pattern then becomes immutable.
+  lockedAt     DateTime? @map("locked_at") @db.Timestamptz(6)
+  active       Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  allocations NumberingAllocation[]
+
+  @@unique([hospitalId, branchId, key, fy, version])
+  @@index([hospitalId, key, active])
+  @@map("numbering_series")
+  @@schema("core")
+}
+
+/// Only written for gapless series, so the absence of a number can be proved.
+/// docs/09 §9.8: "gapless series (invoices, receipts, MLC, blood bag) have no
+/// holes and no duplicates per hospital/branch/FY".
+model NumberingAllocation {
+  id          String   @id @db.Uuid
+  hospitalId  String   @map("hospital_id") @db.Uuid
+  seriesId    String   @map("series_id") @db.Uuid
+  number      BigInt
+  /// The rendered human-facing number, e.g. `BLR/2026-27/000123`.
+  formatted   String   @db.VarChar(120)
+  /// What consumed it, so an orphaned allocation is traceable.
+  refType     String?  @map("ref_type") @db.VarChar(64)
+  refId       String?  @map("ref_id") @db.Uuid
+  allocatedAt DateTime @default(now()) @map("allocated_at") @db.Timestamptz(6)
+  allocatedBy String?  @map("allocated_by") @db.Uuid
+  /// A gapless series may not delete an allocation; a cancelled document keeps
+  /// its number and is marked cancelled instead.
+  voidedAt    DateTime? @map("voided_at") @db.Timestamptz(6)
+  voidReason  String?  @map("void_reason") @db.VarChar(300)
+
+  series NumberingSeries @relation(fields: [seriesId], references: [id], onDelete: Restrict)
+
+  @@unique([seriesId, number])
+  @@index([hospitalId, refType, refId])
+  @@map("numbering_allocations")
+  @@schema("core")
+}
+
+/// CLAUDE.md §4: every module ships behind `module.<key>.enabled`.
+/// EN-007 §3.7: a flag can never enable a module outside the licence.
+model FeatureFlag {
+  id         String  @id @db.Uuid
+  key        String  @db.VarChar(128)
+  hospitalId String? @map("hospital_id") @db.Uuid
+  branchId   String? @map("branch_id") @db.Uuid
+  roleKey    String? @map("role_key") @db.VarChar(64)
+  userId     String? @map("user_id") @db.Uuid
+  enabled    Boolean
+  rolloutPct Int?    @map("rollout_pct")
+  expiresAt  DateTime? @map("expires_at") @db.Timestamptz(6)
+  note       String? @db.VarChar(500)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, key])
+  @@index([key])
+  @@map("feature_flags")
+  @@schema("core")
+}
+
+enum FileStatus {
+  pending_upload
+  scanning
+  clean
+  infected
+  quarantined
+  deleted
+
+  @@schema("core")
+}
+
+/// docs/04 §4: private buckets, presigned URLs ≤ 5 min, virus scan on upload,
+/// magic-byte check. A file row exists before the object does, so an abandoned
+/// upload is detectable and cleanable.
+model StoredFile {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  bucket      String  @db.VarChar(120)
+  objectKey   String  @map("object_key") @db.VarChar(500)
+  filename    String  @db.VarChar(300)
+  /// Declared by the client AND verified by magic bytes; a mismatch quarantines.
+  contentType String  @map("content_type") @db.VarChar(160)
+  detectedContentType String? @map("detected_content_type") @db.VarChar(160)
+  sizeBytes   BigInt  @map("size_bytes")
+  sha256      String? @db.VarChar(64)
+  status      FileStatus @default(pending_upload)
+  scanResult  String? @map("scan_result") @db.VarChar(200)
+  scannedAt   DateTime? @map("scanned_at") @db.Timestamptz(6)
+  /// True when the object contains PHI; drives audit-on-download and retention.
+  containsPhi Boolean @default(false) @map("contains_phi")
+  patientId   String? @map("patient_id") @db.Uuid
+  /// What this file belongs to, e.g. `render_job` / `audit_export` / `user_photo`.
+  refType     String? @map("ref_type") @db.VarChar(64)
+  refId       String? @map("ref_id") @db.Uuid
+  /// Storage lifecycle tier (docs/07 §1.3: hot → S3-IA → Glacier).
+  storageClass String @default("standard") @map("storage_class") @db.VarChar(32)
+  retainUntil  DateTime? @map("retain_until") @db.Timestamptz(6)
+  legalHold    Boolean @default(false) @map("legal_hold")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([bucket, objectKey])
+  @@index([hospitalId, refType, refId])
+  @@index([hospitalId, patientId])
+  @@index([status])
+  @@map("files")
+  @@schema("core")
+}
+
+/// CLAUDE.md §3: "Idempotency on all money-moving and order-creating endpoints
+/// (`Idempotency-Key`)." The stored response is replayed verbatim so a retried
+/// request can never produce a second charge, a second receipt or a second order.
+model IdempotencyKey {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  /// The client-supplied key, scoped per user intent (docs/06 §6.6) — not per retry.
+  key        String  @db.VarChar(200)
+  userId     String? @map("user_id") @db.Uuid
+  route      String  @db.VarChar(200)
+  method     String  @db.VarChar(8)
+  /// Hash of the request body. A same-key-different-body request is a client bug
+  /// and must be rejected loudly rather than silently replaying the wrong answer.
+  requestHash String @map("request_hash") @db.VarChar(64)
+  status     String  @default("in_flight") @db.VarChar(16)
+  responseStatus Int? @map("response_status")
+  responseBody   Json? @map("response_body")
+  /// Set while in flight so a concurrent duplicate waits rather than double-posting.
+  lockedUntil DateTime? @map("locked_until") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  /// docs/07 §4: idempotency results cached 24 h.
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, key, route])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+  @@schema("core")
+}
+
+/// docs/03 §Outbox + ADR-0004. Written in the SAME transaction as the state
+/// change, then relayed to Redis Streams by the worker. This is what makes
+/// "no event without a committed source row, and no source row without an event"
+/// (docs/09 §9.10) structurally true rather than hopeful.
+/// Partitioned monthly; purged 7 days after publish.
+model OutboxEvent {
+  id         String   @db.Uuid
+  hospitalId String   @map("hospital_id") @db.Uuid
+  branchId   String?  @map("branch_id") @db.Uuid
+  aggregate  String   @db.VarChar(64)
+  aggregateId String  @map("aggregate_id") @db.VarChar(128)
+  aggregateVersion Int? @map("aggregate_version")
+  eventType  String   @map("event_type") @db.VarChar(128)
+  schemaVersion Int   @default(1) @map("schema_version")
+  payload    Json
+  containsPhi Boolean @default(false) @map("contains_phi")
+
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  actorType   String  @default("user") @map("actor_type") @db.VarChar(16)
+  correlationId String @map("correlation_id") @db.VarChar(128)
+  causationId   String? @map("causation_id") @db.VarChar(128)
+  traceId       String? @map("trace_id") @db.VarChar(64)
+
+  occurredAt  DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(6)
+  attempts    Int      @default(0)
+  lastError   String?  @map("last_error") @db.Text
+  /// After N attempts the event moves to the dead-letter state rather than being
+  /// dropped — docs/04 §7: "No silent failures."
+  deadLetteredAt DateTime? @map("dead_lettered_at") @db.Timestamptz(6)
+  retentionDays Int @default(7) @map("retention_days")
+
+  @@id([id, occurredAt])
+  /// docs/07 §4 calls this "the hottest small index in the system". A partial
+  /// index on unpublished rows only is added in SQL so it stays tiny forever.
+  @@index([occurredAt])
+  @@index([hospitalId, eventType, occurredAt(sort: Desc)])
+  @@index([aggregate, aggregateId])
+  @@index([correlationId])
+  @@map("outbox_events")
+  @@schema("core")
+}
+
+/// docs/03 §Backup/DR: "quarterly restore drill logged in `core.dr_drills`".
+/// EN-022 §12 makes the record itself the compliance artefact.
+model DrDrill {
+  id          String   @id @db.Uuid
+  hospitalId  String   @map("hospital_id") @db.Uuid
+  kind        String   @db.VarChar(32)
+  scheduledAt DateTime @map("scheduled_at") @db.Timestamptz(6)
+  startedAt   DateTime? @map("started_at") @db.Timestamptz(6)
+  finishedAt  DateTime? @map("finished_at") @db.Timestamptz(6)
+  /// Achieved against the docs/03 targets: RPO ≤ 5 min, RTO ≤ 1 h enterprise.
+  rpoAchievedSeconds Int? @map("rpo_achieved_seconds")
+  rtoAchievedSeconds Int? @map("rto_achieved_seconds")
+  passed      Boolean?
+  conductedBy String?  @map("conducted_by") @db.Uuid
+  witnessedBy String?  @map("witnessed_by") @db.Uuid
+  findings    String?  @db.Text
+  reportFileId String? @map("report_file_id") @db.Uuid
+  /// Corrective actions tracked in NC-015 once Phase 9 lands.
+  capaRef     String?  @map("capa_ref") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@index([hospitalId, scheduledAt(sort: Desc)])
+  @@map("dr_drills")
+  @@schema("core")
+}
+
+/// EN-022 §3 / EN-038 §3.4.6: declared downtime windows. SLA clocks pause across
+/// these so nobody is escalated for a system outage, and the downtime protocol
+/// (docs/01 §7) records back-dated catch-up entries as such.
+model DowntimeWindow {
+  id         String   @id @db.Uuid
+  hospitalId String   @map("hospital_id") @db.Uuid
+  branchId   String?  @map("branch_id") @db.Uuid
+  kind       String   @db.VarChar(24)
+  fromAt     DateTime @map("from_at") @db.Timestamptz(6)
+  toAt       DateTime? @map("to_at") @db.Timestamptz(6)
+  reason     String   @db.Text
+  declaredBy String   @map("declared_by") @db.Uuid
+  /// Reserved numbering block for offline registration (docs/01 §7).
+  reservedNumberBlock Json? @map("reserved_number_block")
+  closedAt   DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, fromAt(sort: Desc)])
+  @@map("downtime_windows")
+  @@schema("core")
+}

@@ -1,0 +1,236 @@
+# EN-024 — Audit Trail & Logging (Immutable Audit Store, Hash Chaining, PHI Access & Break-Glass, Before/After Diffs, Retention & Partitioning, Tamper Detection, Audit Search UI, Statutory Reports, Log Shipping)
+
+| Field | Value |
+|---|---|
+| Domain | Enabler |
+| Module ID | EN-024 |
+| Phase | 0 |
+| Priority | P0 |
+| Complexity | High |
+| Depends on | EN-007 (System Admin — identity, sessions, audit viewer host, settings), EN-023 (Cybersecurity — SIEM export, anomaly detection consumes audit), EN-022 (Backup & DR — audit store retention beyond DB restores), EN-028 (Consent — DSAR access reports, consent ledger events), EN-025 (SSO — login events), EN-026 (API Gateway — API access logs), EN-017/EN-019 (integration & FHIR access logs), EN-016 (document hash chains reuse the same primitives), NC-003 (MRD — medico-legal record access), EN-038 (approval trails), EN-041 (group-level audit views) |
+| Consumed by | Every module — no module may mutate clinical or financial data without writing an audit entry |
+| Feature flag | `module.audit.enabled` (always on, cannot be disabled); sub-flags `audit.hash_chain`, `audit.log_shipping`, `audit.anomaly_detection`, `audit.external_anchor` |
+| Primary roles | Privacy Officer / DPO (57), Auditor (58), Hospital Admin (2), IT Admin (56), MRD Officer (43 — medico-legal access history) |
+| Secondary roles | Medical Superintendent (break-glass review), Quality Manager (54 — NABH evidence), HOD (department access review), every user (own activity view), Super Admin (fleet integrity) |
+| Regulatory | **DPDP Act 2023 & Rules 2025** (accountability, demonstrable compliance, DSAR — a data principal may ask who processed their data, breach evidence, consent records); **CERT-In Directions 2022** (logs retained **180 days within India**, NTP sync, availability to CERT-In on request); NABH 6th ed. **IMS/MOM** (record of who accessed/altered a medical record, medico-legal traceability, entry authentication); NABL 4.2 (data integrity, ALCOA+ principles for laboratory records); **IT Act 2000 §65B** (electronic evidence — certificate of authenticity for records produced in court), §43A/SPDI Rules; Companies Act §128 & Income Tax/GST (financial records 6–8 years, audit trail of accounting software with edit log — MCA's audit-trail/edit-log mandate for accounting software applies to NC-009 postings); HIPAA-compatible controls (audit controls §164.312(b), unique user ids, emergency access procedure) for global readiness; MCI/NMC record-keeping (3 years minimum, MLC longer) |
+
+## 1. Purpose
+EN-024 is the system's memory of *who did what, to which record, when, from where, and why*. It provides an append-only, hash-chained audit store with before/after diffs for every clinical and financial mutation, dedicated **PHI access logging** (including break-glass with reasons), tamper detection, partitioned retention that satisfies clinical, financial and CERT-In obligations, a fast search UI for privacy officers and auditors, statutory report packs (NABH, DPDP DSAR, §65B court certificates, accounting edit logs), and shipping of security-relevant events to a SIEM. It is the substrate other modules build on: EN-007's audit viewer, EN-023's detection, EN-028's DSAR responses and EN-016's document chains all read from here.
+
+## 2. Users & Jobs-to-be-done
+- **Privacy Officer / DPO** (desktop, daily): review the break-glass digest, investigate "who opened this celebrity's chart?", answer a DSAR with a complete access history, and produce breach evidence.
+- **Auditor (internal/external)** (desktop, periodic): pull the audit trail for a sample of bills, prescriptions and discounts; verify segregation of duties actually held; export evidence — and have that export itself logged.
+- **MRD Officer**: produce the access-and-amendment history of a medico-legal record for a court, with a §65B certificate.
+- **Hospital Admin / HOD**: see who changed a tariff, approved a discount, or deleted a schedule slot; run a departmental access review.
+- **Medical Superintendent**: review break-glass accesses weekly — were they clinically justified?
+- **IT Admin**: verify hash-chain integrity, manage retention and partitions, configure SIEM shipping, investigate an incident timeline with EN-023.
+- **Any user**: see their own activity ("my recent actions") — transparency reduces disputes and is required for some access-review workflows.
+
+## 3. Core Workflows
+
+### 3.1 Writing an audit entry (the contract every module obeys)
+1. A service performs a mutation inside a database transaction → in the **same transaction** it writes to `core.audit_log`: actor (user id, role, impersonator id if any), session id, request id/trace id, IP, user agent, device id, hospital/branch, entity (schema.table), row id, business key (e.g. UHID, bill no), action (`I/U/D/READ_PHI/EXPORT/PRINT/LOGIN/LOGOUT/APPROVE/REJECT/SIGN/OVERRIDE/BREAK_GLASS`), before/after JSONB (changed columns only), reason (required for a defined set of actions), and the patient/encounter context where applicable.
+2. Writing audit is **not optional and not asynchronous** for clinical/financial mutations — if the audit insert fails, the transaction fails. (High-volume, non-critical reads use a buffered path — §3.3.)
+3. A repository-layer helper computes the diff automatically from the entity's before/after snapshots so developers cannot forget; a lint/CI check flags any `UPDATE`/`DELETE` on an audited table that bypasses the helper.
+4. Sensitive values are **masked in the diff** by column policy (passwords, tokens, API keys → `«redacted»`; Aadhaar/ABHA → masked; biometric templates never appear at all).
+5. Every entry gets `seq` (monotonic per hospital), `row_hash = sha256(canonical_json(entry))` and `prev_hash` from the previous entry in the chain → the hash chain (§3.4).
+
+### 3.2 PHI access logging & break-glass
+1. Opening a patient's chart, viewing a report, downloading a document, printing a summary, exporting a list containing patient identifiers, or reading PHI through the API (EN-019/EN-026) writes a `READ_PHI` entry with the **purpose context**: care relationship (the user is on the care team / is the treating doctor / has an active encounter link), administrative purpose (billing, MRD, insurance), or **break-glass**.
+2. **Break-glass**: when a clinician opens a chart outside their care team or ward scope, the UI interrupts with a reason prompt (structured reason + free text: emergency cross-cover, on-call consult, code blue, patient request, second opinion, quality review). Access is granted immediately — never blocked, because patient safety comes first — and the event is flagged, the patient's care team is notified (configurable), and the DPO receives it in the daily digest.
+3. Break-glass reviews: DPO/Medical Superintendent mark each as *justified* / *not justified* / *needs explanation*; unjustified accesses feed HR/disciplinary and NABH incident processes; the review outcome is itself audited.
+4. **VIP/sensitive-record flagging**: records flagged (celebrity, staff-as-patient, MLC, HIV/psychiatry per policy) generate an immediate alert on any access outside the care team, not just a daily digest.
+5. Bulk/export operations record the **row count and the filter used**, not every identifier, plus a hash of the exported file so the exact artefact can later be matched.
+
+### 3.3 Log classes & routing
+| Class | Examples | Store | Retention | Written |
+|---|---|---|---|---|
+| **Clinical/financial mutation audit** | order created, result validated, bill finalised, drug dispensed, discount approved | `core.audit_log` (partitioned) | 8 years (clinical/financial), longer for MLC/minors per NC-003 | synchronous, in-transaction |
+| **PHI access** | chart open, report view, export, print, API read | `core.audit_log` (action `READ_PHI`) | 3 years minimum (DPDP/NABH), 8 years for MLC | synchronous for chart/export; buffered ≤ 5 s for high-volume list reads |
+| **Authentication & session** | login, failure, lockout, MFA, SSO, session revoke, impersonation | `core.login_audit` + audit_log | 180 days online (CERT-In), 3 years archive | synchronous |
+| **Admin/config change** | role change, permission edit, tariff change, feature flag, setting, numbering series | `core.audit_log` | 8 years | synchronous |
+| **Application/system log** | pino JSON logs, errors, traces | log store (Loki/OpenSearch), **no PHI** | 180 days (CERT-In) | async |
+| **Integration message log** | HL7/FHIR/webhook payload metadata | `integration.*` (EN-017/EN-019) | 180 days + archive | async |
+| **Security events** | WAF blocks, EDR, anomalies | SIEM (EN-023) | per SIEM policy, ≥ 180 days | streamed |
+- **No PHI in application logs** is enforced by a serialiser deny-list plus CI tests that fail the build if a known PHI field name appears in a log statement.
+
+### 3.4 Hash chaining & tamper detection (`audit.hash_chain`)
+1. Each audit row stores `seq`, `row_hash`, `prev_hash`. Chains are **per hospital per day partition** to keep verification tractable, and each day's terminal hash (`day_root`) is stored in `audit_chain_roots` along with the row count.
+2. A **daily integrity job** recomputes hashes for the previous day, verifies continuity with the prior day's root, and records the result in `audit_integrity_runs`. A weekly job samples older partitions; a full verification can be run on demand (e.g. before a court submission).
+3. Any mismatch (row modified, row deleted, gap in `seq`) raises a **P1 security incident** (EN-023), notifies the DPO and Super Admin, and marks the affected partition `integrity_suspect` — reports generated from it carry that caveat rather than pretending nothing happened.
+4. Database-level protections: audit tables have **no UPDATE/DELETE grants** for application roles; a `BEFORE UPDATE OR DELETE` trigger raises an exception; only the retention job (running as a separate role) may detach whole partitions; RLS prevents cross-tenant reads.
+5. `audit.external_anchor` (optional): the daily `day_root` is published to an external immutable store (S3 Object Lock bucket, a notary service, or a public blockchain) so tampering by a fully compromised administrator is still detectable — this is what makes the chain meaningful against an insider with DB access.
+
+### 3.5 Audit search & investigation
+- Search dimensions: patient, user, role, department, entity/table, action, business key (bill no, order no, UHID), date/time range, IP/device, reason text, break-glass flag, impersonation flag, request/trace id.
+- **Timeline view** per patient ("everyone who touched this record"), per user ("everything this user did on 12-Jun"), per record ("full history of bill B-2231 with before/after diffs").
+- **Diff viewer**: field-level before/after with type-aware rendering (money, dates, coded values resolved to their display names via EN-027), collapsed unchanged fields, and a "who else changed this field" pivot.
+- **Saved searches & scheduled reports** for recurring duties (daily break-glass digest, weekly high-risk exports, monthly discount approvals).
+- Investigations can be grouped into a **case** (linked to an EN-023 incident or an HR matter) with notes and an evidence bundle export.
+
+### 3.6 Statutory reports & evidence
+- **DPDP DSAR support** (with EN-028): "who processed my data and for what purpose" — a per-patient processing-and-access report in plain language, produced within the statutory window.
+- **NABH evidence**: record-access control evidence, amendment history of clinical documents, break-glass review records, access-review completion (EN-007).
+- **§65B certificate** (IT Act): for any audit extract or document produced in court, generate the certificate identifying the computer system, the regularity of its operation, the extraction method and the person responsible; attach the extract's SHA-256 and the integrity-run status for the covering period (used by TR-008/NC-003 in medico-legal matters).
+- **Accounting edit log** (Companies Act/MCA): a report proving that every accounting entry's creation and modification is captured with user and timestamp, and that the audit trail was not disabled during the financial year (the specific statement auditors ask for) — sourced from NC-009's audited tables.
+- **CERT-In**: on request, a log extract for a stated period in a machine-readable format, with the integrity attestation.
+
+### 3.7 Retention, partitioning & archival
+1. `core.audit_log` is **partitioned monthly** by `occurred_at` (pg_partman), with indexes on (hospital_id, occurred_at), (patient_id, occurred_at), (actor_user_id, occurred_at), (entity, row_id) and a GIN index on the reason/diff for text search where needed.
+2. Hot partitions (last 6 months) stay on fast storage; older partitions are compressed and may be moved to a cheaper tablespace; partitions beyond the online window are **exported to immutable object storage** as signed, hash-verified NDJSON/Parquet with their chain roots, then detached — never simply dropped while inside a retention obligation.
+3. Retention classes are configurable per hospital but **floored** by statute: clinical 8 years (MLC/minors longer per NC-003), financial 8 years, PHI access 3 years, auth logs 180 days online. Attempting to configure below the floor is rejected.
+4. Archived partitions remain searchable through a restore-on-demand path (query returns "archived — restore to search", with restore taking minutes, and every restore audited).
+5. **Erasure interaction (DPDP)**: audit entries are *not* deleted on an erasure request — they are the evidence of processing. Instead, direct identifiers inside audit payloads are pseudonymised (patient replaced by a stable pseudonym) where the legal basis allows, while the fact-of-processing record survives; the decision and its legal basis are documented and shown to the DPO.
+
+### 3.8 Log shipping (`audit.log_shipping`)
+- Security-relevant audit events stream to the SIEM (EN-023) in CEF/LEEF/JSON over syslog-TLS/HTTPS with **PHI tokenised** (patient replaced by a salted hash), including auth events, admin changes, break-glass, exports, permission changes and integrity failures.
+- Application logs (pino JSON) ship to Loki/OpenSearch with trace correlation (`trace_id`, `request_id`) so a support engineer can reconstruct a request path without ever seeing PHI.
+- Back-pressure and buffering: if the SIEM is unreachable, events queue durably and drain on recovery; the buffer depth and oldest-unsent age are alerted (a silently broken SIEM feed is a common audit failure).
+
+### 3.9 Exceptions
+- **Audit write failure** on a clinical/financial mutation → the whole transaction rolls back and the user sees a clear error; the failure itself is logged to the system log and alerts IT (this is deliberately strict: an unaudited clinical change is not acceptable).
+- **Clock skew**: entries carry both server time and the DB `now()`; NTP drift beyond tolerance raises a compliance alert (EN-023) because timestamps are the evidence.
+- **Impersonation** (EN-007): both the impersonator and the target identity are recorded on every entry; reports can filter to "actions performed while impersonating".
+- **Bulk jobs/system actors**: batch processes write with a service-account actor and a job reference so "the system did it" is always traceable to a job run.
+
+## 4. Data Model (schema `core`, prefix `audit_`)
+- `audit_log` (**partitioned monthly by `occurred_at`**) — id uuidv7, hospital_id, branch_id?, seq bigint (per hospital, monotonic), occurred_at timestamptz, recorded_at timestamptz, actor_user_id?, actor_type enum(user/service/device/system/patient/external_app), actor_role, impersonator_user_id?, session_id?, request_id, trace_id, ip inet, user_agent, device_id?, entity text (schema.table), row_id uuid?, business_key text?, action enum(insert/update/delete/read_phi/export/print/login/logout/approve/reject/sign/override/break_glass/config_change), patient_id?, encounter_id?, before jsonb, after jsonb, changed_fields text[], reason_code?, reason_text?, data_class enum(phi/financial/hr/operational), sensitivity enum(normal/sensitive/vip), result enum(success/denied/error), denial_reason?, app_module, api_route?, row_count int? (for exports/lists), artifact_sha256?, prev_hash bytea, row_hash bytea; indexes: (hospital_id, occurred_at desc), (patient_id, occurred_at desc), (actor_user_id, occurred_at desc), (entity, row_id, occurred_at desc), (hospital_id, action, occurred_at) partial for `read_phi`/`export`, GIN on `changed_fields`, GIN trgm on `reason_text`.
+- `audit_chain_roots` — hospital_id, chain_date date, first_seq, last_seq, row_count, day_root bytea, prev_day_root bytea, computed_at, anchored_at?, anchor_ref?; UNIQUE(hospital_id, chain_date).
+- `audit_integrity_runs` — id, hospital_id, scope (date range/partition), started_at, finished_at, rows_checked, mismatches int, gaps int, status enum(pass/fail/partial), details jsonb, triggered_by enum(schedule/manual/pre_export).
+- `audit_break_glass` — id, audit_log_id, hospital_id, patient_id, actor_user_id, reason_code, reason_text, ward/department context, care_team_checked bool, notified_care_team_at?, review_status enum(pending/justified/not_justified/explained), reviewed_by, reviewed_at, review_note, incident_ref?; index (hospital_id, review_status, occurred_at).
+- `audit_retention_policies` — hospital_id, data_class, action_class, online_days, archive_years, floor_days (statutory, non-editable), archive_target (repo ref), pseudonymise_on_erasure bool, updated_by/at.
+- `audit_archives` — id, hospital_id, partition_name, period, row_count, file_ref, file_sha256, chain_root, archived_at, storage_class, restorable_until, restored_at?.
+- `audit_exports` — id, hospital_id, requested_by, purpose enum(dsar/court/regulator/internal_audit/certin/insurer), scope jsonb (filters), format, row_count, file_ref, file_sha256, certificate_65b_file_id?, approved_by?, exported_at, expires_at; **the export itself is audited in `audit_log`**.
+- `audit_saved_searches` — id, hospital_id, user_id, name, filters jsonb, schedule cron?, recipients, last_run_at.
+- `audit_cases` — id, hospital_id, title, kind enum(privacy_investigation/hr/security_incident/medico_legal), linked_incident_ref?, status, opened_by, opened_at, closed_at, findings, evidence_bundle_file_id.
+- `audit_field_policies` (seed + config) — entity, column, mask enum(none/redact/mask_partial/exclude), data_class, reason_required bool — drives automatic diff masking and reason enforcement.
+- `login_audit` — see EN-007 (`core.login_audit`): username_attempted, user_id?, result, reason, method, ip, ua, geo, at; 180-day online retention.
+
+## 5. Business Rules & Validations
+- **No audit, no mutation.** Clinical and financial writes fail if the audit entry cannot be written in the same transaction.
+- The audit store is **append-only**: no UPDATE or DELETE grants to application roles, enforced additionally by triggers; only the retention job may detach whole partitions after archival.
+- `seq` is gapless per hospital; a detected gap is treated as tampering (P1), not as a benign anomaly.
+- Reason is **mandatory** for: break-glass access, PHI export/print, deletion/cancellation of clinical or financial records, discount/refund approval beyond policy, override of a hard-stop (allergy/interaction/credit limit), impersonation, and configuration changes flagged sensitive.
+- Break-glass **never blocks access** — it prompts, grants, logs, notifies and queues for review. Blocking a clinician in an emergency would be the more dangerous failure mode.
+- Diffs contain only changed fields; masked columns per `audit_field_policies`; secrets and biometric templates never appear, even masked.
+- Audit reads are themselves audited when they touch PHI-bearing entries (viewing a patient's access history is an access event).
+- Retention floors are enforced in code: any policy below the statutory floor is rejected with the specific regulation cited.
+- Erasure requests never delete audit entries; pseudonymisation is applied where lawful, with the decision recorded.
+- Exports require a stated purpose; court/regulator exports additionally require approval and generate a §65B certificate with the integrity-run status for the covered period.
+- Time is recorded in UTC (`timestamptz`) with the hospital timezone applied only for display; NTP sync is monitored; entries record both the application timestamp and the database timestamp so skew is visible.
+- Multi-tenancy: RLS on `audit_log` by `hospital_id`; group-level auditors use an explicit `app.hospital_ids` scope (EN-041); cross-tenant reads are impossible for ordinary roles.
+- The audit module's own configuration changes (retention, field policies, shipping) are audited and require dual control.
+
+## 6. API Surface (`/api/v1/audit`)
+| Method | Path | Purpose | Permission | Notes |
+|---|---|---|---|---|
+| POST | /entries (internal) | write audit entry | service-internal only | never exposed publicly; in-transaction helper preferred |
+| GET | /search?patient&user&entity&rowId&action&from&to&businessKey&breakGlass&q | audit search | `audit.read` | cursor, partition-pruned |
+| GET | /entries/:id | entry detail with diff | `audit.read` | PHI reads audited |
+| GET | /patients/:id/timeline | everyone who touched this record | `audit.patient.read` (DPO, MRD, Admin) | |
+| GET | /users/:id/activity | a user's actions | `audit.user.read` (DPO, Admin, HOD own dept) | |
+| GET | /records/:entity/:rowId/history | full record history with diffs | `audit.read` | used by "view history" in every module |
+| GET | /me/activity | own activity | any authenticated user | last 90 days |
+| GET/POST | /break-glass ; POST /break-glass/:id/review | break-glass register & review | `audit.breakglass.review` (DPO, Medical Superintendent) | daily digest |
+| GET/POST | /cases ; PATCH /cases/:id ; POST /cases/:id/evidence | investigation cases | `audit.case.manage` (DPO) | bundle export |
+| POST | /exports {scope, purpose} ; GET /exports/:id ; GET /exports/:id/certificate-65b | evidence export | `audit.export` (DPO, Auditor; court/regulator needs approval) | export is itself audited |
+| GET | /integrity/runs ; POST /integrity/verify {from,to} ; GET /integrity/status | tamper detection | `audit.integrity.run` (IT, Auditor) | on-demand verify |
+| GET/PUT | /retention-policies | retention config | `audit.retention.configure` (Hospital Admin + DPO dual) | floors enforced |
+| GET/POST | /archives ; POST /archives/:id/restore | archived partitions | `audit.archive.manage` | restore audited |
+| GET/PUT | /field-policies | masking & reason rules | `audit.config.manage` | dual control |
+| GET/PUT | /log-shipping ; POST /log-shipping/test | SIEM/log store config | `audit.shipping.manage` (IT Admin) | PHI-redaction validated |
+| GET/POST | /saved-searches ; POST /saved-searches/:id/run | saved searches & digests | `audit.read` | scheduled reports |
+| GET | /reports/phi-access ; /reports/break-glass ; /reports/config-changes ; /reports/accounting-edit-log ; /reports/nabh-pack ; /reports/dsar/:patientId | statutory reports | `audit.report.read` | DSAR ties to EN-028 |
+
+## 7. Domain Events (outbox)
+- `audit.break_glass.recorded` → DPO digest, care-team notification, EN-023 (spike detection), VIP-record immediate alert.
+- `audit.export.performed` → EN-023 (data-exfiltration signal), DPO log.
+- `audit.integrity.run_completed`, `audit.integrity.mismatch` → **P1** to EN-023, Super Admin, DPO; blocks §65B certification for affected periods.
+- `audit.retention.archived|restored|purge_blocked` → IT, DPO.
+- `audit.anomaly.detected` (unusual access volume, off-hours PHI reads, mass deletion, repeated denied actions) → EN-023 incident draft.
+- `audit.dsar.report_generated` → EN-028 consent/DSAR ledger.
+- Consumes: every module's mutations (via the in-transaction helper, not events), plus `admin.*`, `security.incident.*` (to link cases), `patient.data.erasure_requested` (pseudonymisation queue), `hr.employee.exited` (retain identity for historical entries).
+
+## 8. Screens (UI)
+- **Audit Search** (desktop, hosted inside the EN-007 admin console): a filter bar built for real investigations (patient, user, entity, action, date range, business key, break-glass only, impersonation only, denied only), virtualised results table with colour-coded action chips, and a right-hand detail pane showing the diff. Shortcuts: `/` focus search, `J/K` navigate rows, `D` open diff, `S` save search, `E` export (permission-gated, prompts for purpose).
+- **Record History** (embedded component available on every entity screen — patient, bill, order, tariff, role): a vertical timeline of versions with actor, time, reason and an expandable field-level diff; "restore to this version" is **not** offered here (corrections happen through the owning module's amendment workflow, preserving the append-only model).
+- **Patient Access Timeline** (desktop, DPO/MRD): who accessed this patient's record, grouped by day, with care-relationship status, purpose, break-glass flag and review outcome; one click to add an entry to an investigation case; used verbatim to answer patient questions.
+- **Break-Glass Register** (desktop, DPO/Medical Superintendent): pending reviews first with clinician, patient (masked until opened), reason, time, ward; review actions with a note; bulk-justify for a documented event (e.g. a code blue where the whole team accessed the chart) with a single shared justification.
+- **Integrity Console** (desktop, IT/Auditor): chain status per day (green ticks / red breaks) for the last 12 months, last run details, "verify range" action with progress, external anchor status, and a clear explanation of what a break means and what to do.
+- **Retention & Archives** (desktop): partitions with size, row counts, storage class, archive status and restore actions; retention policy editor showing the statutory floor beside each configurable value so nobody accidentally proposes an illegal setting.
+- **Investigation Case** (desktop, DPO): case header, linked audit entries, notes, timeline, evidence bundle generation with §65B certificate.
+- **My Activity** (all devices, phone-friendly): the user's own recent actions with plain-language descriptions ("You viewed the record of patient ****3421 at 14:22").
+- Empty/error states: "No audit entries match — try widening the date range", "Partition 2023-04 is archived — restore to search (approx. 4 min)", "Integrity check failed for 12-Mar — this period is marked suspect and cannot be certified".
+
+## 9. Integrations
+- **SIEM/log store**: Splunk, QRadar, Sentinel, Elastic, Wazuh (CEF/LEEF/JSON over syslog-TLS/HTTPS); Loki/OpenSearch for application logs; OpenTelemetry trace correlation.
+- **Object storage** for archived partitions and evidence bundles (S3/MinIO with Object Lock), coordinated with EN-022 retention.
+- **EN-023** consumes the audit stream for anomaly detection and incident timelines; **EN-016** shares the hash-chain primitives for document signing; **EN-028** consumes access history for DSAR and consent evidence; **EN-019/EN-026** feed API-level access entries; **EN-025** feeds SSO/IdP login events.
+- **External anchoring** (optional): S3 Object Lock bucket, RFC 3161 timestamping authority, or a public ledger for the daily chain root.
+- **NC-009** accounting edit-log report; **NC-003/TR-008** medico-legal extracts with §65B certificates.
+
+## 10. Reports & Analytics
+- PHI access report by patient/user/department with break-glass counts and review outcomes; top accessors of a single record (a classic privacy red flag); after-hours access patterns; export/print register with volumes; configuration-change log (roles, permissions, tariffs, flags, settings); approval trails (discounts, refunds, POs, payroll — supporting segregation-of-duties assertions); accounting audit-trail attestation report; integrity-run history; retention & archive inventory; DSAR fulfilment turnaround; audit-write failure rate (should be zero). Read models: `analytics.mv_audit_daily` (counts by action/entity/department), `analytics.mv_phi_access_by_user_month`.
+
+## 11. Notifications
+- DPO: daily break-glass digest, immediate alert on VIP/sensitive-record access outside the care team, unusual export volume, integrity mismatch, DSAR due date approaching.
+- Medical Superintendent: weekly break-glass review list with ageing.
+- IT Admin: audit-write failures, SIEM shipping backlog/outage, partition growth beyond forecast, archive/restore failures, NTP drift.
+- Hospital Admin: monthly audit summary, retention policy change requests, high-risk configuration changes.
+- Care team: "your patient's record was accessed by Dr X outside the care team" (configurable, off by default in some hospitals — a policy decision).
+- Users: "your action requires a reason" is inline UI rather than a notification; "your activity report is ready" for access reviews.
+
+## 12. Permissions (RBAC keys)
+`audit.read` (DPO, Auditor, Hospital Admin, IT Admin; HOD scoped to own department via ABAC) · `audit.patient.read` (DPO, MRD Officer, Medical Superintendent) · `audit.user.read` (DPO, Hospital Admin, HOD own dept) · `audit.breakglass.review` (DPO, Medical Superintendent) · `audit.case.manage` (DPO) · `audit.export` (DPO, Auditor — purpose required; court/regulator exports need Hospital Admin approval; always audited) · `audit.integrity.run` (IT Admin, Auditor) · `audit.retention.configure` (Hospital Admin + DPO, dual control) · `audit.archive.manage` (IT Admin) · `audit.config.manage` (IT Admin + DPO, dual control) · `audit.shipping.manage` (IT Admin) · `audit.report.read` (Admin, Quality, Auditor, DPO) · every user implicitly has *own activity* read. **No role can update or delete audit entries** — the permission does not exist.
+
+## 13. Non-functional
+- Volume for a 2000-bed hospital: **8–15 M audit rows/day** at peak (5000 OP visits, 20k lab tests, 300 admissions, medication administrations, PHI reads), ≈ 250–450 M rows/month → monthly partitions of 30–60 GB. Storage plan must assume ~0.5 TB/year for `audit_log` before compression.
+- Write overhead must be < 3 ms p95 added to a transaction; batched buffered writes for high-volume read logging (≤ 5 s flush, durable queue so nothing is lost on crash).
+- Search: p95 < 1 s for a 30-day window filtered by patient or user (partition pruning + covering indexes); full-text on reasons uses trigram GIN; queries beyond the online window return an explicit "archived" path rather than timing out.
+- Integrity verification of one day's partition < 5 min; full-year verification runnable overnight.
+- Availability: audit writes must not be a single point of failure for clinical operations — they live in the same database and transaction, so their availability equals the database's; the buffered read-log path degrades gracefully with a durable local queue.
+- Security: append-only grants, RLS, masked diffs, encrypted at rest (whole-database encryption + column-level for sensitive payloads), no PHI in shipped logs, MFA/step-up for export and configuration.
+- Accessibility & i18n: audit UI WCAG 2.2 AA; action names and reason codes localised; timestamps shown in hospital timezone with UTC on hover; diffs readable with screen readers (semantic tables, not colour-only).
+
+## 14. Acceptance Criteria
+1. Given any update to a clinical or financial record, when the transaction commits, then an audit entry exists in the same transaction with actor, before/after diff of changed fields only, reason where required, and a valid hash chained to the previous entry.
+2. Given the audit insert fails, when the mutation is attempted, then the entire transaction rolls back, the user sees an explicit error, and IT is alerted — no unaudited change is ever persisted.
+3. Given a clinician opens a chart outside their care team, when they proceed, then a reason is required, access is granted immediately, a break-glass entry is created, and the DPO sees it in the next daily digest.
+4. Given a VIP-flagged record is accessed outside the care team, when the access occurs, then the DPO is alerted immediately rather than at end of day.
+5. Given a user attempts to update or delete a row in `core.audit_log`, when the statement executes, then it is rejected by both the permission model and a database trigger.
+6. Given someone modifies an audit row directly in the database with elevated privileges, when the daily integrity job runs, then the hash chain mismatch is detected, a P1 security incident is raised, the DPO and Super Admin are notified, and the affected period is marked integrity-suspect.
+7. Given the daily chain root is anchored externally, when a full-period verification is run, then the recomputed root matches the anchored value, and any divergence is reported with the exact date.
+8. Given a PHI export of 4000 patient rows, when it completes, then the audit entry records the filter used, the row count and the file's SHA-256 — not 4000 individual identifiers — and the export event is streamed to the SIEM.
+9. Given a patient submits a DSAR, when the DPO generates the report, then it lists every access and processing event for that patient in plain language within the statutory window, and the report generation itself is audited.
+10. Given a retention policy is set below the statutory floor, when it is saved, then it is rejected with the specific regulation and minimum value shown.
+11. Given a partition older than the online window, when the retention job runs, then the partition is exported to immutable storage with a verified hash and chain root before being detached, and it remains restorable for search.
+12. Given an erasure request under DPDP, when it is processed, then audit entries are not deleted; direct identifiers are pseudonymised where lawful, the processing record survives, and the legal basis for retention is documented.
+13. Given a court requires an audit extract, when the §65B certificate is generated, then it includes the extract hash, the system description, the extraction method, the responsible person and the integrity-run status for the covered period.
+14. Given the SIEM is unreachable for 2 hours, when connectivity returns, then all buffered security events are shipped in order with no loss, and the backlog alert clears.
+15. Given a user views their own activity, when the page loads, then they see their last 90 days of actions in plain language, and no other user's data.
+16. Given an auditor searches for all discount approvals above ₹10,000 last quarter, when the search runs on a 90-day window, then results return within the performance target with actor, amount, patient/bill reference and approval reason.
+17. Given an impersonated session (EN-007) performs actions, when those entries are viewed, then both the impersonator and the target identity are shown, and a filter can isolate all impersonated actions.
+
+## 15. Enhancements / Later phases
+- UEBA/anomaly detection over the audit stream (EN-023): peer-group comparison of PHI access volumes, off-hours patterns, sequential-record browsing, "same-surname" lookups that often indicate personal curiosity.
+- Honeytoken/canary patient records that should never be opened — the highest-signal insider-threat detector available (with EN-023).
+- Patient-facing **access transparency** in the portal: "who viewed my record" (a strong trust feature, increasingly expected under DPDP), with clinically appropriate filtering and a defined dispute process.
+- Automated NABH/ISO evidence generation mapping audit reports to specific control clauses.
+- Immutable external anchoring by default (RFC 3161 timestamping of daily roots), plus optional blockchain anchoring for consent events (source enhancement in EN-017's list).
+- Column-level provenance for clinical documents (which values came from a device, an external HL7 feed, or human entry) surfaced in the diff viewer.
+- Audit-aware undo: a guided amendment workflow that creates a compensating entry rather than an edit, for modules that currently lack one.
+- Query federation across archived partitions so cold data is searchable without an explicit restore step.
+- Real-time audit streaming to a customer-owned SIEM per tenant (SaaS), with per-tenant field maps and delivery SLAs.
+
+## 16. Open Questions for the Hospital
+1. Retention required for clinical, financial, HR and access logs beyond the statutory floors — any insurer, accreditation or litigation-hold requirement that demands longer?
+2. Is a SIEM in place today? Which one, and who monitors it outside working hours?
+3. Should the care team be notified when someone accesses their patient's record via break-glass, or only the DPO?
+4. Which records count as "sensitive/VIP" here (staff-as-patient, celebrities, MLC, psychiatry, HIV) and what alerting do they warrant?
+5. Who reviews break-glass accesses, and what is the expected turnaround (daily/weekly)?
+6. Does the hospital want patients to see their own record-access history in the portal? (Strong transparency signal, but needs a dispute process.)
+7. Is external anchoring of the daily hash root acceptable/desired, and to which service (object-lock bucket, timestamping authority, public ledger)?
+8. Who signs §65B certificates for court submissions, and is there an existing template from the hospital's legal counsel?
+9. Storage budget and tiering for ~0.5 TB/year of audit data — on-prem disk, cloud object storage, or both?
+10. For the accounting audit trail (MCA requirement), which system is the book of account of record — NC-009 or an external ERP — and who provides the annual attestation?
+11. Are group-level auditors expected to see audit data across all branches, or must audit access be strictly branch-scoped?

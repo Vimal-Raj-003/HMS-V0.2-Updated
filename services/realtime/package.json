@@ -1,0 +1,30 @@
+{
+  "name": "@vims/realtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Socket.IO gateway with the Redis adapter. Rooms per docs/01 §6, diff-push with 1 push/sec coalescing.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
+    "@socket.io/redis-streams-adapter": "^0.2.2",
+    "@vims/contracts": "workspace:*",
+    "ioredis": "^6.0.0",
+    "pino": "^10.3.1",
+    "socket.io": "^4.8.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "socket.io-client": "^4.8.3",
+    "tsx": "^4.19.2",
+    "vitest": "^4.1.10"
+  }
+}

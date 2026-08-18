@@ -1,0 +1,145 @@
+# OP-031 — Oncology / Chemotherapy Day Care (Cancer registry & staging, Regimen library, BSA/Calvert dosing, Cycle calendar, Pre-chemo checks, Chemo pharmacy compounding, Day-care chairs & administration, CTCAE toxicity, Tumour board)
+
+| Field | Value |
+|---|---|
+| Domain | OPD Clinical |
+| Module ID | OP-031 |
+| Phase | 8 |
+| Priority | P2 |
+| Complexity | Very High |
+| Depends on | **OP-025 §0 (shared specialty console framework)**, OP-002, OP-003 (chemo pharmacy stock, cytotoxic handling, batches), IP-023 (IP chemotherapy shares regimen engine & MAR), IP-014 (ward pharmacy), OP-004 (CBC/RFT/LFT pre-chemo labs, tumour markers, histopath/IHC/molecular), OP-008/EN-008 (imaging, RECIST measurements), OP-006 (day-care beds/chairs infrastructure), IP-006 (port insertion, surgeries), OP-010 (bone marrow, biopsies, port care), EN-029 (dose range/renal/hepatic/cumulative limits, interactions, allergy — chemo rule set), EN-028 (chemo consent per regimen), EN-039 (forms), OP-016 (cancer pain), OP-011 (nutrition), OP-032 (psycho-oncology), OP-018 (tele follow-up), IP-007 (transfusions), IP-012 (neutropenic isolation), OP-005/IP-005/OP-023/RC-002/RC-007 (billing per cycle, packages, pre-auth per cycle, PMJAY oncology packages), NC-006/NC-016 (cytotoxic waste yellow bags), NC-020 (BSC/isolator, hoods), TR-003 (ports/implants), EN-009, PE-002 (cycle reminders), NC-015 (extravasation/incident), EN-017 (cancer registry HBCR/PBCR export), radiotherapy planning system (external, EN-017) |
+| Feature flag | `module.oncology.enabled` (sub: `onco.daycare`, `onco.compounding`, `onco.tumour_board`, `onco.registry`, `onco.radiotherapy_link`) |
+| Primary roles | Medical oncologist / Haemato-oncologist (6), Oncology resident (14), Chemo day-care nurse (16/17: `chemo_nurse`), Oncology pharmacist (30/32: `onco_pharmacist`), Day-care coordinator |
+| Secondary roles | Surgical/radiation oncologist (9), Pathologist (13), Radiologist (12), Palliative/pain (OP-016), Dietician (39), Psycho-oncologist (42), Billing/insurance (27/28), Tumour registrar (MRD 43), Quality (54), Patient/family |
+| Regulatory | NABH (chemotherapy safety: double verification, cytotoxic handling), CDSCO Schedule H/X, NDPS (opioids in palliative), BMW 2016 (cytotoxic waste), National Cancer Registry Programme (HBCR/PBCR ICMR formats; ICD-O-3 topography/morphology), AJCC TNM 8th ed. staging, CTCAE v5.0, RECIST 1.1, PMJAY oncology packages (RC-007), AERB (RT via external), DPDP, Clinical Establishments Act |
+
+## 1. Purpose
+OP-031 delivers a safe, protocol-driven chemotherapy service: cancer **case registry** (site ICD-O-3, histology, TNM/AJCC 8 stage, biomarkers ER/PR/HER2/EGFR/ALK/PD-L1…, ECOG/Karnofsky), **regimen library** (hospital-configurable, versioned: drugs, dose/BSA or mg/kg or AUC, route, day schedule, cycle length, premeds, hydration, antiemetics, supportive care, dose-mod rules), **treatment plan & cycle calendar** with BSA (Mosteller/DuBois) / Calvert (carboplatin AUC with CrCl Cockcroft-Gault) / cumulative dose (anthracycline, bleomycin) calculations, pre-cycle **fitness checks** (labs, vitals, toxicity, consent, pre-auth), **double verification & pharmacist validation**, **compounding worksheet & labels** (cytotoxic pharmacy in BSC/isolator), **day-care chair scheduling & administration record** (infusion start/stop, rates, vesicant/extravasation, reactions), **CTCAE v5 toxicity grading & dose modification**, response assessment (RECIST), tumour board, survivorship/follow-up and registry reporting. IP chemotherapy (IP-023) reuses the same regimen/order/compounding engine with IP-003 MAR. Framework per OP-025 §0.
+
+## 2. Users & Jobs-to-be-done
+- **Oncologist** (desktop/tablet; 40–60 OP + 20–40 chemo reviews/day): register case & stage, choose regimen, plan cycles, review fitness/toxicity, modify doses, sign orders, assess response, present at tumour board.
+- **Oncology pharmacist**: validate orders (dose/BSA/limits/interactions), prepare compounding worksheets, label, dispense per chair, manage cytotoxic stock/returns/wastage.
+- **Chemo nurse** (tablet at chair): pre-chemo checks, chair assignment, double-check (2 nurses/barcode), administer with timings, monitor reactions, extravasation protocol, discharge from day care.
+- **Day-care coordinator**: chair calendar (capacity/turnover), pre-auth per cycle, patient calls, lab pre-scheduling.
+- **Tumour registrar**: registry abstraction & export.
+- **Patient**: cycle calendar, pre-cycle lab reminders, symptom reporting (PRO-CTCAE via app), education.
+
+## 3. Core Workflows
+### 3.1 Case registration & staging
+1. Console tabs: Case/Staging · Plan & Cycles · Today's chemo (day care) · Toxicity · Response · Tumour board · Registry.
+2. New cancer case: primary site (ICD-O-3 topography), morphology, laterality, grade, diagnosis date & basis (histology/cytology/imaging/clinical), biomarkers panel per site (typed), TNM (clinical/pathological, AJCC 8 auto stage-group lookup per site), performance status (ECOG/KPS), comorbidities, intent (curative/adjuvant/neoadjuvant/palliative), MDT decision link; genetic counselling flag; registry fields (HBCR core). Event `onco.case.registered`.
+### 3.2 Regimen library & treatment plan
+1. **Regimen library** (mdm, versioned, HOD-approved; seeded common regimens: FOLFOX, FOLFIRI, AC-T, TCH, CHOP/R-CHOP, ABVD, BEP, carboplatin-paclitaxel, gem-cis, capecitabine, imatinib…): per drug — dose basis (mg/m², mg/kg, AUC, flat, mg/m² capped BSA 2.0/2.2 config), route (IV bolus/infusion time/PO/SC/IT), diluent/volume/stability, days of cycle (D1, D1-14…), cycle length, planned cycles, sequence order, premedication set, hydration, antiemetic tier (MASCC/ASCO emetogenicity), G-CSF rules, cumulative dose caps (doxorubicin 450–550 mg/m², bleomycin 400 U, cisplatin), dose-modification tables (ANC/platelet/creatinine/bilirubin/CTCAE grade), required pre-cycle labs & thresholds, monitoring (echo for anthracyclines/trastuzumab, audiometry cisplatin, PFT bleomycin), consent template.
+2. **Treatment plan**: oncologist selects regimen (version pinned), sets start date, intent, planned cycles, weight/height → **BSA** (Mosteller default; DuBois option; ideal/adjusted body weight options for obese), CrCl (Cockcroft-Gault; measured GFR option) → **Calvert** for carboplatin (AUC × (GFR + 25), GFR cap 125 config) → per-drug doses auto-computed, rounding rules (nearest 5/10 mg, vial-based rounding ≤ 5–10 % config), % dose reductions per drug/cycle with reason codes, cumulative dose projection & alerts, supportive meds, cycle **calendar** generated (day-care slots, lab dates D−1/D−2, follow-up), consent (EN-028 regimen-specific), estimate/pre-auth per cycle (RC-002/RC-007), education → sign (`onco.plan.signed`) → **each cycle = chemo order set** (draft until pre-cycle checks pass).
+### 3.3 Cycle day: fitness check → verification → compounding → administration
+1. D−1/D0: labs auto-ordered (OP-004) → **fitness check** (nurse/doctor): CBC (ANC ≥ 1.5, plt ≥ 100 config per regimen), RFT/LFT, vitals, weight (BSA recalc if change > 5–10 % → recompute prompt), ECOG, toxicity from previous cycle (CTCAE), pregnancy test if applicable, allergy/prior reaction, port/IV access, consent valid, pre-auth approved → oncologist confirms/modifies doses (dose-mod table suggestions) → **signs cycle order** (e-sign; every drug line with dose, calc basis, final dose, % reduction). Hard-stop when out of range unless override with reason and second oncologist (config).
+2. **Pharmacist validation** (independent recalculation of BSA/CrCl/doses vs regimen; interactions; cumulative; stability) → approve/query (query loop with oncologist) → **compounding worksheet** (drug, vials/batch/expiry, diluent, final volume/concentration, BSC/isolator ID, preparer, checker, prep time, expiry after prep, hazardous handling checklist), **labels** (patient, UHID, drug, dose, volume, route, rate, prep/expiry time, "CYTOTOXIC", vesicant flag, barcode) via EN-005; batch/lot consumption from cytotoxic stock (OP-003), vial-sharing & wastage log; delivered to day care with chain-of-custody scan.
+3. **Day care** (`onco.daycare`): chair/bed schedule (capacity per shift, expected duration from regimen infusion times), patient check-in → chair assigned → **bedside verification**: two nurses (or nurse + barcode) verify patient wristband (EN-013) vs label vs order (drug/dose/route/rate/sequence) → premeds → **administration record**: per drug start/stop time, pump rate, line/port, flush, vitals schedule (baseline, 15 min, hourly), infusion reactions (grade, action, drugs given), **extravasation** protocol (vesicant list, antidote kit, incident NC-015, photo), interruptions; sequence enforcement (e.g. paclitaxel before carboplatin), infusion time limits, hydration/urine output for cisplatin, mesna timing → completion → discharge criteria (vitals, no reaction, instructions, next appointment, 24×7 helpline card) → billing per cycle (drugs by actual vials/consumption per hospital policy — full vial vs dose, day-care charge, consumables, nursing) → `onco.cycle.administered`.
+4. Oral chemo/targeted therapy: dispensing per cycle with adherence & toxicity check; hormone therapy long-term.
+### 3.4 Toxicity, dose modification, response
+- **CTCAE v5.0** grading per visit/cycle (haematologic, GI, neuropathy, skin, hepatic, renal, cardiac, febrile neutropenia…), source clinician or PRO-CTCAE app; grade ≥ 3 triggers dose-mod suggestion for next cycle & delay/hold; febrile neutropenia pathway (ER OP-006 alert, antibiotic within 60 min KPI, IP-012 isolation); supportive care (G-CSF, antiemetics, transfusion IP-007). **Response**: RECIST 1.1 target/non-target lesions with measurements per imaging (OP-008 links), sum of diameters, response category (CR/PR/SD/PD), tumour markers trend; end-of-treatment summary; survivorship plan & surveillance calendar; palliative transition (OP-016).
+### 3.5 Tumour board (`onco.tumour_board`) & registry (`onco.registry`)
+- MDT meeting scheduling, case list, presenter, attached imaging/path, decision record (signed by chair), tasks; registry abstraction (HBCR/PBCR fields, ICD-O-3, stage, first-course treatment, follow-up/vital status) → export CSV/XML to ICMR NCRP format; annual vital-status follow-up tasks.
+### 3.6 Exceptions
+- Labs below threshold → cycle deferred (reschedule chairs, notify patient); pharmacist query → order revision (new version); reaction → hold, treat, document; compounding error → discard & incident; power/pump failure → manual rate log; offline: bedside verification cached read-only (no administration start without server unless emergency mode logged); patient absconds/AMA from day care.
+
+## 4. Data Model (schema `specialty`; shared with IP-023)
+- **onco_cases**: id, hospital_id, branch_id, patient_id, case_no (numbering `ONCO_CASE`), primary_site_icdo3, morphology_icdo3, laterality, grade, dx_date, dx_basis, biomarkers jsonb, tnm jsonb (c/p T,N,M, stage_group, edition 8), ecog, kps, intent enum, oncologist_id, status enum(active/remission/surveillance/palliative/deceased/lost), registry jsonb (hbcr fields, exported_at), version; index (hospital_id, patient_id), (hospital_id, status).
+- **regimens** (mdm, versioned): id, hospital_id (null = global seed), code, name, indication_sites text[], version, status enum(draft/approved/retired), cycle_length_days, planned_cycles, emetogenicity, approved_by/at, notes; **regimen_drugs**: id, regimen_id, seq, drug_id, dose_basis enum(mg_m2/mg_kg/auc/flat/mg_m2_capped), dose_value numeric, unit, route, infusion_min, days int[], diluent, volume_ml, stability_h, vesicant bool, cumulative_cap numeric?, cap_unit, is_premed/supportive bool; **regimen_rules**: regimen_id, type enum(lab_threshold/dose_mod/monitoring), rule jsonb.
+- **treatment_plans**: id, case_id, regimen_id, regimen_version, intent, start_date, planned_cycles, bsa_method, bsa numeric(4,2), height_cm, weight_kg, crcl numeric, dose_overrides jsonb, consent_id, estimate_id, status enum(draft/signed/active/completed/stopped), stop_reason, signed_by/at, version.
+- **chemo_cycles**: id, plan_id, cycle_no, day_no, scheduled_at, chair_slot_id?, status enum(planned/fitness_pending/ready/pharm_pending/pharm_approved/compounded/in_progress/administered/deferred/cancelled), fitness jsonb (labs, weight, bsa_used, ecog, toxicity_summary, checks), deferred_reason, preauth_id?, bill_id?, signed_by/at; index (plan_id, cycle_no), (hospital_id, scheduled_at, status).
+- **chemo_order_lines**: id, cycle_id, drug_id, seq, dose_basis, basis_value, calc_dose, reduction_pct, final_dose, unit, route, infusion_min, diluent, volume_ml, cumulative_before, cumulative_after, override_reason?, second_signer_id?, pharm_status enum(pending/approved/queried/rejected), pharm_by/at, pharm_notes.
+- **compounding_records**: id, order_line_id, worksheet jsonb (vials [{batch_id, lot, expiry, qty}], diluent, final_conc, final_volume), hood_id, prepared_by, checked_by, prepared_at, expires_at, label_key, wastage_ml, status enum(prepared/dispensed/returned/discarded), custody jsonb.
+- **daycare_chairs**: id, hospital_id, branch_id, unit_id, name, type enum(chair/bed), is_active; **daycare_slots**: chair_id, start_at, end_at, cycle_id, status.
+- **chemo_administrations**: id, cycle_id, order_line_id, chair_id, verify_nurse1_id, verify_nurse2_id?, barcode_verified bool, started_at, ended_at, rate, access enum(peripheral/port/picc), reactions jsonb ([{at, grade, symptoms, actions}]), extravasation jsonb?, vitals jsonb[], interruptions jsonb, completed bool, by; index (cycle_id).
+- **toxicity_assessments**: id, case_id, cycle_id?, encounter_id, at, source enum(clinician/pro), items jsonb ([{term (CTCAE), grade 1–5, attribution}]), max_grade, action enum(none/dose_reduce/delay/hold/stop/hospitalise), by.
+- **response_assessments**: id, case_id, at, method enum(recist/rano/lugano/markers/clinical), lesions jsonb, sod_mm, baseline_sod_mm, nadir_sod_mm, response enum(cr/pr/sd/pd/ne), imaging_refs uuid[], by.
+- **tumour_boards**: id, hospital_id, at, members uuid[], cases jsonb ([{case_id, presenter, question, decision, decided_by}]), minutes_doc_id, status.
+- **cumulative_doses** (derived): case_id, drug_id, total_dose, unit, per_m2, last_at.
+- Enums: `dose_basis`, `cycle_status`, `pharm_status`, `response_cat`, `treatment_intent`.
+
+## 5. Business Rules & Validations
+- BSA Mosteller √(h×w/3600) (DuBois option); recalculated when weight change > 5 % (config) → doses recomputed & re-signed; BSA cap (2.0/2.2) configurable per regimen; Calvert dose = AUC × (CrCl + 25) with CrCl capped 125 mL/min; CrCl via Cockcroft-Gault (actual/ideal weight per policy), age/creatinine freshness ≤ 7 days.
+- Cumulative caps enforced (warn at 80 %, hard-stop at cap without documented override & cardiology clearance for anthracyclines); monitoring rules (echo/audiometry/PFT) must be within validity before sign.
+- Cycle order requires: fitness labs within 48 h & above thresholds (or dose-mod/override), consent valid for regimen, pre-auth (if payer) approved, weight today; oncologist e-sign; pharmacist independent approval; **two-person bedside verification** (nurse+nurse or nurse+barcode) before every drug; label barcode must match order line & patient wristband; sequence & infusion-time enforcement; vesicants only via secure access with checks; no administration if compounded product expired.
+- Dose rounding rules per drug; % reduction must carry reason (toxicity/organ function/PS); dose > 110 % of regimen or below 50 % → second-oncologist review (config).
+- Compounding: hazardous-drug handling checklist, closed-system devices flag, spill kit, wastage documented, cytotoxic waste to yellow (BMW), stability expiry auto; returns to stock only if unopened & policy allows.
+- Toxicity grade ≥ 3 → next-cycle dose-mod suggestion; febrile neutropenia → red alert & ER pathway; PRO-CTCAE severe → nurse call within 4 h.
+- Billing: per cycle — drug charge by vial policy (full-vial vs proportional; wastage billing per payer rules), day-care & nursing charges, consumables; PMJAY package mapping per cycle; refunds on deferred cycle.
+- Registry: HBCR core fields mandatory to close first-course; ICD-O-3 codes validated; exports audited; vital status follow-up yearly.
+- Immutability: signed plans/cycles/administrations; revisions versioned; retention as clinical (cancer records long-term).
+
+## 6. API Surface (`/api/v1/onco`)
+| Method | Path | Purpose | Permission | Idem | Pag |
+|---|---|---|---|---|---|
+| POST/GET/PATCH | /cases, /cases/{id} | case & staging | onco.case.create/read/update | Y | cursor |
+| GET/POST/PUT | /regimens, /regimens/{id}/versions, /approve | regimen library | onco.regimen.read/manage/approve | Y | cursor |
+| POST/PATCH/GET | /cases/{id}/plans, /plans/{id} | plan (calc doses) | onco.plan.create/update/read | Y | – |
+| POST | /plans/{id}/calc (bsa, crcl, doses) | dose calculator | onco.plan.read | – | – |
+| POST | /plans/{id}/sign | sign plan → cycles | onco.plan.sign | Y | – |
+| GET | /cycles?date=&status=, /cycles/{id} | cycle worklist | onco.cycle.read | – | cursor |
+| PUT | /cycles/{id}/fitness, POST /cycles/{id}/sign, /defer | fitness & order sign | onco.cycle.assess/sign | Y | – |
+| POST | /cycles/{id}/pharm/approve|query, /compounding | pharmacist | onco.pharm.validate / onco.pharm.compound | Y | – |
+| GET/POST | /daycare/chairs, /daycare/slots | scheduling | onco.daycare.schedule | Y | cursor |
+| POST | /cycles/{id}/verify, /administrations, PATCH /administrations/{id} | bedside | onco.admin.verify/record | Y | – |
+| POST/GET | /cases/{id}/toxicity, /response | assessments | onco.tox.record / onco.response.record | Y | cursor |
+| POST/GET | /tumour-boards | MDT | onco.mdt.manage | Y | cursor |
+| GET | /registry/export?period=, /reports/* | registry/KPIs | onco.registry.export / onco.report.read | – | – |
+| POST | /pro (patient scope) | PRO-CTCAE | patient | Y | – |
+
+## 7. Domain Events (outbox)
+- `onco.case.registered|staged|status_changed`, `onco.plan.signed`, `onco.cycle.scheduled|fitness_failed|signed|deferred`, `onco.pharm.approved|queried`, `onco.compounding.prepared|dispensed|discarded` (OP-003 stock, NC-016 waste), `onco.admin.verified|started|completed|reaction|extravasation` (NC-015), `onco.tox.grade3plus`, `onco.febrile_neutropenia`, `onco.response.recorded`, `onco.mdt.decision`, `onco.registry.exported`, `onco.cumulative.threshold`.
+- Consumes: `lab.result.final` (fitness auto-fill), `preauth.approved|denied`, `bill.paid`, `admission.created` (IP-023 handover), `op22.result.attached`, `pacs.study.available`, `procedure.completed` (port), `pharmacy.stock.low` (cytotoxics).
+
+## 8. Screens (UI)
+1. **Oncology worklist / day-care board** (desktop dark TV option): chairs × time Gantt, patient status pipeline (arrived → fitness → order signed → pharmacy → compounding → at chair → done), delays; real-time.
+2. **Case & staging workspace** (desktop): site-specific biomarker panel, TNM picker with auto stage group, ECOG, registry completeness meter.
+3. **Plan builder** (desktop): regimen picker with version, calc panel (BSA/CrCl/Calvert live), drug table (basis → calc → reduction → final, cumulative bar), calendar preview, consent/pre-auth chips; `Ctrl+Enter` sign with e-sign.
+4. **Cycle fitness & order sign** (desktop/tablet): lab traffic-lights vs thresholds, weight/BSA delta, prior toxicity, dose-mod suggestion, override reason, sign.
+5. **Pharmacist validation & compounding** (desktop in chemo pharmacy): queue, independent calc view, approve/query, worksheet with vial/batch scan, hood/preparer/checker, label print (`Ctrl+L`), custody scan.
+6. **Bedside administration** (tablet at chair): wristband + label scan, second-nurse PIN, drug timeline (start/stop buttons), vitals prompts, reaction/extravasation quick actions, discharge checklist; offline read-only.
+7. **Toxicity & response** (desktop): CTCAE grid by cycle, PRO inbox, RECIST lesion table with imaging links, waterfall/spider charts (Recharts).
+8. **Tumour board** (desktop/TV): agenda, case cards, decision capture.
+9. **Patient app**: cycle calendar, lab reminders, PRO-CTCAE, education, helpline.
+- Empty/error: labs missing → "order now" CTA; pharmacist query banner on order.
+
+## 9. Integrations
+- OP-003 cytotoxic stock & batches, EN-005 label printers (cytotoxic labels), EN-013 barcode verification, OP-004 labs auto-order/threshold parsing, PACS/RECIST measurement import (SR), EN-029 chemo rule set (dose range/renal/hepatic/cumulative/interactions), RC-002/RC-007 per-cycle pre-auth & PMJAY, IP-023/IP-003 MAR for inpatient cycles, NC-016 waste, NC-020 BSC certification, external RT planning/oncology information systems (HL7/CSV via EN-017), NCRP registry export, EN-011 FHIR (MedicationRequest/Administration with regimen extension), infusion pumps (EN-042 later).
+
+## 10. Reports & Analytics
+- Day-care utilisation (chairs, turnaround, wait times), cycles planned vs delivered on time, deferral reasons, dose intensity (RDI %) per regimen, pharmacist interventions, compounding TAT & wastage, reaction/extravasation rates, febrile neutropenia incidence & time-to-antibiotic, toxicity grade distribution, response rates by regimen/site, survival (Kaplan-Meier from vital status), registry completeness, drug consumption/cost & revenue per cycle, PMJAY package variance. Read models `analytics.onco_daycare_daily`, `analytics.onco_outcomes`, `analytics.chemo_drug_usage`.
+
+## 11. Notifications
+- Patient: cycle calendar & lab reminders, deferral notice, day-care arrival time, post-chemo instructions & red-flag symptoms (fever ≥ 38 °C → call), PRO prompts, MDT outcome appointment. Staff: fitness failed, pharmacist query, compounding ready, chair delays, reaction/extravasation, febrile neutropenia alert (ER + oncologist), cumulative threshold, pre-auth pending 24 h before cycle, cytotoxic stock shortfall for tomorrow's cycles (demand forecast).
+
+## 12. Permissions (RBAC keys)
+`onco.case.create|read|update`, `onco.regimen.read|manage|approve`, `onco.plan.create|update|read|sign`, `onco.cycle.read|assess|sign|defer|override`, `onco.pharm.validate|compound|dispense`, `onco.daycare.schedule`, `onco.admin.verify|record`, `onco.tox.record`, `onco.response.record`, `onco.mdt.manage`, `onco.registry.abstract|export`, `onco.report.read`, `onco.configure`. Defaults: Oncologist — case/plan/cycle/tox/response/mdt (regimen.approve = HOD); Resident — create/assess, no sign; Onco pharmacist — pharm.*, regimen.read; Chemo nurse — admin.*, cycle.assess (fitness entry), daycare.schedule read; Coordinator — daycare.schedule, cycle.read; Registrar — registry.*; Billing — cycle.read.
+
+## 13. Non-functional
+- Volumes: 120 chemo administrations/day (60 chairs, 2 shifts), 200 onco OP visits/day, 40 compounding preps/hour peak; dose calc deterministic & unit-tested against reference tables; order sign → pharmacy queue < 2 s; label print < 3 s; bedside verification p95 < 300 ms; day-care board refresh via socket. Offline: bedside app read-only cache; emergency mode logs manual verification. Print: cycle sheet, compounding worksheet, cytotoxic labels (ZPL), patient calendar, discharge instructions (regional languages), registry forms. Accessibility: high-contrast alerts; large touch targets at chair.
+
+## 14. Acceptance Criteria (plus OP-025 §0.9)
+1. Given height 160 cm, weight 64 kg, then BSA (Mosteller) = 1.69 m²; paclitaxel 175 mg/m² → 295.8 → rounded per rule (e.g. 296 mg) shown with basis; changing weight to 58 kg triggers recompute prompt (−9 %).
+2. Given creatinine 1.0 mg/dL, age 55, female 60 kg, then CrCl (CG) = 55.25 → carboplatin AUC 5 dose = 5 × (55.25 + 25) = 401 mg; CrCl above 125 is capped.
+3. Given cumulative doxorubicin 420 mg/m² and a new cycle adds 60 mg/m², then warning at ≥ 80 % and hard-stop at 450 requires override + cardiology clearance record.
+4. Given ANC 1.1 on D−1 with regimen threshold 1.5, then cycle status "fitness_pending" with dose-mod/defer options; deferral reschedules chair and notifies patient.
+5. Given the oncologist signs a cycle, then pharmacist queue receives it; pharmacist independent calc mismatch > 5 % raises a query and blocks compounding until resolved.
+6. Given compounding completed, then labels print with barcode; scanning a label of a different patient at the chair blocks administration with audible alert.
+7. Given bedside verification by only one nurse without barcode, then start is blocked; with nurse+barcode or two nurses, start records timestamps per drug.
+8. Given paclitaxel infusion reaction grade 2 recorded, then infusion paused, actions logged, oncologist alerted, and next-cycle premed prompt created.
+9. Given CTCAE neuropathy grade 3 recorded, then next cycle shows dose-mod suggestion per regimen table and requires oncologist decision.
+10. Given RECIST baseline SoD 80 mm and follow-up 45 mm, then response = PR (−43.75 %) and waterfall chart updates.
+11. Given a case missing HBCR core fields, then registry export excludes it and lists deficiencies for the registrar.
+12. Given a chemo nurse attempts to sign a cycle order, then 403 and audit.
+13. Given a PMJAY patient's cycle without approved pre-auth 24 h before, then coordinator alert and cycle flagged "not ready".
+
+## 15. Enhancements / Later phases
+- Sheet row 68 (Chemo protocols, Cycle tracking, Toxicity grading, Rx) — core. Market: pharmacist validation & compounding, day-care chair Gantt, PRO-CTCAE, tumour board, registry export.
+- Later: infusion pump integration (EN-042), gravimetric compounding verification, radiotherapy scheduling & RT dose summary import, molecular tumour board with genomics reports (AI-003 extraction), AI-002 regimen suggestions/toxicity prediction, clinical trials module (eligibility screening), survivorship portal, home chemotherapy (oral) adherence apps, palliative home care.
+
+## 16. Open Questions for the Hospital
+1. Day-care capacity (chairs/beds, shifts), chemo pharmacy setup (BSC/isolator, closed-system devices), IP chemo volumes?
+2. Regimen list to seed and approval authority; dose rounding/BSA cap/CrCl policies; two-oncologist review thresholds?
+3. Billing policy: full-vial vs proportional, wastage, PMJAY/insurance packages per cycle?
+4. Bedside verification method: two nurses vs barcode; wristband availability?
+5. Registry participation (HBCR/PBCR), tumour board frequency, RT/genomics external systems?

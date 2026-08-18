@@ -1,0 +1,413 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Audit trail  (EN-024 §4)
+//
+// `core.audit_log` is the one table in the system that must be provably
+// tamper-evident. Prisma models the shape; the guarantees live in SQL:
+//   - no UPDATE/DELETE grants for `hms_app`
+//   - a BEFORE UPDATE OR DELETE trigger that raises
+//   - monthly partitions, detachable only by `hms_retention`
+//   - RLS by hospital_id
+// See `packages/db/prisma/migrations/**/audit_guards.sql`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AuditActorType {
+  user
+  service
+  device
+  system
+  patient
+  external_app
+
+  @@schema("core")
+}
+
+enum AuditActionType {
+  insert
+  update
+  delete
+  read_phi
+  export
+  print
+  login
+  logout
+  approve
+  reject
+  sign
+  override
+  break_glass
+  config_change
+
+  @@schema("core")
+}
+
+enum AuditDataClass {
+  phi
+  financial
+  hr
+  operational
+
+  @@schema("core")
+}
+
+enum AuditSensitivity {
+  normal
+  sensitive
+  vip
+
+  @@schema("core")
+}
+
+enum AuditResult {
+  success
+  denied
+  error
+
+  @@schema("core")
+}
+
+/// Partitioned monthly by `occurred_at` (docs/03, EN-024 §3.7).
+/// ~8–15 M rows/day at 2000 beds → 30–60 GB per monthly partition.
+model AuditLog {
+  id         String   @db.Uuid
+  hospitalId String   @map("hospital_id") @db.Uuid
+  branchId   String?  @map("branch_id") @db.Uuid
+  /// Monotonic per hospital. EN-024 §5: "a detected gap is treated as tampering
+  /// (P1), not as a benign anomaly."
+  ///
+  /// NULL until the chain sealer has processed the row — see `sealedAt` and
+  /// DECISIONS D-16 for why sealing is asynchronous rather than in-transaction.
+  seq        BigInt?
+
+  /// Business time, and the partition key.
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  /// Database time. EN-024 §3.9 keeps both so NTP skew is visible in evidence.
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+
+  actorUserId        String? @map("actor_user_id") @db.Uuid
+  actorType          AuditActorType @default(user) @map("actor_type")
+  actorRole          String? @map("actor_role") @db.VarChar(64)
+  /// EN-024 §3.9: both identities are recorded on every impersonated action.
+  impersonatorUserId String? @map("impersonator_user_id") @db.Uuid
+  sessionId          String? @map("session_id") @db.Uuid
+  requestId          String? @map("request_id") @db.VarChar(128)
+  traceId            String? @map("trace_id") @db.VarChar(64)
+  ip                 String? @db.Inet
+  userAgent          String? @map("user_agent") @db.VarChar(500)
+  deviceId           String? @map("device_id") @db.Uuid
+
+  /// `schema.table`, so a diff can always be located.
+  entity      String  @db.VarChar(128)
+  rowId       String? @map("row_id") @db.Uuid
+  /// UHID, bill no, order no — what an investigator actually searches for.
+  businessKey String? @map("business_key") @db.VarChar(128)
+  action      AuditActionType
+
+  patientId   String? @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  /// Changed columns only, already masked per `audit_field_policies`.
+  before        Json?
+  after         Json?
+  changedFields String[] @default([]) @map("changed_fields")
+
+  reasonCode String? @map("reason_code") @db.VarChar(64)
+  reasonText String? @map("reason_text") @db.Text
+
+  dataClass   AuditDataClass @map("data_class")
+  sensitivity AuditSensitivity @default(normal)
+  result      AuditResult @default(success)
+  denialReason String? @map("denial_reason") @db.VarChar(200)
+
+  appModule String? @map("app_module") @db.VarChar(32)
+  apiRoute  String? @map("api_route") @db.VarChar(200)
+  /// For exports and list reads: the count and the filter, never every identifier
+  /// (EN-024 §3.2.5).
+  rowCount       Int?    @map("row_count")
+  artifactSha256 String? @map("artifact_sha256") @db.VarChar(64)
+
+  /// The hash chain (EN-024 §3.4). Both NULL until sealed.
+  prevHash Bytes? @map("prev_hash")
+  rowHash  Bytes? @map("row_hash")
+  /// When the chain sealer assigned `seq`, `prev_hash` and `row_hash`.
+  ///
+  /// DECISIONS D-16: sealing is a single-writer background pass, not part of the
+  /// inserting transaction. Assigning a gapless per-hospital sequence inline would
+  /// need a row lock held to transaction commit, so one slow clinical transaction
+  /// would stall every other audit write for that hospital — and EN-024 §5 makes
+  /// an audit failure roll back the clinical mutation, so that stall becomes a
+  /// nurse unable to chart. The chain still detects the actual threats it exists
+  /// for (modification, deletion, gaps) because those act on already-sealed rows;
+  /// a back-dated insertion is caught by the `occurred_at` monotonicity check in
+  /// `core.verify_audit_chain()`. Rows left unsealed beyond the SLA are an
+  /// alertable anomaly, not a silent state.
+  sealedAt DateTime? @map("sealed_at") @db.Timestamptz(6)
+
+  @@id([id, occurredAt])
+  @@unique([hospitalId, seq, occurredAt], map: "audit_log_hospital_seq_key")
+  @@index([hospitalId, occurredAt(sort: Desc)])
+  @@index([patientId, occurredAt(sort: Desc)])
+  @@index([actorUserId, occurredAt(sort: Desc)])
+  @@index([entity, rowId, occurredAt(sort: Desc)])
+  @@index([hospitalId, action, occurredAt(sort: Desc)])
+  @@index([hospitalId, businessKey])
+  @@index([hospitalId, sealedAt])
+  @@map("audit_log")
+  @@schema("core")
+}
+
+/// EN-024 §3.4.1: per hospital per day, with the terminal hash and row count, so
+/// verification is tractable and a day can be certified independently.
+model AuditChainRoot {
+  id           String   @id @db.Uuid
+  hospitalId   String   @map("hospital_id") @db.Uuid
+  chainDate    DateTime @map("chain_date") @db.Date
+  firstSeq     BigInt   @map("first_seq")
+  lastSeq      BigInt   @map("last_seq")
+  rowCount     BigInt   @map("row_count")
+  dayRoot      Bytes    @map("day_root")
+  prevDayRoot  Bytes?   @map("prev_day_root")
+  computedAt   DateTime @default(now()) @map("computed_at") @db.Timestamptz(6)
+  /// EN-024 §3.4.5: published to an external immutable store so tampering by a
+  /// fully compromised administrator is still detectable.
+  anchoredAt   DateTime? @map("anchored_at") @db.Timestamptz(6)
+  anchorRef    String?   @map("anchor_ref") @db.VarChar(500)
+
+  @@unique([hospitalId, chainDate])
+  @@index([hospitalId, chainDate(sort: Desc)])
+  @@map("audit_chain_roots")
+  @@schema("core")
+}
+
+model AuditIntegrityRun {
+  id          String   @id @db.Uuid
+  hospitalId  String   @map("hospital_id") @db.Uuid
+  scope       String   @db.VarChar(200)
+  fromDate    DateTime? @map("from_date") @db.Date
+  toDate      DateTime? @map("to_date") @db.Date
+  startedAt   DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt  DateTime? @map("finished_at") @db.Timestamptz(6)
+  rowsChecked BigInt   @default(0) @map("rows_checked")
+  mismatches  Int      @default(0)
+  gaps        Int      @default(0)
+  status      String   @default("running") @db.VarChar(16)
+  details     Json     @default("{}")
+  triggeredBy String   @default("schedule") @map("triggered_by") @db.VarChar(16)
+
+  @@index([hospitalId, startedAt(sort: Desc)])
+  @@index([hospitalId, status])
+  @@map("audit_integrity_runs")
+  @@schema("core")
+}
+
+enum BreakGlassReviewStatus {
+  pending
+  justified
+  not_justified
+  explained
+
+  @@schema("core")
+}
+
+/// EN-024 §3.2: break-glass never blocks — it prompts, grants, logs, notifies and
+/// queues for review. "Blocking a clinician in an emergency would be the more
+/// dangerous failure mode."
+model AuditBreakGlass {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  auditLogId    String  @map("audit_log_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  actorUserId   String  @map("actor_user_id") @db.Uuid
+  actorRole     String? @map("actor_role") @db.VarChar(64)
+  reasonCode    String  @map("reason_code") @db.VarChar(64)
+  reasonText    String  @map("reason_text") @db.Text
+  wardId        String? @map("ward_id") @db.Uuid
+  departmentId  String? @map("department_id") @db.Uuid
+  /// Whether a care relationship was checked and found absent — the thing that
+  /// makes this a break-glass rather than ordinary access.
+  careTeamChecked Boolean @default(true) @map("care_team_checked")
+  sensitivity   AuditSensitivity @default(normal)
+  notifiedCareTeamAt DateTime? @map("notified_care_team_at") @db.Timestamptz(6)
+  notifiedDpoAt      DateTime? @map("notified_dpo_at") @db.Timestamptz(6)
+  reviewStatus  BreakGlassReviewStatus @default(pending) @map("review_status")
+  reviewedBy    String? @map("reviewed_by") @db.Uuid
+  reviewedAt    DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewNote    String? @map("review_note") @db.Text
+  incidentRef   String? @map("incident_ref") @db.VarChar(64)
+  occurredAt    DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, reviewStatus, occurredAt(sort: Desc)])
+  @@index([hospitalId, patientId, occurredAt(sort: Desc)])
+  @@index([actorUserId, occurredAt(sort: Desc)])
+  @@map("audit_break_glass")
+  @@schema("core")
+}
+
+/// EN-024 §3.7.3 / §5: retention is configurable per hospital but **floored** by
+/// statute. `floorDays` is written by the migration from `RETENTION_FLOORS` in
+/// packages/contracts and is not editable through the API.
+model AuditRetentionPolicy {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  dataClass   String  @map("data_class") @db.VarChar(24)
+  actionClass String  @map("action_class") @db.VarChar(32)
+  onlineDays  Int     @map("online_days")
+  archiveYears Int    @map("archive_years")
+  /// Statutory minimum. A policy below this is rejected with the regulation cited.
+  floorDays   Int     @map("floor_days")
+  regulation  String  @db.VarChar(300)
+  archiveTarget String? @map("archive_target") @db.VarChar(200)
+  /// DPDP erasure: pseudonymise identifiers, never delete the processing record
+  /// (EN-024 §3.7.5).
+  pseudonymiseOnErasure Boolean @default(true) @map("pseudonymise_on_erasure")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@unique([hospitalId, dataClass, actionClass])
+  @@map("audit_retention_policies")
+  @@schema("core")
+}
+
+model AuditArchive {
+  id            String   @id @db.Uuid
+  hospitalId    String   @map("hospital_id") @db.Uuid
+  partitionName String   @map("partition_name") @db.VarChar(128)
+  periodStart   DateTime @map("period_start") @db.Date
+  periodEnd     DateTime @map("period_end") @db.Date
+  rowCount      BigInt   @map("row_count")
+  fileRef       String   @map("file_ref") @db.VarChar(500)
+  fileSha256    String   @map("file_sha256") @db.VarChar(64)
+  chainRoot     Bytes?   @map("chain_root")
+  archivedAt    DateTime @default(now()) @map("archived_at") @db.Timestamptz(6)
+  storageClass  String   @default("standard_ia") @map("storage_class") @db.VarChar(32)
+  restorableUntil DateTime? @map("restorable_until") @db.Timestamptz(6)
+  restoredAt    DateTime? @map("restored_at") @db.Timestamptz(6)
+  /// Set when a partition could NOT be archived because rows under legal hold
+  /// remain (docs/04 §5). The job aborts and alerts rather than archiving silently.
+  purgeBlockedReason String? @map("purge_blocked_reason") @db.VarChar(300)
+  heldRowCount  BigInt?  @map("held_row_count")
+
+  @@unique([hospitalId, partitionName])
+  @@index([hospitalId, archivedAt(sort: Desc)])
+  @@map("audit_archives")
+  @@schema("core")
+}
+
+enum AuditExportPurpose {
+  dsar
+  court
+  regulator
+  internal_audit
+  certin
+  insurer
+
+  @@schema("core")
+}
+
+/// EN-024 §5: "Exports require a stated purpose; court/regulator exports
+/// additionally require approval and generate a §65B certificate with the
+/// integrity-run status for the covered period."
+model AuditExport {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  requestedBy String  @map("requested_by") @db.Uuid
+  purpose     AuditExportPurpose
+  /// The filter used, not the identifiers exported.
+  scope       Json
+  format      String  @db.VarChar(16)
+  rowCount    BigInt  @default(0) @map("row_count")
+  fileRef     String? @map("file_ref") @db.VarChar(500)
+  fileSha256  String? @map("file_sha256") @db.VarChar(64)
+  /// IT Act §65B certificate for court submission.
+  certificate65bFileId String? @map("certificate_65b_file_id") @db.Uuid
+  /// Recorded so a certificate cannot be issued for an integrity-suspect period.
+  integrityStatus String? @map("integrity_status") @db.VarChar(16)
+  approvedBy  String? @map("approved_by") @db.Uuid
+  approvalId  String? @map("approval_id") @db.Uuid
+  patientId   String? @map("patient_id") @db.Uuid
+  exportedAt  DateTime? @map("exported_at") @db.Timestamptz(6)
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, createdAt(sort: Desc)])
+  @@index([hospitalId, purpose])
+  @@map("audit_exports")
+  @@schema("core")
+}
+
+model AuditSavedSearch {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  userId     String  @map("user_id") @db.Uuid
+  name       String  @db.VarChar(160)
+  filters    Json
+  scheduleCron String? @map("schedule_cron") @db.VarChar(64)
+  recipients String[] @default([])
+  lastRunAt  DateTime? @map("last_run_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, userId, name])
+  @@map("audit_saved_searches")
+  @@schema("core")
+}
+
+enum AuditCaseKind {
+  privacy_investigation
+  hr
+  security_incident
+  medico_legal
+
+  @@schema("core")
+}
+
+model AuditCase {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  title      String  @db.VarChar(240)
+  kind       AuditCaseKind
+  linkedIncidentRef String? @map("linked_incident_ref") @db.VarChar(64)
+  status     String  @default("open") @db.VarChar(16)
+  openedBy   String  @map("opened_by") @db.Uuid
+  openedAt   DateTime @default(now()) @map("opened_at") @db.Timestamptz(6)
+  closedAt   DateTime? @map("closed_at") @db.Timestamptz(6)
+  findings   String? @db.Text
+  evidenceBundleFileId String? @map("evidence_bundle_file_id") @db.Uuid
+  /// Audit entry ids attached to this investigation.
+  entryIds   String[] @default([]) @map("entry_ids") @db.Uuid
+  notes      Json    @default("[]")
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@index([hospitalId, status, openedAt(sort: Desc)])
+  @@map("audit_cases")
+  @@schema("core")
+}
+
+/// EN-024 §4 `audit_field_policies`: drives automatic diff masking and reason
+/// enforcement. Seeded from `DEFAULT_AUDIT_FIELD_POLICIES` in packages/contracts
+/// so a developer who forgets to mask a secret cannot leak it into the one table
+/// nobody can retroactively clean.
+model AuditFieldPolicy {
+  id         String  @id @db.Uuid
+  hospitalId String? @map("hospital_id") @db.Uuid
+  /// `schema.table`, or `*` for every table.
+  entity     String  @db.VarChar(128)
+  column     String  @db.VarChar(64)
+  mask       String  @db.VarChar(16)
+  dataClass  String  @map("data_class") @db.VarChar(16)
+  reasonRequired Boolean @default(false) @map("reason_required")
+  note       String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, entity, column])
+  @@index([entity])
+  @@map("audit_field_policies")
+  @@schema("core")
+}
