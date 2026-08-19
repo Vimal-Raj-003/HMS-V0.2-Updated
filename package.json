@@ -2,7 +2,7 @@
   "name": "vims-hms",
   "version": "0.1.0",
   "private": true,
-  "description": "Vim's HMS by VIMS ENTERPRISE — enterprise multi-tenant, cloud + on-prem Hospital Management System",
+  "description": "Vim's HMS by VIMS ENTERPRISE \u2014 enterprise multi-tenant, cloud + on-prem Hospital Management System",
   "license": "UNLICENSED",
   "packageManager": "pnpm@9.15.9",
   "engines": {
@@ -59,7 +59,7 @@
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
       "prettier --write",
-      "eslint --fix --max-warnings=0"
+      "eslint --fix --max-warnings=0 --no-warn-ignored"
     ],
     "*.{json,md,css,yaml,yml}": [
       "prettier --write"

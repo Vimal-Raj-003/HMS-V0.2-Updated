@@ -117,7 +117,10 @@ export class Money {
    */
   static parse(input: string, currency: CurrencyCode): Money {
     const { exponent } = currencyMeta(currency);
-    const cleaned = input.trim().replace(/[\s, ]/g, '').replace(/^[^\d.-]+/, '');
+    const cleaned = input
+      .trim()
+      .replace(/[\s,\u00A0]/g, '')
+      .replace(/^[^\d.-]+/, '');
     const match = /^(-?)(\d*)(?:\.(\d*))?$/.exec(cleaned);
     if (!match || (match[2] === '' && (match[3] ?? '') === '')) {
       throw new MoneyError(`Cannot parse "${input}" as ${currency}`);
@@ -315,7 +318,10 @@ export class Money {
   }
 
   /** Round to a coarser unit — e.g. `roundTo(100n, 'half-up')` rounds ₹ to whole rupees. */
-  roundTo(minorMultiple: bigint, mode: RoundingMode = 'half-up'): { value: Money; roundingAdjustment: Money } {
+  roundTo(
+    minorMultiple: bigint,
+    mode: RoundingMode = 'half-up',
+  ): { value: Money; roundingAdjustment: Money } {
     if (minorMultiple <= 0n) {
       throw new MoneyError('roundTo needs a positive multiple of minor units');
     }

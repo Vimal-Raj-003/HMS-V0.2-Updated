@@ -8,16 +8,14 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./client": "./src/client.ts",
-    "./kysely": "./src/kysely/index.ts",
     "./tenancy": "./src/tenancy.ts"
   },
   "scripts": {
     "generate": "prisma generate",
     "build": "prisma generate && tsc --noEmit",
-    "lint": "eslint src --max-warnings=0",
+    "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "migrate:dev": "dotenv -e ../../.env -- prisma migrate dev",
     "migrate:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
     "migrate:status": "dotenv -e ../../.env -- prisma migrate status",

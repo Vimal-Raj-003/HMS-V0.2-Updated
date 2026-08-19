@@ -24,7 +24,11 @@ export default tseslint.config(
       '**/.turbo/**',
       '**/generated/**',
       '**/coverage/**',
-      '**/*.config.{js,mjs,cjs}',
+      // Build/test config files are not part of any package's typed program
+      // (each tsconfig includes only `src`), so type-aware rules cannot parse
+      // them. The `.js/.mjs/.cjs` forms were already ignored for this reason;
+      // `vitest.config.ts` and `prisma.config.ts` need the same treatment.
+      '**/*.config.{js,mjs,cjs,ts,mts,cts}',
       'scripts/**',
     ],
   },
@@ -82,11 +86,17 @@ export default tseslint.config(
           selector: 'TSAsExpression > TSAnyKeyword',
           message: 'No `as any`. Narrow the type or declare a proper contract in packages/contracts.',
         },
-      ],
-
-      'no-restricted-globals': [
-        'error',
-        { name: 'Math', message: 'Inject a Rng from packages/contracts so tests are deterministic (docs/09 §2).' },
+        {
+          // docs/09 §2 bans *ambient randomness*, not arithmetic. Banning the
+          // whole `Math` global also blocked `Math.floor`, `Math.min` and
+          // `Math.imul`, which are pure — so the rule was unsatisfiable and
+          // `pnpm lint` had never been green. Only `Math.random` is
+          // non-deterministic, and it is the only thing that makes a test
+          // irreproducible from its seed.
+          selector: "MemberExpression[object.name='Math'][property.name='random']",
+          message:
+            'Math.random() is non-deterministic: a suite using it fails irreproducibly in CI. Inject a seeded Rng (packages/testing `createRng`) or a Clock/IdGen from packages/contracts (docs/09 §2).',
+        },
       ],
     },
   },
@@ -147,14 +157,13 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
-      'no-restricted-globals': 'off',
     },
   },
 
   // ---- seeds & scripts may log --------------------------------------------------
   {
     files: ['packages/db/prisma/**/*.ts', 'packages/db/src/seed/**/*.ts', '**/*.cli.ts'],
-    rules: { 'no-console': 'off', 'no-restricted-globals': 'off' },
+    rules: { 'no-console': 'off' },
   },
 
   prettierConfig,

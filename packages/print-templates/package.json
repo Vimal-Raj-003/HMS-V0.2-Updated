@@ -2,7 +2,7 @@
   "name": "@vims/print-templates",
   "version": "0.1.0",
   "private": true,
-  "description": "HTML/CSS print templates (A4/A5), ESC/POS thermal and ZPL label templates. Templates are data, never code (EN-039 §5).",
+  "description": "HTML/CSS print templates (A4/A5), ESC/POS thermal and ZPL label templates. Templates are data, never code (EN-039 \u00a75).",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -13,10 +13,10 @@
     "./zpl": "./src/zpl/index.ts"
   },
   "scripts": {
-    "build": "tsc --noEmit",
-    "lint": "eslint src --max-warnings=0",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "build": "if [ -d src ]; then tsc --noEmit; else echo \"build: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
+    "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
+    "typecheck": "if [ -d src ]; then tsc --noEmit; else echo \"typecheck: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@vims/contracts": "workspace:*"

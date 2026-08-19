@@ -78,7 +78,10 @@ export function asId<B extends string>(value: Uuid): Branded<Uuid, B> {
  */
 export function uuidV7Timestamp(id: Uuid): Date {
   if (!isUuidV7(id)) {
-    throw new Error(`Not a UUIDv7: ${id}`);
+    // `isUuidV7` is a type predicate over `unknown`, so on the false branch a
+    // parameter already declared `Uuid` narrows to `never` and cannot be
+    // interpolated. The value is still a string at runtime.
+    throw new Error(`Not a UUIDv7: ${String(id)}`);
   }
   const hex = id.replace(/-/g, '').slice(0, 12);
   return new Date(Number(BigInt(`0x${hex}`)));

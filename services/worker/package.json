@@ -5,12 +5,12 @@
   "description": "BullMQ processors and cron: outbox relay, escalation timers, partition maintenance, retention/archival, PDF rendering, print dispatch.",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "if [ -d src ]; then tsc; else echo \"build: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "lint": "eslint src --max-warnings=0",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
+    "typecheck": "if [ -d src ]; then tsc --noEmit; else echo \"typecheck: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
