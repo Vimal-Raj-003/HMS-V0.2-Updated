@@ -5,12 +5,13 @@
   "description": "BullMQ processors and cron: outbox relay, escalation timers, partition maintenance, retention/archival, PDF rendering, print dispatch.",
   "type": "module",
   "scripts": {
-    "build": "if [ -d src ]; then tsc; else echo \"build: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
+    "build": "tsc",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
-    "typecheck": "if [ -d src ]; then tsc --noEmit; else echo \"typecheck: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
-    "test": "vitest run --passWithNoTests"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
@@ -19,12 +20,15 @@
     "@vims/print-templates": "workspace:*",
     "bullmq": "^6.1.2",
     "ioredis": "^6.0.0",
+    "pg": "^8.13.1",
     "pino": "^10.3.1",
     "playwright": "^1.62.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "@vims/testing": "workspace:*",
     "tsx": "^4.19.2",
     "vitest": "^4.1.10"
   }

@@ -1,0 +1,145 @@
+# Vim's HMS — CI, implementing the staged pipeline in docs/09 §15.
+#
+# Stages run in order and a failure stops the pipeline, because the later stages
+# are expensive and a type error makes an integration run meaningless. The
+# ordering is not arbitrary: static analysis is seconds, unit tests are tens of
+# seconds, and the container-backed suites are minutes.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push supersedes the previous run on the same branch; there is no value
+# in finishing CI for a commit nobody will merge.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION_FILE: .nvmrc
+  TURBO_TELEMETRY_DISABLED: 1
+  DO_NOT_TRACK: 1
+
+jobs:
+  # ── Stage 1: setup ─────────────────────────────────────────────────────────
+  setup:
+    name: 1 · Setup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      # `--frozen-lockfile` is the point of this stage: a lockfile that drifts
+      # from package.json means CI and production install different trees.
+      - run: pnpm install --frozen-lockfile
+
+  # ── Stage 2: static ────────────────────────────────────────────────────────
+  static:
+    name: 2 · Static analysis
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lint (includes module-boundary and hex-literal rules)
+        run: pnpm lint
+      - name: Typecheck (strict)
+        run: pnpm typecheck
+      - name: Prettier check
+        run: pnpm exec prettier --check "**/*.{ts,tsx,js,jsx,json,md,css,yaml,yml}"
+      - name: Every package with source declares its gate scripts
+        # Guards the `if [ -d src ]` fallbacks introduced in D-21: once a package
+        # has source, its build/typecheck must be real. Without this check a
+        # guard could outlive its purpose and silently stop checking anything.
+        run: node scripts/check-gate-scripts.mjs
+
+  # ── Stage 3: unit ──────────────────────────────────────────────────────────
+  unit:
+    name: 3 · Unit tests
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Coverage thresholds live in each package's vitest config (docs/09 §2)
+      # so a package cannot be added without inheriting a gate.
+      - run: pnpm test
+
+  # ── Stage 5: integration ───────────────────────────────────────────────────
+  integration:
+    name: 5 · Integration (Testcontainers)
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The suites build infra/docker/postgres themselves, so CI and a developer
+      # laptop assert against a byte-identical database — including the four
+      # least-privilege roles and the extension matrix.
+      - name: Integration suites
+        run: pnpm test:integration
+
+  # ── Stage 6: build ─────────────────────────────────────────────────────────
+  build:
+    name: 6 · Build
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+  # ── Stage 7: security ──────────────────────────────────────────────────────
+  security:
+    name: 7 · Security
+    runs-on: ubuntu-latest
+    needs: setup
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs history to catch a secret introduced and then removed.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Dependency audit
+        run: pnpm audit --audit-level high
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: p/typescript p/owasp-top-ten p/secrets
