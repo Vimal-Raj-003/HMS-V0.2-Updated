@@ -230,6 +230,9 @@ importers:
       '@vims/contracts':
         specifier: workspace:*
         version: link:../contracts
+      argon2:
+        specifier: ^0.45.1
+        version: 0.45.1
       kysely:
         specifier: ^0.29.5
         version: 0.29.5
@@ -293,6 +296,9 @@ importers:
       '@vims/contracts':
         specifier: workspace:*
         version: link:../contracts
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^22.10.5
@@ -413,6 +419,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.1.0
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.1
       '@types/react':
         specifier: ^19.0.7
         version: 19.2.18
@@ -494,15 +503,24 @@ importers:
       bullmq:
         specifier: ^6.1.2
         version: 6.1.2(ioredis@6.0.0)(pg@8.23.0)
+      fastify:
+        specifier: ^5.2.1
+        version: 5.11.3
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
+      jose:
+        specifier: ^6.0.11
+        version: 6.2.9
       nestjs-pino:
         specifier: ^4.6.1
         version: 4.6.1(@nestjs/common@11.2.1(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@11.0.0)(pino@10.3.1)(rxjs@7.8.2)
       otplib:
         specifier: ^13.4.1
         version: 13.4.1
+      pg:
+        specifier: ^8.13.1
+        version: 8.23.0
       pino:
         specifier: ^10.3.1
         version: 10.3.1
@@ -543,6 +561,9 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.21.0
       '@types/web-push':
         specifier: ^3.6.4
         version: 3.6.4
@@ -653,6 +674,9 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
+      pg:
+        specifier: ^8.13.1
+        version: 8.23.0
       pino:
         specifier: ^10.3.1
         version: 10.3.1
@@ -666,6 +690,12 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.21.0
+      '@vims/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
       tsx:
         specifier: ^4.19.2
         version: 4.23.12
@@ -5148,6 +5178,9 @@ packages:
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
+
+  jose@6.2.9:
+    resolution: {integrity: sha512-XrchZOFZUl/T3vTwRe8XK+cJrGtMF4th1ARnDfwbBXFKThGhlsxEE4Zu03AD/bjJSt/9jT/mxrOCkJWOg77aPA==}
 
   js-tokens@10.0.0:
     resolution: {integrity: sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q==}
@@ -11886,6 +11919,8 @@ snapshots:
   jiti@2.6.1: {}
 
   jiti@2.7.0: {}
+
+  jose@6.2.9: {}
 
   js-tokens@10.0.0: {}
 

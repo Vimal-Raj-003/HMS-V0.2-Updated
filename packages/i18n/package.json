@@ -2,7 +2,7 @@
   "name": "@vims/i18n",
   "version": "0.1.0",
   "private": true,
-  "description": "next-intl message catalogues. en-IN default plus hi, ta, te, ml, kn, mr, bn, gu, or, pa and ar (RTL) \u2014 the locale superset fixed by DECISIONS D-13.",
+  "description": "next-intl message catalogues. en-IN default plus hi, ta, te, ml, kn, mr, bn, gu, or, pa and ar (RTL) — the locale superset fixed by DECISIONS D-13.",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -11,10 +11,11 @@
     "./messages/*": "./src/messages/*.json"
   },
   "scripts": {
-    "build": "if [ -d src ]; then tsc --noEmit; else echo \"build: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
+    "build": "tsc --noEmit",
     "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
-    "typecheck": "if [ -d src ]; then tsc --noEmit; else echo \"typecheck: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
-    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "coverage:check": "tsx src/check-coverage.ts"
   },
   "dependencies": {

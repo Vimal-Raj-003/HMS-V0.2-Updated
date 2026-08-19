@@ -1,0 +1,87 @@
+{
+  "common": {
+    "actions": {
+      "add": "Add",
+      "back": "Back",
+      "cancel": "Cancel",
+      "close": "Close",
+      "confirm": "Confirm",
+      "delete": "Delete",
+      "edit": "Edit",
+      "export": "Export",
+      "next": "Next",
+      "print": "Print",
+      "refresh": "Refresh",
+      "retry": "Retry",
+      "save": "Save",
+      "search": "Search",
+      "signAndComplete": "Sign & complete"
+    },
+    "state": {
+      "empty": "Nothing here yet",
+      "loading": "Loading…",
+      "offline": "Offline — your changes will sync when the connection returns",
+      "saved": "Saved at {time}",
+      "saving": "Saving…"
+    },
+    "labels": {
+      "branch": "Branch",
+      "hospital": "Hospital",
+      "language": "Language",
+      "role": "Role",
+      "theme": "Theme"
+    },
+    "units": {
+      "itemCount": "{count} items",
+      "selectedCount": "{count} selected"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in",
+      "subtitle": "Vim's HMS · {hospitalName}",
+      "username": "Username or employee ID",
+      "password": "Password",
+      "submit": "Sign in",
+      "forgotPassword": "Forgot your password?",
+      "totpTitle": "Two-step verification",
+      "totpHint": "Enter the 6-digit code from your authenticator app",
+      "otpTitle": "Sign in with your mobile number",
+      "otpHint": "We sent a 6-digit code to the number ending {maskedMobile}",
+      "abha": "Sign in with ABHA",
+      "breakGlass": "Emergency (break-glass) access",
+      "breakGlassWarning": "Break-glass access is recorded and reviewed. Give a reason before you continue."
+    },
+    "errors": {
+      "invalidCredentials": "That username or password is not correct",
+      "accountLocked": "This account is locked. Contact your administrator.",
+      "otpExpired": "That code has expired. Ask for a new one.",
+      "totpInvalid": "That verification code is not correct",
+      "sessionExpired": "Your session has ended. Sign in again."
+    }
+  },
+  "nav": {
+    "admin": "Administration",
+    "appointments": "Appointments",
+    "billing": "Billing",
+    "dashboard": "Dashboard",
+    "help": "Help",
+    "ipd": "Inpatient",
+    "laboratory": "Laboratory",
+    "notifications": "Notifications",
+    "opd": "Outpatient",
+    "patients": "Patients",
+    "pharmacy": "Pharmacy",
+    "radiology": "Radiology",
+    "reports": "Reports"
+  },
+  "errors": {
+    "conflict": "Someone else changed this while you were working. Reload and try again.",
+    "forbidden": "You do not have permission to do this",
+    "generic": "Something went wrong. Nothing was saved.",
+    "network": "No connection to the hospital server",
+    "notFound": "We could not find what you asked for",
+    "notLicensed": "This is not included in your hospital's plan",
+    "serverError": "The server could not complete this. Your work is safe."
+  }
+}

@@ -17,11 +17,13 @@
     "./tokens": "./src/tokens/tokens.ts"
   },
   "scripts": {
-    "build": "if [ -d src ]; then tsc --noEmit; else echo \"build: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
+    "build": "tsc --noEmit",
     "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
-    "typecheck": "if [ -d src ]; then tsc --noEmit; else echo \"typecheck: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
-    "test": "vitest run --passWithNoTests",
-    "tokens:contrast": "tsx src/tokens/verify-contrast.ts"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "tokens:contrast": "tsx src/tokens/verify-contrast.ts",
+    "test:watch": "vitest",
+    "tokens:build": "tsx src/tokens/build-css.ts"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.2",
@@ -51,6 +53,7 @@
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
+    "@types/node": "^22.10.5",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
     "axe-core": "^4.10.2",

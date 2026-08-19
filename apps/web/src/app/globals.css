@@ -1,0 +1,4 @@
+@import 'tailwindcss';
+/* The three themes from docs/06 as CSS custom properties — light is the default
+   for clinical work, dark is for TV/queue boards and admin analytics. */
+@import '@vims/ui/tokens.css';
