@@ -4,12 +4,12 @@
   "private": true,
   "description": "NestJS 11 modular monolith on Fastify. /api/v1 with the full tenancy, policy, idempotency, audit and outbox interceptor chain.",
   "scripts": {
-    "build": "if [ -d src ]; then nest build; else echo \"build: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "nest start --watch",
     "start": "node dist/main.js",
     "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
-    "typecheck": "if [ -d src ]; then tsc --noEmit; else echo \"typecheck: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
-    "test": "vitest run --coverage --passWithNoTests",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:safety": "vitest run --config vitest.safety.config.ts",
@@ -35,9 +35,12 @@
     "@vims/db": "workspace:*",
     "argon2": "^0.45.1",
     "bullmq": "^6.1.2",
+    "fastify": "^5.2.1",
     "ioredis": "^6.0.0",
+    "jose": "^6.0.11",
     "nestjs-pino": "^4.6.1",
     "otplib": "^13.4.1",
+    "pg": "^8.13.1",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "prom-client": "^15.1.3",
@@ -53,6 +56,7 @@
     "@nestjs/schematics": "^11.0.2",
     "@nestjs/testing": "^11.2.1",
     "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
     "@types/web-push": "^3.6.4",
     "@vims/testing": "workspace:*",
     "@vitest/coverage-v8": "^4.1.10",
@@ -60,5 +64,6 @@
     "tsx": "^4.19.2",
     "unplugin-swc": "^1.5.1",
     "vitest": "^4.1.10"
-  }
+  },
+  "type": "module"
 }

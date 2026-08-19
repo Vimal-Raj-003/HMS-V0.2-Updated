@@ -24,6 +24,25 @@ describe('Money construction', () => {
     expect(() => Money.fromMinor(100_000_000_000_000n, 'INR')).toThrow(/numeric\(14,2\)/);
   });
 
+  it('accepts a plain safe integer and an integer string as minor units', () => {
+    expect(Money.fromMinor(123_450, 'INR').toDecimalString()).toBe('1234.50');
+    expect(Money.fromMinor('123450', 'INR').toDecimalString()).toBe('1234.50');
+    expect(Money.fromMinor('-1', 'INR').minor).toBe(-1n);
+  });
+
+  it('refuses a decimal string in fromMinor, which is the classic rupee/paise mix-up', () => {
+    // `fromMinor("1234.50")` means someone passed rupees where paise were expected;
+    // accepting it would under-bill by a factor of 100.
+    expect(() => Money.fromMinor('1234.50', 'INR')).toThrow(/integer string/);
+    expect(() => Money.fromMinor('₹1234', 'INR')).toThrow(MoneyError);
+  });
+
+  it('carries its currency with it, so an amount can never be read as a bare number', () => {
+    const m = Money.parse('10.00', 'AED');
+    expect(m.currency).toBe('AED');
+    expect(m.minor).toBe(1_000n);
+  });
+
   it('parses a decimal string exactly as written', () => {
     expect(Money.parse('1234.50', 'INR').minor).toBe(123_450n);
     expect(Money.parse('0.01', 'INR').minor).toBe(1n);
@@ -36,6 +55,12 @@ describe('Money construction', () => {
 
   it('treats a missing fractional part as zero paise, not as an error', () => {
     expect(Money.parse('1234', 'INR').toDecimalString()).toBe('1234.00');
+  });
+
+  it('treats a missing integer part as zero rupees, in both signs', () => {
+    // A cashier typing ".50" means fifty paise, not a parse failure.
+    expect(Money.parse('.50', 'INR').minor).toBe(50n);
+    expect(Money.parse('-.50', 'INR').minor).toBe(-50n);
   });
 
   it('refuses a third decimal place instead of rounding it away silently', () => {
@@ -109,6 +134,11 @@ describe('Money arithmetic', () => {
     expect(Money.parse('0.01', 'INR').timesQuantity(0).isZero).toBe(true);
   });
 
+  it('accepts a bigint quantity, for counts that came out of the database as bigint', () => {
+    expect(Money.parse('350.00', 'INR').timesQuantity(3n).toDecimalString()).toBe('1050.00');
+    expect(Money.parse('350.00', 'INR').timesQuantity(-2n).toDecimalString()).toBe('-700.00');
+  });
+
   it('refuses a fractional quantity, directing the caller to a rounding-mode-explicit API', () => {
     expect(() => Money.parse('100.00', 'INR').timesQuantity(1.5)).toThrow(/multiplyByRate/);
   });
@@ -120,6 +150,13 @@ describe('Money arithmetic', () => {
     expect(negative.abs().toDecimalString()).toBe('42.50');
     expect(negative.negate().toDecimalString()).toBe('42.50');
     expect(Money.zero('INR').isZero).toBe(true);
+
+    const positive = Money.parse('42.50', 'INR');
+    expect(positive.isPositive).toBe(true);
+    expect(positive.isNegative).toBe(false);
+    // abs() of a positive amount must be the identity, not a sign flip.
+    expect(positive.abs().toDecimalString()).toBe('42.50');
+    expect(positive.negate().toDecimalString()).toBe('-42.50');
   });
 });
 
@@ -141,9 +178,38 @@ describe('Money rates, percentages and rounding', () => {
     expect(Money.fromMinor(-5n, 'INR').multiplyByRate('0.5', 'half-up').value.minor).toBe(-3n);
   });
 
+  it('leaves anything below half alone under half-up', () => {
+    // 1 paisa at 40 % = 0.4 paise, which must not become a paisa.
+    expect(Money.fromMinor(1n, 'INR').multiplyByRate('0.4', 'half-up').value.minor).toBe(0n);
+  });
+
   it('rounds half to even under half-even, so repeated operations do not drift upward', () => {
     expect(Money.fromMinor(5n, 'INR').multiplyByRate('0.5', 'half-even').value.minor).toBe(2n);
     expect(Money.fromMinor(15n, 'INR').multiplyByRate('0.5', 'half-even').value.minor).toBe(8n);
+  });
+
+  it('still rounds normally under half-even when the remainder is not exactly half', () => {
+    // Only the exact tie goes to even; everything else follows the nearer value.
+    expect(Money.fromMinor(1n, 'INR').multiplyByRate('0.6', 'half-even').value.minor).toBe(1n);
+    expect(Money.fromMinor(1n, 'INR').multiplyByRate('0.4', 'half-even').value.minor).toBe(0n);
+  });
+
+  it('does not invent a rounding adjustment when a negative amount divides exactly', () => {
+    // A refund of ₹0.10 at 50 % is exactly −₹0.05 — the bill must show no rounding line.
+    const { value, roundingAdjustment } = Money.fromMinor(-10n, 'INR').multiplyByRate('0.5', 'half-up');
+    expect(value.minor).toBe(-5n);
+    expect(roundingAdjustment.isZero).toBe(true);
+  });
+
+  it('accepts a negative rate, because a discount is a negative-rate line', () => {
+    const { value } = Money.parse('100.00', 'INR').multiplyByRate('-0.18', 'half-up');
+    expect(value.toDecimalString()).toBe('-18.00');
+  });
+
+  it('accepts a rate written without its leading zero', () => {
+    // Tariff masters imported from spreadsheets routinely carry ".5" rather than "0.5".
+    expect(Money.parse('100.00', 'INR').multiplyByRate('.5', 'half-up').value.toDecimalString()).toBe('50.00');
+    expect(Money.parse('100.00', 'INR').percentage('.5').value.toDecimalString()).toBe('0.50');
   });
 
   it('truncates toward zero under "down" and away under "up"', () => {
@@ -212,6 +278,12 @@ describe('Money splitting and allocation', () => {
     expect(shares[0]!.lessThan(shares[2]!)).toBe(true);
   });
 
+  it('accepts bigint weights, which is what a SUM() out of Postgres returns', () => {
+    const shares = Money.parse('100.00', 'INR').allocate([1n, 2n, 3n]);
+    expect(shares.map((s) => s.toDecimalString())).toEqual(['16.67', '33.33', '50.00']);
+    expect(Money.sum(shares, 'INR').toDecimalString()).toBe('100.00');
+  });
+
   it('never creates or destroys money when allocating, for any weight vector', () => {
     fc.assert(
       fc.property(
@@ -250,6 +322,10 @@ describe('Money comparison', () => {
     expect(b.greaterThanOrEqual(b)).toBe(true);
     expect(Money.max(a, b).equals(b)).toBe(true);
     expect(Money.min(a, b).equals(a)).toBe(true);
+    // Argument order must not change the answer — an "up to ₹X or Y %, whichever
+    // is lower" ceiling (docs/05 §Model) is evaluated with either argument first.
+    expect(Money.max(b, a).equals(b)).toBe(true);
+    expect(Money.min(b, a).equals(a)).toBe(true);
   });
 
   it('treats amounts in different currencies as unequal rather than throwing on equals', () => {

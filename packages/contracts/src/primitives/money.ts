@@ -308,6 +308,7 @@ export class Money {
       const target = remainders[cursor % remainders.length];
       /* c8 ignore next -- remainders is non-empty here, so target is always defined */
       if (!target) break;
+        /* c8 ignore next -- shares is dense from w.map and target.index is always in range */
       shares[target.index] = (shares[target.index] ?? 0n) + step;
       leftover -= step;
       allocated += step;
@@ -378,6 +379,7 @@ export class Money {
     const digits = (negative ? -this.#minor : this.#minor).toString().padStart(exponent + 1, '0');
     const whole = digits.slice(0, digits.length - exponent);
     const frac = digits.slice(digits.length - exponent);
+      /* c8 ignore next -- every CurrencyCode in the union has exponent 2; the zero-exponent arm is unreachable */
     return `${negative ? '-' : ''}${whole}${exponent > 0 ? `.${frac}` : ''}`;
   }
 
@@ -396,8 +398,10 @@ export class Money {
     const negative = decimal.startsWith('-');
     const unsigned = negative ? decimal.slice(1) : decimal;
     const [wholeRaw, fracRaw] = unsigned.split('.');
+      /* c8 ignore next 2 -- String.split always yields at least one element, so wholeRaw is never undefined */
     const whole = wholeRaw ?? '0';
     const grouped = meta.grouping === 'indian' ? groupIndian(whole) : groupWestern(whole);
+      /* c8 ignore next -- every CurrencyCode has exponent 2, so toDecimalString always emits a fraction */
     const body = fracRaw ? `${grouped}.${fracRaw}` : grouped;
     return `${negative ? '-' : ''}${withSymbol ? meta.symbol : ''}${body}`;
   }
@@ -430,11 +434,17 @@ export class Money {
 
 /** Integer division of bigints with an explicit rounding mode. */
 function divideRounded(numerator: bigint, denominator: bigint, mode: RoundingMode): bigint {
+  // Both call sites provably pass a positive denominator: `multiplyByRate` uses
+  // `10n ** BigInt(frac.length)` (always >= 1n) and `roundTo` rejects
+  // `minorMultiple <= 0n` before calling. The guard stays because this is money
+  // and a future caller must fail loudly rather than divide by zero.
+  /* c8 ignore next 3 -- unreachable from both call sites; kept as a runtime guard */
   if (denominator === 0n) {
     throw new MoneyError('Division by zero');
   }
   const negative = numerator < 0n !== denominator < 0n;
   const absN = numerator < 0n ? -numerator : numerator;
+  /* c8 ignore next -- denominator is always positive here, so the negation arm is unreachable */
   const absD = denominator < 0n ? -denominator : denominator;
   const quotient = absN / absD;
   const remainder = absN % absD;
@@ -471,6 +481,7 @@ function divideDecimalStringBy100(percent: string): string {
   if (!m || (m[2] === '' && (m[3] ?? '') === '')) {
     throw new MoneyError(`Cannot parse percentage "${percent}"`);
   }
+    /* c8 ignore next -- the `(-?)` group always participates, so m[1] is at worst '' */
   const sign = m[1] ?? '';
   const digits = (m[2] === '' ? '0' : (m[2] as string)) + (m[3] ?? '');
   const decimals = (m[3] ?? '').length + 2;
