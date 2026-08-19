@@ -16,9 +16,9 @@ export default function DashboardPage(): React.JSX.Element {
       <h1 id="dashboard-heading" className="text-xl font-semibold tracking-tight">
         Dashboard
       </h1>
-      <div className="mt-6 rounded-lg border border-control bg-surface p-8 text-center">
+      <div className="mt-6 rounded-lg border border-control bg-layer-1 p-8 text-center">
         <p className="font-medium">Your workspace is ready</p>
-        <p className="mt-2 text-sm text-subtle">
+        <p className="mt-2 text-sm text-fg-subtle">
           Clinical and administrative modules appear here as they are enabled for your hospital and
           your role.
         </p>

@@ -22,7 +22,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en-IN" dir="ltr" suppressHydrationWarning>
-      <body className="min-h-dvh bg-canvas text-default antialiased">{children}</body>
+      <body className="min-h-dvh bg-canvas text-fg-default antialiased">{children}</body>
     </html>
   );
 }

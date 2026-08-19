@@ -19,7 +19,7 @@ export default function LoginPage({
       <div className="w-full max-w-[26rem]">
         <header className="mb-8 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">Vim&rsquo;s HMS</h1>
-          <p className="mt-1 text-sm text-subtle">by VIMS ENTERPRISE</p>
+          <p className="mt-1 text-sm text-fg-subtle">by VIMS ENTERPRISE</p>
         </header>
         <LoginForm nextPath={searchParams} />
       </div>

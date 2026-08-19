@@ -1,4 +1,4 @@
-import { Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
+import { Inject, Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { FastifyRequest } from 'fastify';
 import { getContext } from '../context/request-context.js';
@@ -17,8 +17,8 @@ import { TokenService } from './token.service.js';
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
-    private readonly reflector: Reflector,
-    private readonly tokens: TokenService,
+    @Inject(Reflector) private readonly reflector: Reflector,
+    @Inject(TokenService) private readonly tokens: TokenService,
   ) {}
 
   async canActivate(execution: ExecutionContext): Promise<boolean> {

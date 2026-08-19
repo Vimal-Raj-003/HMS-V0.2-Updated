@@ -5,11 +5,11 @@
   "description": "Next.js display client: token boards, ward boards and kiosk self-service. Device-token paired, no cursor, no chrome.",
   "scripts": {
     "dev": "next dev --port ${TV_KIOSK_PORT:-3001}",
-    "build": "if [ -d src ]; then next build; else echo \"build: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
+    "build": "next build",
     "start": "next start --port ${TV_KIOSK_PORT:-3001}",
     "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
-    "typecheck": "if [ -d src ]; then tsc --noEmit; else echo \"typecheck: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
-    "test": "vitest run --passWithNoTests"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@vims/contracts": "workspace:*",
@@ -21,11 +21,15 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
+    "jsdom": "^25.0.1",
     "tailwindcss": "^4.3.3",
-    "@tailwindcss/postcss": "^4.3.3",
     "vitest": "^4.1.10"
   }
 }

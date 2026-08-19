@@ -48,9 +48,9 @@ interface GrantRow {
 export class AuthService {
   constructor(
     @Inject(ENV) private readonly env: Env,
-    private readonly db: DatabaseService,
-    private readonly passwords: PasswordService,
-    private readonly tokens: TokenService,
+    @Inject(DatabaseService) private readonly db: DatabaseService,
+    @Inject(PasswordService) private readonly passwords: PasswordService,
+    @Inject(TokenService) private readonly tokens: TokenService,
   ) {}
 
   /**
@@ -259,6 +259,35 @@ export class AuthService {
       nowMs: params.nowMs,
       timezone: params.timezone,
     };
+  }
+
+  /** Display name for the acting user. Self-scoped; used by `/me`. */
+  async displayNameFor(hospitalId: string, userId: string): Promise<string> {
+    const row = await this.db.withHospitalScope(hospitalId, (tx) =>
+      tx.maybeOne<{ display_name: string }>(
+        `SELECT display_name FROM core.users WHERE id = $1 AND deleted_at IS NULL`,
+        [userId],
+      ),
+    );
+    return row?.display_name ?? 'Unknown user';
+  }
+
+  /** The workspace the user's highest-precedence active role lands on. */
+  async homeWorkspaceFor(hospitalId: string, userId: string): Promise<string | null> {
+    const row = await this.db.withHospitalScope(hospitalId, (tx) =>
+      tx.maybeOne<{ home_workspace: string }>(
+        `SELECT r.home_workspace
+           FROM core.user_roles ur
+           JOIN core.roles r ON r.id = ur.role_id
+          WHERE ur.user_id = $1 AND ur.hospital_id = $2
+            AND ur.active AND r.active
+            AND ur.valid_from <= now() AND (ur.valid_to IS NULL OR ur.valid_to > now())
+          ORDER BY r.key
+          LIMIT 1`,
+        [userId, hospitalId],
+      ),
+    );
+    return row?.home_workspace ?? null;
   }
 
   private async recordFailure(user: UserRow): Promise<void> {

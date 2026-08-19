@@ -1,0 +1,54 @@
+import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+
+export const HANDOFF = join(process.cwd(), 'e2e', '.stack.json');
+
+export interface StackHandoff {
+  readonly apiOrigin: string;
+  readonly webOrigin: string;
+  readonly hospitalId: string;
+}
+
+let stack: ChildProcess | undefined;
+
+/**
+ * Starts `e2e/stack.mts` and waits for it to publish its handoff file.
+ *
+ * The stack runs as a child process because it is ESM and Playwright's loader is
+ * CommonJS; see the note at the top of `stack.mts`.
+ */
+export default async function globalSetup(): Promise<void> {
+  rmSync(HANDOFF, { force: true });
+
+  stack = spawn('npx', ['tsx', 'e2e/stack.mts'], { cwd: process.cwd(), stdio: 'inherit' });
+  (globalThis as Record<string, unknown>)['__vimsStackPid'] = stack.pid;
+
+  let exited: number | null = null;
+  stack.on('exit', (code) => {
+    exited = code ?? 1;
+  });
+
+  const deadline = Date.now() + 300_000;
+  while (Date.now() < deadline) {
+    if (existsSync(HANDOFF)) {
+      const handoff = JSON.parse(readFileSync(HANDOFF, 'utf8')) as StackHandoff;
+      if (handoff.hospitalId.length > 0) return;
+    }
+    if (exited !== null) throw new Error(`e2e stack exited early with code ${exited}`);
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error('e2e stack did not become ready within 300s');
+}
+
+export function stopStack(): void {
+  const pid = (globalThis as Record<string, unknown>)['__vimsStackPid'];
+  if (typeof pid === 'number') {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // Already gone.
+    }
+  }
+  rmSync(HANDOFF, { force: true });
+}

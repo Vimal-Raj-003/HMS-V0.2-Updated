@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Inject, Query } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
 import { currentTenantContext } from '../../../core/tenancy/tenant-context.js';
 import { DatabaseService } from '../../../core/db/database.service.js';
@@ -26,8 +26,8 @@ interface UserListRow {
 @Injectable()
 export class UsersService {
   constructor(
-    private readonly db: DatabaseService,
-    private readonly audit: AuditService,
+    @Inject(DatabaseService) private readonly db: DatabaseService,
+    @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
   async list(limit: number): Promise<readonly UserListRow[]> {
@@ -61,7 +61,7 @@ export class UsersService {
 
 @Controller('admin/users')
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(@Inject(UsersService) private readonly users: UsersService) {}
 
   @Permission('admin.user.read')
   @Get()

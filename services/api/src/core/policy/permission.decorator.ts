@@ -28,3 +28,24 @@ export function Permission(key: string): CustomDecorator<string> {
 export function Public(): CustomDecorator<string> {
   return SetMetadata(PUBLIC_KEY, true);
 }
+
+export const AUTHENTICATED_ONLY_KEY = 'vims:authenticated-only';
+
+/**
+ * Marks a route that requires a **valid session but no specific permission**.
+ *
+ * There is exactly one legitimate use: session introspection. `/me` cannot
+ * require a permission key, because the client calls `/me` precisely to learn
+ * which permission keys it holds — requiring one would be circular, and the
+ * usual workaround (marking it `@Public()`) is worse, because it would let an
+ * unauthenticated caller probe it.
+ *
+ * The contract a route accepts by using this is narrow and not enforceable by
+ * the type system, so it is stated here and must be checked in review: **a route
+ * marked this way may only return data about the calling session itself.** It
+ * may never accept an identifier that lets the caller ask about somebody else —
+ * that is what permission keys are for.
+ */
+export function AuthenticatedOnly(): CustomDecorator<string> {
+  return SetMetadata(AUTHENTICATED_ONLY_KEY, true);
+}

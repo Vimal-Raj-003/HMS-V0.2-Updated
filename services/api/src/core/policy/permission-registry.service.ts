@@ -1,4 +1,4 @@
-import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { PERMISSION_CATALOGUE } from '@vims/contracts';
 import { DatabaseService } from '../db/database.service.js';
 
@@ -24,7 +24,7 @@ import { DatabaseService } from '../db/database.service.js';
 export class PermissionRegistryService implements OnApplicationBootstrap {
   private readonly logger = new Logger(PermissionRegistryService.name);
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(@Inject(DatabaseService) private readonly db: DatabaseService) {}
 
   async onApplicationBootstrap(): Promise<void> {
     const { missingInDatabase, unknownInCode } = await this.verify();

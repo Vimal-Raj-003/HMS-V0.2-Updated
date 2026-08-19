@@ -1,4 +1,4 @@
-import { Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
+import { Inject, Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ProblemType } from '@vims/contracts';
 import type { FastifyRequest } from 'fastify';
@@ -6,7 +6,7 @@ import { AuthService } from '../../modules/platform/auth/auth.service.js';
 import { getContext } from '../context/request-context.js';
 import { AppError } from '../problem/app-error.js';
 import { evaluate } from './policy.engine.js';
-import { PERMISSION_KEY, PUBLIC_KEY } from './permission.decorator.js';
+import { AUTHENTICATED_ONLY_KEY, PERMISSION_KEY, PUBLIC_KEY } from './permission.decorator.js';
 
 /**
  * Step 6 — RBAC + ABAC, deny by default.
@@ -19,8 +19,8 @@ import { PERMISSION_KEY, PUBLIC_KEY } from './permission.decorator.js';
 @Injectable()
 export class PolicyGuard implements CanActivate {
   constructor(
-    private readonly reflector: Reflector,
-    private readonly auth: AuthService,
+    @Inject(Reflector) private readonly reflector: Reflector,
+    @Inject(AuthService) private readonly auth: AuthService,
   ) {}
 
   async canActivate(execution: ExecutionContext): Promise<boolean> {
@@ -29,6 +29,33 @@ export class PolicyGuard implements CanActivate {
       execution.getClass(),
     ]);
     if (isPublic === true) return true;
+
+    const ctxEarly = getContext();
+
+    // Session introspection: authenticated, but no permission key — see the
+    // reasoning on `AuthenticatedOnly`. Auth and tenant guards have already run,
+    // so reaching here means the session is verified.
+    const authenticatedOnly = this.reflector.getAllAndOverride<boolean>(AUTHENTICATED_ONLY_KEY, [
+      execution.getHandler(),
+      execution.getClass(),
+    ]);
+    if (authenticatedOnly === true) {
+      if (ctxEarly.userId === null || ctxEarly.hospitalId === null) throw AppError.unauthenticated();
+      const self = await this.auth.resolvePolicyContext({
+        userId: ctxEarly.userId,
+        hospitalId: ctxEarly.hospitalId,
+        branchId: ctxEarly.branchId,
+        sessionId: ctxEarly.sessionId ?? '',
+        acr: 'aal1',
+        amr: ['pwd'],
+        authTimeMs: Date.now(),
+        impersonatorUserId: ctxEarly.impersonatorUserId,
+        timezone: 'Asia/Kolkata',
+        nowMs: Date.now(),
+      });
+      ctxEarly.grantedBranchIds = self.grantedBranchIds;
+      return true;
+    }
 
     const permission = this.reflector.getAllAndOverride<string>(PERMISSION_KEY, [
       execution.getHandler(),

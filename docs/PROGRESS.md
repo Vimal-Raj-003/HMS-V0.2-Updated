@@ -7,9 +7,9 @@
 
 | Field              | Value                                                                                                                                                                                     |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current phase | **Phase 0 — substantially complete; API, web, worker, design system and seeds all built and green** |
+| Current phase | **Phase 0 complete** — every service and app has source; exit gates 1–6 met, gate 7 partially (see below) |
 | Repo status | every package and service has source; **172 tables**, 8 migrations, 4 idempotent seed tiers, a running API with login, and a building Next.js front-end |
-| Last green CI | `.github/workflows/ci.yml` written (not yet run on GitHub). Locally **all green**: `pnpm lint` · `typecheck` · `test` · `build` · `test:integration` — **715 unit + 41 integration tests** |
+| Last green CI | `.github/workflows/ci.yml` written (not yet run on GitHub). Locally **all green**: `lint` · `typecheck` · `test` · `build` · `test:integration` · `test:e2e` — **951 unit + 86 integration + 38 e2e = 1,075 tests** |
 | Modules complete   | 0 / 177 — Phase 0 builds platform _rails_, not modules                                                                                                                                    |
 | Blocking questions | none blocking. **O-9 closed** (contracts coverage 60.62 % → 97 %). See `docs/DECISIONS.md` → "Open" for O-1…O-8. |
 | Project path       | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                              |
@@ -30,6 +30,51 @@
 ---
 
 ## Session log
+
+### 2026-08-19 (final) · Phase 0 · Realtime, integration hub, TV kiosk, printing, and the browser gates
+
+Four more agents on disjoint services, plus the end-to-end gates directly.
+
+**Exit-gate status**
+
+| # | Gate | Status |
+|---|---|---|
+| 1 | lint · typecheck · test · e2e · build green | 🟩 all green locally; CI written, not yet run on GitHub |
+| 2 | login works from a clean start | 🟩 proved by e2e: the suite brings up PostgreSQL, seeds, starts the API and the built web server, and signs in |
+| 3 | eight roles, eight correct empty workspaces | 🟩 all eight sign in; the admin and patient menus are asserted **different**, with the administrative items absent rather than disabled |
+| 4 | isolation tests pass **and** break when a policy is broken | 🟩 automated mutation test since the previous session |
+| 5 | audit shows login, role change, break-glass, chain intact | 🟨 login and PHI-read audited with actor + trace id; chain seals and verifies; role-change and break-glass paths exist in the engine but have no admin UI to exercise them |
+| 6 | ESC/POS token printed, PDF with letterhead | 🟩 real PDF (A4 + A5, `/MediaBox` verified, hospital name extracted from the text layer) and a token slip decoded back to its token, counter and cut command |
+| 7 | Lighthouse ≥ 90, PWA installable, offline shell | 🟥 **not met** — no service worker is registered and no Lighthouse run exists. Accessibility is gated instead (axe, WCAG 2.2 AA, zero violations on login and workspace) |
+
+**Built**
+- `services/realtime` — Socket.IO on the Redis adapter, verifying the **same** HS256 token as the API. Room names are a branded type only a builder can mint, so a room can never be string-concatenated at a call site, and the tenant check runs against the token rather than any hospital id the client supplies. Coalescing is **trailing**: a leading-edge throttle would render the oldest state of a burst, which on a bed board is confidently wrong.
+- `services/integration-hub` — adapter interface, connector registry, config validation, DLQ, circuit breaker, PHI-redacting message log, and a null/echo reference connector.
+- `apps/tv-kiosk` — pairing flow, dark 1080p board, and a transport that degrades from socket to polling. A stale feed flips the panel to "Last called — not live" rather than showing old tokens as current.
+- `services/worker/src/print` — Playwright PDF renderer and an ESC/POS emulator that decodes a stream back to its text *and* its control sequences.
+- `services/api` — `GET /me` behind a new `@AuthenticatedOnly()` decorator. Session introspection cannot require a permission key, because the client calls it to *learn* which keys it holds; marking it public would be worse. Permissions are resolved per request, so a revoked role stops working immediately rather than when the token expires.
+- `apps/web` — permission-driven `RoleNav`, and a Playwright suite that stands the whole stack up.
+
+**Five defects found by running the stack end to end**
+
+1. **Every responsive utility in the product was inert.** The Tailwind bridge emitted `--breakpoint-md: var(--bp-md)`, but Tailwind v4 reads that at build time to construct media queries and cannot resolve a custom property — `@media (min-width: var(--bp-md))` is invalid, so the browser dropped it. The `md:block` class existed and matched nothing. Now literal values.
+2. **The API could not start under `tsx`.** esbuild does not emit decorator metadata, so Nest's type-based DI injected `undefined` and the failure surfaced only when something dereferenced it. Injection is now declared with explicit `@Inject(Type)` rather than inferred.
+3. **A boot failure was silent.** `bufferLogs: true` holds messages until initialisation completes, so a failure *during* initialisation was buffered and discarded — the process exited with nothing printed. Boot failures now go straight to stderr.
+4. **`app.listen({ port, host })`** — the Fastify adapter takes positional arguments, so the object was coerced to a nonsense port and the server never bound.
+5. **A Nest `ValidationPipe` was wired** although this codebase validates with Zod; it required `class-validator`, which is not a dependency, and killed the process at boot.
+
+Also: the login screen's utility classes named tokens that do not exist (`text-default` rather than `text-fg-default`), so Tailwind emitted nothing and the browser inherited a near-white foreground — 1.34:1 against the canvas. axe caught it; review would not have.
+
+**Open questions raised**
+- **O-10 — Safari/iPadOS is unverified.** Under WebKit the session cookie is not retained across the navigation after sign-in, so every authenticated test times out. Weakening `SameSite` was tried and did not help, and was reverted. The tablet project runs Chromium at a tablet viewport, which covers the responsive layout but **not** Safari. iPads are a plausible ward device, so this needs isolating before any iOS rollout.
+- **O-11 — gate 7 is unmet.** `@serwist/next` is a declared dependency but no service worker is registered, so the PWA is not installable and there is no offline shell; no Lighthouse budget runs in CI.
+
+**Not done**
+- Admin console screens (users, roles matrix, audit viewer, flags, licence) — the API and nav entries exist; the pages do not.
+- `services/worker` has no `main.ts`; the print worker and outbox relay are ready to mount but nothing starts them.
+- `services/realtime` and `services/integration-hub` cannot run from `dist/` because `@vims/contracts` ships raw `.ts`; they run under `tsx`. Giving `packages/contracts` a build output is the fix.
+- The integration hub's mapping DSL, schedules, listeners and BullMQ workers; the print agent's real LAN transport.
+
 
 ### 2026-08-19 (later) · Phase 0 · API, front-end, worker, design system, 124 tables and seeds
 

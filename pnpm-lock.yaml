@@ -81,6 +81,15 @@ importers:
       '@tailwindcss/postcss':
         specifier: ^4.3.3
         version: 4.3.3
+      '@testing-library/dom':
+        specifier: ^10.4.0
+        version: 10.4.1
+      '@testing-library/jest-dom':
+        specifier: ^6.6.3
+        version: 6.10.0(@testing-library/dom@10.4.1)
+      '@testing-library/react':
+        specifier: ^16.1.0
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.1
@@ -90,6 +99,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.3
         version: 19.2.4(@types/react@19.2.18)
+      jsdom:
+        specifier: ^25.0.1
+        version: 25.0.1
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -181,6 +193,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.3
         version: 19.2.4(@types/react@19.2.18)
+      '@vims/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@vims/testing':
         specifier: workspace:*
         version: link:../../packages/testing
@@ -603,6 +618,9 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
+      pg:
+        specifier: ^8.13.1
+        version: 8.23.0
       pino:
         specifier: ^10.3.1
         version: 10.3.1
@@ -613,6 +631,12 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.21.0
+      '@vims/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
       tsx:
         specifier: ^4.19.2
         version: 4.23.12
@@ -634,6 +658,9 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
+      jose:
+        specifier: ^6.0.11
+        version: 6.2.9
       pino:
         specifier: ^10.3.1
         version: 10.3.1
@@ -647,6 +674,9 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.1
+      '@vims/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
       socket.io-client:
         specifier: ^4.8.3
         version: 4.8.3

@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Inject } from '@nestjs/common';
 import { DatabaseService } from '../db/database.service.js';
 import { Public } from '../policy/permission.decorator.js';
 
@@ -13,7 +13,7 @@ import { Public } from '../policy/permission.decorator.js';
  */
 @Controller()
 export class HealthController {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(@Inject(DatabaseService) private readonly db: DatabaseService) {}
 
   @Public()
   @Get('healthz')

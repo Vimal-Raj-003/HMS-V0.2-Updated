@@ -2,26 +2,32 @@
   "name": "@vims/integration-hub",
   "version": "0.1.0",
   "private": true,
-  "description": "EN-017 skeleton: connector registry, adapter interface, mapping DSL, DLQ, circuit breakers, health checks, PHI-redacted message log. No live connectors in Phase 0.",
+  "description": "EN-017 skeleton: connector registry, adapter interface, config schema, health checks, DLQ, circuit breakers, PHI-redacted message log. No live connectors in Phase 0.",
   "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "scripts": {
-    "build": "if [ -d src ]; then tsc; else echo \"build: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
+    "build": "tsc",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
-    "typecheck": "if [ -d src ]; then tsc --noEmit; else echo \"typecheck: no source yet \u2014 added by the Phase 0 step that builds this package\"; fi",
-    "test": "vitest run --passWithNoTests"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@vims/contracts": "workspace:*",
     "@vims/db": "workspace:*",
     "bullmq": "^6.1.2",
     "ioredis": "^6.0.0",
+    "pg": "^8.13.1",
     "pino": "^10.3.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "@vims/testing": "workspace:*",
     "tsx": "^4.19.2",
     "vitest": "^4.1.10"
   }

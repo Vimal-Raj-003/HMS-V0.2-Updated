@@ -1,0 +1,74 @@
+@import 'tailwindcss';
+/* The same three token maps apps/web consumes. A board forces `dark`
+   (docs/06 §2 "dark for TV/queue boards"), so only the dark map is ever active
+   here — but it is the shared one, not a private copy. */
+@import '@vims/ui/tokens.css';
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    /* docs/06 §4.4: no chrome, no scrollbars. A scrollbar on a corridor TV means
+       content nobody will ever scroll to. */
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  body {
+    /* Nobody touches this screen; a stranded pointer is just a burn-in risk. */
+    cursor: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  ::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@layer components {
+  /* Burn-in mitigation moves the whole safe area; the transform value itself is
+     computed from the clock in `lib/burn-in.ts`, never from a random source. */
+  .board-safe-area {
+    transition: transform var(--dur-tv) var(--ease-standard);
+    will-change: transform;
+  }
+
+  /* docs/06 §4.4: token flips are a cross-fade, capped at --dur-tv (400 ms), and
+     nothing on a board may animate faster than 3 Hz (photosensitive safety). */
+  .token-flip {
+    animation: token-fade var(--dur-tv) var(--ease-decel) both;
+  }
+
+  .board-ticker {
+    animation: board-ticker 40s linear infinite;
+  }
+}
+
+@keyframes token-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes board-ticker {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-safe-area,
+  .token-flip,
+  .board-ticker {
+    animation: none;
+    transition: none;
+  }
+}

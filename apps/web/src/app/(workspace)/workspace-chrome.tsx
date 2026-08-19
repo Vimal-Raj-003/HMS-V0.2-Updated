@@ -1,23 +1,33 @@
 'use client';
 
+import { RoleNav } from '@vims/ui';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { PHASE0_NAV } from '@/lib/nav';
+
+interface WorkspaceChromeProps {
+  readonly displayName: string;
+  readonly roles: readonly string[];
+  readonly permissions: readonly string[];
+  readonly children: React.ReactNode;
+}
 
 /**
- * The application chrome: header, role navigation, main work area.
+ * The application chrome: header, permission-driven navigation, work area.
  *
- * `docs/06` §4.1 is explicit that the left nav is generated from permissions and
- * that an item the user cannot use is never rendered. That matters more than it
- * sounds: a greyed-out "Approve refund" teaches staff to hunt for a workaround,
- * and in a hospital the workaround is usually somebody else's password.
- *
- * The nav below is a Phase-0 placeholder driven by a static list; it becomes the
- * permission-driven `RoleNav` from `@vims/ui` once the API exposes the session's
- * resolved permission set.
+ * The nav is filtered by `RoleNav` against the session's real permission set,
+ * which is why two roles signing in on the same machine see genuinely different
+ * menus rather than the same menu with things disabled.
  */
-export function WorkspaceChrome({ children }: { children: React.ReactNode }): React.JSX.Element {
+export function WorkspaceChrome({
+  displayName,
+  roles,
+  permissions,
+  children,
+}: WorkspaceChromeProps): React.JSX.Element {
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
+  const granted = useMemo(() => new Set(permissions), [permissions]);
 
   async function signOut(): Promise<void> {
     setSigningOut(true);
@@ -30,38 +40,35 @@ export function WorkspaceChrome({ children }: { children: React.ReactNode }): Re
     <div className="min-h-dvh">
       <a
         href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-surface focus:px-3 focus:py-2"
+        className="sr-only focus:not-sr-only focus:absolute focus:start-2 focus:top-2 focus:z-50 focus:rounded focus:bg-layer-1 focus:px-3 focus:py-2"
       >
         Skip to content
       </a>
 
       <header className="flex h-14 items-center justify-between border-b border-control px-4">
+        <span className="font-semibold tracking-tight">Vim&rsquo;s HMS</span>
         <div className="flex items-center gap-3">
-          <span className="font-semibold tracking-tight">Vim&rsquo;s HMS</span>
+          <span data-testid="session-user" className="text-sm text-fg-subtle">
+            {displayName}
+          </span>
+          <span data-testid="session-roles" className="sr-only">
+            {roles.join(',')}
+          </span>
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            disabled={signingOut}
+            className="h-9 rounded-md border border-control px-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            {signingOut ? 'Signing out…' : 'Sign out'}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => void signOut()}
-          disabled={signingOut}
-          className="h-9 rounded-md border border-control px-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-        >
-          {signingOut ? 'Signing out…' : 'Sign out'}
-        </button>
       </header>
 
       <div className="flex">
-        <nav aria-label="Main" className="hidden w-56 shrink-0 border-e border-control p-3 md:block">
-          <ul className="space-y-1 text-sm">
-            <li>
-              <a
-                href="/dashboard"
-                className="block rounded-md px-3 py-2 hover:bg-sunken focus-visible:outline focus-visible:outline-2"
-              >
-                Dashboard
-              </a>
-            </li>
-          </ul>
-        </nav>
+        <div data-testid="role-nav" className="hidden w-56 shrink-0 border-e border-control p-3 md:block">
+          <RoleNav items={PHASE0_NAV} grantedPermissions={granted} label="Main" />
+        </div>
         <main id="main" className="min-w-0 flex-1 p-6">
           {children}
         </main>

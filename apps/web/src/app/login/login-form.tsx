@@ -71,18 +71,19 @@ export function LoginForm({ nextPath }: LoginFormProps): React.JSX.Element {
     <form
       onSubmit={(e) => void onSubmit(e)}
       noValidate
-      className="rounded-lg border border-control bg-surface p-6 shadow-sm"
+      className="rounded-lg border border-control bg-layer-1 p-6 shadow-sm"
     >
       {problem && (
         <div
           id={errorId}
           role="alert"
-          className="mb-5 rounded-md border border-danger-border bg-danger-subtle p-3 text-sm text-danger-fg"
+          data-testid="login-error"
+          className="mb-5 rounded-md border border-danger-border bg-danger-surface p-3 text-sm text-danger-fg"
         >
           <p className="font-medium">{problem.problem.title}</p>
           {problem.problem.detail && <p className="mt-1">{problem.problem.detail}</p>}
           {problem.problem.nextAction && <p className="mt-1">{problem.problem.nextAction}</p>}
-          <p className="mt-2 font-mono text-xs text-subtle">Reference: {problem.reference}</p>
+          <p className="mt-2 font-mono text-xs text-fg-subtle">Reference: {problem.reference}</p>
         </div>
       )}
 
@@ -121,7 +122,7 @@ export function LoginForm({ nextPath }: LoginFormProps): React.JSX.Element {
         disabled={busy}
         aria-busy={busy}
         {...(problem ? { 'aria-describedby': errorId } : {})}
-        className="mt-6 h-11 w-full rounded-md bg-primary text-primary-fg font-medium transition-opacity disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="mt-6 h-11 w-full rounded-md bg-accent-solid text-accent-on-solid font-medium transition-opacity disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         {busy ? 'Signing in…' : 'Sign in'}
       </button>
@@ -160,10 +161,10 @@ function Field(props: {
         autoFocus={props.autoFocus}
         aria-invalid={props.error ? true : undefined}
         {...(describedBy ? { 'aria-describedby': describedBy } : {})}
-        className="h-11 w-full rounded-md border border-control bg-surface px-3 text-base focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="h-11 w-full rounded-md border border-control bg-layer-1 px-3 text-base focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
       />
       {props.hint && (
-        <p id={hintId} className="mt-1 text-xs text-subtle">
+        <p id={hintId} className="mt-1 text-xs text-fg-subtle">
           {props.hint}
         </p>
       )}

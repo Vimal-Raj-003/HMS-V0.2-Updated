@@ -91,7 +91,14 @@ function tailwindTheme(): string {
   for (const key of Object.keys(elevation)) entries.push([`--shadow-e${key}`, `var(--e-${key})`]);
   for (const key of Object.keys(durations)) entries.push([`--animate-duration-${key}`, `var(--dur-${key})`]);
   for (const key of Object.keys(easings)) entries.push([`--ease-${key}`, `var(--ease-${key})`]);
-  for (const key of Object.keys(breakpoints)) entries.push([`--breakpoint-${key}`, `var(--bp-${key})`]);
+  // Literal values, NOT `var(--bp-*)`. Tailwind v4 reads `--breakpoint-*` at
+  // build time to construct the media queries, and it cannot resolve a custom
+  // property to do it — `@media (min-width: var(--bp-md))` is invalid CSS, so
+  // the browser drops the whole block. The utilities are still emitted, which is
+  // what makes this so quiet: `md:block` exists in the stylesheet, matches
+  // nothing, and every responsive layout in the product silently collapses to
+  // its smallest variant. Found by an end-to-end test, not by review.
+  for (const [key, value] of Object.entries(breakpoints)) entries.push([`--breakpoint-${key}`, value]);
   for (const key of Object.keys(zIndex)) entries.push([`--z-index-${key}`, `var(--z-${key})`]);
   for (const key of Object.keys(density)) entries.push([`--spacing-row-${key}`, `var(--row-${key})`]);
 

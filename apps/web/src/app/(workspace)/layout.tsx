@@ -1,17 +1,31 @@
 import { redirect } from 'next/navigation';
+import { fetchSession } from '@/lib/server-api';
 import { readAccessToken } from '@/lib/session';
 import { WorkspaceChrome } from './workspace-chrome';
 
 /**
  * Every authenticated screen sits inside this layout.
  *
- * The token check here is a redirect, not a security control — the API decides
- * what the session may actually do. Its job is to avoid rendering a workspace
- * shell that will immediately 401 on its first fetch, which reads to a user as a
- * broken application rather than as a finished session.
+ * The session is fetched server-side, so the first paint already has the right
+ * navigation — no flash of a menu the user cannot use, and no round trip before
+ * the shell is usable. The cookie check is a redirect, not a security control:
+ * the API's guard chain decides what the session may actually do.
  */
 export default async function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   const token = await readAccessToken();
   if (token === null) redirect('/login');
-  return <WorkspaceChrome>{children}</WorkspaceChrome>;
+
+  const session = await fetchSession();
+  // A cookie that the API rejects means the session ended between the two calls.
+  if (session === null) redirect('/login');
+
+  return (
+    <WorkspaceChrome
+      displayName={session.user.displayName}
+      roles={session.roles}
+      permissions={session.permissions}
+    >
+      {children}
+    </WorkspaceChrome>
+  );
 }

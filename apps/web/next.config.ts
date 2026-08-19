@@ -8,6 +8,18 @@ const config: NextConfig = {
   // copies that can drift.
   transpilePackages: ['@vims/ui', '@vims/contracts', '@vims/i18n', '@vims/flags'],
   poweredByHeader: false,
+  webpack(config: { resolve: { extensionAlias?: Record<string, readonly string[]> } }) {
+    // The workspace packages are ESM TypeScript and therefore write `./x.js` in
+    // their import specifiers, which is what the spec requires even though the
+    // file on disk is `./x.ts` or `./x.tsx`. Node and `tsc` follow that; webpack
+    // does not unless told. Without this, `@vims/ui`'s barrel resolves for
+    // typecheck and fails at build — the least helpful possible split.
+    config.resolve.extensionAlias = {
+      '.js': ['.ts', '.tsx', '.js'],
+      '.mjs': ['.mts', '.mjs'],
+    };
+    return config;
+  },
   experimental: { typedRoutes: true },
   async headers() {
     return [

@@ -1,0 +1,46 @@
+import { readFileSync } from 'node:fs';
+import { expect, type Page } from '@playwright/test';
+import { HANDOFF, type StackHandoff } from './global-setup';
+
+export const DEV_PASSWORD = 'VimsDev#2026';
+
+export function stack(): StackHandoff {
+  return JSON.parse(readFileSync(HANDOFF, 'utf8')) as StackHandoff;
+}
+
+/** Signs in as a seeded role and waits for the workspace to be usable. */
+export async function signIn(page: Page, roleKey: string): Promise<void> {
+  const { hospitalId } = stack();
+  await page.goto('/login');
+  await page.getByLabel('Hospital').fill(hospitalId);
+  await page.getByLabel('Username, email or employee ID').fill(`${roleKey}@vims-blr`);
+  await page.getByLabel('Password').fill(DEV_PASSWORD);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page).toHaveURL(/\/dashboard/);
+}
+
+/**
+ * Every nav label this session can reach.
+ *
+ * `RoleNav` renders a group as a collapsible button whose children are not in
+ * the DOM until it is expanded, so collecting only links would report a
+ * two-level menu as a one-item one. Groups are expanded first, then links and
+ * group buttons are both collected — the question is what the user can reach,
+ * not how it happens to be marked up.
+ */
+export async function visibleNavLabels(page: Page): Promise<string[]> {
+  const nav = page.getByTestId('role-nav');
+  await expect(nav).toBeVisible();
+
+  const groups = nav.getByRole('button');
+  for (let i = 0; i < (await groups.count()); i += 1) {
+    const group = groups.nth(i);
+    if ((await group.getAttribute('aria-expanded')) === 'false') await group.click();
+  }
+
+  const labels = [
+    ...(await nav.getByRole('button').allInnerTexts()),
+    ...(await nav.getByRole('link').allInnerTexts()),
+  ];
+  return labels.map((t) => t.trim()).filter((t) => t.length > 0);
+}
