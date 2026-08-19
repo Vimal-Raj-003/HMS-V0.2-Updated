@@ -1,0 +1,368 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-025 — Single Sign-On (schema `core`, prefix `sso_`)
+//
+// EN-025 §5 states the two rules the shape has to make structurally true:
+//   * "Matching is by stable subject, never by email alone" → `sso_identities`
+//     is unique on `(provider_id, subject)`, and `email_at_idp` is descriptive
+//     only.
+//   * "a configuration that would leave a tenant with zero working local
+//     accounts is rejected at save time" → `sso_break_glass_accounts` and
+//     `sso_fallback_windows` exist independently of any provider row, so
+//     removing every provider cannot remove the way back in.
+//
+// Secrets are never stored here. `secrets_ref` is a Vault/SSM path; certificates
+// hold public material and thumbprints only (docs/04 §4).
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum SsoProtocol {
+  oidc
+  saml2
+  ldap
+  ad
+
+  @@schema("core")
+}
+
+enum SsoIdentityStatus {
+  active
+  orphaned
+  disabled
+
+  @@schema("core")
+}
+
+enum SsoLoginResult {
+  success
+  failed
+  denied_unmapped
+  denied_disabled
+  assertion_invalid
+  replay
+  expired
+  network_error
+  idp_error
+
+  @@schema("core")
+}
+
+model SsoProvider {
+  id                 String  @id @db.Uuid
+  hospitalId         String  @map("hospital_id") @db.Uuid
+  key                String  @db.VarChar(64)
+  displayName        String  @map("display_name") @db.VarChar(160)
+  protocol           SsoProtocol
+  enabled            Boolean @default(false)
+  sortOrder          Int     @default(100) @map("sort_order")
+  /// { branches[], userSegments[] } — which population this provider serves.
+  scope              Json    @default("{}")
+  /// Protocol-specific, non-secret configuration only.
+  config             Json    @default("{}")
+  /// Vault path holding client_secret / private key / bind password.
+  secretsRef         String? @map("secrets_ref") @db.VarChar(300)
+  /// Current + next public certs with thumbprints and not_after, so rotation is
+  /// visible before it breaks a login at 03:00.
+  certificates       Json    @default("{}")
+  jitEnabled         Boolean @default(false) @map("jit_enabled")
+  jitDefaultRole     String? @map("jit_default_role") @db.VarChar(64)
+  denyIfUnmapped     Boolean @default(true) @map("deny_if_unmapped")
+  homeRealm          Json    @default("{}") @map("home_realm")
+  sloEnabled         Boolean @default(false) @map("slo_enabled")
+  forceReauthMaxAgeSec Int?  @map("force_reauth_max_age_sec")
+  health             Json    @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  attributeMappings SsoAttributeMapping[]
+  roleMappings      SsoRoleMapping[]
+  identities        SsoIdentity[]
+
+  @@unique([hospitalId, key])
+  @@index([hospitalId, enabled])
+  @@map("sso_providers")
+  @@schema("core")
+}
+
+model SsoAttributeMapping {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  providerId  String  @map("provider_id") @db.Uuid
+  sourceClaim String  @map("source_claim") @db.VarChar(200)
+  targetField String  @map("target_field") @db.VarChar(64)
+  transform   Json    @default("{}")
+  required    Boolean @default(false)
+  sortOrder   Int     @default(100) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  provider SsoProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, sourceClaim, targetField], map: "sso_attribute_mappings_key")
+  @@index([hospitalId, providerId])
+  @@map("sso_attribute_mappings")
+  @@schema("core")
+}
+
+/// EN-025 §5: "Sensitive roles are never granted by group mapping alone."
+/// `is_sensitive_blocked` is computed from the role and makes the drop visible
+/// rather than silent.
+model SsoRoleMapping {
+  id                 String  @id @db.Uuid
+  hospitalId         String  @map("hospital_id") @db.Uuid
+  providerId         String  @map("provider_id") @db.Uuid
+  matchType          String  @map("match_type") @db.VarChar(16)
+  claimName          String  @default("groups") @map("claim_name") @db.VarChar(120)
+  matchValue         String  @map("match_value") @db.VarChar(400)
+  roleId             String  @map("role_id") @db.Uuid
+  branchId           String? @map("branch_id") @db.Uuid
+  scope              Json    @default("{}")
+  conditions         Json    @default("{}")
+  priority           Int     @default(100)
+  enabled            Boolean @default(true)
+  isSensitiveBlocked Boolean @default(false) @map("is_sensitive_blocked")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  provider SsoProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, providerId, enabled])
+  @@index([roleId])
+  @@map("sso_role_mappings")
+  @@schema("core")
+}
+
+model SsoIdentity {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  userId          String  @map("user_id") @db.Uuid
+  providerId      String  @map("provider_id") @db.Uuid
+  /// The IdP's stable identifier. Never the email.
+  subject         String  @db.VarChar(255)
+  emailAtIdp      String? @map("email_at_idp") @db.VarChar(254)
+  lastLoginAt     DateTime? @map("last_login_at") @db.Timestamptz(6)
+  lastClaimsHash  String? @map("last_claims_hash") @db.VarChar(64)
+  linkedAt        DateTime @default(now()) @map("linked_at") @db.Timestamptz(6)
+  linkedBy        String? @map("linked_by") @db.Uuid
+  status          SsoIdentityStatus @default(active)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  provider SsoProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
+
+  @@unique([providerId, subject])
+  @@index([hospitalId, userId])
+  @@map("sso_identities")
+  @@schema("core")
+}
+
+/// Partitioned monthly, ≥ 180-day retention (CERT-In). Append-only.
+model SsoLoginAttempt {
+  id                String  @db.Uuid
+  hospitalId        String  @map("hospital_id") @db.Uuid
+  providerId        String? @map("provider_id") @db.Uuid
+  /// Never a password, never a full email for a failed attempt — the username
+  /// as typed, which is what an investigation needs and all it needs.
+  usernameAttempted String? @map("username_attempted") @db.VarChar(200)
+  subject           String? @db.VarChar(255)
+  result            SsoLoginResult
+  reasonCode        String? @map("reason_code") @db.VarChar(64)
+  acr               String? @db.VarChar(120)
+  amr               String[] @default([])
+  ip                String? @db.VarChar(64)
+  userAgent         String? @map("user_agent") @db.VarChar(400)
+  deviceId          String? @map("device_id") @db.Uuid
+  latencyMs         Int?    @map("latency_ms")
+  correlationId     String? @map("correlation_id") @db.VarChar(128)
+  occurredAt        DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@id([id, occurredAt])
+  @@index([hospitalId, occurredAt(sort: Desc)])
+  @@index([providerId, result, occurredAt(sort: Desc)])
+  @@map("sso_login_attempts")
+  @@schema("core")
+}
+
+/// Links a `core.sessions` row to the IdP session, so back-channel logout can
+/// find and kill it (EN-025 §3).
+model SsoSessionLink {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  sessionId  String  @map("session_id") @db.Uuid
+  providerId String  @map("provider_id") @db.Uuid
+  subject    String  @db.VarChar(255)
+  idTokenSub String? @map("id_token_sub") @db.VarChar(255)
+  /// The IdP's session id (`sid` claim) — the key back-channel logout arrives on.
+  sid        String? @db.VarChar(255)
+  authTime   DateTime? @map("auth_time") @db.Timestamptz(6)
+  acr        String? @db.VarChar(120)
+  amr        String[] @default([])
+  expiresAt  DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([sessionId])
+  @@index([providerId, sid])
+  @@index([hospitalId, expiresAt])
+  @@map("sso_session_links")
+  @@schema("core")
+}
+
+model SsoScimClient {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  providerId  String? @map("provider_id") @db.Uuid
+  name        String  @db.VarChar(160)
+  /// Hash only. The bearer token is shown exactly once at creation.
+  tokenHash   String  @map("token_hash") @db.VarChar(64)
+  ipAllowlist String[] @default([]) @map("ip_allowlist")
+  scopes      String[] @default([])
+  lastUsedAt  DateTime? @map("last_used_at") @db.Timestamptz(6)
+  rotatedAt   DateTime? @map("rotated_at") @db.Timestamptz(6)
+  status      String  @default("active") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([tokenHash])
+  @@index([hospitalId, status])
+  @@map("sso_scim_clients")
+  @@schema("core")
+}
+
+/// Partitioned monthly. `payload_redacted` never carries a credential.
+model SsoScimOperation {
+  id            String  @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  clientId      String  @map("client_id") @db.Uuid
+  op            String  @db.VarChar(24)
+  resourceType  String  @map("resource_type") @db.VarChar(24)
+  externalId    String? @map("external_id") @db.VarChar(255)
+  hmsUserId     String? @map("hms_user_id") @db.Uuid
+  payloadRedacted Json  @default("{}") @map("payload_redacted")
+  result        String  @db.VarChar(24)
+  error         String? @db.Text
+  occurredAt    DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@id([id, occurredAt])
+  @@index([hospitalId, occurredAt(sort: Desc)])
+  @@index([clientId, occurredAt(sort: Desc)])
+  @@map("sso_scim_operations")
+  @@schema("core")
+}
+
+model SsoReconciliationRun {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  providerId   String  @map("provider_id") @db.Uuid
+  runAt        DateTime @default(now()) @map("run_at") @db.Timestamptz(6)
+  idpUserCount Int     @default(0) @map("idp_user_count")
+  hmsUserCount Int     @default(0) @map("hms_user_count")
+  orphans      Int     @default(0)
+  missing      Int     @default(0)
+  drift        Int     @default(0)
+  findings     Json    @default("[]")
+  actionsTaken Json    @default("[]") @map("actions_taken")
+  status       String  @default("completed") @db.VarChar(16)
+
+  @@index([hospitalId, providerId, runAt(sort: Desc)])
+  @@map("sso_reconciliation_runs")
+  @@schema("core")
+}
+
+/// EN-025 §4: "every use raises `sso.break_glass.used`". The account survives
+/// any provider configuration, which is the point.
+model SsoBreakGlassAccount {
+  id                String  @id @db.Uuid
+  hospitalId        String  @map("hospital_id") @db.Uuid
+  userId            String  @map("user_id") @db.Uuid
+  ownerName         String  @map("owner_name") @db.VarChar(200)
+  purpose           String  @db.Text
+  ipRestriction     String[] @default([]) @map("ip_restriction")
+  lastValidatedAt   DateTime? @map("last_validated_at") @db.Timestamptz(6)
+  nextValidationDue DateTime? @map("next_validation_due") @db.Timestamptz(6)
+  lastUsedAt        DateTime? @map("last_used_at") @db.Timestamptz(6)
+  useCount          Int     @default(0) @map("use_count")
+  status            String  @default("active") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, userId])
+  @@index([hospitalId, status])
+  @@map("sso_break_glass_accounts")
+  @@schema("core")
+}
+
+/// A bounded window during which local password login is re-enabled because the
+/// IdP is unreachable. Reviewed afterwards, never open-ended.
+model SsoFallbackWindow {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  openedBy       String  @map("opened_by") @db.Uuid
+  reason         String  @db.Text
+  openedAt       DateTime @default(now()) @map("opened_at") @db.Timestamptz(6)
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz(6)
+  closedAt       DateTime? @map("closed_at") @db.Timestamptz(6)
+  loginsDuring   Int     @default(0) @map("logins_during")
+  reviewedBy     String? @map("reviewed_by") @db.Uuid
+  reviewNote     String? @map("review_note") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, openedAt(sort: Desc)])
+  @@map("sso_fallback_windows")
+  @@schema("core")
+}
+
+/// EN-025 §3.6 step-up: fresh strong auth at the moment of a high-risk action.
+/// `action_key` is a permission key from the catalogue.
+model SsoStepUpPolicy {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  actionKey      String  @map("action_key") @db.VarChar(96)
+  requiredAcr    String? @map("required_acr") @db.VarChar(120)
+  requiredAmr    String[] @default([]) @map("required_amr")
+  maxAgeSec      Int     @default(300) @map("max_age_sec")
+  fallbackMethod String  @default("totp") @map("fallback_method") @db.VarChar(16)
+  enabled        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, actionKey])
+  @@index([hospitalId, enabled])
+  @@map("sso_step_up_policies")
+  @@schema("core")
+}
+
+model SsoStepUpEvent {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  userId       String  @map("user_id") @db.Uuid
+  actionKey    String  @map("action_key") @db.VarChar(96)
+  sessionId    String? @map("session_id") @db.Uuid
+  satisfiedBy  String  @map("satisfied_by") @db.VarChar(24)
+  acr          String? @db.VarChar(120)
+  occurredAt   DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  /// The `core.audit_log` row this step-up authorised.
+  auditRef     String? @map("audit_ref") @db.Uuid
+
+  @@index([hospitalId, userId, occurredAt(sort: Desc)])
+  @@index([actionKey, occurredAt(sort: Desc)])
+  @@map("sso_step_up_events")
+  @@schema("core")
+}

@@ -1,0 +1,207 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-005 — Printer Integration (schema `core`, prefix `print_`)
+//
+// EN-005 §4 also lists `print_templates` "(owned by EN-039)". That table is
+// `core.tpl_print_templates` in `core-templates.prisma`; it is referenced here
+// by `template_key`, never redefined — docs/03 §Shared platform-owned tables
+// forbids two modules owning one table.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PrintJobStatus {
+  queued
+  sent
+  printing
+  completed
+  failed
+  cancelled
+  fallback_browser
+
+  @@schema("core")
+}
+
+enum PrintFormat {
+  zpl
+  escpos
+  tspl
+  pdf
+
+  @@schema("core")
+}
+
+/// The desktop agent that owns one or more physical printers. Authenticated by
+/// a device token scoped to its branch (EN-005 §5).
+model PrintAgent {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String  @map("branch_id") @db.Uuid
+  name            String  @db.VarChar(160)
+  host            String? @db.VarChar(200)
+  os              String? @db.VarChar(64)
+  agentVersion    String? @map("agent_version") @db.VarChar(32)
+  deviceId        String? @map("device_id") @db.Uuid
+  lastHeartbeatAt DateTime? @map("last_heartbeat_at") @db.Timestamptz(6)
+  status          String  @default("unpaired") @db.VarChar(16)
+  /// Network class and last-known address, for support triage only.
+  ip              String? @db.VarChar(64)
+  capabilities    Json    @default("{}")
+  pairingCode     String? @map("pairing_code") @db.VarChar(12)
+  pairingExpiresAt DateTime? @map("pairing_expires_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  printers PrintPrinter[]
+
+  @@unique([hospitalId, branchId, name], map: "print_agents_name_key")
+  @@index([hospitalId, branchId, status])
+  @@map("print_agents")
+  @@schema("core")
+}
+
+model PrintPrinter {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String  @map("branch_id") @db.Uuid
+  agentId      String? @map("agent_id") @db.Uuid
+  name         String  @db.VarChar(160)
+  kind         String  @db.VarChar(24)
+  connection   String  @db.VarChar(24)
+  address      String? @db.VarChar(200)
+  driverMode   String  @map("driver_mode") @db.VarChar(24)
+  paper        String  @db.VarChar(24)
+  dpi          Int?
+  locationId   String? @map("location_id") @db.Uuid
+  departmentId String? @map("department_id") @db.Uuid
+  counterId    String? @map("counter_id") @db.Uuid
+  capabilities Json    @default("{}")
+  /// { mono, colour } per page. Money, so numeric — never a float.
+  costPerPage  Json    @default("{}") @map("cost_per_page")
+  status       String  @default("unknown") @db.VarChar(24)
+  lastStatusAt DateTime? @map("last_status_at") @db.Timestamptz(6)
+  active       Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  agent PrintAgent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@unique([hospitalId, name])
+  @@index([hospitalId, branchId, active])
+  @@map("print_printers")
+  @@schema("core")
+}
+
+/// EN-005 §3.2: document type → printer, resolved narrowest-scope-first
+/// (user → workstation → counter → location → department → branch).
+model PrintMapping {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  docType     String  @map("doc_type") @db.VarChar(48)
+  scopeType   String  @map("scope_type") @db.VarChar(16)
+  scopeId     String? @map("scope_id") @db.Uuid
+  printerId   String  @map("printer_id") @db.Uuid
+  templateKey String? @map("template_key") @db.VarChar(96)
+  copies      Int     @default(1)
+  options     Json    @default("{}")
+  priority    Int     @default(100)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, branchId, docType, scopeType, scopeId], map: "print_mappings_scope_key")
+  @@index([hospitalId, branchId, docType, priority])
+  @@map("print_mappings")
+  @@schema("core")
+}
+
+/// EN-005 §3.4: auto-print rules, only for whitelisted events.
+model PrintRule {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  eventType   String  @map("event_type") @db.VarChar(128)
+  docType     String  @map("doc_type") @db.VarChar(48)
+  condition   Json    @default("{}")
+  targetScope Json    @default("{}") @map("target_scope")
+  copies      Int     @default(1)
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, eventType, active])
+  @@map("print_rules")
+  @@schema("core")
+}
+
+model PrintWorkstation {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String  @map("branch_id") @db.Uuid
+  name            String  @db.VarChar(160)
+  fingerprint     String  @db.VarChar(200)
+  counterId       String? @map("counter_id") @db.Uuid
+  locationId      String? @map("location_id") @db.Uuid
+  defaultPrinters Json    @default("{}") @map("default_printers")
+  lastSeenAt      DateTime? @map("last_seen_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, fingerprint])
+  @@index([hospitalId, branchId])
+  @@map("print_workstations")
+  @@schema("core")
+}
+
+/// Partitioned monthly. EN-005 §5 retention: job metadata 1 year, rendered files
+/// 7 days. `phi` drives the cross-branch print restriction and the audit hook;
+/// the job row itself never carries document content, only a file reference.
+model PrintJob {
+  id            String  @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  docType       String  @map("doc_type") @db.VarChar(48)
+  templateKey   String? @map("template_key") @db.VarChar(96)
+  printerId     String? @map("printer_id") @db.Uuid
+  agentId       String? @map("agent_id") @db.Uuid
+  requestedBy   String? @map("requested_by") @db.Uuid
+  workstationId String? @map("workstation_id") @db.Uuid
+  sourceModule  String  @map("source_module") @db.VarChar(16)
+  sourceRefType String? @map("source_ref_type") @db.VarChar(64)
+  sourceRefId   String? @map("source_ref_id") @db.Uuid
+  patientId     String? @map("patient_id") @db.Uuid
+  phi           Boolean @default(false)
+  fileId        String? @map("file_id") @db.Uuid
+  renderJobId   String? @map("render_job_id") @db.Uuid
+  format        PrintFormat
+  copies        Int     @default(1)
+  pages         Int?
+  status        PrintJobStatus @default(queued)
+  priority      Int     @default(5)
+  attempts      Int     @default(0)
+  error         String? @db.Text
+  isReprint     Boolean @default(false) @map("is_reprint")
+  reprintReason String? @map("reprint_reason") @db.VarChar(500)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([id, createdAt])
+  @@index([hospitalId, createdAt(sort: Desc)])
+  @@index([printerId, status])
+  @@index([status, priority, createdAt])
+  @@map("print_jobs")
+  @@schema("core")
+}

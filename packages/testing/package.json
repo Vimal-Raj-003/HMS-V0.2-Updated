@@ -33,6 +33,7 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "argon2": "^0.45.1"
   }
 }

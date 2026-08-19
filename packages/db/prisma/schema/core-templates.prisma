@@ -1,0 +1,415 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-039 — Forms & Template Builder (schema `core`, prefix `tpl_`)
+//
+// EN-039 §4 splits the module across two schemas: templates in `core`,
+// *responses* in `clinical`. Only the `core` half is created here.
+// `clinical.form_responses` and `clinical.form_response_versions` are owned by
+// Phase 2 (docs/03 §Shared platform-owned tables puts `clinical.documents` in
+// Phase 2 with OP-002), and the `clinical` schema is not yet in the datasource.
+// Creating an empty partitioned PHI table five phases early would give the RLS
+// suite a table to protect and give nobody a row to put in it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum TplFormCategory {
+  clinical_note
+  assessment
+  flowsheet
+  checklist
+  intake
+  consent_body
+  survey
+  administrative
+
+  @@schema("core")
+}
+
+enum TplScope {
+  system
+  group
+  hospital
+  branch
+  department
+  console
+
+  @@schema("core")
+}
+
+enum TplStatus {
+  draft
+  in_review
+  approved
+  published
+  superseded
+  retired
+
+  @@schema("core")
+}
+
+enum TplPrintFamily {
+  clinical
+  billing
+  pharmacy
+  lab
+  radiology
+  consent
+  legal
+  hr
+  procurement
+  label
+  thermal
+  wristband
+
+  @@schema("core")
+}
+
+enum TplOutputFormat {
+  pdf
+  escpos
+  zpl
+  epl
+
+  @@schema("core")
+}
+
+enum TplRenderPurpose {
+  original
+  copy
+  duplicate
+  draft
+  cancelled
+
+  @@schema("core")
+}
+
+enum TplRenderStatus {
+  queued
+  rendering
+  rendered
+  failed
+
+  @@schema("core")
+}
+
+enum TplPrintAuditAction {
+  printed
+  reprinted
+  emailed
+  downloaded
+  shared
+
+  @@schema("core")
+}
+
+/// EN-039 §3.1. `hospital_id IS NULL` marks a shipped system template.
+model TplFormTemplate {
+  id                      String  @id @db.Uuid
+  hospitalId              String? @map("hospital_id") @db.Uuid
+  key                     String  @db.VarChar(96)
+  name                    String  @db.VarChar(200)
+  category                TplFormCategory
+  scope                   TplScope @default(hospital)
+  consoleCode             String? @map("console_code") @db.VarChar(32)
+  departmentIds           String[] @default([]) @map("department_ids") @db.Uuid
+  producesClinicalDocument Boolean @default(false) @map("produces_clinical_document")
+  signable                Boolean @default(false)
+  rolesAllowed            String[] @default([]) @map("roles_allowed")
+  currentVersion          Int     @default(0) @map("current_version")
+  reviewDueAt             DateTime? @map("review_due_at") @db.Timestamptz(6)
+  ownerUserId             String? @map("owner_user_id") @db.Uuid
+  status                  TplStatus @default(draft)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  /// Retirement, not deletion: EN-039 §4 retention is "templates and versions
+  /// permanent (a document must always be renderable)".
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  versions TplFormVersion[]
+
+  @@unique([hospitalId, key])
+  @@index([hospitalId, category, status])
+  @@index([key])
+  @@map("tpl_form_templates")
+  @@schema("core")
+}
+
+/// EN-039 §5: "Every response is bound to its template version, forever. A
+/// version is never edited in place." `immutable` is set at publication.
+model TplFormVersion {
+  id            String  @id @db.Uuid
+  hospitalId    String? @map("hospital_id") @db.Uuid
+  templateId    String  @map("template_id") @db.Uuid
+  version       Int
+  /// sections[] + fields[] with type, label_i18n, validation, phi_class,
+  /// terminology_binding, unit, carry_forward, promote_to_column.
+  schemaDef     Json    @map("schema_def")
+  logic         Json    @default("{}")
+  calculations  Json    @default("{}")
+  layout        Json    @default("{}")
+  fixtures      Json    @default("{}")
+  /// from_version → per-field class + map. EN-039 §3.3: data is never destroyed
+  /// by a template change.
+  migrationRules Json   @default("{}") @map("migration_rules")
+  fhirMapping   Json    @default("{}") @map("fhir_mapping")
+  effectiveFrom DateTime? @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  publishedBy   String? @map("published_by") @db.Uuid
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  approvalRef   String? @map("approval_ref") @db.Uuid
+  checksum      String  @db.VarChar(64)
+  immutable     Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  template TplFormTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@unique([templateId, version])
+  @@index([hospitalId, templateId])
+  @@map("tpl_form_versions")
+  @@schema("core")
+}
+
+/// EN-039 §3.2 body diagrams. `hospital_id IS NULL` = shipped asset library.
+model TplDiagramAsset {
+  id         String  @id @db.Uuid
+  hospitalId String? @map("hospital_id") @db.Uuid
+  key        String  @db.VarChar(96)
+  name       String  @db.VarChar(200)
+  kind       String  @db.VarChar(32)
+  svgFileId  String? @map("svg_file_id") @db.Uuid
+  /// region_code, snomed_code, label, laterality, tbsa_pct_by_age.
+  regions    Json    @default("[]")
+  version    Int     @default(1)
+  active     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, key, version])
+  @@index([kind, active])
+  @@map("tpl_diagram_assets")
+  @@schema("core")
+}
+
+/// EN-039 §3.5. Print/letterhead designer output.
+model TplPrintTemplate {
+  id                  String  @id @db.Uuid
+  hospitalId          String  @map("hospital_id") @db.Uuid
+  branchId            String? @map("branch_id") @db.Uuid
+  key                 String  @db.VarChar(96)
+  name                String  @db.VarChar(200)
+  family              TplPrintFamily
+  /// size, orientation, margins, duplex, stationery_mode.
+  page                Json    @default("{}")
+  header              Json    @default("{}")
+  footer              Json    @default("{}")
+  watermark           Json    @default("{}")
+  /// Ordered bands with data bindings.
+  blocks              Json    @default("[]")
+  languages           String[] @default(["en-IN"])
+  bilingualMode       String  @default("none") @map("bilingual_mode") @db.VarChar(16)
+  output              TplOutputFormat @default(pdf)
+  targetDeviceProfile String? @map("target_device_profile") @db.VarChar(64)
+  currentVersion      Int     @default(0) @map("current_version")
+  status              TplStatus @default(draft)
+  reviewDueAt         DateTime? @map("review_due_at") @db.Timestamptz(6)
+  ownerUserId         String? @map("owner_user_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  versions TplPrintVersion[]
+
+  @@unique([hospitalId, key])
+  @@index([hospitalId, family, status])
+  @@map("tpl_print_templates")
+  @@schema("core")
+}
+
+model TplPrintVersion {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  printTemplateId String  @map("print_template_id") @db.Uuid
+  version         Int
+  definition      Json
+  css             String? @db.Text
+  sampleContext   Json    @default("{}") @map("sample_context")
+  effectiveFrom   DateTime? @map("effective_from") @db.Timestamptz(6)
+  publishedBy     String? @map("published_by") @db.Uuid
+  publishedAt     DateTime? @map("published_at") @db.Timestamptz(6)
+  approvalRef     String? @map("approval_ref") @db.Uuid
+  checksum        String  @db.VarChar(64)
+  immutable       Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  printTemplate TplPrintTemplate @relation(fields: [printTemplateId], references: [id], onDelete: Restrict)
+
+  @@unique([printTemplateId, version])
+  @@index([hospitalId, printTemplateId])
+  @@map("tpl_print_versions")
+  @@schema("core")
+}
+
+/// EN-039 §3.5 branding. Effective-dated so a reprint of a two-year-old bill
+/// carries the letterhead that was in force then.
+model TplBranding {
+  id                 String  @id @db.Uuid
+  hospitalId         String  @map("hospital_id") @db.Uuid
+  branchId           String? @map("branch_id") @db.Uuid
+  logoLightFileId    String? @map("logo_light_file_id") @db.Uuid
+  logoDarkFileId     String? @map("logo_dark_file_id") @db.Uuid
+  legalName          String  @map("legal_name") @db.VarChar(300)
+  address            Json    @default("{}")
+  contacts           Json    @default("{}")
+  gstin              String? @db.VarChar(15)
+  /// Clinical establishment, drug licence, NABH/NABL with validity.
+  licences           Json    @default("{}")
+  colours            Json    @default("{}")
+  fonts              Json    @default("{}")
+  footerDisclaimerI18n Json  @default("{}") @map("footer_disclaimer_i18n")
+  effectiveFrom      DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo        DateTime? @map("effective_to") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, branchId, effectiveFrom(sort: Desc)])
+  @@map("tpl_branding")
+  @@schema("core")
+}
+
+/// EN-039 §3.6. Partitioned monthly. The unique tuple is the render cache key:
+/// the same data, template version, locale and purpose must produce the same
+/// artefact, which is what makes a document hash meaningful to the signature
+/// chain (EN-039 §5 "Rendering is deterministic").
+model TplRenderJob {
+  id              String  @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String? @map("branch_id") @db.Uuid
+  printTemplateId String  @map("print_template_id") @db.Uuid
+  version         Int
+  purpose         TplRenderPurpose @default(original)
+  dataHash        String  @map("data_hash") @db.VarChar(64)
+  locale          String  @default("en-IN") @db.VarChar(16)
+  status          TplRenderStatus @default(queued)
+  artifactFileId  String? @map("artifact_file_id") @db.Uuid
+  sha256          String? @db.VarChar(64)
+  pages           Int?
+  sizeBytes       BigInt? @map("size_bytes")
+  durationMs      Int?    @map("duration_ms")
+  errorClass      String? @map("error_class") @db.VarChar(64)
+  requestedBy     String? @map("requested_by") @db.Uuid
+  refType         String? @map("ref_type") @db.VarChar(64)
+  refId           String? @map("ref_id") @db.Uuid
+  deliveredTo     Json    @default("[]") @map("delivered_to")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([id, createdAt])
+  @@unique([hospitalId, printTemplateId, version, dataHash, locale, purpose, createdAt], map: "tpl_render_jobs_cache_key")
+  @@index([hospitalId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+  @@index([refType, refId])
+  @@map("tpl_render_jobs")
+  @@schema("core")
+}
+
+/// EN-039 §4: retained 7 years. Append-only — a reprint of a financial or
+/// clinical document is evidence, so there is no `deleted_at`.
+model TplPrintAudit {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  renderJobId String  @map("render_job_id") @db.Uuid
+  action      TplPrintAuditAction
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  deviceRef   String? @map("device_ref") @db.VarChar(120)
+  copies      Int     @default(1)
+  occurredAt  DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  /// Mandatory for reprints of financial and clinical documents.
+  reason      String? @db.VarChar(500)
+
+  @@index([hospitalId, occurredAt(sort: Desc)])
+  @@index([renderJobId])
+  @@map("tpl_print_audit")
+  @@schema("core")
+}
+
+/// EN-039 §4: per-user macros, snippets and pre-filled templates.
+model TplFavourite {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  userId      String  @map("user_id") @db.Uuid
+  templateKey String  @map("template_key") @db.VarChar(96)
+  kind        String  @db.VarChar(16)
+  payload     Json    @default("{}")
+  name        String  @db.VarChar(160)
+  sort        Int     @default(0)
+  private     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([userId, templateKey, kind, name])
+  @@index([hospitalId, userId])
+  @@map("tpl_favourites")
+  @@schema("core")
+}
+
+/// EN-039 §5: "Translations gate publication for patient-facing templates."
+model TplTranslation {
+  id              String  @id @db.Uuid
+  hospitalId      String? @map("hospital_id") @db.Uuid
+  templateKey     String  @map("template_key") @db.VarChar(96)
+  version         Int
+  language        String  @db.VarChar(16)
+  keys            Json    @default("{}")
+  completenessPct Int     @default(0) @map("completeness_pct")
+  translatedBy    String? @map("translated_by") @db.Uuid
+  reviewedBy      String? @map("reviewed_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, templateKey, version, language], map: "tpl_translations_key")
+  @@index([templateKey, language])
+  @@map("tpl_translations")
+  @@schema("core")
+}
+
+/// EN-039 §4: signed export/import bundles of templates plus their assets.
+model TplBundle {
+  id                  String  @id @db.Uuid
+  hospitalId          String  @map("hospital_id") @db.Uuid
+  name                String  @db.VarChar(200)
+  contents            Json    @default("{}")
+  signature           String? @db.Text
+  exportedFrom        String? @map("exported_from") @db.VarChar(200)
+  importedAt          DateTime? @map("imported_at") @db.Timestamptz(6)
+  compatibilityReport Json    @default("{}") @map("compatibility_report")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, name])
+  @@map("tpl_bundles")
+  @@schema("core")
+}

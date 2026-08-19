@@ -1,0 +1,560 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-027 — Master Data Management (schema `mdm`)
+//
+// What is here: the **governance and terminology framework** — the registry, the
+// change-set lifecycle, code systems, concepts, value sets, concept maps,
+// stewardship, merge/duplicate handling and cross-branch sync — plus
+// `mdm_departments`, the one domain master Phase 0 actually consumes
+// (`core.settings.department_id`, `core.user_roles.scope`, EN-038 approver
+// resolution `dynamic:hod_of(department)`).
+//
+// What is deliberately NOT here: the clinical and commercial domain masters
+// (`mdm_services`, `mdm_lab_tests`, `mdm_rad_procedures`, `mdm_drugs`,
+// `mdm_drug_brands`, `mdm_items`, `mdm_uoms`, `mdm_payers`, `mdm_schemes`,
+// `mdm_wards`, `mdm_beds`, `mdm_room_classes`, `mdm_hsn_sac`, `mdm_tax_rates`).
+// docs/03 §Shared platform-owned tables schedules `mdm.*` masters across
+// Phases 0–2 and EN-027 §4 shows their columns as "key columns illustrated",
+// not as a complete definition. Each lands with the phase that first reads it
+// (services & tariffs → Phase 5, lab tests → Phase 3, drugs & items → Phase 4,
+// wards & beds → Phase 7), where its real consumers can fix its shape. Creating
+// thirty half-guessed masters now would be inventing, which CLAUDE.md §0.1
+// forbids, and would guarantee a rewrite.
+//
+// The **effective-dated pattern** from EN-027 §4 is implemented once, on
+// `mdm_departments`, and is what every later master copies:
+//   record_key (stable identity) + version + effective_from/to + status,
+//   UNIQUE(record_key, version), and a btree_gist EXCLUDE constraint that makes
+//   overlapping effective ranges impossible — EN-027 §5 requires this
+//   "enforced by a btree_gist exclusion constraint, not just application code".
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum MdmRecordStatus {
+  draft
+  pending_approval
+  active
+  superseded
+  retired
+
+  @@schema("mdm")
+}
+
+enum MdmChangeSetStatus {
+  draft
+  validated
+  pending_approval
+  approved
+  rejected
+  activated
+  rolled_back
+
+  @@schema("mdm")
+}
+
+enum MdmChangeOp {
+  create
+  update
+  retire
+  merge
+  enable_branch
+  disable_branch
+
+  @@schema("mdm")
+}
+
+enum MdmScope {
+  system
+  group
+  hospital
+  branch
+
+  @@schema("mdm")
+}
+
+/// EN-027 §4: metadata about the masters themselves. Global — identical for
+/// every tenant, and the thing the admin console reads to render any master.
+model MdmMastersRegistry {
+  key                 String  @id @db.VarChar(64)
+  name                String  @db.VarChar(160)
+  tableName           String  @map("table_name") @db.VarChar(96)
+  scope               MdmScope @default(hospital)
+  ownerRole           String  @map("owner_role") @db.VarChar(64)
+  effectiveDated      Boolean @default(true) @map("effective_dated")
+  approvalMatrixRef   String? @map("approval_matrix_ref") @db.VarChar(96)
+  allowLocalOverride  Boolean @default(false) @map("allow_local_override")
+  standardBindings    Json    @default("{}") @map("standard_bindings")
+  consumers           String[] @default([])
+  reviewFrequencyMonths Int   @default(12) @map("review_frequency_months")
+  retentionPolicy     String? @map("retention_policy") @db.VarChar(120)
+  /// The phase that owns the table. Rows exist for masters not yet created, so
+  /// the registry is the honest list of what is planned versus what is live.
+  phase               Int     @default(0)
+  active              Boolean @default(true)
+
+  syncedAt DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  @@index([scope, active])
+  @@map("mdm_masters_registry")
+  @@schema("mdm")
+}
+
+/// EN-027 §3.2: propose → review → approve → activate. Nothing is edited in
+/// place; a change set is the unit of approval and of rollback.
+model MdmChangeSet {
+  id               String  @id @db.Uuid
+  hospitalId       String  @map("hospital_id") @db.Uuid
+  branchId         String? @map("branch_id") @db.Uuid
+  domain           String  @db.VarChar(64)
+  title            String  @db.VarChar(200)
+  reason           String  @db.Text
+  proposedBy       String  @map("proposed_by") @db.Uuid
+  proposedAt       DateTime @default(now()) @map("proposed_at") @db.Timestamptz(6)
+  effectiveFrom    DateTime @map("effective_from") @db.Timestamptz(6)
+  status           MdmChangeSetStatus @default(draft)
+  /// The EN-038 request that approved it.
+  approvalId       String? @map("approval_id") @db.Uuid
+  operationsCount  Int     @default(0) @map("operations_count")
+  /// Affected transactions, tariffs, templates — shown before approval.
+  impact           Json    @default("{}")
+  validationReport Json    @default("{}") @map("validation_report")
+  activatedAt      DateTime? @map("activated_at") @db.Timestamptz(6)
+  rolledBackAt     DateTime? @map("rolled_back_at") @db.Timestamptz(6)
+  source           String  @default("ui") @db.VarChar(16)
+  /// Bulk uploads record the file hash for row-level provenance (EN-027 §5).
+  sourceFileHash   String? @map("source_file_hash") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  operations MdmChangeOperation[]
+  syncJobs   MdmSyncJob[]
+
+  @@index([hospitalId, status, proposedAt(sort: Desc)])
+  @@index([hospitalId, domain])
+  @@map("mdm_change_sets")
+  @@schema("mdm")
+}
+
+model MdmChangeOperation {
+  id               String  @id @db.Uuid
+  hospitalId       String  @map("hospital_id") @db.Uuid
+  changeSetId      String  @map("change_set_id") @db.Uuid
+  masterKey        String  @map("master_key") @db.VarChar(64)
+  op               MdmChangeOp
+  recordKey        String? @map("record_key") @db.Uuid
+  before           Json?
+  after            Json?
+  diff             Json    @default("{}")
+  validationStatus String  @default("pending") @map("validation_status") @db.VarChar(16)
+  errorText        String? @map("error_text") @db.Text
+  rowNo            Int?    @map("row_no")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  changeSet MdmChangeSet @relation(fields: [changeSetId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, changeSetId])
+  @@index([masterKey, recordKey])
+  @@map("mdm_change_operations")
+  @@schema("mdm")
+}
+
+/// Global terminology. ICD-10/11, LOINC, SNOMED CT, ATC, UCUM, ISO 3166 …
+/// Identical for every tenant, so no `hospital_id`; the migration gives it an
+/// explicit "readable with a tenant context" policy rather than `USING (true)`.
+model MdmCodeSystem {
+  id                 String  @id @db.Uuid
+  key                String  @db.VarChar(64)
+  name               String  @db.VarChar(200)
+  version            String  @db.VarChar(64)
+  releaseDate        DateTime? @map("release_date") @db.Date
+  licence            String  @default("free") @db.VarChar(16)
+  licenceRef         String? @map("licence_ref") @db.VarChar(300)
+  sourceUrl          String? @map("source_url") @db.VarChar(500)
+  conceptCount       Int     @default(0) @map("concept_count")
+  status             String  @default("loaded") @db.VarChar(16)
+  loadedAt           DateTime? @map("loaded_at") @db.Timestamptz(6)
+  /// EN-027 §5: activation requires a delta report review.
+  activatedAt        DateTime? @map("activated_at") @db.Timestamptz(6)
+  deltaReportFileId  String? @map("delta_report_file_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  concepts MdmConcept[]
+
+  @@unique([key, version])
+  @@index([status])
+  @@map("mdm_code_systems")
+  @@schema("mdm")
+}
+
+model MdmConcept {
+  id                 String  @id @db.Uuid
+  codeSystemId       String  @map("code_system_id") @db.Uuid
+  code               String  @db.VarChar(64)
+  display            String  @db.VarChar(500)
+  displayLang        String  @default("en") @map("display_lang") @db.VarChar(16)
+  definition         String? @db.Text
+  parentCodes        String[] @default([]) @map("parent_codes")
+  /// Semantic tag, ATC class, LOINC parts, ICD chapter/block, drug schedule.
+  properties         Json    @default("{}")
+  status             String  @default("active") @db.VarChar(16)
+  effectiveFrom      DateTime? @map("effective_from") @db.Date
+  /// EN-027 §5: concepts inactivated upstream stay resolvable and are blocked
+  /// for new use — the reason is what the remediation list is built from.
+  inactivatedReason  String? @map("inactivated_reason") @db.VarChar(300)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  codeSystem   MdmCodeSystem @relation(fields: [codeSystemId], references: [id], onDelete: Cascade)
+  designations MdmConceptDesignation[]
+
+  @@unique([codeSystemId, code])
+  @@index([codeSystemId, status])
+  @@map("mdm_concepts")
+  @@schema("mdm")
+}
+
+/// Materialised transitive closure, rebuilt on version activation, so a
+/// subsumption query ("is this code a kind of sepsis?") is an index lookup.
+model MdmConceptClosure {
+  id             String @id @db.Uuid
+  codeSystemId   String @map("code_system_id") @db.Uuid
+  ancestorCode   String @map("ancestor_code") @db.VarChar(64)
+  descendantCode String @map("descendant_code") @db.VarChar(64)
+  depth          Int
+
+  @@unique([codeSystemId, ancestorCode, descendantCode], map: "mdm_concept_closure_key")
+  @@index([codeSystemId, descendantCode])
+  @@map("mdm_concept_closure")
+  @@schema("mdm")
+}
+
+/// Multilingual terms plus LASA/tall-man display forms (docs/06 §5 drug safety).
+model MdmConceptDesignation {
+  id        String @id @db.Uuid
+  conceptId String @map("concept_id") @db.Uuid
+  language  String @db.VarChar(16)
+  term      String @db.VarChar(500)
+  use       String @default("synonym") @db.VarChar(24)
+
+  concept MdmConcept @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+
+  @@unique([conceptId, language, term], map: "mdm_concept_designations_key")
+  @@index([language])
+  @@map("mdm_concept_designations")
+  @@schema("mdm")
+}
+
+/// `hospital_id IS NULL` = a shipped value set; a hospital may define its own.
+/// EN-027 §5: "a form or API referencing a value set pins a version so a
+/// terminology change cannot silently alter a clinical form's options."
+model MdmValueSet {
+  id         String  @id @db.Uuid
+  hospitalId String? @map("hospital_id") @db.Uuid
+  key        String  @db.VarChar(96)
+  name       String  @db.VarChar(200)
+  purpose    String? @db.Text
+  ownerRole  String? @map("owner_role") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  versions MdmValueSetVersion[]
+
+  @@unique([hospitalId, key])
+  @@map("mdm_value_sets")
+  @@schema("mdm")
+}
+
+model MdmValueSetVersion {
+  id              String  @id @db.Uuid
+  hospitalId      String? @map("hospital_id") @db.Uuid
+  valueSetId      String  @map("value_set_id") @db.Uuid
+  version         Int
+  /// enumerated | filter | hierarchy expression
+  definition      Json
+  expansionCached Json?   @map("expansion_cached")
+  expandedAt      DateTime? @map("expanded_at") @db.Timestamptz(6)
+  status          MdmRecordStatus @default(draft)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  valueSet MdmValueSet @relation(fields: [valueSetId], references: [id], onDelete: Cascade)
+  members  MdmValueSetMember[]
+
+  @@unique([valueSetId, version])
+  @@map("mdm_value_set_versions")
+  @@schema("mdm")
+}
+
+model MdmValueSetMember {
+  id                String  @id @db.Uuid
+  hospitalId        String? @map("hospital_id") @db.Uuid
+  valueSetVersionId String  @map("value_set_version_id") @db.Uuid
+  codeSystemKey     String  @map("code_system_key") @db.VarChar(64)
+  code              String  @db.VarChar(64)
+  display           String? @db.VarChar(500)
+  sortOrder         Int     @default(0) @map("sort_order")
+
+  valueSetVersion MdmValueSetVersion @relation(fields: [valueSetVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([valueSetVersionId, codeSystemKey, code], map: "mdm_value_set_members_key")
+  @@map("mdm_value_set_members")
+  @@schema("mdm")
+}
+
+model MdmConceptMap {
+  id           String  @id @db.Uuid
+  hospitalId   String? @map("hospital_id") @db.Uuid
+  key          String  @db.VarChar(96)
+  name         String  @db.VarChar(200)
+  sourceSystem String  @map("source_system") @db.VarChar(64)
+  targetSystem String  @map("target_system") @db.VarChar(64)
+  purpose      String? @db.VarChar(120)
+  version      Int     @default(1)
+  status       MdmRecordStatus @default(draft)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  elements MdmConceptMapElement[]
+
+  @@unique([hospitalId, key, version], map: "mdm_concept_maps_key")
+  @@map("mdm_concept_maps")
+  @@schema("mdm")
+}
+
+model MdmConceptMapElement {
+  id           String  @id @db.Uuid
+  hospitalId   String? @map("hospital_id") @db.Uuid
+  conceptMapId String  @map("concept_map_id") @db.Uuid
+  sourceCode   String  @map("source_code") @db.VarChar(64)
+  targetCode   String? @map("target_code") @db.VarChar(64)
+  /// equivalent | wider | narrower | inexact | unmatched
+  equivalence  String  @default("equivalent") @db.VarChar(16)
+  comment      String? @db.Text
+  mappedBy     String? @map("mapped_by") @db.Uuid
+  mappedAt     DateTime? @map("mapped_at") @db.Timestamptz(6)
+  reviewStatus String  @default("pending") @map("review_status") @db.VarChar(16)
+
+  conceptMap MdmConceptMap @relation(fields: [conceptMapId], references: [id], onDelete: Cascade)
+
+  @@unique([conceptMapId, sourceCode], map: "mdm_concept_map_elements_key")
+  @@map("mdm_concept_map_elements")
+  @@schema("mdm")
+}
+
+/// EN-027 §3.4: an unmapped inbound code is a backlog item, never a silent drop.
+model MdmMappingBacklog {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  sourceSystem  String  @map("source_system") @db.VarChar(64)
+  sourceCode    String  @map("source_code") @db.VarChar(64)
+  sourceDisplay String? @map("source_display") @db.VarChar(500)
+  targetSystem  String  @map("target_system") @db.VarChar(64)
+  firstSeenAt   DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  occurrences   Int     @default(1)
+  origin        String  @db.VarChar(24)
+  status        String  @default("open") @db.VarChar(16)
+  assignedTo    String? @map("assigned_to") @db.Uuid
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, sourceSystem, sourceCode, targetSystem], map: "mdm_mapping_backlog_key")
+  @@index([hospitalId, status, occurrences(sort: Desc)])
+  @@map("mdm_mapping_backlog")
+  @@schema("mdm")
+}
+
+/// EN-027 §5: "Merges never delete data … unmerge is possible within 30 days."
+model MdmMergeMap {
+  id                 String  @id @db.Uuid
+  hospitalId         String  @map("hospital_id") @db.Uuid
+  masterKey          String  @map("master_key") @db.VarChar(64)
+  losingRecordKey    String  @map("losing_record_key") @db.Uuid
+  survivingRecordKey String  @map("surviving_record_key") @db.Uuid
+  mergedBy           String  @map("merged_by") @db.Uuid
+  mergedAt           DateTime @default(now()) @map("merged_at") @db.Timestamptz(6)
+  reason             String  @db.Text
+  unmergeDeadline    DateTime @map("unmerge_deadline") @db.Timestamptz(6)
+  unmergedAt         DateTime? @map("unmerged_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, masterKey, losingRecordKey], map: "mdm_merge_map_key")
+  @@index([hospitalId, survivingRecordKey])
+  @@map("mdm_merge_map")
+  @@schema("mdm")
+}
+
+model MdmDuplicateCandidate {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  masterKey   String  @map("master_key") @db.VarChar(64)
+  recordKeyA  String  @map("record_key_a") @db.Uuid
+  recordKeyB  String  @map("record_key_b") @db.Uuid
+  score       Decimal @db.Decimal(5, 4)
+  signals     Json    @default("{}")
+  status      String  @default("open") @db.VarChar(16)
+  decidedBy   String? @map("decided_by") @db.Uuid
+  decidedAt   DateTime? @map("decided_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, masterKey, recordKeyA, recordKeyB], map: "mdm_duplicate_candidates_key")
+  @@index([hospitalId, status, score(sort: Desc)])
+  @@map("mdm_duplicate_candidates")
+  @@schema("mdm")
+}
+
+model MdmQualityFinding {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  masterKey  String  @map("master_key") @db.VarChar(64)
+  ruleKey    String  @map("rule_key") @db.VarChar(96)
+  severity   String  @db.VarChar(16)
+  recordKey  String? @map("record_key") @db.Uuid
+  detail     Json    @default("{}")
+  firstSeen  DateTime @default(now()) @map("first_seen") @db.Timestamptz(6)
+  status     String  @default("open") @db.VarChar(16)
+  ownerRole  String? @map("owner_role") @db.VarChar(64)
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamptz(6)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, masterKey, status])
+  @@map("mdm_quality_findings")
+  @@schema("mdm")
+}
+
+/// EN-027 §3.6: a group-level change fans out to branches; a conflict either
+/// blocks or produces a registered local override, never a silent divergence.
+model MdmSyncJob {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  changeSetId    String  @map("change_set_id") @db.Uuid
+  targetBranchId String  @map("target_branch_id") @db.Uuid
+  status         String  @default("pending") @db.VarChar(16)
+  appliedAt      DateTime? @map("applied_at") @db.Timestamptz(6)
+  conflicts      Json    @default("[]")
+  overrideCreated Boolean @default(false) @map("override_created")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  changeSet MdmChangeSet @relation(fields: [changeSetId], references: [id], onDelete: Cascade)
+
+  @@unique([changeSetId, targetBranchId], map: "mdm_sync_jobs_key")
+  @@index([hospitalId, status])
+  @@map("mdm_sync_jobs")
+  @@schema("mdm")
+}
+
+/// EN-027 §5: "branches may only enable/disable or set permitted local
+/// overrides, and every override is registered and reportable."
+model MdmLocalOverride {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  masterKey     String  @map("master_key") @db.VarChar(64)
+  recordKey     String  @map("record_key") @db.Uuid
+  field         String  @db.VarChar(96)
+  localValue    Json    @map("local_value")
+  reason        String  @db.Text
+  approvedBy    String? @map("approved_by") @db.Uuid
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, branchId, masterKey, recordKey, field], map: "mdm_local_overrides_key")
+  @@map("mdm_local_overrides")
+  @@schema("mdm")
+}
+
+/// EN-027 §3.7: annual attestation per domain with steward decisions.
+model MdmReviewCampaign {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  masterKey  String  @map("master_key") @db.VarChar(64)
+  name       String  @db.VarChar(200)
+  dueAt      DateTime @map("due_at") @db.Timestamptz(6)
+  status     String  @default("open") @db.VarChar(16)
+  ownerRole  String? @map("owner_role") @db.VarChar(64)
+  closedAt   DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  items MdmReviewItem[]
+
+  @@index([hospitalId, status, dueAt])
+  @@map("mdm_review_campaigns")
+  @@schema("mdm")
+}
+
+model MdmReviewItem {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  campaignId String  @map("campaign_id") @db.Uuid
+  recordKey  String  @map("record_key") @db.Uuid
+  decision   String  @default("pending") @db.VarChar(16)
+  note       String? @db.Text
+  decidedBy  String? @map("decided_by") @db.Uuid
+  decidedAt  DateTime? @map("decided_at") @db.Timestamptz(6)
+
+  campaign MdmReviewCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, recordKey], map: "mdm_review_items_key")
+  @@index([hospitalId, decision])
+  @@map("mdm_review_items")
+  @@schema("mdm")
+}
+
+/// The reference implementation of the EN-027 §4 effective-dated pattern, and
+/// the one master Phase 0 consumes. `record_key` is the stable identity;
+/// `id` is one *version* of it. Never edited in place, never hard-deleted.
+model MdmDepartment {
+  id                  String  @id @db.Uuid
+  recordKey           String  @map("record_key") @db.Uuid
+  hospitalId          String  @map("hospital_id") @db.Uuid
+  branchId            String? @map("branch_id") @db.Uuid
+  version             Int     @default(1)
+  code                String  @db.VarChar(32)
+  name                String  @db.VarChar(200)
+  kind                String  @db.VarChar(16)
+  specialityConcept   String? @map("speciality_concept") @db.VarChar(64)
+  parentDepartmentKey String? @map("parent_department_key") @db.Uuid
+  headUserId          String? @map("head_user_id") @db.Uuid
+  costCentreKey       String? @map("cost_centre_key") @db.VarChar(64)
+  /// Branch enablement without editing the group-scoped record (EN-027 §5).
+  activeBranches      String[] @default([]) @map("active_branches") @db.Uuid
+  effectiveFrom       DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo         DateTime? @map("effective_to") @db.Timestamptz(6)
+  status              MdmRecordStatus @default(draft)
+  changeSetId         String? @map("change_set_id") @db.Uuid
+  replacedByKey       String? @map("replaced_by_key") @db.Uuid
+  approvedBy          String? @map("approved_by") @db.Uuid
+  approvedAt          DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_departments")
+  @@schema("mdm")
+}

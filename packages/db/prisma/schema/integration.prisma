@@ -1,0 +1,387 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-017 — Integration Hub / ESB (schema `integration`, prefix `ihub_`)
+//
+// The two rules that shape these tables (EN-017 §5):
+//   * "Credentials are write-only from the UI (masked forever after save)" —
+//     no table here has a credential column. `credentials_ref` is a Vault path
+//     and `ihub_credentials_audit` records rotations with values never stored.
+//   * "PHI redaction is mandatory on the searchable copy of every message" —
+//     `ihub_messages.payload_redacted` is the queryable copy; the full payload
+//     lives encrypted in object storage behind `payload_ref`, and reading it is
+//     itself audited as a PHI read.
+//
+// `ihub_data_flows` from EN-017 §4 is marked "(materialised)" — a read model, so
+// it belongs in `analytics.*` and arrives with EN-001 in Phase 11.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum IhubDirection {
+  in
+  out
+  both
+
+  @@schema("integration")
+}
+
+enum IhubConnectorStatus {
+  draft
+  ready
+  active
+  paused
+  failing
+  retired
+
+  @@schema("integration")
+}
+
+enum IhubMessageStatus {
+  queued
+  in_flight
+  sent
+  acknowledged
+  failed
+  dead_lettered
+  blocked
+  discarded
+  replayed
+
+  @@schema("integration")
+}
+
+enum IhubCircuitStateKind {
+  closed
+  open
+  half_open
+
+  @@schema("integration")
+}
+
+model IhubConnector {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  branchId       String? @map("branch_id") @db.Uuid
+  key            String  @db.VarChar(96)
+  name           String  @db.VarChar(200)
+  category       String  @db.VarChar(24)
+  templateId     String? @map("template_id") @db.Uuid
+  /// Adapter package id + version, resolved from `ihub_connector_packages`.
+  adapter        String  @db.VarChar(160)
+  protocol       String  @db.VarChar(24)
+  direction      IhubDirection @default(out)
+  environment    String  @default("sandbox") @db.VarChar(16)
+  endpoint       Json    @default("{}")
+  authType       String  @map("auth_type") @db.VarChar(32)
+  /// Vault path. Never a secret value — docs/04 §4.
+  credentialsRef String? @map("credentials_ref") @db.VarChar(300)
+  tls            Json    @default("{}")
+  egress         Json    @default("{}")
+  status         IhubConnectorStatus @default(draft)
+  version        Int     @default(1)
+  ownerUserId    String? @map("owner_user_id") @db.Uuid
+  vendorContact  Json    @default("{}") @map("vendor_contact")
+  /// DPDP register: purpose, data categories, contains_phi, cross_border,
+  /// dpa_ref, retention at processor. EN-017 §5 blocks cross-border by default.
+  dpdp           Json    @default("{}")
+  containsPhi    Boolean @default(false) @map("contains_phi")
+  crossBorder    Boolean @default(false) @map("cross_border")
+  sla            Json    @default("{}")
+  /// EN-017 §5: on-prem connectors must run without internet unless flagged.
+  requiresInternet Boolean @default(false) @map("requires_internet")
+  retainPayloadDays Int   @default(30) @map("retain_payload_days")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  operations   IhubOperation[]
+  mappings     IhubMapping[]
+  schedules    IhubSchedule[]
+  healthChecks IhubHealthCheck[]
+
+  @@unique([hospitalId, key, version], map: "ihub_connectors_key")
+  @@index([hospitalId, status])
+  @@index([hospitalId, category])
+  @@map("ihub_connectors")
+  @@schema("integration")
+}
+
+model IhubOperation {
+  id                String  @id @db.Uuid
+  hospitalId        String  @map("hospital_id") @db.Uuid
+  connectorId       String  @map("connector_id") @db.Uuid
+  key               String  @db.VarChar(96)
+  name              String  @db.VarChar(200)
+  /// HTTP method, or HL7 message type (`ORU^R01`), or ASTM record type.
+  method            String? @db.VarChar(32)
+  path              String? @db.VarChar(500)
+  requestSchemaRef  String? @map("request_schema_ref") @db.VarChar(200)
+  responseSchemaRef String? @map("response_schema_ref") @db.VarChar(200)
+  timeoutMs         Int     @default(30000) @map("timeout_ms")
+  /// EN-017 §5: retries never apply to non-idempotent operations without a
+  /// partner-supported key — such an operation fails to the DLQ instead.
+  idempotency       String  @default("none") @db.VarChar(16)
+  partitionKeyExpr  String? @map("partition_key_expr") @db.VarChar(300)
+  retryPolicy       Json    @default("{}") @map("retry_policy")
+  circuitPolicy     Json    @default("{}") @map("circuit_policy")
+  rateLimit         Json    @default("{}") @map("rate_limit")
+  active            Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  connector IhubConnector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+
+  @@unique([connectorId, key])
+  @@index([hospitalId, connectorId, active])
+  @@map("ihub_operations")
+  @@schema("integration")
+}
+
+model IhubMapping {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  connectorId   String  @map("connector_id") @db.Uuid
+  operationId   String? @map("operation_id") @db.Uuid
+  direction     IhubDirection
+  name          String  @db.VarChar(200)
+  version       Int     @default(1)
+  /// rules[]: source_path, target_path, transforms[], validate, on_error.
+  /// EN-017 §5: `custom(js)` snippets are sandboxed, time-boxed and reviewed.
+  spec          Json
+  canonicalType String? @map("canonical_type") @db.VarChar(96)
+  /// EN-027 concept maps this mapping pins.
+  valueSetRefs  Json    @default("{}") @map("value_set_refs")
+  status        String  @default("draft") @db.VarChar(16)
+  activatedBy   String? @map("activated_by") @db.Uuid
+  activatedAt   DateTime? @map("activated_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  connector IhubConnector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  samples   IhubMappingSample[]
+
+  @@unique([connectorId, name, version], map: "ihub_mappings_key")
+  @@index([hospitalId, connectorId, status])
+  @@map("ihub_mappings")
+  @@schema("integration")
+}
+
+/// EN-017 §5: a connector cannot go `active` without "at least one activated
+/// mapping with all samples passing". The samples are the evidence.
+model IhubMappingSample {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  mappingId      String  @map("mapping_id") @db.Uuid
+  name           String  @db.VarChar(200)
+  /// Synthetic fixtures only — docs/09 §11 forbids production PHI in a fixture.
+  sourcePayload  Json    @map("source_payload")
+  expectedTarget Json    @map("expected_target")
+  lastRunStatus  String? @map("last_run_status") @db.VarChar(16)
+  lastRunAt      DateTime? @map("last_run_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mapping IhubMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+
+  @@unique([mappingId, name])
+  @@index([hospitalId, mappingId])
+  @@map("ihub_mapping_samples")
+  @@schema("integration")
+}
+
+model IhubSchedule {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  connectorId   String  @map("connector_id") @db.Uuid
+  operationId   String  @map("operation_id") @db.Uuid
+  mode          String  @db.VarChar(16)
+  eventFilter   Json    @default("{}") @map("event_filter")
+  cron          String? @db.VarChar(64)
+  timezone      String  @default("Asia/Kolkata") @db.VarChar(64)
+  window        Json    @default("{}")
+  /// { lastSyncedAt, cursor } — the resume point after a restart.
+  watermark     Json    @default("{}")
+  overlapSec    Int     @default(0) @map("overlap_sec")
+  throttle      Json    @default("{}")
+  nextRunAt     DateTime? @map("next_run_at") @db.Timestamptz(6)
+  lastRunAt     DateTime? @map("last_run_at") @db.Timestamptz(6)
+  lastRunStatus String? @map("last_run_status") @db.VarChar(16)
+  enabled       Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  connector IhubConnector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+
+  @@unique([connectorId, operationId, mode], map: "ihub_schedules_key")
+  @@index([enabled, nextRunAt])
+  @@map("ihub_schedules")
+  @@schema("integration")
+}
+
+/// The message log. Partitioned monthly; 180-day online retention (CERT-In),
+/// then archived. Append-only: EN-017 §5 — "status transitions are recorded,
+/// never overwritten by deletion".
+model IhubMessage {
+  id               String  @db.Uuid
+  hospitalId       String  @map("hospital_id") @db.Uuid
+  branchId         String? @map("branch_id") @db.Uuid
+  connectorId      String  @map("connector_id") @db.Uuid
+  connectorVersion Int     @map("connector_version")
+  operationId      String? @map("operation_id") @db.Uuid
+  direction        IhubDirection
+  correlationId    String  @map("correlation_id") @db.VarChar(128)
+  parentMessageId  String? @map("parent_message_id") @db.Uuid
+  refType          String? @map("ref_type") @db.VarChar(64)
+  refId            String? @map("ref_id") @db.Uuid
+  idempotencyKey   String? @map("idempotency_key") @db.VarChar(200)
+  partitionKey     String? @map("partition_key") @db.VarChar(200)
+  priority         Int     @default(5)
+  status           IhubMessageStatus @default(queued)
+  attempts         Int     @default(0)
+  nextAttemptAt    DateTime? @map("next_attempt_at") @db.Timestamptz(6)
+  httpStatus       Int?    @map("http_status")
+  ackCode          String? @map("ack_code") @db.VarChar(16)
+  latencyMs        Int?    @map("latency_ms")
+  errorClass       String? @map("error_class") @db.VarChar(64)
+  errorCode        String? @map("error_code") @db.VarChar(64)
+  errorText        String? @map("error_text") @db.Text
+  /// The searchable copy. Names, addresses, phones, Aadhaar/ABHA, UHID (last 4
+  /// kept), DOB (year kept) and free text are replaced with typed tokens.
+  payloadRedacted  Json    @default("{}") @map("payload_redacted")
+  /// Encrypted object-store key for the full payload. Reading it requires
+  /// `ihub.payload.read` and is audited as a PHI read.
+  payloadRef       String? @map("payload_ref") @db.VarChar(500)
+  responseRedacted Json?   @map("response_redacted")
+  sizeBytes        Int?    @map("size_bytes")
+  containsPhi      Boolean @default(false) @map("contains_phi")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  sentAt           DateTime? @map("sent_at") @db.Timestamptz(6)
+  completedAt      DateTime? @map("completed_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([id, createdAt])
+  @@index([hospitalId, connectorId, createdAt(sort: Desc)])
+  @@index([status, nextAttemptAt])
+  @@index([correlationId])
+  @@index([refType, refId])
+  @@map("ihub_messages")
+  @@schema("integration")
+}
+
+/// EN-017 §3.6: the DLQ groups by *fingerprint*, not by message, so 4000 copies
+/// of one broken mapping are one triage item rather than 4000.
+model IhubDlqItem {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  connectorId     String  @map("connector_id") @db.Uuid
+  operationId     String? @map("operation_id") @db.Uuid
+  /// hash(error_class + error_code + mapping path)
+  fingerprint     String  @db.VarChar(64)
+  firstSeenAt     DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt      DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  occurrences     Int     @default(1)
+  sampleMessageId String? @map("sample_message_id") @db.Uuid
+  status          String  @default("open") @db.VarChar(16)
+  assignedTo      String? @map("assigned_to") @db.Uuid
+  ticketRef       String? @map("ticket_ref") @db.VarChar(120)
+  resolutionNote  String? @map("resolution_note") @db.Text
+  suppressedUntil DateTime? @map("suppressed_until") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, connectorId, fingerprint], map: "ihub_dlq_fingerprint_key")
+  @@index([hospitalId, status, lastSeenAt(sort: Desc)])
+  @@map("ihub_dlq")
+  @@schema("integration")
+}
+
+/// State is per connector+operation and shared across workers via Redis; this
+/// table is the durable copy so a full restart does not hammer a dead partner.
+model IhubCircuitState {
+  id                   String  @id @db.Uuid
+  hospitalId           String  @map("hospital_id") @db.Uuid
+  connectorId          String  @map("connector_id") @db.Uuid
+  operationId          String? @map("operation_id") @db.Uuid
+  state                IhubCircuitStateKind @default(closed)
+  consecutiveFailures  Int     @default(0) @map("consecutive_failures")
+  errorRate            Decimal @default(0) @map("error_rate") @db.Decimal(5, 4)
+  openedAt             DateTime? @map("opened_at") @db.Timestamptz(6)
+  nextProbeAt          DateTime? @map("next_probe_at") @db.Timestamptz(6)
+  lastTransitionReason String? @map("last_transition_reason") @db.VarChar(300)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([connectorId, operationId], map: "ihub_circuit_state_key")
+  @@index([hospitalId, state])
+  @@map("ihub_circuit_state")
+  @@schema("integration")
+}
+
+model IhubHealthCheck {
+  id                  String  @id @db.Uuid
+  hospitalId          String  @map("hospital_id") @db.Uuid
+  connectorId         String  @map("connector_id") @db.Uuid
+  kind                String  @db.VarChar(24)
+  config              Json    @default("{}")
+  lastRunAt           DateTime? @map("last_run_at") @db.Timestamptz(6)
+  lastStatus          String? @map("last_status") @db.VarChar(16)
+  consecutiveFailures Int     @default(0) @map("consecutive_failures")
+  uptime24h           Decimal @default(0) @map("uptime_24h") @db.Decimal(5, 2)
+  uptime7d            Decimal @default(0) @map("uptime_7d") @db.Decimal(5, 2)
+  uptime30d           Decimal @default(0) @map("uptime_30d") @db.Decimal(5, 2)
+  latencyP95Ms        Int?    @map("latency_p95_ms")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  connector IhubConnector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+
+  @@unique([connectorId, kind])
+  @@index([hospitalId, lastStatus])
+  @@map("ihub_health_checks")
+  @@schema("integration")
+}
+
+/// EN-017 §5: "rotation is a first-class action with an audit entry; secrets
+/// never appear in message logs, exports or errors." Values are never stored.
+model IhubCredentialsAudit {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  connectorId String  @map("connector_id") @db.Uuid
+  action      String  @db.VarChar(24)
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  occurredAt  DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, connectorId, occurredAt(sort: Desc)])
+  @@map("ihub_credentials_audit")
+  @@schema("integration")
+}
+
+/// EN-017 §3.8 connector SDK: signed adapter packages installed per hospital.
+model IhubConnectorPackage {
+  id                   String  @id @db.Uuid
+  packageKey           String  @map("package_key") @db.VarChar(120)
+  version              String  @db.VarChar(32)
+  publisher            String  @db.VarChar(200)
+  signature            String  @db.Text
+  manifest             Json    @default("{}")
+  capabilities         Json    @default("{}")
+  installedForHospitals String[] @default([]) @map("installed_for_hospitals") @db.Uuid
+  status               String  @default("available") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([packageKey, version])
+  @@map("ihub_connector_packages")
+  @@schema("integration")
+}

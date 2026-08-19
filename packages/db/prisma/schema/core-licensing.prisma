@@ -1,0 +1,550 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-040 — Licence & Subscription Management (schema `core`, prefix `lic_`)
+//
+// EN-040 §4 says "operator-scoped tables live in the control plane": `lic_plans`,
+// `lic_plan_versions` and `lic_enforcement_points` therefore have no
+// `hospital_id`. They are catalogues, identical for every tenant, and every
+// tenant needs to read the plan it is on and the plan it could move to.
+//
+// That makes them the same shape as `core.permissions` — and the generated RLS
+// policy for a table with no tenant column is `USING (true)`, which
+// `core.v_rls_open_policies` flags as a leak. The new migration therefore gives
+// all three an explicit policy that is readable only *with* a tenant context
+// (`cardinality(core.accessible_hospital_ids()) > 0`) and writable by nobody
+// through the application role. That is strictly stronger than `USING (true)`
+// and keeps the open-policy allow-list at exactly two tables.
+//
+// The rule this module exists to protect (EN-040 §5): "Clinical safety is never
+// gated." `clinical_safety_exempt` on `lic_enforcement_points` is synced from
+// `packages/contracts/src/licensing/entitlements.ts` and is the column the
+// safety suite asserts against at every degradation tier.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum LicSubscriptionStatus {
+  trial
+  active
+  grace
+  soft_degraded
+  hard_degraded
+  suspended
+  terminated
+  billing_hold
+
+  @@schema("core")
+}
+
+enum LicEntitlementFamily {
+  feature
+  capacity
+  quota
+
+  @@schema("core")
+}
+
+enum LicEnforcementGuard {
+  route
+  action
+  quota
+  seat
+  device
+
+  @@schema("core")
+}
+
+enum LicItemKind {
+  module
+  addon
+  seat_pack
+  bed_band
+  branch
+  device
+  quota
+
+  @@schema("core")
+}
+
+enum LicInvoiceStatus {
+  draft
+  issued
+  sent
+  part_paid
+  paid
+  overdue
+  void
+  written_off
+
+  @@schema("core")
+}
+
+enum LicPaymentStatus {
+  pending
+  success
+  failed
+  refunded
+
+  @@schema("core")
+}
+
+enum LicMandateStatus {
+  pending
+  active
+  paused
+  revoked
+  expired
+
+  @@schema("core")
+}
+
+enum LicPeriodStatus {
+  open
+  closed
+  invoiced
+
+  @@schema("core")
+}
+
+/// Operator catalogue. No tenant column by design (EN-040 §4).
+model LicPlan {
+  id       String  @id @db.Uuid
+  key      String  @unique @db.VarChar(64)
+  name     String  @db.VarChar(160)
+  tier     String  @db.VarChar(32)
+  currency String  @default("INR") @db.Char(3)
+  status   String  @default("active") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  versions LicPlanVersion[]
+
+  @@map("lic_plans")
+  @@schema("core")
+}
+
+/// Immutable once published — a subscription points at a version, so a price
+/// change can never rewrite what a hospital already agreed to.
+model LicPlanVersion {
+  id               String  @id @db.Uuid
+  planId           String  @map("plan_id") @db.Uuid
+  version          Int
+  billingFrequency String  @map("billing_frequency") @db.VarChar(16)
+  currency         String  @default("INR") @db.Char(3)
+  basePrice        Decimal @map("base_price") @db.Decimal(14, 2)
+  /// bed band → price. Money inside JSON is a *published price list*, never an
+  /// amount that is summed; every amount that is summed is a numeric column.
+  perBedPrice      Json    @default("{}") @map("per_bed_price")
+  perBranchPrice   Decimal @default(0) @map("per_branch_price") @db.Decimal(14, 2)
+  perSeatPrice     Json    @default("{}") @map("per_seat_price")
+  moduleBundle     String[] @default([]) @map("module_bundle")
+  capacity         Json    @default("{}")
+  quotas           Json    @default("{}")
+  overageRates     Json    @default("{}") @map("overage_rates")
+  /// { sac, gstRate } — EN-040 §5 validates GST fields before issue.
+  tax              Json    @default("{}")
+  minCommitment    Int     @default(0) @map("min_commitment")
+  trialDays        Int     @default(0) @map("trial_days")
+  graceDays        Int     @default(15) @map("grace_days")
+  degradeLadderRef String? @map("degrade_ladder_ref") @db.VarChar(64)
+  status           String  @default("draft") @db.VarChar(16)
+  effectiveFrom    DateTime @map("effective_from") @db.Timestamptz(6)
+  immutable        Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plan LicPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@unique([planId, version])
+  @@map("lic_plan_versions")
+  @@schema("core")
+}
+
+/// EN-040 §4 / §3.2. Synced from `ENFORCEMENT_POINTS` in packages/contracts —
+/// "the single registry that makes behaviour consistent".
+model LicEnforcementPoint {
+  key                  String  @id @db.VarChar(96)
+  family               LicEntitlementFamily
+  guard                LicEnforcementGuard
+  description          String  @db.Text
+  /// EN-040 §3.2: fail open for clinical, closed for commercial.
+  failOpen             Boolean @default(false) @map("fail_open")
+  /// EN-040 §14 AC-20: an automated test asserts this stays true at every tier.
+  clinicalSafetyExempt Boolean @default(false) @map("clinical_safety_exempt")
+  /// Plain language a nurse can understand — never "SKU" or "entitlement".
+  messageI18n          Json    @default("{}") @map("message_i18n")
+  upgradeCta           String? @map("upgrade_cta") @db.VarChar(200)
+
+  syncedAt DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  @@index([family])
+  @@index([clinicalSafetyExempt])
+  @@map("lic_enforcement_points")
+  @@schema("core")
+}
+
+model LicSubscription {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  planVersionId String  @map("plan_version_id") @db.Uuid
+  status        LicSubscriptionStatus @default(trial)
+  startsAt      DateTime @map("starts_at") @db.Timestamptz(6)
+  endsAt        DateTime? @map("ends_at") @db.Timestamptz(6)
+  renewalMode   String  @default("manual") @map("renewal_mode") @db.VarChar(16)
+  termMonths    Int     @default(12) @map("term_months")
+  currency      String  @default("INR") @db.Char(3)
+  contractRef   String? @map("contract_ref") @db.VarChar(120)
+  salesOwner    String? @map("sales_owner") @db.VarChar(160)
+  poRef         String? @map("po_ref") @db.VarChar(120)
+  /// 0–4, matching `DEGRADATION_LADDER` in packages/contracts.
+  degradeTier   Int     @default(0) @map("degrade_tier")
+  graceUntil    DateTime? @map("grace_until") @db.Timestamptz(6)
+  suspendAt     DateTime? @map("suspend_at") @db.Timestamptz(6)
+  terminateAt   DateTime? @map("terminate_at") @db.Timestamptz(6)
+  notes         String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  items    LicSubscriptionItem[]
+  overrides LicOverride[]
+
+  @@unique([hospitalId, planVersionId, startsAt], map: "lic_subscriptions_term_key")
+  @@index([status, endsAt])
+  @@index([hospitalId, status])
+  @@map("lic_subscriptions")
+  @@schema("core")
+}
+
+model LicSubscriptionItem {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  subscriptionId String  @map("subscription_id") @db.Uuid
+  kind           LicItemKind
+  key            String  @db.VarChar(96)
+  quantity       Decimal @default(1) @db.Decimal(14, 2)
+  unitPrice      Decimal @default(0) @map("unit_price") @db.Decimal(14, 2)
+  discountPct    Decimal @default(0) @map("discount_pct") @db.Decimal(5, 2)
+  effectiveFrom  DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo    DateTime? @map("effective_to") @db.Timestamptz(6)
+  amendmentRef   String? @map("amendment_ref") @db.VarChar(120)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  subscription LicSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, subscriptionId, kind])
+  @@map("lic_subscription_items")
+  @@schema("core")
+}
+
+/// EN-040 §5: "Every deviation from the plan is an audited override with an
+/// approver and an expiry — no silent per-customer forks of a plan."
+model LicOverride {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  subscriptionId String  @map("subscription_id") @db.Uuid
+  entitlementKey String  @map("entitlement_key") @db.VarChar(96)
+  value          Json
+  reason         String  @db.Text
+  approvedBy     String? @map("approved_by") @db.Uuid
+  effectiveFrom  DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo    DateTime? @map("effective_to") @db.Timestamptz(6)
+  ticketRef      String? @map("ticket_ref") @db.VarChar(120)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  subscription LicSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, entitlementKey])
+  @@map("lic_overrides")
+  @@schema("core")
+}
+
+/// The materialised answer every service asks. Cached in Redis with a 30 s
+/// propagation SLA (`ENTITLEMENT_PROPAGATION_SLA_SECONDS`).
+model LicEntitlement {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String? @map("branch_id") @db.Uuid
+  key             String  @db.VarChar(96)
+  allowed         Boolean @default(true)
+  limitValue      Decimal? @map("limit_value") @db.Decimal(14, 2)
+  degradeMode     Int     @default(0) @map("degrade_mode")
+  source          String  @default("plan") @db.VarChar(16)
+  effectiveFrom   DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo     DateTime? @map("effective_to") @db.Timestamptz(6)
+  documentVersion Int     @default(1) @map("document_version")
+  /// Ed25519 over the entitlement document — EN-040 §5: "Entitlement decisions
+  /// are cached and signed."
+  signature       String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, branchId, key, effectiveFrom], map: "lic_entitlements_scope_key")
+  @@index([hospitalId, key])
+  @@map("lic_entitlements")
+  @@schema("core")
+}
+
+/// EN-040 §3.6 / §5: "Metering records counts only — never patient identifiers
+/// or clinical content." Partitioned monthly.
+model LicUsageDaily {
+  id         String  @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String? @map("branch_id") @db.Uuid
+  meterKey   String  @map("meter_key") @db.VarChar(96)
+  usageDate  DateTime @map("usage_date") @db.Timestamptz(6)
+  value      Decimal @db.Decimal(14, 2)
+  peak       Decimal? @db.Decimal(14, 2)
+  source     String  @default("worker") @db.VarChar(32)
+  computedAt DateTime @default(now()) @map("computed_at") @db.Timestamptz(6)
+
+  @@id([id, usageDate])
+  @@unique([hospitalId, branchId, meterKey, usageDate], map: "lic_usage_daily_meter_key")
+  @@index([hospitalId, meterKey, usageDate(sort: Desc)])
+  @@map("lic_usage_daily")
+  @@schema("core")
+}
+
+model LicUsagePeriod {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  subscriptionId String  @map("subscription_id") @db.Uuid
+  periodStart    DateTime @map("period_start") @db.Timestamptz(6)
+  periodEnd      DateTime @map("period_end") @db.Timestamptz(6)
+  meterKey       String  @map("meter_key") @db.VarChar(96)
+  included       Decimal @default(0) @db.Decimal(14, 2)
+  used           Decimal @default(0) @db.Decimal(14, 2)
+  overage        Decimal @default(0) @db.Decimal(14, 2)
+  rate           Decimal @default(0) @db.Decimal(14, 2)
+  amount         Decimal @default(0) @db.Decimal(14, 2)
+  currency       String  @default("INR") @db.Char(3)
+  status         LicPeriodStatus @default(open)
+  closedAt       DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([subscriptionId, periodStart, meterKey], map: "lic_usage_periods_key")
+  @@index([hospitalId, status])
+  @@map("lic_usage_periods")
+  @@schema("core")
+}
+
+/// EN-040 §5: "Invoices are gapless and immutable once issued; corrections are
+/// credit notes." The number comes from `core.numbering_series` with
+/// `gapless = true`; never deleted, hence no `deleted_at`.
+model LicInvoice {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  subscriptionId String  @map("subscription_id") @db.Uuid
+  invoiceNo      String  @map("invoice_no") @db.VarChar(64)
+  periodStart    DateTime @map("period_start") @db.Timestamptz(6)
+  periodEnd      DateTime @map("period_end") @db.Timestamptz(6)
+  issueDate      DateTime @map("issue_date") @db.Date
+  dueDate        DateTime @map("due_date") @db.Date
+  currency       String  @default("INR") @db.Char(3)
+  subtotal       Decimal @default(0) @db.Decimal(14, 2)
+  discount       Decimal @default(0) @db.Decimal(14, 2)
+  taxableValue   Decimal @default(0) @map("taxable_value") @db.Decimal(14, 2)
+  cgst           Decimal @default(0) @db.Decimal(14, 2)
+  sgst           Decimal @default(0) @db.Decimal(14, 2)
+  igst           Decimal @default(0) @db.Decimal(14, 2)
+  total          Decimal @default(0) @db.Decimal(14, 2)
+  placeOfSupply  String? @map("place_of_supply") @db.VarChar(2)
+  buyerGstin     String? @map("buyer_gstin") @db.VarChar(15)
+  sellerGstin    String? @map("seller_gstin") @db.VarChar(15)
+  irn            String? @db.VarChar(64)
+  qrRef          String? @map("qr_ref") @db.VarChar(200)
+  status         LicInvoiceStatus @default(draft)
+  pdfFileId      String? @map("pdf_file_id") @db.Uuid
+  sentAt         DateTime? @map("sent_at") @db.Timestamptz(6)
+  paidAt         DateTime? @map("paid_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  lines    LicInvoiceLine[]
+  payments LicPayment[]
+
+  @@unique([invoiceNo])
+  @@index([hospitalId, status, issueDate(sort: Desc)])
+  @@map("lic_invoices")
+  @@schema("core")
+}
+
+model LicInvoiceLine {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  invoiceId   String  @map("invoice_id") @db.Uuid
+  kind        LicItemKind
+  description String  @db.VarChar(500)
+  hsnSac      String? @map("hsn_sac") @db.VarChar(16)
+  qty         Decimal @default(1) @db.Decimal(14, 2)
+  unit        String? @db.VarChar(32)
+  rate        Decimal @default(0) @db.Decimal(14, 2)
+  amount      Decimal @default(0) @db.Decimal(14, 2)
+  taxRate     Decimal @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  meterKey    String? @map("meter_key") @db.VarChar(96)
+  periodStart DateTime? @map("period_start") @db.Timestamptz(6)
+  periodEnd   DateTime? @map("period_end") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invoice LicInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, invoiceId])
+  @@map("lic_invoice_lines")
+  @@schema("core")
+}
+
+model LicPayment {
+  id                  String  @id @db.Uuid
+  hospitalId          String  @map("hospital_id") @db.Uuid
+  invoiceId           String  @map("invoice_id") @db.Uuid
+  gateway             String  @db.VarChar(24)
+  gatewayRef          String? @map("gateway_ref") @db.VarChar(200)
+  mandateId           String? @map("mandate_id") @db.Uuid
+  amount              Decimal @db.Decimal(14, 2)
+  currency            String  @default("INR") @db.Char(3)
+  tdsAmount           Decimal @default(0) @map("tds_amount") @db.Decimal(14, 2)
+  tdsCertificateFileId String? @map("tds_certificate_file_id") @db.Uuid
+  receivedAt          DateTime? @map("received_at") @db.Timestamptz(6)
+  status              LicPaymentStatus @default(pending)
+  failureReason       String? @map("failure_reason") @db.VarChar(300)
+  retryNo             Int     @default(0) @map("retry_no")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  invoice LicInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, invoiceId, status])
+  @@map("lic_payments")
+  @@schema("core")
+}
+
+/// RBI-compliant recurring mandate (EN-040 §3.7): AFA on creation, pre-debit
+/// notification before every debit.
+model LicMandate {
+  id                 String  @id @db.Uuid
+  hospitalId         String  @map("hospital_id") @db.Uuid
+  gateway            String  @db.VarChar(24)
+  mandateRef         String  @map("mandate_ref") @db.VarChar(200)
+  method             String  @db.VarChar(16)
+  maxAmount          Decimal @map("max_amount") @db.Decimal(14, 2)
+  currency           String  @default("INR") @db.Char(3)
+  status             LicMandateStatus @default(pending)
+  revokedAt          DateTime? @map("revoked_at") @db.Timestamptz(6)
+  preDebitNotifiedAt DateTime? @map("pre_debit_notified_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([gateway, mandateRef])
+  @@index([hospitalId, status])
+  @@map("lic_mandates")
+  @@schema("core")
+}
+
+model LicDunningEvent {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  subscriptionId String  @map("subscription_id") @db.Uuid
+  step           Int
+  channel        String  @db.VarChar(24)
+  sentAt         DateTime @default(now()) @map("sent_at") @db.Timestamptz(6)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  outcome        String? @db.VarChar(64)
+
+  @@index([hospitalId, subscriptionId, sentAt(sort: Desc)])
+  @@map("lic_dunning_events")
+  @@schema("core")
+}
+
+/// EN-040 §3.8 on-prem keys. "On-prem keys validate fully offline; no
+/// functionality may depend on reaching the vendor."
+model LicKey {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  deploymentId    String  @map("deployment_id") @db.VarChar(120)
+  planVersionId   String  @map("plan_version_id") @db.Uuid
+  issuedAt        DateTime @default(now()) @map("issued_at") @db.Timestamptz(6)
+  validFrom       DateTime @map("valid_from") @db.Timestamptz(6)
+  validTo         DateTime @map("valid_to") @db.Timestamptz(6)
+  graceDays       Int     @default(15) @map("grace_days")
+  capacity        Json    @default("{}")
+  quotas          Json    @default("{}")
+  moduleBundle    String[] @default([]) @map("module_bundle")
+  hardwareBinding Json?   @map("hardware_binding")
+  /// EN-040 §5: binding defaults to soft with a 14-day reconciliation window.
+  bindingMode     String  @default("soft") @map("binding_mode") @db.VarChar(16)
+  nonce           String  @db.VarChar(64)
+  /// Ed25519 detached signature over the canonicalised key document.
+  signature       String  @db.Text
+  issuedBy        String? @map("issued_by") @db.Uuid
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokeReason    String? @map("revoke_reason") @db.VarChar(300)
+  deliveredTo     String? @map("delivered_to") @db.VarChar(300)
+  installedAt     DateTime? @map("installed_at") @db.Timestamptz(6)
+  installFingerprint String? @map("install_fingerprint") @db.VarChar(200)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  installs LicKeyInstall[]
+
+  @@unique([hospitalId, deploymentId, nonce], map: "lic_keys_deployment_key")
+  @@index([hospitalId, validTo])
+  @@map("lic_keys")
+  @@schema("core")
+}
+
+model LicKeyInstall {
+  id                 String  @id @db.Uuid
+  hospitalId         String  @map("hospital_id") @db.Uuid
+  keyId              String  @map("key_id") @db.Uuid
+  deploymentId       String  @map("deployment_id") @db.VarChar(120)
+  installedAt        DateTime @default(now()) @map("installed_at") @db.Timestamptz(6)
+  machineFingerprint String  @map("machine_fingerprint") @db.VarChar(200)
+  appVersion         String? @map("app_version") @db.VarChar(32)
+  validationResult   String  @map("validation_result") @db.VarChar(32)
+  /// EN-040 §5: "Clock rollback cannot extend a licence" — the high-water mark
+  /// is what makes that detectable offline.
+  clockHighwaterAt   DateTime? @map("clock_highwater_at") @db.Timestamptz(6)
+
+  key LicKey @relation(fields: [keyId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, keyId, installedAt(sort: Desc)])
+  @@map("lic_key_installs")
+  @@schema("core")
+}
+
+/// EN-040 §4: append-only, and also mirrored to EN-024. It exists separately so
+/// the *customer* can always see what the operator did to their entitlement.
+model LicAudit {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  action     String  @db.VarChar(48)
+  before     Json?
+  after      Json?
+  reason     String  @db.Text
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, occurredAt(sort: Desc)])
+  @@map("lic_audit")
+  @@schema("core")
+}

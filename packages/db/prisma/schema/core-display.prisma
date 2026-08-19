@@ -1,0 +1,374 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-018 — TV Output & Digital Signage (prefix `display_`)
+//
+// Deviation from the spec, stated plainly: EN-018 §4 puts these in schema
+// `engage`. They are created in `core` instead, because `engage` is a Phase-10
+// schema (docs/03 §Schemas: "portal accounts, notifications, campaigns,
+// feedback, tickets") that does not exist yet, is not in the datasource, and —
+// critically — is not covered by the RLS generator, the grant defaults or the
+// three security views (`core.v_rls_coverage`, `core.v_rls_open_policies`,
+// `core.v_grant_coverage`) that `verify-isolation.sql` asserts against. A board
+// created in an unmonitored schema would be a tenant-scoped table nobody proved
+// was isolated.
+//
+// The tables are needed now rather than in Phase 10 because `apps/tv-kiosk`'s
+// pairing flow is a Phase-0 deliverable (phase-00 §0.5) and the device it pairs
+// is a `core.devices` row.
+//
+// When `engage` lands, moving them is `ALTER TABLE … SET SCHEMA` plus extending
+// the three views — recorded here so the move is a decision, not a discovery.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum DisplayBoardStatus {
+  active
+  paused
+  retired
+
+  @@schema("core")
+}
+
+/// EN-018 §5: "Privacy by default." `mask_mode` is the single most important
+/// column here — a public-area board may never render an identifiable name.
+enum DisplayMaskMode {
+  token_only
+  initial
+  first_name
+  full_name
+
+  @@schema("core")
+}
+
+enum DisplayPhiLevel {
+  none
+  masked
+  identifiable
+
+  @@schema("core")
+}
+
+enum DisplayDeviceStatus {
+  unpaired
+  online
+  offline
+  revoked
+
+  @@schema("core")
+}
+
+model DisplayBoard {
+  id               String  @id @db.Uuid
+  hospitalId       String  @map("hospital_id") @db.Uuid
+  branchId         String  @map("branch_id") @db.Uuid
+  code             String  @db.VarChar(32)
+  name             String  @db.VarChar(160)
+  purposeType      String  @map("purpose_type") @db.VarChar(48)
+  locationText     String? @map("location_text") @db.VarChar(200)
+  /// `public` vs `staff_only`. A management KPI board may only be staff-only.
+  locationPrivacy  String  @default("public") @map("location_privacy") @db.VarChar(16)
+  floor            String? @db.VarChar(32)
+  orientation      String  @default("landscape") @db.VarChar(16)
+  resolutionProfile String @default("fhd") @map("resolution_profile") @db.VarChar(8)
+  themeKey         String? @map("theme_key") @db.VarChar(64)
+  audioEnabled     Boolean @default(false) @map("audio_enabled")
+  ttsLanguages     String[] @default([]) @map("tts_languages")
+  ttsVoice         String? @map("tts_voice") @db.VarChar(64)
+  volumeSchedule   Json    @default("{}") @map("volume_schedule")
+  staleThresholdSec Int    @default(60) @map("stale_threshold_sec")
+  maskMode         DisplayMaskMode @default(token_only) @map("mask_mode")
+  idleMinutes      Int     @default(10) @map("idle_minutes")
+  activeLayoutId   String? @map("active_layout_id") @db.Uuid
+  fallbackLayoutId String? @map("fallback_layout_id") @db.Uuid
+  emergencyScope   String  @default("board") @map("emergency_scope") @db.VarChar(16)
+  status           DisplayBoardStatus @default(active)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  layouts   DisplayLayout[]
+  schedules DisplaySchedule[]
+
+  @@unique([hospitalId, branchId, code], map: "display_boards_code_key")
+  @@index([hospitalId, branchId, status])
+  @@map("display_boards")
+  @@schema("core")
+}
+
+model DisplayLayout {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  boardId        String? @map("board_id") @db.Uuid
+  name           String  @db.VarChar(160)
+  isTemplate     Boolean @default(false) @map("is_template")
+  version        Int     @default(1)
+  grid           Json    @default("{}")
+  /// [{ id, type, x, y, w, h, params, style, refresh_sec }]
+  widgets        Json    @default("[]")
+  themeOverrides Json    @default("{}") @map("theme_overrides")
+  status         String  @default("draft") @db.VarChar(16)
+  activatedAt    DateTime? @map("activated_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  board DisplayBoard? @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@unique([boardId, name, version], map: "display_layouts_version_key")
+  @@index([hospitalId, isTemplate])
+  @@map("display_layouts")
+  @@schema("core")
+}
+
+/// EN-018 §4: "seed, code-registered". A global catalogue with no tenant column,
+/// like `core.permissions`; the new migration gives it an explicit policy rather
+/// than letting the generator emit `USING (true)`.
+model DisplayWidgetCatalogue {
+  type               String  @id @db.VarChar(64)
+  name               String  @db.VarChar(160)
+  category           String  @db.VarChar(48)
+  dataSource         String  @map("data_source") @db.VarChar(96)
+  paramsSchema       Json    @default("{}") @map("params_schema")
+  minSize            Json    @default("{}") @map("min_size")
+  supportsAudio      Boolean @default(false) @map("supports_audio")
+  /// EN-018 §5: a widget with `identifiable` cannot be placed on a public board.
+  phiLevel           DisplayPhiLevel @default(none) @map("phi_level")
+  allowedPurposeTypes String[] @default([]) @map("allowed_purpose_types")
+
+  syncedAt DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  @@index([category])
+  @@map("display_widgets_catalogue")
+  @@schema("core")
+}
+
+model DisplayDevice {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String  @map("branch_id") @db.Uuid
+  /// EN-007 `core.devices` row that holds the scoped token.
+  deviceId        String? @map("device_id") @db.Uuid
+  boardId         String? @map("board_id") @db.Uuid
+  name            String  @db.VarChar(160)
+  kind            String  @db.VarChar(32)
+  serial          String? @db.VarChar(120)
+  mac             String? @db.VarChar(32)
+  resolution      String? @db.VarChar(24)
+  audioCapable    Boolean @default(false) @map("audio_capable")
+  appVersion      String? @map("app_version") @db.VarChar(32)
+  lastHeartbeatAt DateTime? @map("last_heartbeat_at") @db.Timestamptz(6)
+  status          DisplayDeviceStatus @default(unpaired)
+  /// 6 digits, single-use, valid 10 minutes, 5 attempts per device (EN-018 §5).
+  pairingCode     String? @map("pairing_code") @db.VarChar(8)
+  pairingExpiresAt DateTime? @map("pairing_expires_at") @db.Timestamptz(6)
+  pairingAttempts Int     @default(0) @map("pairing_attempts")
+  network         Json    @default("{}")
+  lastError       String? @map("last_error") @db.VarChar(500)
+  pairedBy        String? @map("paired_by") @db.Uuid
+  pairedAt        DateTime? @map("paired_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, branchId, name], map: "display_devices_name_key")
+  @@index([hospitalId, status])
+  @@index([boardId])
+  @@map("display_devices")
+  @@schema("core")
+}
+
+/// Partitioned monthly; EN-018 §4 retention 90 days.
+model DisplayDeviceEvent {
+  id         String  @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  deviceId   String  @map("device_id") @db.Uuid
+  event      String  @db.VarChar(32)
+  detail     Json    @default("{}")
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@id([id, occurredAt])
+  @@index([deviceId, occurredAt(sort: Desc)])
+  @@index([hospitalId, occurredAt(sort: Desc)])
+  @@map("display_device_events")
+  @@schema("core")
+}
+
+model DisplaySchedule {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  boardId    String  @map("board_id") @db.Uuid
+  layoutId   String  @map("layout_id") @db.Uuid
+  priority   Int     @default(100)
+  daysOfWeek Int[]   @default([]) @map("days_of_week")
+  startTime  String? @map("start_time") @db.VarChar(8)
+  endTime    String? @map("end_time") @db.VarChar(8)
+  validFrom  DateTime? @map("valid_from") @db.Date
+  validTo    DateTime? @map("valid_to") @db.Date
+  active     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  board DisplayBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, boardId, priority])
+  @@map("display_schedules")
+  @@schema("core")
+}
+
+model DisplayPlaylist {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String? @map("branch_id") @db.Uuid
+  name       String  @db.VarChar(160)
+  shuffle    Boolean @default(false)
+  active     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  items DisplayPlaylistItem[]
+
+  @@unique([hospitalId, name])
+  @@map("display_playlists")
+  @@schema("core")
+}
+
+/// EN-018 §5: "Media content must be approved (Marketing → Hospital Admin)
+/// before it can appear on a patient-facing board."
+model DisplayPlaylistItem {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  playlistId  String  @map("playlist_id") @db.Uuid
+  mediaFileId String? @map("media_file_id") @db.Uuid
+  url         String? @db.VarChar(500)
+  durationSec Int     @default(10) @map("duration_sec")
+  startDate   DateTime? @map("start_date") @db.Date
+  endDate     DateTime? @map("end_date") @db.Date
+  language    String? @db.VarChar(16)
+  approvedBy  String? @map("approved_by") @db.Uuid
+  approvedAt  DateTime? @map("approved_at") @db.Timestamptz(6)
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  playlist DisplayPlaylist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, playlistId, sortOrder])
+  @@map("display_playlist_items")
+  @@schema("core")
+}
+
+/// EN-018 §5: capped at 200 characters, PHI/profanity filtered, audited.
+model DisplayAnnouncement {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  boardIds    String[] @default([]) @map("board_ids") @db.Uuid
+  /// { "en-IN": "…", "hi": "…" }
+  text        Json    @default("{}")
+  audioOnly   Boolean @default(false) @map("audio_only")
+  priority    Int     @default(100)
+  startsAt    DateTime @map("starts_at") @db.Timestamptz(6)
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz(6)
+  repeatCount Int     @default(1) @map("repeat_count")
+  status      String  @default("scheduled") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, startsAt(sort: Desc)])
+  @@map("display_announcements")
+  @@schema("core")
+}
+
+model DisplayEmergencyCode {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  codeKey       String  @map("code_key") @db.VarChar(32)
+  /// Multilingual label; the colour is a semantic token, never a hex literal.
+  label         Json    @default("{}")
+  colourToken   String  @map("colour_token") @db.VarChar(32)
+  severity      String  @default("critical") @db.VarChar(16)
+  defaultScope  String  @default("branch") @map("default_scope") @db.VarChar(16)
+  instruction   Json    @default("{}")
+  audioPattern  String? @map("audio_pattern") @db.VarChar(64)
+  autoExpireMin Int     @default(30) @map("auto_expire_min")
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, codeKey])
+  @@map("display_emergency_codes")
+  @@schema("core")
+}
+
+/// NABH evidence, retained 3 years. Append-only.
+model DisplayCodeActivation {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String? @map("branch_id") @db.Uuid
+  codeKey      String  @map("code_key") @db.VarChar(32)
+  scope        String  @db.VarChar(16)
+  locationText String? @map("location_text") @db.VarChar(200)
+  wardId       String? @map("ward_id") @db.Uuid
+  triggeredBy  String  @map("triggered_by") @db.Uuid
+  triggeredAt  DateTime @default(now()) @map("triggered_at") @db.Timestamptz(6)
+  clearedBy    String? @map("cleared_by") @db.Uuid
+  clearedAt    DateTime? @map("cleared_at") @db.Timestamptz(6)
+  reason       String? @db.Text
+  boardsReached Int    @default(0) @map("boards_reached")
+  refEventId   String? @map("ref_event_id") @db.Uuid
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, triggeredAt(sort: Desc)])
+  @@map("display_code_activations")
+  @@schema("core")
+}
+
+/// EN-018 §4: "Redis primary; Postgres snapshot table for recovery."
+model DisplayBoardState {
+  boardId    String  @id @map("board_id") @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  state      Json    @default("{}")
+  version    Int     @default(0)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId])
+  @@map("display_board_state")
+  @@schema("core")
+}
+
+/// Rendered speech is cached by content hash so a repeated token call does not
+/// re-synthesise, and so an offline board can still speak.
+model DisplayTtsCache {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  hash        String  @db.VarChar(64)
+  lang        String  @db.VarChar(16)
+  voice       String  @db.VarChar(64)
+  audioFileId String? @map("audio_file_id") @db.Uuid
+  bytes       Int     @default(0)
+  lastUsedAt  DateTime? @map("last_used_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, hash])
+  @@map("display_tts_cache")
+  @@schema("core")
+}

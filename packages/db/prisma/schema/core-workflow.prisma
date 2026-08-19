@@ -1,0 +1,483 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-038 — Workflow & Approval Engine (schema `core`, prefix `wf_`)
+//
+// EN-038 §5 states the rule the whole shape serves: "The engine authorises; it
+// never executes." Nothing here holds a business action — only the decision and
+// the evidence of how it was reached.
+//
+// Two spec entries are deliberately not re-created:
+//   * `wf_downtime_windows` — `core.downtime_windows` already exists (EN-022 §3
+//     names the same table, and EN-038 §3.4 only consumes it to pause SLA
+//     clocks). A second table would let the two disagree about whether the
+//     system was down.
+//   * `wf_metrics` — a 15-minute read model; it belongs in `analytics.*`
+//     (docs/03 §Performance rules) and arrives with EN-001 in Phase 11.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum WfDomain {
+  billing
+  finance
+  purchase
+  pharmacy
+  hr
+  clinical
+  quality
+  master_data
+  it
+  other
+
+  @@schema("core")
+}
+
+enum WfBreachAction {
+  escalate
+  auto_approve
+  auto_reject
+  hold
+
+  @@schema("core")
+}
+
+enum WfMatrixStatus {
+  draft
+  active
+  superseded
+  retired
+
+  @@schema("core")
+}
+
+enum WfRequestStatus {
+  pending
+  approved
+  rejected
+  withdrawn
+  expired
+  auto_approved
+  bypassed
+  invalidated
+
+  @@schema("core")
+}
+
+enum WfStageKind {
+  serial
+  parallel
+  quorum
+  any_of
+
+  @@schema("core")
+}
+
+enum WfStageStatus {
+  waiting
+  active
+  approved
+  rejected
+  skipped
+  expired
+
+  @@schema("core")
+}
+
+enum WfDecision {
+  pending
+  approved
+  rejected
+  abstained
+  reassigned
+  info_requested
+
+  @@schema("core")
+}
+
+enum WfResolvedFrom {
+  role
+  dynamic
+  explicit
+  delegate
+  escalation
+
+  @@schema("core")
+}
+
+enum WfActionKind {
+  created
+  submitted
+  viewed
+  approved
+  rejected
+  modified
+  info_requested
+  info_provided
+  withdrawn
+  reassigned
+  escalated
+  reminded
+  expired
+  bypassed
+  ratified
+  reversed
+
+  @@schema("core")
+}
+
+enum WfDelegationStatus {
+  active
+  expired
+  revoked
+
+  @@schema("core")
+}
+
+/// The module-facing contract (EN-038 §3.1). `hospital_id IS NULL` marks a
+/// shipped system process definition.
+model WfProcess {
+  id               String  @id @db.Uuid
+  hospitalId       String? @map("hospital_id") @db.Uuid
+  key              String  @db.VarChar(96)
+  name             String  @db.VarChar(160)
+  domain           WfDomain
+  /// Typed fields with PHI classification per field, so an approver sees only
+  /// what the process declares (EN-038 §5 PHI minimisation).
+  contextSchema    Json    @default("{}") @map("context_schema")
+  outcomeContract  Json    @default("{}") @map("outcome_contract")
+  allowsModification Boolean @default(false) @map("allows_modification")
+  /// Clinical safety, narcotics and statutory sign-offs are never delegable.
+  nonDelegable     Boolean @default(false) @map("non_delegable")
+  requiresEsign    Boolean @default(false) @map("requires_esign")
+  sodRules         Json    @default("[]") @map("sod_rules")
+  /// EN-038 §5: auto-approve on breach is prohibited for financial
+  /// disbursement, clinical safety, statutory and narcotic processes.
+  breachDefault    WfBreachAction @default(escalate) @map("breach_default")
+  urgencyAllowed   Boolean @default(true) @map("urgency_allowed")
+  bypassAllowed    Boolean @default(false) @map("bypass_allowed")
+  activeMatrixId   String? @map("active_matrix_id") @db.Uuid
+  status           WfMatrixStatus @default(active)
+  ownerModule      String  @map("owner_module") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, key])
+  @@index([hospitalId, domain, status])
+  @@index([key])
+  @@map("wf_processes")
+  @@schema("core")
+}
+
+model WfMatrix {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  branchId       String? @map("branch_id") @db.Uuid
+  processKey     String  @map("process_key") @db.VarChar(96)
+  name           String  @db.VarChar(160)
+  currentVersion Int     @default(0) @map("current_version")
+  status         WfMatrixStatus @default(draft)
+  ownerRole      String  @map("owner_role") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  versions WfMatrixVersion[]
+
+  @@unique([hospitalId, branchId, processKey, name])
+  @@index([hospitalId, processKey, status])
+  @@map("wf_matrices")
+  @@schema("core")
+}
+
+/// EN-038 §3.7: a published version is immutable and carries a checksum, so a
+/// request bound to it can always be re-evaluated exactly as it was decided.
+model WfMatrixVersion {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  matrixId      String  @map("matrix_id") @db.Uuid
+  version       Int
+  /// rules[] with priority, condition_ast and stages[] — see EN-038 §4.
+  rules         Json
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  publishedBy   String? @map("published_by") @db.Uuid
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  /// The EN-038 request that approved this publication (matrix changes are
+  /// themselves approved).
+  approvalRef   String? @map("approval_ref") @db.Uuid
+  /// Financial matrices must attach a simulation run to the publication.
+  simulationRef String? @map("simulation_ref") @db.Uuid
+  checksum      String  @db.VarChar(64)
+  immutable     Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  matrix WfMatrix @relation(fields: [matrixId], references: [id], onDelete: Restrict)
+
+  @@unique([matrixId, version])
+  @@index([matrixId, effectiveFrom(sort: Desc)])
+  @@map("wf_matrix_versions")
+  @@schema("core")
+}
+
+/// Partitioned monthly. Retention 7 years (financial/statutory evidence), so
+/// there is no `deleted_at`: EN-038 §5 — "Decisions are immutable … No edit, no
+/// delete, ever."
+model WfRequest {
+  id             String  @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  branchId       String? @map("branch_id") @db.Uuid
+  processKey     String  @map("process_key") @db.VarChar(96)
+  matrixVersionId String? @map("matrix_version_id") @db.Uuid
+  refType        String  @map("ref_type") @db.VarChar(64)
+  refId          String  @map("ref_id") @db.Uuid
+  idempotencyKey String  @map("idempotency_key") @db.VarChar(200)
+  requestedBy    String  @map("requested_by") @db.Uuid
+  requestedAt    DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  context        Json    @default("{}")
+  /// EN-038 §5: "A request is bound to its matrix version and its context hash."
+  /// A material change to the underlying record invalidates the request.
+  contextHash    String  @map("context_hash") @db.VarChar(64)
+  reason         String? @db.Text
+  urgency        String  @default("normal") @db.VarChar(16)
+  attachments    Json    @default("[]")
+  status         WfRequestStatus @default(pending)
+  currentStage   Int     @default(1) @map("current_stage")
+  /// The resolved stage plan snapshotted at submission.
+  plan           Json    @default("{}")
+  decidedAt      DateTime? @map("decided_at") @db.Timestamptz(6)
+  outcomeNote    String? @map("outcome_note") @db.Text
+  modifiedValue  Json?   @map("modified_value")
+  slaDueAt       DateTime? @map("sla_due_at") @db.Timestamptz(6)
+  escalationLevel Int    @default(0) @map("escalation_level")
+  totalTurnaroundSec    Int? @map("total_turnaround_sec")
+  businessTurnaroundSec Int? @map("business_turnaround_sec")
+  /// Money at stake, where the process has one. docs/03: numeric(14,2) + ISO 4217.
+  amount         Decimal? @db.Decimal(14, 2)
+  currency       String? @db.Char(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([id, requestedAt])
+  @@unique([hospitalId, processKey, refType, refId, idempotencyKey, requestedAt], map: "wf_requests_idempotency_key")
+  @@index([hospitalId, status, slaDueAt])
+  @@index([refType, refId])
+  @@index([requestedBy, requestedAt(sort: Desc)])
+  @@map("wf_requests")
+  @@schema("core")
+}
+
+model WfStage {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  requestId     String  @map("request_id") @db.Uuid
+  requestAt     DateTime @map("request_at") @db.Timestamptz(6)
+  stageNo       Int     @map("stage_no")
+  kind          WfStageKind
+  /// EN-038 §5: "a quorum stage cannot be configured with N > M".
+  quorumN       Int?    @map("quorum_n")
+  requiredCount Int     @default(1) @map("required_count")
+  receivedCount Int     @default(0) @map("received_count")
+  status        WfStageStatus @default(waiting)
+  activatedAt   DateTime? @map("activated_at") @db.Timestamptz(6)
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz(6)
+  slaDueAt      DateTime? @map("sla_due_at") @db.Timestamptz(6)
+  remindersSent Int     @default(0) @map("reminders_sent")
+  escalatedTo   Json    @default("[]") @map("escalated_to")
+  skipReason    String? @map("skip_reason") @db.VarChar(300)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  approvers WfStageApprover[]
+
+  @@unique([requestId, stageNo])
+  @@index([hospitalId, status, slaDueAt])
+  @@map("wf_stages")
+  @@schema("core")
+}
+
+model WfStageApprover {
+  id                  String  @id @db.Uuid
+  hospitalId          String  @map("hospital_id") @db.Uuid
+  stageId             String  @map("stage_id") @db.Uuid
+  userId              String  @map("user_id") @db.Uuid
+  resolvedFrom        WfResolvedFrom @map("resolved_from")
+  onBehalfOfUserId    String? @map("on_behalf_of_user_id") @db.Uuid
+  delegationId        String? @map("delegation_id") @db.Uuid
+  notifiedAt          DateTime? @map("notified_at") @db.Timestamptz(6)
+  viewedAt            DateTime? @map("viewed_at") @db.Timestamptz(6)
+  decision            WfDecision @default(pending)
+  decidedAt           DateTime? @map("decided_at") @db.Timestamptz(6)
+  reason              String? @db.Text
+  esignRef            String? @map("esign_ref") @db.VarChar(200)
+  decisionLatencySec  Int?    @map("decision_latency_sec")
+  device              String? @db.VarChar(16)
+  /// Proves the approver saw the same context that was submitted.
+  contextHashAtDecision String? @map("context_hash_at_decision") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  stage WfStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  @@unique([stageId, userId])
+  /// The "my pending approvals" query.
+  @@index([userId, decision, stageId])
+  @@index([hospitalId, decision])
+  @@map("wf_stage_approvers")
+  @@schema("core")
+}
+
+/// Append-only timeline, partitioned monthly.
+model WfAction {
+  id          String  @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  requestId   String  @map("request_id") @db.Uuid
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  action      WfActionKind
+  actedAt     DateTime @default(now()) @map("acted_at") @db.Timestamptz(6)
+  fromState   String? @map("from_state") @db.VarChar(24)
+  toState     String? @map("to_state") @db.VarChar(24)
+  reason      String? @db.Text
+  payload     Json    @default("{}")
+  /// Network class only (`internal`/`vpn`/`external`) — never a raw IP, which
+  /// would be personal data in an approval timeline the requester can read.
+  ipClass     String? @map("ip_class") @db.VarChar(16)
+
+  @@id([id, actedAt])
+  @@index([requestId, actedAt])
+  @@index([hospitalId, actedAt(sort: Desc)])
+  @@map("wf_actions")
+  @@schema("core")
+}
+
+/// EN-038 §3.5. Validation (in the service): the delegate's authority must be
+/// greater than or equal to the delegator's for every delegated process.
+model WfDelegation {
+  id               String  @id @db.Uuid
+  hospitalId       String  @map("hospital_id") @db.Uuid
+  delegatorUserId  String  @map("delegator_user_id") @db.Uuid
+  delegateUserId   String  @map("delegate_user_id") @db.Uuid
+  /// Empty means "every delegable process"; non-delegable processes are never
+  /// included regardless (EN-038 §5).
+  processKeys      String[] @default([]) @map("process_keys")
+  fromAt           DateTime @map("from_at") @db.Timestamptz(6)
+  toAt             DateTime @map("to_at") @db.Timestamptz(6)
+  reason           String  @db.VarChar(500)
+  status           WfDelegationStatus @default(active)
+  revokedBy        String? @map("revoked_by") @db.Uuid
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, delegatorUserId, status])
+  @@index([hospitalId, delegateUserId, status])
+  @@map("wf_delegations")
+  @@schema("core")
+}
+
+model WfOutOfOffice {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  userId       String  @map("user_id") @db.Uuid
+  fromAt       DateTime @map("from_at") @db.Timestamptz(6)
+  toAt         DateTime @map("to_at") @db.Timestamptz(6)
+  note         String? @db.VarChar(500)
+  delegationId String? @map("delegation_id") @db.Uuid
+  autoEscalate Boolean @default(true) @map("auto_escalate")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, userId, fromAt])
+  @@map("wf_out_of_office")
+  @@schema("core")
+}
+
+/// EN-038 §5: "SLA clocks use business calendars and pause during recorded
+/// downtime" — the downtime source is `core.downtime_windows`.
+model WfBusinessCalendar {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String? @map("branch_id") @db.Uuid
+  name         String  @db.VarChar(120)
+  workingDays  Json    @default("{}") @map("working_days")
+  workingHours Json    @default("{}") @map("working_hours")
+  holidays     DateTime[] @db.Date
+  timezone     String  @default("Asia/Kolkata") @db.VarChar(64)
+  isDefault    Boolean @default(false) @map("is_default")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, branchId, name])
+  @@index([hospitalId, isDefault])
+  @@map("wf_business_calendars")
+  @@schema("core")
+}
+
+/// EN-038 §3.7: replaying historical requests against a candidate matrix before
+/// publishing it. Retained 2 years.
+model WfSimulation {
+  id                     String  @id @db.Uuid
+  hospitalId             String  @map("hospital_id") @db.Uuid
+  matrixVersionId        String  @map("matrix_version_id") @db.Uuid
+  runBy                  String  @map("run_by") @db.Uuid
+  runAt                  DateTime @default(now()) @map("run_at") @db.Timestamptz(6)
+  sampleFrom             DateTime @map("sample_from") @db.Timestamptz(6)
+  sampleTo               DateTime @map("sample_to") @db.Timestamptz(6)
+  requestsEvaluated      Int     @default(0) @map("requests_evaluated")
+  changedPlanCount       Int     @default(0) @map("changed_plan_count")
+  extraTierCount         Int     @default(0) @map("extra_tier_count")
+  approverLoadDelta      Json    @default("{}") @map("approver_load_delta")
+  projectedTurnaroundDelta Int?  @map("projected_turnaround_delta")
+  samples                Json    @default("[]")
+  notes                  String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, matrixVersionId, runAt(sort: Desc)])
+  @@map("wf_simulations")
+  @@schema("core")
+}
+
+/// EN-038 §5: emergency bypass is role-restricted, reason-mandatory, notifies
+/// the whole chain and creates a mandatory ratification request within 24 h.
+model WfBypass {
+  id                   String  @id @db.Uuid
+  hospitalId           String  @map("hospital_id") @db.Uuid
+  branchId             String? @map("branch_id") @db.Uuid
+  requestId            String? @map("request_id") @db.Uuid
+  processKey           String  @map("process_key") @db.VarChar(96)
+  refType              String  @map("ref_type") @db.VarChar(64)
+  refId                String  @map("ref_id") @db.Uuid
+  actorUserId          String  @map("actor_user_id") @db.Uuid
+  reason               String  @db.Text
+  bypassedAt           DateTime @default(now()) @map("bypassed_at") @db.Timestamptz(6)
+  ratificationRequestId String? @map("ratification_request_id") @db.Uuid
+  ratified             Boolean @default(false)
+  ratifiedAt           DateTime? @map("ratified_at") @db.Timestamptz(6)
+  ratifiedBy           String? @map("ratified_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, ratified, bypassedAt(sort: Desc)])
+  @@index([refType, refId])
+  @@map("wf_bypasses")
+  @@schema("core")
+}

@@ -1,0 +1,492 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-037 — Notification Centre (schema `core`, prefix `notif_`)
+//
+// The shape follows EN-037 §4 literally. Three deliberate additions the spec
+// leaves implicit, all forced by docs/03 and by the RLS generator:
+//
+//   1. `hospital_id` is present on every child table (`notif_recipients`,
+//      `notif_deliveries`, …). EN-037 §4 lists them keyed only by their parent,
+//      but docs/03 §Table rules says "`hospital_id uuid not null` on every
+//      business table", and without it the RLS generator would classify the
+//      table as a global catalogue and emit `USING (true)` — a cross-tenant leak
+//      of exactly the kind `..._rls_tenant_key_exceptions` was written to close.
+//   2. Partitioned tables carry a composite primary key `(id, <partition key>)`
+//      because PostgreSQL requires the partition key to be part of every unique
+//      constraint. `core.outbox_events` already does this.
+//   3. `notif_metrics` is NOT created here. EN-037 §4 marks it "read model,
+//      15-min refresh"; docs/03 §Performance rules puts read models in
+//      `analytics.*` refreshed by a job. It lands with EN-001 in Phase 11.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// EN-037 §3.1. Five levels; `critical` is the one with non-configurable
+/// behaviour (overrides quiet hours, never coalesced, always escalates).
+enum NotifSeverity {
+  info
+  low
+  normal
+  high
+  critical
+
+  @@schema("core")
+}
+
+/// EN-037 §3.6 preference-centre categories. Mirrors
+/// `packages/contracts/src/notifications/types.ts#notificationCategorySchema`.
+enum NotifCategory {
+  clinical_safety
+  my_patients
+  orders_results
+  approvals
+  roster_hr
+  inventory
+  finance
+  it_system
+  quality
+  announcement
+
+  @@schema("core")
+}
+
+/// EN-037 §3.3. `inapp` is always written — the bell is the record of
+/// "you were told", so a notification never exists only as an SMS.
+enum NotifChannel {
+  inapp
+  web_push
+  fcm
+  apns
+  sms
+  whatsapp
+  email
+  voice
+  tv
+
+  @@schema("core")
+}
+
+enum NotifTypeStatus {
+  active
+  deprecated
+  suppressed
+
+  @@schema("core")
+}
+
+enum NotifCoalescePolicy {
+  none
+  digest_hourly
+  digest_daily
+  custom
+
+  @@schema("core")
+}
+
+/// EN-037 §5: "External-channel content minimisation is mandatory."
+enum NotifExternalContentPolicy {
+  minimal
+  standard
+
+  @@schema("core")
+}
+
+enum NotifStatus {
+  open
+  acknowledged
+  resolved
+  expired
+  suppressed
+
+  @@schema("core")
+}
+
+enum NotifDeliveryStatus {
+  queued
+  sent
+  delivered
+  failed
+  suppressed
+  skipped
+
+  @@schema("core")
+}
+
+enum NotifAudienceReason {
+  role
+  careteam
+  oncall
+  subscription
+  explicit
+  rule
+
+  @@schema("core")
+}
+
+enum NotifEscalationStopReason {
+  acknowledged
+  resolved
+  cancelled
+  expired
+  exhausted
+
+  @@schema("core")
+}
+
+/// EN-037 §3.1: "a registered, versioned definition rather than an ad-hoc call,
+/// so the catalogue is governable". `hospital_id IS NULL` marks a row in the
+/// shipped system catalogue, readable by every tenant and writable by none.
+model NotifType {
+  id                   String  @id @db.Uuid
+  hospitalId           String? @map("hospital_id") @db.Uuid
+  key                  String  @db.VarChar(96)
+  name                 String  @db.VarChar(160)
+  category             NotifCategory
+  severity             NotifSeverity
+  mustAcknowledge      Boolean @default(false) @map("must_acknowledge")
+  /// Null for types that do not require acknowledgement.
+  ackWindowSec         Int?    @map("ack_window_sec")
+  /// `AudienceExpression[]` from packages/contracts — role-in-scope, care
+  /// relation, on-call, explicit users, subscribers, devices.
+  audienceExpr         Json    @map("audience_expr")
+  channelsBySeverity   Json    @default("{}") @map("channels_by_severity")
+  quietHoursOverride   Boolean @default(false) @map("quiet_hours_override")
+  dedupeKeyExpr        String? @map("dedupe_key_expr") @db.VarChar(300)
+  dedupeWindowSec      Int     @default(0) @map("dedupe_window_sec")
+  coalescePolicy       NotifCoalescePolicy @default(none) @map("coalesce_policy")
+  escalationLadderId   String? @map("escalation_ladder_id") @db.Uuid
+  externalContentPolicy NotifExternalContentPolicy @default(minimal) @map("external_content_policy")
+  /// Typed context contract; PHI-classified fields are marked so the external
+  /// template validator can refuse them (EN-037 §5).
+  payloadSchema        Json    @default("{}") @map("payload_schema")
+  payloadFields        String[] @default([]) @map("payload_fields")
+  /// EN-037 §4 retention: clinical safety 3650 d, operational 365 d, info 90 d.
+  retentionDays        Int     @default(365) @map("retention_days")
+  ownerModule          String  @map("owner_module") @db.VarChar(16)
+  status               NotifTypeStatus @default(active)
+  version              Int     @default(1)
+  /// EN-037 §3.5 fatigue guardrail: per-type tenant ceiling before auto-digest.
+  rateCeilingPerHour   Int?    @map("rate_ceiling_per_hour")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  /// A retired type keeps its history; EN-037 §3.2 point 5 calls this
+  /// "retiring it from the catalogue with an audit entry".
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, key])
+  @@index([hospitalId, category, status])
+  @@index([key])
+  @@map("notif_types")
+  @@schema("core")
+}
+
+/// EN-037 §3.4. Rungs are ordered levels with their own delay, audience and
+/// channels. Held as JSON because a rung is only ever read as a whole ladder.
+model NotifEscalationLadder {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  key             String  @db.VarChar(96)
+  name            String  @db.VarChar(160)
+  /// Ward/department/branch overrides that narrow where this ladder applies.
+  scope           Json    @default("{}")
+  /// `EscalationRung[]` — level, delay_sec, audience_expr, channels,
+  /// repeat_every_sec, max_repeats.
+  rungs           Json
+  /// What happens when the last rung times out. EN-037 §3.4.6: never silence.
+  exhaustedAction Json    @default("{}") @map("exhausted_action")
+  active          Boolean @default(true)
+  version         Int     @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, key, version])
+  @@index([hospitalId, active])
+  @@map("notif_escalation_ladders")
+  @@schema("core")
+}
+
+/// EN-037 §3.2 point 2. Ordered, effective-dated, simulate-able overrides.
+model NotifRoutingRule {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  typeKey       String? @map("type_key") @db.VarChar(96)
+  category      NotifCategory?
+  condition     Json    @default("{}")
+  /// add/remove audience, force channels, override severity, suppress.
+  action        Json
+  priority      Int     @default(100)
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, priority])
+  @@index([hospitalId, typeKey, active])
+  @@map("notif_routing_rules")
+  @@schema("core")
+}
+
+/// The fact. One logical event with many recipients and many deliveries.
+/// Partitioned monthly (EN-037 §4). Append-only: EN-037 §5 — "Notification rows
+/// are append-only; state transitions are recorded with timestamps and never
+/// deleted", which is why there is no `deleted_at`.
+model NotifNotification {
+  id           String  @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String? @map("branch_id") @db.Uuid
+  typeKey      String  @map("type_key") @db.VarChar(96)
+  typeVersion  Int     @map("type_version")
+  severity     NotifSeverity
+  title        String  @db.VarChar(200)
+  bodyShort    String  @map("body_short") @db.VarChar(500)
+  bodyRich     Json?   @map("body_rich")
+  /// Typed context. PHI-classified fields are marked by the type's payload
+  /// schema so external channels can be minimised (EN-037 §5).
+  payload      Json    @default("{}")
+  containsPhi  Boolean @default(false) @map("contains_phi")
+  refType      String? @map("ref_type") @db.VarChar(64)
+  refId        String? @map("ref_id") @db.Uuid
+  patientId    String? @map("patient_id") @db.Uuid
+  encounterId  String? @map("encounter_id") @db.Uuid
+  dedupeKey    String? @map("dedupe_key") @db.VarChar(300)
+  /// EN-037 §3.2 point 3: a repeat collapses into the existing row as "×3".
+  occurrenceCount Int  @default(1) @map("occurrence_count")
+  firstAt      DateTime @default(now()) @map("first_at") @db.Timestamptz(6)
+  lastAt       DateTime @default(now()) @map("last_at") @db.Timestamptz(6)
+  expiresAt    DateTime? @map("expires_at") @db.Timestamptz(6)
+  sourceModule String  @map("source_module") @db.VarChar(16)
+  correlationId String @map("correlation_id") @db.VarChar(128)
+  escalationInstanceId String? @map("escalation_instance_id") @db.Uuid
+  status       NotifStatus @default(open)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([id, createdAt])
+  @@index([hospitalId, createdAt(sort: Desc)])
+  @@index([dedupeKey, status])
+  @@index([patientId, createdAt(sort: Desc)])
+  @@index([refType, refId])
+  @@index([correlationId])
+  @@map("notif_notifications")
+  @@schema("core")
+}
+
+/// Who was told. Read/ack state lives here, so the same fact read on a phone
+/// shows as read on the desktop within a second (EN-037 §3.1).
+model NotifRecipient {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  notificationId String  @map("notification_id") @db.Uuid
+  /// Denormalised from the parent so the recipient row can be located in the
+  /// correct monthly partition without a lookup.
+  notificationAt DateTime @map("notification_at") @db.Timestamptz(6)
+  userId         String? @map("user_id") @db.Uuid
+  deviceId       String? @map("device_id") @db.Uuid
+  audienceReason NotifAudienceReason @map("audience_reason")
+  scope          Json    @default("{}")
+  readAt         DateTime? @map("read_at") @db.Timestamptz(6)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  ackChannel     NotifChannel? @map("ack_channel")
+  /// EN-037 §3.4.4: the read-back/call-back record or the intended action.
+  /// "A tap that only dismisses is not an acknowledgement."
+  ackResponse    Json?   @map("ack_response")
+  dismissedAt    DateTime? @map("dismissed_at") @db.Timestamptz(6)
+  snoozedUntil   DateTime? @map("snoozed_until") @db.Timestamptz(6)
+  escalationLevel Int    @default(1) @map("escalation_level")
+  deliveredAny   Boolean @default(false) @map("delivered_any")
+  /// EN-037 §3.4.8: set when an off-duty transition moved this alert on.
+  handedOverToUserId String? @map("handed_over_to_user_id") @db.Uuid
+  handoverNote   String? @map("handover_note") @db.VarChar(500)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([notificationId, userId])
+  /// The bell query (EN-037 §13: p95 < 150 ms).
+  @@index([userId, readAt, createdAt(sort: Desc)])
+  @@index([hospitalId, notificationId])
+  @@map("notif_recipients")
+  @@schema("core")
+}
+
+/// One attempt on one channel. Partitioned monthly; 180-day CERT-In retention.
+model NotifDelivery {
+  id          String  @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  recipientId String  @map("recipient_id") @db.Uuid
+  channel     NotifChannel
+  attempt     Int     @default(1)
+  status      NotifDeliveryStatus @default(queued)
+  /// EN-009/EN-032/EN-033 provider message id.
+  providerRef String? @map("provider_ref") @db.VarChar(200)
+  errorClass  String? @map("error_class") @db.VarChar(64)
+  errorText   String? @map("error_text") @db.Text
+  queuedAt    DateTime @default(now()) @map("queued_at") @db.Timestamptz(6)
+  sentAt      DateTime? @map("sent_at") @db.Timestamptz(6)
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz(6)
+  latencyMs   Int?    @map("latency_ms")
+  costUnits   Decimal? @map("cost_units") @db.Decimal(14, 2)
+
+  @@id([id, queuedAt])
+  @@index([recipientId])
+  @@index([status, queuedAt])
+  @@index([hospitalId, channel, queuedAt(sort: Desc)])
+  @@map("notif_deliveries")
+  @@schema("core")
+}
+
+/// EN-037 §13: "escalation timers are durable (persisted `next_fire_at` polled
+/// every 5 s, not in-memory `setTimeout`) and survive worker restarts — a missed
+/// escalation is a patient-safety failure, not a glitch."
+model NotifEscalationInstance {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  notificationId String  @map("notification_id") @db.Uuid
+  notificationAt DateTime @map("notification_at") @db.Timestamptz(6)
+  ladderId       String? @map("ladder_id") @db.Uuid
+  currentLevel   Int     @default(1) @map("current_level")
+  startedAt      DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  nextFireAt     DateTime? @map("next_fire_at") @db.Timestamptz(6)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  acknowledgedBy String? @map("acknowledged_by") @db.Uuid
+  exhaustedAt    DateTime? @map("exhausted_at") @db.Timestamptz(6)
+  stoppedReason  NotifEscalationStopReason? @map("stopped_reason")
+  /// One entry per rung fired, with resolved targets and any roster defect.
+  levelLog       Json    @default("[]") @map("level_log")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// The escalation poller's only query — must stay a tiny index scan.
+  @@index([nextFireAt])
+  @@index([hospitalId, notificationId])
+  @@map("notif_escalation_instances")
+  @@schema("core")
+}
+
+/// EN-037 §3.6. One row per (user, category, channel). Categories listed in
+/// `LOCKED_CATEGORIES` cannot be switched off and the UI says so.
+model NotifUserPreference {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  userId          String  @map("user_id") @db.Uuid
+  category        NotifCategory
+  channel         NotifChannel
+  enabled         Boolean @default(true)
+  digestSchedule  String? @map("digest_schedule") @db.VarChar(32)
+  /// { start, end, timezone, days } — EN-037 §3.5.
+  quietHours      Json    @default("{}") @map("quiet_hours")
+  language        String  @default("en-IN") @db.VarChar(16)
+  /// { enabledUntil, reason } — bounded do-not-disturb for OT/consultation.
+  focusMode       Json    @default("{}") @map("focus_mode")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([userId, category, channel])
+  @@index([hospitalId, userId])
+  @@map("notif_user_preferences")
+  @@schema("core")
+}
+
+enum NotifDeviceKind {
+  web_push
+  fcm
+  apns
+
+  @@schema("core")
+}
+
+/// Registered push endpoints. The token itself is encrypted; `token_hash` is
+/// what uniqueness and pruning work on, so a raw token never needs to be read.
+model NotifDevice {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  userId         String  @map("user_id") @db.Uuid
+  kind           NotifDeviceKind
+  tokenEncrypted String  @map("token_encrypted") @db.Text
+  tokenHash      String  @map("token_hash") @db.VarChar(64)
+  /// Web Push (VAPID) keying material.
+  p256dh         String? @db.VarChar(200)
+  auth           String? @db.VarChar(100)
+  endpoint       String? @db.Text
+  userAgent      String? @map("user_agent") @db.VarChar(400)
+  platform       String? @db.VarChar(64)
+  lastSeenAt     DateTime? @map("last_seen_at") @db.Timestamptz(6)
+  lastSuccessAt  DateTime? @map("last_success_at") @db.Timestamptz(6)
+  failureCount   Int     @default(0) @map("failure_count")
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([userId, tokenHash])
+  @@index([hospitalId, userId, revokedAt])
+  @@map("notif_devices")
+  @@schema("core")
+}
+
+enum NotifTopicKind {
+  ward
+  department
+  doctor_list
+  store
+  project
+  patient
+
+  @@schema("core")
+}
+
+/// EN-037 §3.6: "permission-checked at subscribe time and re-checked at
+/// delivery", which is why the granting permission key is stored on the row.
+model NotifSubscription {
+  id                   String  @id @db.Uuid
+  hospitalId           String  @map("hospital_id") @db.Uuid
+  branchId             String? @map("branch_id") @db.Uuid
+  userId               String  @map("user_id") @db.Uuid
+  topicKind            NotifTopicKind @map("topic_kind")
+  topicId              String  @map("topic_id") @db.Uuid
+  grantedByPermission  String  @map("granted_by_permission") @db.VarChar(96)
+  revokedAt            DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([userId, topicKind, topicId])
+  @@index([hospitalId, topicKind, topicId])
+  @@map("notif_subscriptions")
+  @@schema("core")
+}
+
+/// EN-037 §5: "Snooze is bounded (≤8 h), never available for `critical`, and is
+/// counted as a display in fatigue metrics." The 8-hour ceiling is enforced by a
+/// CHECK constraint added in SQL, not only by the service.
+model NotifSnooze {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  userId     String  @map("user_id") @db.Uuid
+  typeKey    String? @map("type_key") @db.VarChar(96)
+  category   NotifCategory?
+  until      DateTime @db.Timestamptz(6)
+  reason     String? @db.VarChar(300)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId, until])
+  @@index([hospitalId, userId])
+  @@map("notif_snoozes")
+  @@schema("core")
+}

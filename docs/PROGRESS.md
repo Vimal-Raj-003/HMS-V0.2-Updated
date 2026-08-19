@@ -7,11 +7,11 @@
 
 | Field              | Value                                                                                                                                                                                     |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current phase      | **Phase 0 — in progress (foundation rails complete, services not yet built)**                                                                                                             |
-| Repo status        | monorepo scaffolded and **committed to git** (was entirely uncommitted until 2026-08-19); `packages/contracts`, `packages/db` and `packages/testing` build, lint and typecheck clean      |
-| Last green CI      | CI not yet wired (`.github/workflows` pending). Locally: `pnpm lint` 20/20 ✅, `pnpm typecheck` 20/20 ✅, `pnpm test` **red** — `@vims/contracts` coverage 60.62 % vs the 90 % gate (O-9) |
+| Current phase | **Phase 0 — substantially complete; API, web, worker, design system and seeds all built and green** |
+| Repo status | every package and service has source; **172 tables**, 8 migrations, 4 idempotent seed tiers, a running API with login, and a building Next.js front-end |
+| Last green CI | `.github/workflows/ci.yml` written (not yet run on GitHub). Locally **all green**: `pnpm lint` · `typecheck` · `test` · `build` · `test:integration` — **715 unit + 41 integration tests** |
 | Modules complete   | 0 / 177 — Phase 0 builds platform _rails_, not modules                                                                                                                                    |
-| Blocking questions | **O-9 blocks exit gate 1** (`packages/contracts` coverage 60.62 % vs 90 %); see `docs/DECISIONS.md` → "Open"                                                                              |
+| Blocking questions | none blocking. **O-9 closed** (contracts coverage 60.62 % → 97 %). See `docs/DECISIONS.md` → "Open" for O-1…O-8. |
 | Project path       | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                              |
 
 ### Exit-gate status (`docs/prompts/phase-00-foundation.md`)
@@ -30,6 +30,94 @@
 ---
 
 ## Session log
+
+### 2026-08-19 (later) · Phase 0 · API, front-end, worker, design system, 124 tables and seeds
+
+Built with four parallel agents on disjoint directories plus direct work on
+`services/api`, `services/worker`, `apps/web` and CI.
+
+**`services/api` — the ten-step request lifecycle (`docs/01` §3) now runs**
+- Request context (ALS) → auth guard → tenant guard → Zod pipe → policy guard →
+  `SET LOCAL` transaction → audit → outbox → RFC 9457 filter. Guards are
+  registered **globally in lifecycle order**, so a new route is closed until it
+  says otherwise, and a non-public route with no `@Permission()` is refused as a
+  programming error rather than treated as open.
+- The RBAC/ABAC engine is pure functions: deny by default, **role grants are
+  additive** (any single grant may permit — intersecting them would mean adding
+  a role could remove access), and obligations are *returned* rather than
+  performed so a controller cannot discharge one by ignoring it.
+- `PermissionRegistryService` **verifies** the catalogue at boot instead of
+  writing it, because `_grants` says `REVOKE INSERT, UPDATE, DELETE ON
+  core.permissions FROM hms_app` — the application role must not be able to
+  author the list of things it may do. Drift fails startup.
+
+**`apps/web` — the front-end builds and runs**
+- `/login` renders problem+json including its `reference`; tokens live in
+  httpOnly `sameSite=strict` cookies set by a server route, so no script in the
+  page can lift a session; `?next=` is validated as a same-origin absolute path
+  (an open redirect on a login screen is a phishing vector); middleware routes on
+  cookie *presence* only and says so — authorisation is the API's job.
+
+**`services/worker`** — outbox relay (`FOR UPDATE SKIP LOCKED`, at-least-once,
+dead-letter on exhaustion) and the audit chain sealer.
+
+**Agent results**
+- `packages/contracts`: 85 → **388 tests**, coverage 60.62 % → **97 %** (O-9 closed).
+- `packages/ui`: 330 tokens × 3 themes, **816 contrast obligations**, 19 primitives,
+  the 14 first-wave clinical components, 74 tests.
+- `packages/db`: **+124 tables (172 total)**, 730 partitions, one migration, and
+  four idempotent seed tiers (minimal 2,344 rows → volume 29,151).
+- `packages/i18n` 71 · `packages/flags` 40 (100 % coverage) · `packages/print-templates` 59.
+
+**Six defects found by running things rather than reading them**
+
+1. **`--sp-0.5` is an invalid CSS custom-property *name*.** `.` is not legal in a
+   CSS ident, so the browser discards the whole declaration — and every utility
+   built on it — in silence. Both emitters now escape to `--sp-0\.5`.
+2. **The outbox relay never marked anything published.** `occurred_at` is
+   `timestamptz(6)` and is half of the partitioned primary key, but a JS `Date`
+   holds only milliseconds; the round-tripped value matched zero rows, so every
+   event would have been redelivered forever. The row now carries
+   `occurred_at::text`.
+3. **12 hex values in `docs/06` fail WCAG 2.2 AA** on surfaces they are actually
+   used on (e.g. `--fg-subtle` at 3.98:1 on `--bg-sunken`; ESI-4 and
+   bed-vacant-clean specify white on a green reaching only 3.73:1). Each
+   deviation is documented and printed by `tokens:contrast`.
+4. **Login could not read `core.users`.** It has RLS, and an unscoped session
+   sees nothing. Login now runs hospital-scoped with no acting user.
+5. **A login could not read its own role grants.** The generated policy appends
+   `(branch_id IS NULL OR branch_id = ANY(current_branch_ids()))`, and
+   `current_branch_ids()` is empty when unset. Since the branch scope is derived
+   *from* the grants this is a genuine chicken-and-egg; `docs/05` resolves it by
+   placing branch choice after the password step. Codified in
+   `currentTenantContext()`.
+6. **`scripts/check-hex-literals.mjs` did not exist** although the root
+   `tokens:check` script referenced it.
+
+**Verified**
+`pnpm lint` · `typecheck` · `test` · `build` · `test:integration` all green.
+**715 unit + 41 integration tests.** RLS covers 172/172 tables with `WITH CHECK`;
+the unrestricted-policy allow-list is still exactly `permissions` and
+`setting_definitions`; `verify-isolation.sql` passes on both a bare and a seeded
+database; seeds re-run write **zero** rows with byte-identical per-table digests.
+The decisive API test reads `core.users` with **no `hospital_id` predicate** and
+still never crosses tenants — row-level security, not a WHERE clause, is doing
+the work.
+
+**Not done / next**
+- **`test:e2e`** — Playwright is configured in the manifests but no specs exist,
+  so exit gates 2, 3 and 7 (login as each of 8 roles, Lighthouse ≥ 90, PWA
+  installable/offline) are not yet demonstrable end-to-end in a browser.
+- **`services/realtime`, `services/integration-hub`, `apps/tv-kiosk`** — still
+  manifests only.
+- Admin console screens (users, roles matrix, audit viewer, flags, licence).
+- ESC/POS token print and PDF letterhead render (exit gate 6) — the templates
+  exist in `packages/print-templates`; the worker-side Playwright renderer does not.
+- MDM domain masters (`mdm_services`, `mdm_drugs`, …) are deliberately deferred to
+  Phases 1–2 with a registry row each rather than invented.
+- Two ADRs are owed: the EN-018 `display_*` schema placement, and the
+  global-catalogue RLS predicate `USING (cardinality(accessible_hospital_ids()) > 0)`.
+
 
 ### 2026-08-19 · Phase 0 · Step 0–1: git baseline + `packages/testing` harness
 

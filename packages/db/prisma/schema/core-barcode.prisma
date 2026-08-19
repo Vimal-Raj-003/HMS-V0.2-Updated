@@ -1,0 +1,218 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-013 — Barcode / QR (schema `core`, prefix `bc_`)
+//
+// `docs/PROGRESS.md` lists `bc_*` among the missing Phase-0 table groups. The
+// `bc_` prefix is EN-013's (see `EN-013 §4`, "schema `core`, prefix `bc_`"), not
+// EN-018's — EN-018 uses `display_*`. Both are created in this phase because
+// both are Phase-0 modules and both appear in the Phase-0 role templates
+// (`barcode.scan` is in `BASE_CLINICAL`; `display.board.read` is the tv-kiosk
+// device scope).
+//
+// EN-040 marks `module.barcode.enabled` `clinicalSafetyExempt` — patient
+// identification is never gated by a licence, which is why these tables exist
+// in Phase 0 rather than with the first clinical module that scans a wristband.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// EN-013 §3.1: per-entity ID scheme. `hospital_id IS NULL` = shipped default.
+model BcScheme {
+  id              String  @id @db.Uuid
+  hospitalId      String? @map("hospital_id") @db.Uuid
+  entityType      String  @map("entity_type") @db.VarChar(48)
+  key             String  @db.VarChar(64)
+  symbology       String  @db.VarChar(24)
+  payloadFormat   String  @map("payload_format") @db.VarChar(300)
+  prefix          String? @db.VarChar(16)
+  /// GS1 application-identifier map for (01)/(10)/(17)/(21) style payloads.
+  aiMap           Json    @default("{}") @map("ai_map")
+  checkDigit      String? @map("check_digit") @db.VarChar(16)
+  labelTemplateId String? @map("label_template_id") @db.Uuid
+  signed          Boolean @default(false)
+  version         Int     @default(1)
+  active          Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, entityType, key])
+  @@index([entityType, active])
+  @@map("bc_schemes")
+  @@schema("core")
+}
+
+/// EN-013 §3.5: every label issued, so a reprint is always attributable.
+model BcLabelIssued {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String  @map("branch_id") @db.Uuid
+  schemeKey       String  @map("scheme_key") @db.VarChar(64)
+  entityType      String  @map("entity_type") @db.VarChar(48)
+  entityId        String  @map("entity_id") @db.Uuid
+  codeValue       String  @map("code_value") @db.VarChar(300)
+  printerId       String? @map("printer_id") @db.Uuid
+  printedBy       String? @map("printed_by") @db.Uuid
+  printedAt       DateTime @default(now()) @map("printed_at") @db.Timestamptz(6)
+  copies          Int     @default(1)
+  isReprint       Boolean @default(false) @map("is_reprint")
+  reprintReason   String? @map("reprint_reason") @db.VarChar(500)
+  templateVersion Int?    @map("template_version")
+
+  @@index([entityType, entityId])
+  @@index([hospitalId, printedAt(sort: Desc)])
+  @@map("bc_labels_issued")
+  @@schema("core")
+}
+
+/// EN-013 §4. Mother–baby linked bands share a code root; deactivation on
+/// discharge or replacement is recorded rather than the row being removed.
+model BcWristband {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  encounterId   String? @map("encounter_id") @db.Uuid
+  bandType      String  @map("band_type") @db.VarChar(16)
+  codeValue     String  @map("code_value") @db.VarChar(300)
+  /// allergy / fall / dnr / isolation colour flags (docs/06 §5 patient safety).
+  colourFlags   Json    @default("{}") @map("colour_flags")
+  linkedBandId  String? @map("linked_band_id") @db.Uuid
+  issuedAt      DateTime @default(now()) @map("issued_at") @db.Timestamptz(6)
+  issuedBy      String? @map("issued_by") @db.Uuid
+  deactivatedAt DateTime? @map("deactivated_at") @db.Timestamptz(6)
+  reason        String? @db.VarChar(300)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, patientId, issuedAt(sort: Desc)])
+  @@index([codeValue])
+  @@map("bc_wristbands")
+  @@schema("core")
+}
+
+/// EN-013 §3.6, partitioned monthly and sampled (verification scans 100 %,
+/// navigation scans 10 %). `raw_value` is hashed when the code carries PHI.
+model BcScanEvent {
+  id            String  @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  userId        String? @map("user_id") @db.Uuid
+  deviceId      String? @map("device_id") @db.Uuid
+  screenContext String? @map("screen_context") @db.VarChar(120)
+  rawValueHash  String? @map("raw_value_hash") @db.VarChar(64)
+  schemeKey     String? @map("scheme_key") @db.VarChar(64)
+  entityType    String? @map("entity_type") @db.VarChar(48)
+  entityId      String? @map("entity_id") @db.Uuid
+  resolved      Boolean @default(false)
+  actionTaken   String? @map("action_taken") @db.VarChar(64)
+  occurredAt    DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@id([id, occurredAt])
+  @@index([hospitalId, occurredAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@map("bc_scan_events")
+  @@schema("core")
+}
+
+model BcScannerProfile {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  name        String  @db.VarChar(160)
+  makeModel   String? @map("make_model") @db.VarChar(160)
+  prefix      String? @db.VarChar(16)
+  suffix      String? @db.VarChar(16)
+  symbologies String[] @default([])
+  minLength   Int?    @map("min_length")
+  notes       String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, name])
+  @@map("bc_scanner_profiles")
+  @@schema("core")
+}
+
+/// Mirror of NC-006 `item_gtins`, kept here so a scan resolves without a
+/// cross-module query before Phase 4 exists.
+model BcGtinMap {
+  id        String  @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  gtin      String  @db.VarChar(14)
+  itemId    String? @map("item_id") @db.Uuid
+  packLevel String? @map("pack_level") @db.VarChar(24)
+  uom       String? @db.VarChar(24)
+  source    String  @default("manual") @db.VarChar(16)
+  verified  Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, gtin, packLevel], map: "bc_gtin_map_key")
+  @@index([hospitalId, itemId])
+  @@map("bc_gtin_map")
+  @@schema("core")
+}
+
+/// GUDID/CDSCO lookups for implant UDIs, cached so an OT scan works offline.
+model BcUdiCache {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  udiDi        String  @map("udi_di") @db.VarChar(64)
+  issuer       String? @db.VarChar(32)
+  deviceName   String? @map("device_name") @db.VarChar(300)
+  manufacturer String? @db.VarChar(300)
+  gmdn         String? @db.VarChar(64)
+  lookupSource String  @map("lookup_source") @db.VarChar(24)
+  fetchedAt    DateTime @default(now()) @map("fetched_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, udiDi])
+  @@map("bc_udi_cache")
+  @@schema("core")
+}
+
+/// EN-013 §4: the two-person / five-rights verification record. Clinical safety
+/// evidence — append-only, never deleted.
+model BcVerification {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  branchId       String? @map("branch_id") @db.Uuid
+  kind           String  @db.VarChar(24)
+  patientId      String? @map("patient_id") @db.Uuid
+  encounterId    String? @map("encounter_id") @db.Uuid
+  /// The codes that were actually scanned, not what was expected.
+  scanned        Json    @default("[]")
+  result         String  @db.VarChar(16)
+  overrideReason String? @map("override_reason") @db.VarChar(500)
+  userIds        String[] @default([]) @map("user_ids") @db.Uuid
+  occurredAt     DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, patientId, occurredAt(sort: Desc)])
+  @@index([hospitalId, kind, occurredAt(sort: Desc)])
+  @@map("bc_verifications")
+  @@schema("core")
+}
+
+/// Signed tokens behind public QR codes (report verification, visitor passes).
+model BcSignedToken {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  code       String  @db.VarChar(120)
+  entityType String  @map("entity_type") @db.VarChar(48)
+  entityId   String  @map("entity_id") @db.Uuid
+  scopes     String[] @default([])
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
+  revoked    Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([code])
+  @@index([hospitalId, entityType, entityId])
+  @@map("bc_signed_tokens")
+  @@schema("core")
+}
