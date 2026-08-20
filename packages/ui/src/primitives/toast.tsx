@@ -265,6 +265,12 @@ export function ToastViewport({ label, renderOverflow }: ToastViewportProps): Re
   return (
     <div
       data-slot="toast-viewport"
+      // A bare <div> has no role, and ARIA prohibits an accessible name on a
+      // generic element: `aria-label` is discarded, so the region announces as
+      // nothing. `role="region"` is what makes the name survive, and it also
+      // gives the alerts a landmark a screen-reader user can jump to — which is
+      // the point of a toast region carrying clinical alerts.
+      role="region"
       aria-label={label}
       className={cn(
         'pointer-events-none fixed inset-inline-end-4 bottom-4 z-toast flex w-full max-w-96 flex-col gap-2',

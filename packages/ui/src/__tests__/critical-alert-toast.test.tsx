@@ -71,6 +71,23 @@ describe('CriticalAlertToast — docs/06 §5.2 #32', () => {
     );
     await expect(findAccessibilityViolations(container)).resolves.toEqual([]);
   });
+
+  /**
+   * The toast *item* was axe-tested from the start; the viewport that wraps it
+   * never was, and that is where the defect lived — `aria-label` on a role-less
+   * <div>, which ARIA prohibits, so the region's name was discarded and it
+   * announced as nothing. Testing a component in isolation does not test the
+   * container it is mounted into.
+   */
+  it('gives the viewport a named landmark, and has no axe violations', async () => {
+    const { container } = render(
+      <ToastProvider>
+        <ToastViewport label="Notifications" />
+      </ToastProvider>,
+    );
+    expect(screen.getByRole('region', { name: 'Notifications' })).toBeInTheDocument();
+    await expect(findAccessibilityViolations(container)).resolves.toEqual([]);
+  });
 });
 
 function Publisher(): React.JSX.Element {
