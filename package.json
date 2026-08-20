@@ -17,7 +17,7 @@
     "test": "turbo run test",
     "test:integration": "turbo run test:integration",
     "test:safety": "turbo run test:safety",
-    "test:e2e": "playwright test --config=apps/web/playwright.config.ts",
+    "test:e2e": "pnpm --filter @vims/web test:e2e",
     "clean": "turbo run clean && rm -rf node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css,yaml,yml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,css,yaml,yml}\"",

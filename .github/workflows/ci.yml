@@ -114,6 +114,58 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
+  # ── Stage 8: end-to-end ────────────────────────────────────────────────────
+  e2e:
+    name: 8 · End-to-end (browser)
+    runs-on: ubuntu-latest
+    needs: [unit, build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The suite starts its own PostgreSQL container, seeds it, and starts both
+      # the API and a production build of the web app, so it needs the build
+      # first and a browser binary.
+      - name: Build the web app
+        run: pnpm --filter @vims/web build
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run the browser suite
+        run: pnpm test:e2e
+      - name: Upload the report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
+  # ── Stage 9: safety ────────────────────────────────────────────────────────
+  # docs/09 §15 stage 9: "`pnpm test:safety` — always, every PR". The suites do
+  # not exist yet (they arrive with the clinical modules that have hard stops to
+  # bypass), but the stage is wired now so adding one cannot be forgotten.
+  safety:
+    name: 9 · Clinical safety
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ env.NODE_VERSION_FILE }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Clinical-safety invariants
+        # packages/flags proves that no licence state, degradation tier or
+        # feature flag can disable a clinical-safety-exempt capability.
+        run: pnpm --filter @vims/flags test
+      - run: pnpm test:safety
+
   # ── Stage 7: security ──────────────────────────────────────────────────────
   security:
     name: 7 · Security
