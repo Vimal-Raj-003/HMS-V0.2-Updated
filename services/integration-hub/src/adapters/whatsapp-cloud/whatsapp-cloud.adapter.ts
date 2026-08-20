@@ -69,7 +69,10 @@ export const whatsAppOptionsSchema = z
     wabaId: z.string().min(1).max(64),
     phoneNumberId: z.string().min(1).max(64),
     /** Graph API version. Pinned: Meta deprecates versions on a schedule. */
-    graphVersion: z.string().regex(/^v\d+\.\d+$/).default('v20.0'),
+    graphVersion: z
+      .string()
+      .regex(/^v\d+\.\d+$/)
+      .default('v20.0'),
     /** App secret for `X-Hub-Signature-256`. A reference, never the value. */
     appSecretRef: secretRefSchema,
   })
@@ -195,7 +198,9 @@ const metaWebhookSchema = z.object({
                       timestamp: z.union([z.string(), z.number()]).optional(),
                       type: z.string().optional(),
                       text: z.object({ body: z.string().optional() }).optional(),
-                      button: z.object({ payload: z.string().optional(), text: z.string().optional() }).optional(),
+                      button: z
+                        .object({ payload: z.string().optional(), text: z.string().optional() })
+                        .optional(),
                     }),
                   )
                   .optional(),
@@ -251,7 +256,13 @@ export class WhatsAppCloudAdapter implements ConnectorAdapter {
     const options = this.options;
     if (ctx === undefined || options === undefined) throw new Error(NOT_CONFIGURED);
     if (this.closed) {
-      return { status: 'failed', errorClass: 'network', message: 'adapter is closed', retryable: true, latencyMs: 0 };
+      return {
+        status: 'failed',
+        errorClass: 'network',
+        message: 'adapter is closed',
+        retryable: true,
+        latencyMs: 0,
+      };
     }
     if (operationKey !== 'sendTemplate') {
       return {
@@ -282,7 +293,12 @@ export class WhatsAppCloudAdapter implements ConnectorAdapter {
         { connectorId: ctx.connectorId, templateKey: payload.templateKey },
         'WhatsApp: sandbox/replay — call recorded, nothing sent',
       );
-      return { status: 'acknowledged', partnerRef: `sandbox:${message.messageId}`, latencyMs: 0, response: { sandbox: true } };
+      return {
+        status: 'acknowledged',
+        partnerRef: `sandbox:${message.messageId}`,
+        latencyMs: 0,
+        response: { sandbox: true },
+      };
     }
 
     const components: unknown[] = [];
@@ -357,10 +373,11 @@ export class WhatsAppCloudAdapter implements ConnectorAdapter {
           status: 'failed',
           errorClass: mapped,
           code: `META_${String(code)}`,
-          message:
-            error.success
-              ? error.data.error.error_data?.details ?? error.data.error.message ?? 'WhatsApp Cloud rejected the message'
-              : 'WhatsApp Cloud rejected the message',
+          message: error.success
+            ? (error.data.error.error_data?.details ??
+              error.data.error.message ??
+              'WhatsApp Cloud rejected the message')
+            : 'WhatsApp Cloud rejected the message',
           // `rate_limited`, `auth` and `partner_5xx` are the hub's retryable set;
           // an undeliverable recipient is not retryable, it is a fallback.
           retryable: mapped === 'rate_limited' || mapped === 'auth' || mapped === 'partner_5xx',
@@ -373,7 +390,9 @@ export class WhatsAppCloudAdapter implements ConnectorAdapter {
         latencyMs,
         now: ctx.clock.now(),
         ...(code === undefined ? {} : { code: `META_${String(code)}` }),
-        ...(error.success && error.data.error.message !== undefined ? { message: error.data.error.message } : {}),
+        ...(error.success && error.data.error.message !== undefined
+          ? { message: error.data.error.message }
+          : {}),
       });
     }
 
@@ -385,7 +404,8 @@ export class WhatsAppCloudAdapter implements ConnectorAdapter {
         status: 'failed',
         errorClass: 'schema_drift',
         code: 'META_NO_WAMID',
-        message: 'WhatsApp Cloud answered 2xx without a message id, so no status webhook could ever be matched',
+        message:
+          'WhatsApp Cloud answered 2xx without a message id, so no status webhook could ever be matched',
         retryable: false,
         latencyMs,
         httpStatus: response.status,
@@ -407,7 +427,8 @@ export class WhatsAppCloudAdapter implements ConnectorAdapter {
    * HMAC is over the bytes Meta sent, not over a re-serialisation of them.
    */
   receive(raw: RawInbound): Promise<CanonicalEnvelope> {
-    if (this.context === undefined || this.options === undefined) return Promise.reject(new Error(NOT_CONFIGURED));
+    if (this.context === undefined || this.options === undefined)
+      return Promise.reject(new Error(NOT_CONFIGURED));
 
     const text = typeof raw.body === 'string' ? raw.body : '';
     const signature = headerValue(raw.headers, 'x-hub-signature-256');
@@ -460,7 +481,8 @@ export class WhatsAppCloudAdapter implements ConnectorAdapter {
             providerMessageId: inboundMessage.id,
             from: inboundMessage.from.startsWith('+') ? inboundMessage.from : `+${inboundMessage.from}`,
             at: epochToDate(inboundMessage.timestamp, raw.receivedAt),
-            kind: inboundMessage.type === 'button' ? 'button' : inboundMessage.type === 'text' ? 'text' : 'media',
+            kind:
+              inboundMessage.type === 'button' ? 'button' : inboundMessage.type === 'text' ? 'text' : 'media',
             ...(inboundMessage.text?.body === undefined ? {} : { text: inboundMessage.text.body }),
             ...(buttonPayload === undefined ? {} : { buttonPayload }),
           });
@@ -552,7 +574,9 @@ export function createWhatsAppCloudFactory(
         );
       }
       if (config.auth.type !== 'api_key') {
-        return ["WhatsApp Cloud uses a bearer token, so auth.type must be 'api_key' with header 'Authorization'"];
+        return [
+          "WhatsApp Cloud uses a bearer token, so auth.type must be 'api_key' with header 'Authorization'",
+        ];
       }
       // A cross-border flow to Meta is exactly what EN-017 §5 wants recorded.
       if (!config.dpdp.crossBorder) {

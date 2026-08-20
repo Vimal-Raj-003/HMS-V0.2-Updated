@@ -1,20 +1,21 @@
 # AI-005 — Predictive Analytics (30-Day Readmission, No-Show & Overbooking, Length of Stay, Bed Demand & Staffing Forecast, Inventory Demand, Revenue Forecast, Deterioration/Sepsis Early Warning, Claim-Denial Risk — with Feature Store, Model Registry, Drift & Fairness Monitoring, SHAP Explainability)
 
-| Field | Value |
-|---|---|
-| Domain | AI & Advanced Tech |
-| Module ID | AI-005 |
-| Phase | 12 |
-| Priority | P2 |
-| Complexity | Very High |
-| Depends on | **AI-001 §0 (AI Platform Foundation — mandatory)**, EN-001 (analytics schema & semantic layer — the feature source), NC-011 (dataset registry), EN-029 (deterministic scores NEWS2/qSOFA remain authoritative), IP-001/IP-025 (admissions, bed board, patient flow), IP-002 (discharge), OP-001 (appointments/slots), NC-006 (stock ledger, item master), NC-005 (purchase lead times), NC-030 (duty roster), RC-004 (denials), RC-001/EN-002 (claims), OP-005/IP-005 (billing), EN-037 (alert routing), EN-024 (audit), EN-041 (multi-branch scope) |
-| Consumed by | IP-025 (bed command centre), IP-001/IP-003/IP-009 (ward & ICU), OP-001 (overbooking policy), PE-002 (recall & post-discharge calls), NC-006/NC-005 (replenishment), NC-030 (rostering), NC-009/NC-022 (finance & budget), RC-002/RC-004 (pre-auth & denial prevention), AI-002 (cites risk scores), EN-001 (dashboards) |
-| Feature flag | `module.ai_predict.enabled` (sub: `predict.readmission`, `predict.noshow`, `predict.los`, `predict.bed_demand`, `predict.staffing`, `predict.inventory`, `predict.revenue`, `predict.deterioration`, `predict.denial`) |
-| Primary roles | Bed Manager / Patient Flow (IP-025 operator), Nurse Supervisor / Matron (22), Hospital Admin (2), Finance Manager (46), Stores In-charge (44), Insurance Desk (28), Front Office lead (24) |
-| Secondary roles | Medical Superintendent (4 — clinical model governance), Intensivist (11), Quality Manager (54), Data steward / analyst, DPO (57 — profiling governance), Auditor (58) |
-| Regulatory | DPDP Act 2023 & Rules 2025 (**automated profiling of patients requires a lawful purpose, transparency and human review; §9 prohibits behavioural profiling of children**), CDSCO/India MDR — clinical risk models are **decision-support outputs presented to clinicians, never autonomous clinical action** (AI-001 §0.8); NABH 6th edn (readmission, ALOS, occupancy are declared quality indicators — model outputs must never be used to restate an actual indicator); IRDAI (no denial or care-limiting decision may be made by a model); NMC (clinical accountability rests with the practitioner); fairness expectations for scheme vs self-pay patients (PMJAY/CGHS) |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain          | AI & Advanced Tech                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Module ID       | AI-005                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Phase           | 12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Priority        | P2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Complexity      | Very High                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Depends on      | **AI-001 §0 (AI Platform Foundation — mandatory)**, EN-001 (analytics schema & semantic layer — the feature source), NC-011 (dataset registry), EN-029 (deterministic scores NEWS2/qSOFA remain authoritative), IP-001/IP-025 (admissions, bed board, patient flow), IP-002 (discharge), OP-001 (appointments/slots), NC-006 (stock ledger, item master), NC-005 (purchase lead times), NC-030 (duty roster), RC-004 (denials), RC-001/EN-002 (claims), OP-005/IP-005 (billing), EN-037 (alert routing), EN-024 (audit), EN-041 (multi-branch scope)                                                                                                                         |
+| Consumed by     | IP-025 (bed command centre), IP-001/IP-003/IP-009 (ward & ICU), OP-001 (overbooking policy), PE-002 (recall & post-discharge calls), NC-006/NC-005 (replenishment), NC-030 (rostering), NC-009/NC-022 (finance & budget), RC-002/RC-004 (pre-auth & denial prevention), AI-002 (cites risk scores), EN-001 (dashboards)                                                                                                                                                                                                                                                                                                                                                      |
+| Feature flag    | `module.ai_predict.enabled` (sub: `predict.readmission`, `predict.noshow`, `predict.los`, `predict.bed_demand`, `predict.staffing`, `predict.inventory`, `predict.revenue`, `predict.deterioration`, `predict.denial`)                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Primary roles   | Bed Manager / Patient Flow (IP-025 operator), Nurse Supervisor / Matron (22), Hospital Admin (2), Finance Manager (46), Stores In-charge (44), Insurance Desk (28), Front Office lead (24)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Secondary roles | Medical Superintendent (4 — clinical model governance), Intensivist (11), Quality Manager (54), Data steward / analyst, DPO (57 — profiling governance), Auditor (58)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Regulatory      | DPDP Act 2023 & Rules 2025 (**automated profiling of patients requires a lawful purpose, transparency and human review; §9 prohibits behavioural profiling of children**), CDSCO/India MDR — clinical risk models are **decision-support outputs presented to clinicians, never autonomous clinical action** (AI-001 §0.8); NABH 6th edn (readmission, ALOS, occupancy are declared quality indicators — model outputs must never be used to restate an actual indicator); IRDAI (no denial or care-limiting decision may be made by a model); NMC (clinical accountability rests with the practitioner); fairness expectations for scheme vs self-pay patients (PMJAY/CGHS) |
 
 ## 1. Purpose
+
 AI-005 is the hospital's supervised-ML layer: a governed feature store over EN-001's analytics schema, a training and
 registry pipeline, and nine production models whose outputs drive concrete operational decisions — who gets a
 post-discharge call, which slots to overbook, when to open the surge ward, how many nurses to roster, what to
@@ -23,6 +24,7 @@ explainable (SHAP), calibrated, monitored for drift and fairness, and routed to 
 diagnoses, never denies care, and never overrides a deterministic score.
 
 ## 2. Users & Jobs-to-be-done
+
 - **Bed manager / patient flow (IP-025, desktop + TV, hourly)**: a 72-hour bed-demand forecast by ward class and a
   ranked list of predicted discharges so housekeeping and admissions can be sequenced instead of firefought.
 - **Nurse supervisor (22, weekly)**: a census and acuity forecast that turns into a roster proposal in NC-030,
@@ -44,6 +46,7 @@ diagnoses, never denies care, and never overrides a deterministic score.
 ## 3. Core Workflows
 
 ### 3.1 Feature store
+
 1. **Source of truth is EN-001's `analytics` schema** — AI-005 never reads transactional tables live. Features are
    defined declaratively (`predict_features`): key, description, entity (`patient` / `encounter` / `appointment` /
    `slot` / `ward` / `item` / `claim` / `branch`), SQL/Kysely expression over analytics facts, data type, refresh
@@ -55,13 +58,14 @@ diagnoses, never denies care, and never overrides a deterministic score.
    observable at or before D. The pipeline rejects any feature whose expression references a future-dated fact —
    leakage checks run in CI on every feature definition change.
 4. **Forbidden features are declared and blocked at definition time**: caste, religion, exact address beyond PIN
-   district, insurance-scheme membership *as a predictor of clinical need*, and any free-text field that could
-   re-introduce a protected attribute. Payer class may be used for *financial* models (denial, revenue) but never for
-   *clinical* models (readmission, deterioration, LOS).
+   district, insurance-scheme membership _as a predictor of clinical need_, and any free-text field that could
+   re-introduce a protected attribute. Payer class may be used for _financial_ models (denial, revenue) but never for
+   _clinical_ models (readmission, deterioration, LOS).
 5. Feature lineage is recorded: which analytics facts, which modules produced them, last refresh, null rate,
    distribution baseline (for PSI drift).
 
 ### 3.2 Training pipeline & model registry
+
 1. A training run is declared as a versioned job (`predict_training_runs`): model key, algorithm, feature set version,
    label definition, **temporal split** (train on the older window, validate on the recent window — never a random
    split, which leaks time), hyperparameters, class balance handling, and the cohort filter.
@@ -83,6 +87,7 @@ diagnoses, never denies care, and never overrides a deterministic score.
    drift alerts; every retrain re-runs the whole gate.
 
 ### 3.3 Scoring & operational integration
+
 1. **Batch scoring** (nightly 02:00 hospital TZ, plus intra-day where stated) writes to `predict_scores`, never
    directly into a clinical or financial table.
 2. Each score carries: model key + version, value, calibrated probability or interval, **risk band** (the operational
@@ -91,25 +96,26 @@ diagnoses, never denies care, and never overrides a deterministic score.
 3. **Routing is the point** — a score with no owner and no action is dead weight. Each model declares its
    integration:
 
-| Model | Cadence | Lands where | Human decision |
-|---|---|---|---|
-| 30-day readmission | at discharge + daily for IP | IP-002 discharge checklist, PE-002 call list | discharge planner enrols the patient in a follow-up pathway |
-| No-show | T-72 h, T-24 h per appointment | OP-001 slot board, EN-009 reminder tiering | front office applies the overbooking policy & targeted reminders |
-| Length of stay | on admission + daily | IP-001/IP-025 bed board, RC-002 pre-auth extension | bed manager plans; case manager extends pre-auth early |
-| Bed demand (72 h/7 d) | hourly | IP-025 command centre, TV board | open/close surge beds, defer elective admissions |
-| Staffing/acuity | daily for the next 14 days | NC-030 roster planner | supervisor approves the roster proposal |
-| Inventory demand | weekly + on stock event | NC-006 reorder proposals, NC-005 indents | stores raises the indent |
-| Revenue/collections | monthly + rolling 90 d | NC-009/NC-022, EN-001 dashboard | finance adjusts budget/AR focus |
-| Deterioration/sepsis | every vitals/lab event | IP-003/IP-009 patient rail **beside NEWS2** | nurse escalates per policy |
-| Claim denial risk | pre-submission | RC-001 claim workbench, RC-004 | insurance desk fixes documentation before submitting |
+| Model                 | Cadence                        | Lands where                                        | Human decision                                                   |
+| --------------------- | ------------------------------ | -------------------------------------------------- | ---------------------------------------------------------------- |
+| 30-day readmission    | at discharge + daily for IP    | IP-002 discharge checklist, PE-002 call list       | discharge planner enrols the patient in a follow-up pathway      |
+| No-show               | T-72 h, T-24 h per appointment | OP-001 slot board, EN-009 reminder tiering         | front office applies the overbooking policy & targeted reminders |
+| Length of stay        | on admission + daily           | IP-001/IP-025 bed board, RC-002 pre-auth extension | bed manager plans; case manager extends pre-auth early           |
+| Bed demand (72 h/7 d) | hourly                         | IP-025 command centre, TV board                    | open/close surge beds, defer elective admissions                 |
+| Staffing/acuity       | daily for the next 14 days     | NC-030 roster planner                              | supervisor approves the roster proposal                          |
+| Inventory demand      | weekly + on stock event        | NC-006 reorder proposals, NC-005 indents           | stores raises the indent                                         |
+| Revenue/collections   | monthly + rolling 90 d         | NC-009/NC-022, EN-001 dashboard                    | finance adjusts budget/AR focus                                  |
+| Deterioration/sepsis  | every vitals/lab event         | IP-003/IP-009 patient rail **beside NEWS2**        | nurse escalates per policy                                       |
+| Claim denial risk     | pre-submission                 | RC-001 claim workbench, RC-004                     | insurance desk fixes documentation before submitting             |
 
-4. **Alert routing** goes through EN-037 with per-model priority; clinical models are capped at *informational*
+4. **Alert routing** goes through EN-037 with per-model priority; clinical models are capped at _informational_
    priority (EN-029 owns must-acknowledge escalation). Alert volume budgets apply exactly as in EN-029 §3.7 — a
    predictive alert that is ignored 90 % of the time is retired.
 5. Every human action on a score (enrolled / dismissed / overbooked / reordered / documentation fixed) is captured as
    an outcome, closing the loop for the next evaluation.
 
 ### 3.4 Model-by-model definitions (labels & guardrails)
+
 - **30-day readmission**: label = unplanned inpatient readmission to any branch within 30 days of discharge
   (planned/chemo/dialysis cycles excluded). Features: prior admissions, comorbidity burden, LOS, discharge
   disposition, med count/high-risk meds, key labs at discharge, follow-up booked, distance from hospital (district
@@ -140,6 +146,7 @@ diagnoses, never denies care, and never overrides a deterministic score.
   payer/package. Output: risk band + **specific missing evidence**, which is the actionable part.
 
 ### 3.5 Monitoring, drift & fairness
+
 1. Daily: prediction volume, score distribution, null-feature rate, serving latency, feature freshness.
 2. **Input drift** — PSI per feature vs the training baseline; PSI > 0.2 flags, > 0.25 on a top-5 feature triggers
    retraining review. **Output drift** — score distribution shift, calibration decay (Brier/ECE recomputed as labels
@@ -154,6 +161,7 @@ diagnoses, never denies care, and never overrides a deterministic score.
 6. Incidents (a model that misled an operational decision) are logged in NC-015 with the score id.
 
 ### 3.6 Exceptions
+
 - **Model unavailable / stale features** → the score is not shown at all rather than shown stale; the UI falls back to
   the heuristic (AI-001 §0.7) with a "heuristic" badge.
 - **Cold start** (new hospital, new branch, < 6 months of data) → ship the heuristic baselines and a clearly-labelled
@@ -164,6 +172,7 @@ diagnoses, never denies care, and never overrides a deterministic score.
   forecasts (beds, staffing, inventory, revenue) are unaffected as they are non-identifying.
 
 ## 4. Data Model (schema `ai`, prefix `predict_`; shared tables per AI-001 §0.10)
+
 - `predict_features` — id, hospital_id?, key, entity enum(patient/encounter/appointment/slot/ward/item/claim/branch),
   description, expression_ref (analytics SQL/Kysely fragment), dtype, refresh_cadence, phi_level, allowed_models[],
   forbidden bool, baseline_stats jsonb, owner, version, effective_from; UNIQUE(hospital_id, key, version).
@@ -197,6 +206,7 @@ diagnoses, never denies care, and never overrides a deterministic score.
   for the life of any model version + 2 years, drift metrics 3 years.
 
 ## 5. Business Rules & Validations
+
 - **No model output ever takes an action by itself.** Every integration point is a proposal to a named human role
   with an accept/dismiss action that is recorded.
 - **A model may never be used to deny, delay or ration clinical care**, to refuse admission, to shorten a clinically
@@ -220,23 +230,25 @@ diagnoses, never denies care, and never overrides a deterministic score.
 - Champion promotion, demotion and rollback are audited with the metrics that justified them.
 
 ## 6. API Surface (`/api/v1/predict`)
-| Method | Path | Purpose | Permission | Notes |
-|---|---|---|---|---|
-| GET/POST | /features ; /features/:key/versions | feature definitions | `predict.feature.read|manage` (data steward) | leakage check on save |
-| POST | /features/backfill | rebuild point-in-time snapshots | `predict.feature.manage` | long-running job |
-| GET/POST | /models ; GET /models/:key/versions | registry | `predict.model.read|manage` | |
-| POST | /models/:key/train | launch a training run | `predict.model.train` | async; returns run id |
-| POST | /models/:key/versions/:v/promote \| /shadow \| /rollback \| /retire | lifecycle | `predict.model.promote` (+ EN-038) | thresholds + model card enforced |
-| GET | /models/:key/versions/:v/card ; /metrics ; /fairness ; /shap | transparency | `predict.model.read` | |
-| POST | /score | on-demand scoring for an entity | `predict.score.request` | rate-limited; returns drivers |
-| GET | /scores?model&entity&band&from&to | score lists (worklists) | `predict.score.read` (role-scoped) | cursor pagination |
-| POST | /scores/:id/action | record the human decision | `predict.score.act` | closes the loop |
-| GET | /forecasts?model&dimension&horizon | time-series outputs | `predict.forecast.read` | beds, staffing, inventory, revenue |
-| GET/PUT | /overbooking-policy | bounded overbooking configuration | `predict.overbooking.manage` (2, 24 lead, 5) | approval required |
-| GET | /drift?model&from&to ; GET /monitoring | drift, calibration, fairness dashboards | `predict.monitor.read` | |
-| GET | /explain/:scoreId | SHAP drivers in plain language | `predict.score.read` | also the DSAR answer |
+
+| Method   | Path                                                                | Purpose                                 | Permission                                   | Notes                              |
+| -------- | ------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------- | ---------------------------------- |
+| GET/POST | /features ; /features/:key/versions                                 | feature definitions                     | `predict.feature.read                        | manage` (data steward)             | leakage check on save |
+| POST     | /features/backfill                                                  | rebuild point-in-time snapshots         | `predict.feature.manage`                     | long-running job                   |
+| GET/POST | /models ; GET /models/:key/versions                                 | registry                                | `predict.model.read                          | manage`                            |                       |
+| POST     | /models/:key/train                                                  | launch a training run                   | `predict.model.train`                        | async; returns run id              |
+| POST     | /models/:key/versions/:v/promote \| /shadow \| /rollback \| /retire | lifecycle                               | `predict.model.promote` (+ EN-038)           | thresholds + model card enforced   |
+| GET      | /models/:key/versions/:v/card ; /metrics ; /fairness ; /shap        | transparency                            | `predict.model.read`                         |                                    |
+| POST     | /score                                                              | on-demand scoring for an entity         | `predict.score.request`                      | rate-limited; returns drivers      |
+| GET      | /scores?model&entity&band&from&to                                   | score lists (worklists)                 | `predict.score.read` (role-scoped)           | cursor pagination                  |
+| POST     | /scores/:id/action                                                  | record the human decision               | `predict.score.act`                          | closes the loop                    |
+| GET      | /forecasts?model&dimension&horizon                                  | time-series outputs                     | `predict.forecast.read`                      | beds, staffing, inventory, revenue |
+| GET/PUT  | /overbooking-policy                                                 | bounded overbooking configuration       | `predict.overbooking.manage` (2, 24 lead, 5) | approval required                  |
+| GET      | /drift?model&from&to ; GET /monitoring                              | drift, calibration, fairness dashboards | `predict.monitor.read`                       |                                    |
+| GET      | /explain/:scoreId                                                   | SHAP drivers in plain language          | `predict.score.read`                         | also the DSAR answer               |
 
 ## 7. Domain Events (outbox)
+
 - `predict.score.created` (batched) → routing to the owning module's worklist.
 - `predict.readmission.high_risk` → IP-002 discharge checklist, PE-002 enrolment task.
 - `predict.noshow.flagged` → OP-001 slot board, EN-009 reminder tiering.
@@ -253,6 +265,7 @@ diagnoses, never denies care, and never overrides a deterministic score.
   `claim.denied`, `bill.finalized`, `roster.published`.
 
 ## 8. Screens (UI)
+
 - **Discharge Risk panel** (IP-002 discharge checklist, desktop): risk band chip with the calibration statement
   ("in this band, ~1 in 4 patients returns within 30 days"), the top modifiable drivers as actionable checkboxes
   (book follow-up, medication counselling, home-care referral), and an Enrol-in-follow-up button creating the PE-002
@@ -283,6 +296,7 @@ diagnoses, never denies care, and never overrides a deterministic score.
   06:00) — prediction hidden", "Model in shadow — not shown to operations".
 
 ## 9. Integrations
+
 - **EN-001/NC-011** analytics schema and dataset registry as the only feature source; a feature referencing a
   transactional table is rejected at definition time.
 - **IP-025, IP-001, IP-002, OP-001, NC-030, NC-006, NC-005, NC-009, NC-022, RC-001, RC-002, RC-004, PE-002** as
@@ -294,6 +308,7 @@ diagnoses, never denies care, and never overrides a deterministic score.
 - **AI-002** may cite an AI-005 score in an explanation but never recomputes it; **EN-029** is unaffected by any of it.
 
 ## 10. Reports & Analytics
+
 - **Model performance**: AUROC/AUPRC, calibration (reliability curve, ECE, Brier), MAE/MAPE and interval coverage for
   forecasts — split provisional vs matured.
 - **Business impact** (the only metrics that justify the module): readmission rate in the intervened cohort vs
@@ -308,6 +323,7 @@ diagnoses, never denies care, and never overrides a deterministic score.
   `mv_predict_business_impact_monthly`.
 
 ## 11. Notifications
+
 - Daily digests (not per-score alerts) for readmission, no-show and denial-risk worklists to their owning desks.
 - Bed-demand surge threshold crossed → IP-025 + Nursing Superintendent + Admin (EN-037, operational priority).
 - Inventory reorder proposals ready → Stores In-charge weekly; stock-out risk within lead time → immediate.
@@ -317,6 +333,7 @@ diagnoses, never denies care, and never overrides a deterministic score.
 - Champion promotion/rollback → Governance Committee and the affected role owners.
 
 ## 12. Permissions (RBAC keys)
+
 `predict.feature.read|manage` (data steward, 56) · `predict.model.read` (2, 4, 54, 58) · `predict.model.manage|train`
 (data steward) · `predict.model.promote` (4 for clinical, 2 for operational, + EN-038) · `predict.score.read`
 (role-scoped: 22/IP-025 for beds, 24 for no-show, 28 for denial, 44 for inventory, 46 for revenue, 7/11/17/18 for
@@ -324,6 +341,7 @@ deterioration) · `predict.score.request` · `predict.score.act` · `predict.for
 (2, 5, 24 lead) · `predict.monitor.read` (2, 4, 54, 57, 58) · plus AI-001 §0.13.
 
 ## 13. Non-functional
+
 - **Volumes (2000-bed)**: ~1200 IP patients scored daily (readmission, LOS, deterioration on every vitals event ≈
   35 000 scoring events/day), ~6000 appointments scored daily, ~20 000 inventory item-store pairs weekly, ~800 claims
   scored daily, hourly bed forecasts for ~12 ward classes × 72 horizons.
@@ -347,6 +365,7 @@ deterioration) · `predict.score.request` · `predict.score.act` · `predict.for
   12 months, fairness tests in CI, k6 for the scoring endpoint at 100 rps, and a nightly "no future data" assertion.
 
 ## 14. Acceptance Criteria
+
 1. **Given** a feature definition that references a fact timestamped after the prediction point, **when** saved,
    **then** the leakage check fails in CI and the definition is rejected.
 2. **Given** a clinical model, **when** a feature set including payer class or a protected attribute is proposed,
@@ -387,6 +406,7 @@ deterioration) · `predict.score.request` · `predict.score.act` · `predict.for
     version, input freshness, the human action taken and the matured outcome once observed.
 
 ## 15. Enhancements / Later phases
+
 - **Causal / uplift modelling** for interventions: not "who will be readmitted" but "who benefits from a follow-up
   call" — the correct question, requiring a randomised holdout the hospital must agree to.
 - **Real-time surgical scheduling optimisation** (OT utilisation, case-duration prediction feeding IP-006/TR-004).
@@ -399,6 +419,7 @@ deterioration) · `predict.score.request` · `predict.score.act` · `predict.for
 - **AutoML-assisted feature discovery** with mandatory human review before any feature enters the registry.
 
 ## 16. Open Questions for the Hospital
+
 1. How much clean historical data exists per domain (discharges, appointments, claims, stock), and from which date is
    it trustworthy? This single answer determines which models can exist at go-live.
 2. What is the hospital's own definition of a **readmission** for its NABH indicator (any admission vs unplanned,

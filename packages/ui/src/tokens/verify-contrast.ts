@@ -115,7 +115,9 @@ function main(): number {
     for (const name of ungated) out(`      ${name}`);
     out('      Add a requirement, or document why the token carries no contrast duty.');
   } else {
-    out(`ok    every semantic token is either gated or explicitly exempt (${Object.keys(UNGATED).length} exempt)`);
+    out(
+      `ok    every semantic token is either gated or explicitly exempt (${Object.keys(UNGATED).length} exempt)`,
+    );
   }
 
   out('');

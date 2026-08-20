@@ -37,9 +37,7 @@ export function CardTitle({ className, ...props }: ComponentProps<'h3'>): React.
 }
 
 export function CardDescription({ className, ...props }: ComponentProps<'p'>): React.JSX.Element {
-  return (
-    <p data-slot="card-description" className={cn('text-sm text-fg-muted', className)} {...props} />
-  );
+  return <p data-slot="card-description" className={cn('text-sm text-fg-muted', className)} {...props} />;
 }
 
 export function CardContent({ className, ...props }: ComponentProps<'div'>): React.JSX.Element {

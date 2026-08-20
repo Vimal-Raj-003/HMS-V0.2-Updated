@@ -5,6 +5,7 @@ patients, families, corporates, TPAs and referring doctors — which means it is
 gets a login.
 
 ## Read first
+
 `CLAUDE.md`, `docs/PROGRESS.md`, then: **PE-001** (patient portal), **OP-020** (patient app, PWA stage),
 **PE-002** (follow-up & recall), **PE-003** (health education library), **OP-038** (patient education portal),
 **PE-004** (patient community), **PE-005** (loyalty & wellness), **PE-006** (corporate client portal),
@@ -31,6 +32,7 @@ and only what the patient consented to share.
 ## Deliverables
 
 ### 10.0 Threat model — do this before writing a line of portal code
+
 **The patient portal is the most externally-attacked surface in this system.** Produce a written threat model in
 `docs/adr/` covering, at minimum: credential stuffing and OTP brute force; OTP interception and SIM swap; account
 takeover via password/mobile reset; **IDOR on every record, report, bill and file URL**; enumeration of UHIDs,
@@ -43,6 +45,7 @@ tier, their own WAF rules, their own audit stream and their own alert thresholds
 logged as a PHI read.**
 
 ### 10.1 Patient portal core (PE-001 + OP-020)
+
 - **Identity**: mobile OTP and ABHA login, optional password with WebAuthn/biometric on device, account linking to
   the UHID with a verified match (never by name similarity), device sessions, and step-up verification for
   sensitive actions (record download, family link, DSAR).
@@ -56,12 +59,14 @@ logged as a PHI read.**
 - OP-020 is the same product as an installable PWA with push, offline record viewing and a queue-position live view.
 
 ### 10.2 Family, minors and consent (PE-001 §3.7 + EN-028)
+
 Family and dependant linking with a **verification step and an explicit consent artefact per relationship**;
 **guardian access for minors that automatically lapses at the age of majority** (configurable), with a documented
 re-consent path; caregiver delegation with scope and expiry; and revocation that takes effect immediately across
 sessions, tokens and cached pages. Every grant and revocation is in the EN-028 consent ledger.
 
 ### 10.3 DPDP self-service: consent centre and DSAR (PE-001 §3.9)
+
 A consent centre showing every purpose the patient has consented to, with granular withdraw, and **self-service
 Data Subject Access Requests**: access/copy, correction, nominee designation, and erasure. Requests are ticketed,
 identity-verified, tracked against the **90-day statutory SLA** with escalation at 60 and 80 days, fulfilled by an
@@ -70,12 +75,14 @@ where retention law overrides erasure (clinical records, MLC, tax) — **the rej
 auditable artefact**. Grievance escalation path to the Data Protection Officer is visible in the UI.
 
 ### 10.4 ABHA and health-locker sharing (PE-001 §3.8 + EN-011)
+
 From the portal the patient can link their ABHA, see linked care contexts, and **share records to their health
 locker or to another provider**, driven by consent artefacts. The wiring to the ABDM M2/M3 pipes is completed in
 Phase 11 — here, build the patient-facing surface, the consent capture and the queueing so Phase 11 only connects
 the transport.
 
 ### 10.5 Follow-up, recall and re-engagement (PE-002)
+
 The follow-up rule engine (by diagnosis, procedure, drug, result, discharge, chronic cohort), recall list
 generation, multi-channel cadence (WhatsApp → SMS → IVR → call) with **quiet hours and per-patient frequency
 caps**, post-discharge call scripts with outcome capture, medication-adherence check-ins, chronic-care cohorts,
@@ -83,6 +90,7 @@ caps**, post-discharge call scripts with outcome capture, medication-adherence c
 and conversion analytics that attribute a booking back to the exact reminder that produced it.
 
 ### 10.6 Feedback, grievance and reputation (EN-030 + NC-032 + NC-026)
+
 Survey builder (NPS, department-specific, post-discharge, post-report), triggering rules, capture on WhatsApp,
 SMS link, kiosk, portal and IVR, and **star-threshold routing: a high score invites a public review, a low score is
 routed privately into the NC-032 grievance workflow with an SLA and a service-recovery task — never to a public
@@ -91,6 +99,7 @@ review aggregation. The complaint engine itself was built in Phase 9; this phase
 and the routing rules.
 
 ### 10.7 Website and public surfaces (EN-012)
+
 Embeddable **booking widget** (iframe and JS SDK) with slot search, payment link and confirmation, doctor and
 department directory pages, health-package pages with payment, report download with OTP, lead forms, chatbot mount
 point (AI-001 lands in Phase 12 — deterministic FAQ now), consent banner and analytics with **consent-gated
@@ -99,6 +108,7 @@ tracking**, and **SEO**: server-rendered doctor/department/package/location page
 Public pages must be fast and cacheable at the edge and must never require a session.
 
 ### 10.8 Kiosk (EN-034)
+
 Provisioning and device management by pairing code, **session and identity as the safety core** — short sessions,
 automatic timeout, screen wipe on idle, no residual PHI after a session — self check-in and token, payment kiosk,
 report print and download, feedback capture, and queue status. **Accessibility is a hard requirement**: wheelchair
@@ -107,11 +117,13 @@ screen, and an operable path for a low-literacy user (icons plus speech). Offlin
 issue continue from a local sequence block when the network is down.
 
 ### 10.9 IVR and call centre (EN-033)
+
 Telephony connector and numbers, IVR flow builder with inbound self-service (appointment status, report ready,
 token position, bill balance), agent console with screen-pop and click-to-call, outbound campaigns for PE-002
 recalls, and **recording with consent, purpose and retention** recorded per call.
 
 ### 10.10 Corporate portal (PE-006)
+
 Client onboarding, employee roster upload and eligibility, bulk health-check scheduling, invoices/SOA/payment, and
 **aggregate wellness dashboards with k-anonymity ≥ 10 enforced in the query layer** — any cell, filter combination
 or drill-down that would resolve to fewer than ten employees is suppressed, and suppression must survive
@@ -119,11 +131,13 @@ differencing attacks (two queries that differ by one employee must not reveal th
 never sees an individual's diagnosis, report or prescription — only eligibility, utilisation and invoices.
 
 ### 10.11 TPA/payer portal (PE-008)
+
 Payer onboarding and user management with **strict scoping: a payer user can only ever see cases where that payer
 is the payer on the episode**, enforced by RLS and proven by test. Pre-authorisation queue, claim queue, document
 exchange, query-and-response loop, bulk settlement upload, and SLA dashboards shown to both sides.
 
 ### 10.12 Referring doctor portal (PE-007) — with the structural compliance guard
+
 Referrer onboarding with **NMC registration verification**, referral submission, status tracking, and
 **consent-gated outcome summaries and report access** (the referring doctor sees the outcome only if the patient
 consented to that referrer, for that episode, with an expiry).
@@ -134,6 +148,7 @@ a test asserts that no referral row can be joined to a payout row for a practiti
 are the compliant alternative — build those well.
 
 ### 10.13 Education, second opinion, loyalty, community (PE-003/OP-038, OP-036, PE-005, PE-004)
+
 Education library with authoring, translation workflow, approval lifecycle, **auto-share on diagnosis, discharge
 and dispensing**, read receipts, and website sync. OP-036 second opinion: case bundling with the patient's
 explicit consent, expert panel routing, opinion document and fee handling. PE-005 loyalty and wellness with an
@@ -142,10 +157,12 @@ PE-004 community with moderation, crisis escalation from self-harm language to a
 pseudonymous identity that cannot be reversed by other members.
 
 ### 10.14 E-sign (EN-016)
+
 Aadhaar eSign and DSC integration for consents, discharge documents, claim forms and portal-signed forms, with
 document stamping and public verification of a signed PDF.
 
 ## Constraints & watch-outs
+
 - **Every portal is a separate audience with a separate identity realm and a separate permission surface.** Do not
   reuse a staff role for an external user. Patient, family member, corporate HR, TPA user and referring doctor are
   distinct principal types with their own rate limits, session lifetimes and MFA policy.
@@ -168,6 +185,7 @@ document stamping and public verification of a signed PDF.
   Phase 12.
 
 ## Exit gate
+
 1. The written threat model exists, each threat has a control and a test, and the automated IDOR sweep across every
    external GET passes with 404s for the wrong principal.
 2. A patient logs in by OTP, sees their reports, bills and prescriptions, downloads a report, pays a bill, books a
@@ -186,7 +204,7 @@ document stamping and public verification of a signed PDF.
    score ≥ 90 on Lighthouse and render correct structured data. A kiosk checks in a patient, prints a token and a
    report after OTP, leaves **no PHI on screen or in storage** after the session, and issues tokens offline.
 9. A corporate dashboard suppresses every cell below 10 employees, including via differencing across two filter
-    combinations, and no API call can retrieve an individual's clinical data.
+   combinations, and no API call can retrieve an individual's clinical data.
 10. A TPA user cannot see a single case belonging to another payer, at API level and at SQL level (RLS negative
     test, same rigour as the Phase 0 tenant-isolation test).
 11. A referring doctor sees an outcome summary only for a patient who consented, with expiry honoured; a test

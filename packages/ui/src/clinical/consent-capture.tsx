@@ -9,13 +9,7 @@ import { Checkbox } from '../primitives/checkbox.js';
 import { Input } from '../primitives/input.js';
 import { Label } from '../primitives/label.js';
 import { RadioGroup, RadioGroupItem } from '../primitives/radio-group.js';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../primitives/select.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../primitives/select.js';
 import { SignaturePad, type SignaturePadLabels } from './signature-pad.js';
 
 /**
@@ -74,8 +68,7 @@ export type ConsentAttestation =
   | { readonly kind: 'witnessed'; readonly witnessName: string; readonly witnessRelation: string };
 
 export type ConsentSubject =
-  | { readonly kind: 'self' }
-  | { readonly kind: 'guardian'; readonly name: string; readonly relation: string };
+  { readonly kind: 'self' } | { readonly kind: 'guardian'; readonly name: string; readonly relation: string };
 
 export interface ConsentArtefact {
   readonly templateId: string;

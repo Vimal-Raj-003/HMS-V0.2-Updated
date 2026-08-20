@@ -39,7 +39,10 @@ describe('settings registry', () => {
     // `min(5)` schema would break the admin console for every new hospital.
     for (const def of SETTING_DEFINITIONS) {
       const result = def.schema.safeParse(def.defaultValue);
-      expect(result.success, `${def.key} default ${JSON.stringify(def.defaultValue)} fails its own schema`).toBe(true);
+      expect(
+        result.success,
+        `${def.key} default ${JSON.stringify(def.defaultValue)} fails its own schema`,
+      ).toBe(true);
     }
   });
 
@@ -65,7 +68,9 @@ describe('settings registry', () => {
     for (const def of SETTING_DEFINITIONS) {
       expect(def.scopes.length, `${def.key} has no scope`).toBeGreaterThan(0);
       for (const scope of def.scopes) {
-        expect(['hospital', 'branch', 'department', 'user'], `${def.key} has scope ${scope}`).toContain(scope);
+        expect(['hospital', 'branch', 'department', 'user'], `${def.key} has scope ${scope}`).toContain(
+          scope,
+        );
       }
       expect(new Set(def.scopes).size, `${def.key} repeats a scope`).toBe(def.scopes.length);
     }
@@ -211,9 +216,10 @@ describe('settings that encode a safety or statutory rule', () => {
     const enabled = getSettingDefinition('ui.enabled_locales')!;
     expect(enabled.defaultValue).toContain('en-IN');
     expect(enabled.schema.safeParse([]).success).toBe(false);
-    expect(enabled.schema.safeParse(['en-IN', 'hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn', 'gu', 'or', 'pa', 'ar']).success).toBe(
-      true,
-    );
+    expect(
+      enabled.schema.safeParse(['en-IN', 'hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn', 'gu', 'or', 'pa', 'ar'])
+        .success,
+    ).toBe(true);
     expect(enabled.schema.safeParse(['en-US']).success).toBe(false);
 
     const fallback = getSettingDefinition('ui.locale_default')!;

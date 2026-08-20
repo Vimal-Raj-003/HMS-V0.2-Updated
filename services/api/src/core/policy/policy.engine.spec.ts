@@ -48,7 +48,11 @@ function ctx(overrides: Partial<PolicyContext> = {}): PolicyContext {
   };
 }
 
-const resource = (o: Partial<PolicyResource> = {}): PolicyResource => ({ type: 'user', hospitalId: HOSP_A, ...o });
+const resource = (o: Partial<PolicyResource> = {}): PolicyResource => ({
+  type: 'user',
+  hospitalId: HOSP_A,
+  ...o,
+});
 
 describe('catalogue integrity — the keys these tests rely on', () => {
   it.each([PLAIN, PHI_READ, REASON_REQUIRED, STEP_UP, SECOND_PERSON, SAFETY_EXEMPT])(
@@ -359,13 +363,28 @@ describe('audit obligations are always returned', () => {
 
 describe('amount limits use decimal arithmetic, never floats', () => {
   it('accepts at the boundary and rejects just above it', () => {
-    expect(withinAmountLimit({ maxAmount: '5000.00', combine: 'whichever_is_lower' }, { type: 'bill', amount: '5000.00' })).toBe(true);
-    expect(withinAmountLimit({ maxAmount: '5000.00', combine: 'whichever_is_lower' }, { type: 'bill', amount: '5000.01' })).toBe(false);
+    expect(
+      withinAmountLimit(
+        { maxAmount: '5000.00', combine: 'whichever_is_lower' },
+        { type: 'bill', amount: '5000.00' },
+      ),
+    ).toBe(true);
+    expect(
+      withinAmountLimit(
+        { maxAmount: '5000.00', combine: 'whichever_is_lower' },
+        { type: 'bill', amount: '5000.01' },
+      ),
+    ).toBe(false);
   });
 
   it('handles a value classic float arithmetic gets wrong', () => {
     // 0.1 + 0.2 === 0.30000000000000004 in binary floating point.
-    expect(withinAmountLimit({ maxAmount: '0.30', combine: 'whichever_is_lower' }, { type: 'bill', amount: '0.30' })).toBe(true);
+    expect(
+      withinAmountLimit(
+        { maxAmount: '0.30', combine: 'whichever_is_lower' },
+        { type: 'bill', amount: '0.30' },
+      ),
+    ).toBe(true);
   });
 
   it('whichever_is_lower requires BOTH ceilings to pass', () => {
@@ -396,8 +415,20 @@ describe('time windows', () => {
   const at = (iso: string) => Date.parse(iso);
 
   it('matches inside a daytime window', () => {
-    expect(withinTimeWindow({ daysOfWeek: [], startTime: '09:00', endTime: '17:00', crossesMidnight: false }, at('2026-08-19T10:00:00+05:30'), tz)).toBe(true);
-    expect(withinTimeWindow({ daysOfWeek: [], startTime: '09:00', endTime: '17:00', crossesMidnight: false }, at('2026-08-19T18:00:00+05:30'), tz)).toBe(false);
+    expect(
+      withinTimeWindow(
+        { daysOfWeek: [], startTime: '09:00', endTime: '17:00', crossesMidnight: false },
+        at('2026-08-19T10:00:00+05:30'),
+        tz,
+      ),
+    ).toBe(true);
+    expect(
+      withinTimeWindow(
+        { daysOfWeek: [], startTime: '09:00', endTime: '17:00', crossesMidnight: false },
+        at('2026-08-19T18:00:00+05:30'),
+        tz,
+      ),
+    ).toBe(false);
   });
 
   /**
@@ -434,7 +465,11 @@ describe('time windows', () => {
   it('denies through the engine outside the window', () => {
     const d = evaluate({
       permission: PLAIN,
-      context: ctx({ conditions: [{ timeWindow: { daysOfWeek: [], startTime: '22:00', endTime: '06:00', crossesMidnight: true } }] }),
+      context: ctx({
+        conditions: [
+          { timeWindow: { daysOfWeek: [], startTime: '22:00', endTime: '06:00', crossesMidnight: true } },
+        ],
+      }),
       resource: resource(),
     });
     expect(d.allowed).toBe(false);
@@ -445,6 +480,8 @@ describe('time windows', () => {
 describe('decision trace', () => {
   it('records the path taken, so a denial can be explained to a user', () => {
     const d = evaluate({ permission: PLAIN, context: ctx(), resource: resource() });
-    expect(d.trace).toEqual(expect.arrayContaining(['catalogue:hit', 'tenant:ok', 'rbac:hit', 'branch:ok', 'abac:ok']));
+    expect(d.trace).toEqual(
+      expect.arrayContaining(['catalogue:hit', 'tenant:ok', 'rbac:hit', 'branch:ok', 'abac:ok']),
+    );
   });
 });

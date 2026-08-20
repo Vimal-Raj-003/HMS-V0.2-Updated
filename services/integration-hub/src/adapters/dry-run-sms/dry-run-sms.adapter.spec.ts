@@ -52,7 +52,10 @@ describe('dry-run SMS send', () => {
 
   it('refuses an unnormalised recipient, exactly as a real gateway would', async () => {
     const instance = await adapter();
-    const result = await instance.send('sendSms', outboundMessage('sendSms', { ...SMS_PAYLOAD, mobile: '9876543210' }));
+    const result = await instance.send(
+      'sendSms',
+      outboundMessage('sendSms', { ...SMS_PAYLOAD, mobile: '9876543210' }),
+    );
     if (result.status !== 'failed') throw new Error('unreachable');
     expect(result.message).toContain('E.164');
   });
@@ -64,7 +67,9 @@ describe('dry-run SMS send', () => {
 
     expect((await instance.send('sendSms', outboundMessage('sendSms', SMS_PAYLOAD))).status).toBe('failed');
     expect((await instance.send('sendSms', outboundMessage('sendSms', SMS_PAYLOAD))).status).toBe('failed');
-    expect((await instance.send('sendSms', outboundMessage('sendSms', SMS_PAYLOAD))).status).toBe('acknowledged');
+    expect((await instance.send('sendSms', outboundMessage('sendSms', SMS_PAYLOAD))).status).toBe(
+      'acknowledged',
+    );
   });
 
   it('bounds the outbox, because rendered bodies are PHI-bearing by construction', async () => {

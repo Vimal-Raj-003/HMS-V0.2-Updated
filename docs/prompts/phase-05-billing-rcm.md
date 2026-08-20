@@ -3,6 +3,7 @@
 Phases 0–4 complete. Charges have been accumulating as "intents". Now they become money — correctly, once, with tax.
 
 ## Read first
+
 `CLAUDE.md`, `docs/PROGRESS.md`, then: **RC-003** (tariff — build this FIRST), **OP-005** (OP billing),
 **EN-010** (payment gateway), **OP-023** (packages), **EN-002** (insurance/TPA), **RC-002** (pre-auth),
 **RC-007** (government schemes), **RC-008** (estimator), **RC-006** (leakage), **NC-034** (doctor payouts),
@@ -19,6 +20,7 @@ payment method, refundable with control, claimable from any payer, and auditable
 ## Deliverables
 
 ### 5.1 Tariff engine (RC-003) — the pricing authority
+
 Service master link (EN-027), **rate plans**: self-pay, corporate (per company), TPA/insurer (per payer per plan),
 government scheme (PMJAY/CGHS/ECHS/ESIC/state), staff/concession, camp. Bed-class differential pricing. Effective-
 dated versions with approval (EN-038) and **no overlapping published versions** (enforce with a DB exclusion
@@ -27,6 +29,7 @@ A single `resolve(service, payer, class, date, branch)` API that **every** bill 
 `MISSING_RATE` (blocking) rather than zero when a rate is absent.
 
 ### 5.2 OP billing (OP-005)
+
 Charge capture from all Phase 1–4 events (consultation, vitals-room procedures, lab, radiology, pharmacy,
 procedures, day care), consolidated visit bill, itemised and grouped views, **GST handling** (tax invoice vs bill
 of supply, exempt healthcare services vs taxable items like pharmacy retail and cosmetic procedures, HSN/SAC,
@@ -36,6 +39,7 @@ bill cancellation with reversal accounting (never delete), reprint with watermar
 department/doctor/service/payer.
 
 ### 5.3 Payments (EN-010 + NC-001 extension)
+
 Cash, card (POS integration), **UPI dynamic QR**, net banking, wallets, payment links (WhatsApp/SMS), cheque with
 clearing status, corporate credit, insurance credit. Razorpay primary with an adapter interface for PayU/PhonePe/
 Cashfree/Stripe. Webhook-driven confirmation with idempotency, auto-reconciliation against settlement files,
@@ -43,11 +47,13 @@ mismatch queue, refunds through the original instrument, ledger sync hooks for N
 Enforce **§269ST** cash limits. Every payment is idempotent — prove it with a replayed webhook test.
 
 ### 5.4 Packages (OP-023)
+
 Package definition (inclusions, exclusions, caps, validity, room class), booking with advance, activation and
 consumption tracking against limits, **variance tracking (actual vs package)** with alerts at 80 %/100 %,
 excess-charge approval before billing beyond the package, package profitability report.
 
 ### 5.5 Insurance & TPA (EN-002 + RC-002)
+
 Payer/TPA/insurer master, empanelment records, plan and tariff mapping, ROHINI codes, policy capture and
 eligibility check, **pre-authorisation**: request assembly with clinical justification templates, document
 checklist, submission (portal/email/API), status tracking, query and enhancement rounds, approved amount →
@@ -55,11 +61,13 @@ credit limit that flows into billing, emergency/retrospective pre-auth, expiry. 
 Claim-pack assembly is prepared here and completed in Phase 11 with NHCX.
 
 ### 5.6 Government schemes (RC-007)
+
 PMJAY/Ayushman package master (HBP), beneficiary verification, scheme-specific workflow and blocking rules
 (**no cash collection from a scheme beneficiary — hard block at every collection point**), CGHS/ECHS/ESIC and
 state schemes, scheme claim formats, reconciliation and shortfall tracking.
 
 ### 5.7 Estimator, leakage, payouts (RC-008, RC-006, NC-034)
+
 - **Cost estimator**: procedure/package-based estimate with payer awareness, co-pay calculation, room-class
   scenarios, printable/shareable with validity, conversion tracking, estimate-vs-actual learning. (NABH cost
   transparency requirement.)
@@ -71,6 +79,7 @@ state schemes, scheme claim formats, reconciliation and shortfall tracking.
   practitioners is representable in the schema).
 
 ## Constraints & watch-outs
+
 - **One charge, one bill line, once.** Charge intents carry an idempotency key from the source event; a replayed
   event must never double-bill. Write the test first.
 - Money is `numeric(14,2)`; rounding rules stated once and applied everywhere; totals recomputed server-side and
@@ -80,6 +89,7 @@ state schemes, scheme claim formats, reconciliation and shortfall tracking.
 - A blocked rate (`MISSING_RATE`) stops the bill and raises a task — silence here becomes revenue leakage.
 
 ## Exit gate
+
 1. A full OP visit (consult + 3 lab tests + X-ray + 4 drugs) produces one correct bill; every line traces to its
    clinical event; GST is correct for a mixed exempt/taxable bill; the invoice prints and passes a GST review.
 2. Replay every charge event 3× → the bill is unchanged (idempotency proven).

@@ -31,11 +31,7 @@
  * spec allows it (`«phone:9876»`) so a human can still correlate a complaint
  * with a message without the log holding the identifier.
  */
-import {
-  DEFAULT_AUDIT_FIELD_POLICIES,
-  REDACTION_PLACEHOLDER,
-  type AuditFieldPolicy,
-} from '@vims/contracts';
+import { DEFAULT_AUDIT_FIELD_POLICIES, REDACTION_PLACEHOLDER, type AuditFieldPolicy } from '@vims/contracts';
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -572,7 +568,7 @@ function redactNode(
 
 function measure(value: unknown): number {
   try {
-    return Buffer.byteLength(typeof value === 'string' ? value : JSON.stringify(value) ?? '', 'utf8');
+    return Buffer.byteLength(typeof value === 'string' ? value : (JSON.stringify(value) ?? ''), 'utf8');
   } catch {
     return 0;
   }
@@ -584,7 +580,10 @@ function measure(value: unknown): number {
  * request back in its 422 body would otherwise put the whole patient in a
  * VARCHAR column nobody thinks of as a payload.
  */
-export function redactText(input: string, options: RedactionOptions = {}): RedactionResult & { readonly payload: string } {
+export function redactText(
+  input: string,
+  options: RedactionOptions = {},
+): RedactionResult & { readonly payload: string } {
   const tally = new Tally();
   const limit = options.maxFreeTextLength ?? DEFAULTS.maxFreeTextLength;
   const structured = summariseStructuredMessage(input);

@@ -231,7 +231,15 @@ async function seedSpecialities(ctx: SeedContext, tenancy: SeededTenancy): Promi
 // ── consult types ───────────────────────────────────────────────────────────
 
 /** code, name, kind, chargeable, validity days, validity visits, minutes. */
-const CONSULT_TYPES: readonly (readonly [string, string, string, boolean, number | null, number | null, number])[] = [
+const CONSULT_TYPES: readonly (readonly [
+  string,
+  string,
+  string,
+  boolean,
+  number | null,
+  number | null,
+  number,
+])[] = [
   ['NEW', 'New consultation', 'new', true, null, null, 15],
   ['FU', 'Follow-up', 'follow_up', true, 30, null, 10],
   // OP-001 §5: "free follow-up validity from tariff (default 7 days, 1 visit)".
@@ -298,9 +306,8 @@ async function seedPractitioners(ctx: SeedContext, tenancy: SeededTenancy): Prom
           display_name: `Dr. ${name}`,
           gender: null,
           qualifications: specCode === 'PHYSIO' ? ['BPT', 'MPT'] : ['MBBS', 'MS'],
-          registration_council: specCode === 'PHYSIO'
-            ? 'Karnataka State Council for Physiotherapy'
-            : 'Karnataka Medical Council',
+          registration_council:
+            specCode === 'PHYSIO' ? 'Karnataka State Council for Physiotherapy' : 'Karnataka Medical Council',
           registration_number: registration,
           registration_valid_to: '2030-03-31',
           // ABDM HPR ids are issued to a real practitioner; a seeded one has
@@ -328,7 +335,12 @@ async function seedPractitioners(ctx: SeedContext, tenancy: SeededTenancy): Prom
         }),
       );
 
-      for (const [consultCode, multiplier] of [['NEW', 1], ['FU', 0.5], ['TELE', 0.8], ['SECOND_OPINION', 1.5]] as const) {
+      for (const [consultCode, multiplier] of [
+        ['NEW', 1],
+        ['FU', 0.5],
+        ['TELE', 0.8],
+        ['SECOND_OPINION', 1.5],
+      ] as const) {
         const feeKey = seedId('mdm-practitioner-fee-key', h.code, code, consultCode);
         fees.push(
           master('mdm-practitioner-fee', h.id, feeKey, null, {
@@ -350,7 +362,17 @@ async function seedPractitioners(ctx: SeedContext, tenancy: SeededTenancy): Prom
 // ── the service catalogue ───────────────────────────────────────────────────
 
 /** code, name, group, department, SAC, GST %, procedure?, appointable?, minutes. */
-const SERVICES: readonly (readonly [string, string, string, string, string, number, boolean, boolean, number])[] = [
+const SERVICES: readonly (readonly [
+  string,
+  string,
+  string,
+  string,
+  string,
+  number,
+  boolean,
+  boolean,
+  number,
+])[] = [
   ['REG', 'Registration charge', 'administrative', 'ADMIN', '999319', 0, false, false, 0],
   ['REG_CARD', 'UHID card (duplicate)', 'administrative', 'ADMIN', '999319', 18, false, false, 0],
   ['CONS_OPD', 'OPD consultation', 'consultation', 'GENMED', '999312', 0, false, true, 15],

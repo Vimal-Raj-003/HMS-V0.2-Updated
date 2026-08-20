@@ -128,7 +128,11 @@ test.describe('gate 7 — what must NOT be cached', () => {
 
     // Warm any cache that might exist by making the call online first.
     const online = await page.evaluate(async () => {
-      const r = await fetch('/api/auth/login', { method: 'POST', body: '{}' , headers: { 'content-type': 'application/json' } });
+      const r = await fetch('/api/auth/login', {
+        method: 'POST',
+        body: '{}',
+        headers: { 'content-type': 'application/json' },
+      });
       return r.status;
     });
     expect(online).toBeGreaterThan(0);

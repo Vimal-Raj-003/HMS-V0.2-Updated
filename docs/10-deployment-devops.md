@@ -10,15 +10,15 @@
 
 ## 1. Environments
 
-| Env | Purpose | Data | Who deploys | Lifetime |
-|---|---|---|---|---|
-| **local** | developer laptop; `docker compose -f infra/compose/dev.yml up` | `seed:minimal` | developer | ephemeral |
-| **dev** | shared integration of `main`; partner sandboxes wired | `seed:demo` | CI on every merge to `main` | permanent |
-| **staging** | release-candidate verification; production-shaped topology at 1/4 scale | `seed:volume` (3-year synthetic) | CI on RC tag | permanent |
-| **uat** (per implementation) | hospital's own masters + scripted UAT (`09` §12) | hospital masters + synthetic patients; migrated data after dry-run 2 | implementation lead | project duration + 30 d |
-| **pre-prod** | final smoke on the exact production image and config; DR restore target | last production restore, masked | release manager | permanent |
-| **prod** | live | real | release manager, staged rollout | forever |
-| **sandbox** (per hospital, optional) | training, demos, new-branch rehearsal, API partners | masked or synthetic, never live PHI | hospital admin, self-service | on demand |
+| Env                                  | Purpose                                                                 | Data                                                                 | Who deploys                     | Lifetime                |
+| ------------------------------------ | ----------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------- | ----------------------- |
+| **local**                            | developer laptop; `docker compose -f infra/compose/dev.yml up`          | `seed:minimal`                                                       | developer                       | ephemeral               |
+| **dev**                              | shared integration of `main`; partner sandboxes wired                   | `seed:demo`                                                          | CI on every merge to `main`     | permanent               |
+| **staging**                          | release-candidate verification; production-shaped topology at 1/4 scale | `seed:volume` (3-year synthetic)                                     | CI on RC tag                    | permanent               |
+| **uat** (per implementation)         | hospital's own masters + scripted UAT (`09` §12)                        | hospital masters + synthetic patients; migrated data after dry-run 2 | implementation lead             | project duration + 30 d |
+| **pre-prod**                         | final smoke on the exact production image and config; DR restore target | last production restore, masked                                      | release manager                 | permanent               |
+| **prod**                             | live                                                                    | real                                                                 | release manager, staged rollout | forever                 |
+| **sandbox** (per hospital, optional) | training, demos, new-branch rehearsal, API partners                     | masked or synthetic, never live PHI                                  | hospital admin, self-service    | on demand               |
 
 Rules: **no production PHI outside prod and the masked pre-prod restore** (`09` §11). Every non-prod environment
 carries a visible environment banner and a distinct favicon/theme so nobody trains on production by accident.
@@ -50,7 +50,7 @@ Cloudflare (DNS, WAF, DDoS, TLS, rate limit, bot)
 ```
 
 Notes: one Kubernetes namespace per environment; **tenant isolation is at the database row level by default**
-(`01` §8), with dedicated schema/database/stack available as a commercial lever. `services/print-agent` is *not*
+(`01` §8), with dedicated schema/database/stack available as a commercial lever. `services/print-agent` is _not_
 in the cloud — it always runs on the hospital LAN (§5). MLLP/ASTM listeners likewise: even a cloud tenant needs an
 on-site gateway container for analyzers and modalities.
 
@@ -106,45 +106,46 @@ excluding DICOM**, which is listed separately.
 
 ### 4.1 Application tier
 
-| Component | 50 beds | 200 beds | 500 beds | 1000 beds | 2000 beds |
-|---|---|---|---|---|---|
-| Concurrent staff sessions (peak) | 25 | 120 | 400 | 900 | 2,000 |
-| API peak rps | 40 | 180 | 500 | 950 | 1,800 |
-| `api` | 2 × (1 vCPU, 2 GB) | 2 × (2, 3) | 3 × (2, 4) | 5 × (2, 4) | 8 × (2, 4) |
-| `realtime` | 1 × (0.5, 1) | 1 × (1, 2) | 2 × (1, 2) | 2 × (2, 3) | 3 × (2, 4) |
-| `worker` critical+standard | 1 × (1, 2) | 2 × (1, 3) | 2 × (2, 4) | 4 × (2, 4) | 6 × (2, 4) |
-| `worker-bulk` (PDF, reports, migration) | shared | 1 × (2, 4) | 1 × (2, 6) | 2 × (2, 6) | 3 × (4, 8) |
-| `integration-hub` | 1 × (0.5, 1) | 1 × (1, 2) | 1 × (2, 3) | 2 × (2, 4) | 2 × (4, 6) |
-| `web` (SSR) | 1 × (1, 1.5) | 2 × (1, 2) | 2 × (2, 3) | 3 × (2, 3) | 4 × (2, 4) |
-| Redis | 1 GB | 2 GB | 4 GB | 8 GB | 16 GB (cluster) |
-| **Total app tier** | ~6 vCPU / 12 GB | ~14 / 28 | ~26 / 52 | ~48 / 96 | ~90 / 180 |
+| Component                               | 50 beds            | 200 beds   | 500 beds   | 1000 beds  | 2000 beds       |
+| --------------------------------------- | ------------------ | ---------- | ---------- | ---------- | --------------- |
+| Concurrent staff sessions (peak)        | 25                 | 120        | 400        | 900        | 2,000           |
+| API peak rps                            | 40                 | 180        | 500        | 950        | 1,800           |
+| `api`                                   | 2 × (1 vCPU, 2 GB) | 2 × (2, 3) | 3 × (2, 4) | 5 × (2, 4) | 8 × (2, 4)      |
+| `realtime`                              | 1 × (0.5, 1)       | 1 × (1, 2) | 2 × (1, 2) | 2 × (2, 3) | 3 × (2, 4)      |
+| `worker` critical+standard              | 1 × (1, 2)         | 2 × (1, 3) | 2 × (2, 4) | 4 × (2, 4) | 6 × (2, 4)      |
+| `worker-bulk` (PDF, reports, migration) | shared             | 1 × (2, 4) | 1 × (2, 6) | 2 × (2, 6) | 3 × (4, 8)      |
+| `integration-hub`                       | 1 × (0.5, 1)       | 1 × (1, 2) | 1 × (2, 3) | 2 × (2, 4) | 2 × (4, 6)      |
+| `web` (SSR)                             | 1 × (1, 1.5)       | 2 × (1, 2) | 2 × (2, 3) | 3 × (2, 3) | 4 × (2, 4)      |
+| Redis                                   | 1 GB               | 2 GB       | 4 GB       | 8 GB       | 16 GB (cluster) |
+| **Total app tier**                      | ~6 vCPU / 12 GB    | ~14 / 28   | ~26 / 52   | ~48 / 96   | ~90 / 180       |
 
 ### 4.2 PostgreSQL
 
-| | 50 beds | 200 beds | 500 beds | 1000 beds | 2000 beds |
-|---|---|---|---|---|---|
-| vCPU | 4 | 8 | 16 | 24 | 32 (→64 headroom) |
-| RAM | 16 GB | 32 GB | 64 GB | 128 GB | 256 GB (→512) |
-| `shared_buffers` / `effective_cache_size` | 4 / 11 GB | 8 / 22 GB | 16 / 45 GB | 32 / 90 GB | 64 / 180 GB |
-| `work_mem` (report pool) | 8 MB (32) | 16 (64) | 32 (128) | 32 (128) | 32 (128) |
-| `max_connections` (behind PgBouncer) | 100 | 200 | 300 | 400 | 500 |
-| Data disk (3 y, with archival) | 200 GB | 500 GB | 1.2 TB | 2.5 TB | 5 TB |
-| WAL disk (separate volume) | 50 GB | 100 GB | 200 GB | 400 GB | 800 GB |
-| Sustained IOPS / peak | 1,000 / 3,000 | 3,000 / 8,000 | 6,000 / 15,000 | 12,000 / 30,000 | 25,000 / 60,000 |
-| Disk type | NVMe SSD | NVMe SSD | NVMe SSD (RAID 10) | NVMe RAID 10 | NVMe RAID 10 |
-| Read replicas | 0 | 0–1 | 1 | 2 | 2–3 |
-| Backup repo (pgBackRest, 30-day PITR) | 600 GB | 1.5 TB | 4 TB | 8 TB | 16 TB |
+|                                           | 50 beds       | 200 beds      | 500 beds           | 1000 beds       | 2000 beds         |
+| ----------------------------------------- | ------------- | ------------- | ------------------ | --------------- | ----------------- |
+| vCPU                                      | 4             | 8             | 16                 | 24              | 32 (→64 headroom) |
+| RAM                                       | 16 GB         | 32 GB         | 64 GB              | 128 GB          | 256 GB (→512)     |
+| `shared_buffers` / `effective_cache_size` | 4 / 11 GB     | 8 / 22 GB     | 16 / 45 GB         | 32 / 90 GB      | 64 / 180 GB       |
+| `work_mem` (report pool)                  | 8 MB (32)     | 16 (64)       | 32 (128)           | 32 (128)        | 32 (128)          |
+| `max_connections` (behind PgBouncer)      | 100           | 200           | 300                | 400             | 500               |
+| Data disk (3 y, with archival)            | 200 GB        | 500 GB        | 1.2 TB             | 2.5 TB          | 5 TB              |
+| WAL disk (separate volume)                | 50 GB         | 100 GB        | 200 GB             | 400 GB          | 800 GB            |
+| Sustained IOPS / peak                     | 1,000 / 3,000 | 3,000 / 8,000 | 6,000 / 15,000     | 12,000 / 30,000 | 25,000 / 60,000   |
+| Disk type                                 | NVMe SSD      | NVMe SSD      | NVMe SSD (RAID 10) | NVMe RAID 10    | NVMe RAID 10      |
+| Read replicas                             | 0             | 0–1           | 1                  | 2               | 2–3               |
+| Backup repo (pgBackRest, 30-day PITR)     | 600 GB        | 1.5 TB        | 4 TB               | 8 TB            | 16 TB             |
 
 ### 4.3 Object storage & PACS
 
-| | 50 | 200 | 500 | 1000 | 2000 |
-|---|---|---|---|---|---|
-| Documents/PDF/photos (3 y) | 150 GB | 600 GB | 1.5 TB | 3 TB | 5.5 TB |
-| DICOM/year (studies/day) | 0.4 TB (60) | 1.6 TB (250) | 4 TB (600) | 7 TB (1,000) | 11 TB (1,200+) |
-| PACS hot tier (90 days, NVMe) | 120 GB | 450 GB | 1.1 TB | 1.9 TB | 2.7 TB |
-| PACS warm/cold | NAS/S3-IA | NAS/S3-IA | NAS + S3-IA | S3-IA → Glacier @ 1 y | S3-IA → Glacier @ 1 y |
+|                               | 50          | 200          | 500         | 1000                  | 2000                  |
+| ----------------------------- | ----------- | ------------ | ----------- | --------------------- | --------------------- |
+| Documents/PDF/photos (3 y)    | 150 GB      | 600 GB       | 1.5 TB      | 3 TB                  | 5.5 TB                |
+| DICOM/year (studies/day)      | 0.4 TB (60) | 1.6 TB (250) | 4 TB (600)  | 7 TB (1,000)          | 11 TB (1,200+)        |
+| PACS hot tier (90 days, NVMe) | 120 GB      | 450 GB       | 1.1 TB      | 1.9 TB                | 2.7 TB                |
+| PACS warm/cold                | NAS/S3-IA   | NAS/S3-IA    | NAS + S3-IA | S3-IA → Glacier @ 1 y | S3-IA → Glacier @ 1 y |
 
 ### 4.4 Server BOM shorthand (on-prem)
+
 - **50–200 beds:** 2 × 1U servers (16 c / 64 GB / 2×960 GB NVMe RAID1) — one app+DB primary, one standby/backup; or a single server with a documented, accepted 4-hour RTO.
 - **500 beds:** 3 × app nodes (16 c / 64 GB) + 2 × DB nodes (16 c / 128 GB / 4×1.92 TB NVMe RAID10) + 1 × backup/NAS (48 TB usable RAID6).
 - **1000–2000 beds:** 4–6 × app nodes (24 c / 96 GB) + 2–3 × DB nodes (32 c / 256–512 GB / 8×3.84 TB NVMe RAID10) + PACS node (dual-socket, 200 TB NAS + tape/object cold tier) + 2 × observability nodes.
@@ -165,23 +166,23 @@ Internet ──[ISP2]──┘   (HA pair)         ├── VLAN 30  Medical de
                                          └── VLAN 99  Guest Wi-Fi ← fully isolated, no route to any of the above
 ```
 
-| Flow | Port/proto | Direction | Notes |
-|---|---|---|---|
-| Browsers/tablets → proxy | 443/tcp (TLS 1.3) | VLAN 20/50 → 10 | HTTP:80 redirects only |
-| Proxy → web/api/realtime | 3000 / 4000 / 4001 tcp | within VLAN 10 | mTLS on-prem |
-| API/worker → PgBouncer → Postgres | 6432 → 5432 tcp | VLAN 10 only | never exposed beyond VLAN 10 |
-| API/worker → Redis | 6379 tcp | VLAN 10 | requirepass + ACL |
-| Services → MinIO/S3 | 9000 tcp / 443 | VLAN 10 | presigned URLs ≤ 5 min |
-| Analyzers → integration-hub (HL7 MLLP) | **2575/tcp** | VLAN 30 → 10 (allow-list per device IP) | ASTM on 2576, serial via device server |
-| Modalities ↔ Orthanc (DICOM) | **104 / 11112 tcp** | VLAN 40 ↔ 10 | MWL on the same AE title |
-| Orthanc → OHIF/web | 8042 tcp | VLAN 10 | viewer proxied through 443 |
-| print-agent → printers | 9100 tcp (RAW), 631 (IPP) | VLAN 10 → 50 | agent runs on the LAN, polls the API outbound |
-| Barcode/label printers (ZPL) | 9100 tcp | VLAN 50 | |
-| Biometric/attendance devices | vendor tcp (4370 etc.) | VLAN 60 → 10 | |
-| NTP | 123/udp | all → VLAN 10 NTP host → NPL/NIC | CERT-In clock sync requirement |
-| Outbound integrations (ABDM, payment, SMS, WhatsApp) | 443 tcp | VLAN 10 → internet via proxy, **egress allow-list only** | |
-| Remote support | WireGuard 51820/udp or vendor jump host | inbound, MFA, time-boxed | §12 |
-| Monitoring scrape | 9090/9100/4317 | VLAN 90/10 | OTLP gRPC 4317 |
+| Flow                                                 | Port/proto                              | Direction                                                | Notes                                         |
+| ---------------------------------------------------- | --------------------------------------- | -------------------------------------------------------- | --------------------------------------------- |
+| Browsers/tablets → proxy                             | 443/tcp (TLS 1.3)                       | VLAN 20/50 → 10                                          | HTTP:80 redirects only                        |
+| Proxy → web/api/realtime                             | 3000 / 4000 / 4001 tcp                  | within VLAN 10                                           | mTLS on-prem                                  |
+| API/worker → PgBouncer → Postgres                    | 6432 → 5432 tcp                         | VLAN 10 only                                             | never exposed beyond VLAN 10                  |
+| API/worker → Redis                                   | 6379 tcp                                | VLAN 10                                                  | requirepass + ACL                             |
+| Services → MinIO/S3                                  | 9000 tcp / 443                          | VLAN 10                                                  | presigned URLs ≤ 5 min                        |
+| Analyzers → integration-hub (HL7 MLLP)               | **2575/tcp**                            | VLAN 30 → 10 (allow-list per device IP)                  | ASTM on 2576, serial via device server        |
+| Modalities ↔ Orthanc (DICOM)                         | **104 / 11112 tcp**                     | VLAN 40 ↔ 10                                             | MWL on the same AE title                      |
+| Orthanc → OHIF/web                                   | 8042 tcp                                | VLAN 10                                                  | viewer proxied through 443                    |
+| print-agent → printers                               | 9100 tcp (RAW), 631 (IPP)               | VLAN 10 → 50                                             | agent runs on the LAN, polls the API outbound |
+| Barcode/label printers (ZPL)                         | 9100 tcp                                | VLAN 50                                                  |                                               |
+| Biometric/attendance devices                         | vendor tcp (4370 etc.)                  | VLAN 60 → 10                                             |                                               |
+| NTP                                                  | 123/udp                                 | all → VLAN 10 NTP host → NPL/NIC                         | CERT-In clock sync requirement                |
+| Outbound integrations (ABDM, payment, SMS, WhatsApp) | 443 tcp                                 | VLAN 10 → internet via proxy, **egress allow-list only** |                                               |
+| Remote support                                       | WireGuard 51820/udp or vendor jump host | inbound, MFA, time-boxed                                 | §12                                           |
+| Monitoring scrape                                    | 9090/9100/4317                          | VLAN 90/10                                               | OTLP gRPC 4317                                |
 
 **Wi-Fi for tablets:** WPA2/3-Enterprise with RADIUS and device certificates on `HMS-CLIN`; ≥ −67 dBm and
 ≥ 2 APs visible everywhere clinical work happens (wards, ICU, OT corridors, ER, lifts landings); seamless roaming
@@ -194,13 +195,13 @@ is slow on tablets" tickets are Wi-Fi tickets.
 
 CI gates are in `09` §15. Deployment workflows:
 
-| Workflow | Trigger | Steps |
-|---|---|---|
-| `ci.yml` | every PR/push | the 12 CI stages (`09` §15) |
-| `release.yml` | tag `v*` | build multi-arch images → SBOM (Syft) → scan (Trivy) → **sign (cosign, keyless OIDC)** → publish → generate changelogs → attach evidence pack |
-| `deploy-cloud.yml` | manual/auto per wave | verify signature + SBOM policy → `migrate` job → Helm upgrade with `--atomic --timeout 10m` → smoke suite → progressive traffic → auto-rollback on gate failure |
-| `deploy-onprem.yml` | manual | build a **signed offline bundle** (images tar, Helm/compose, migrations, checksums, release note) → publish to the customer portal → on-site/remote apply via `infra/scripts/onprem-upgrade.sh` |
-| `nightly.yml` | cron | full e2e, soak, partner sandbox contracts, restore verification, integrity invariants |
+| Workflow            | Trigger              | Steps                                                                                                                                                                                           |
+| ------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci.yml`            | every PR/push        | the 12 CI stages (`09` §15)                                                                                                                                                                     |
+| `release.yml`       | tag `v*`             | build multi-arch images → SBOM (Syft) → scan (Trivy) → **sign (cosign, keyless OIDC)** → publish → generate changelogs → attach evidence pack                                                   |
+| `deploy-cloud.yml`  | manual/auto per wave | verify signature + SBOM policy → `migrate` job → Helm upgrade with `--atomic --timeout 10m` → smoke suite → progressive traffic → auto-rollback on gate failure                                 |
+| `deploy-onprem.yml` | manual               | build a **signed offline bundle** (images tar, Helm/compose, migrations, checksums, release note) → publish to the customer portal → on-site/remote apply via `infra/scripts/onprem-upgrade.sh` |
+| `nightly.yml`       | cron                 | full e2e, soak, partner sandbox contracts, restore verification, integrity invariants                                                                                                           |
 
 **Deployment steps in detail** (both profiles): pre-flight (`/healthz` of current version, backup freshness < 24 h,
 free disk > 25 %, no open Sev-1) → **backup/restore point** → `migrate` (expand-only, see below) → rolling deploy
@@ -212,13 +213,13 @@ Rollback = redeploy previous tag (target < 10 min), because the schema is backwa
 ### 6.1 Migration safety rules (non-negotiable)
 
 1. **Expand → migrate → contract, across at least two releases.**
-   *Release N*: add the new nullable column/table/index (`CREATE INDEX CONCURRENTLY`), dual-write, backfill in a chunked, resumable, throttled job. *Release N+1*: switch reads, verify. *Release N+2*: stop writing the old, drop it.
+   _Release N_: add the new nullable column/table/index (`CREATE INDEX CONCURRENTLY`), dual-write, backfill in a chunked, resumable, throttled job. _Release N+1_: switch reads, verify. _Release N+2_: stop writing the old, drop it.
 2. **No destructive change ships with the code that stops using the thing.** Dropping a column, table or constraint requires the prior release to have been running in production for ≥ 14 days with zero reads (proved by `pg_stat_statements` and a query-log audit).
 3. **Nothing that takes an `ACCESS EXCLUSIVE` lock for more than 2 seconds** on a table > 1 M rows. `lock_timeout = '2s'`, `statement_timeout` set on the migration role; a blocked migration fails fast and is retried in a window rather than queueing behind clinical traffic.
 4. **Backfills are jobs, not migrations**: batched (≤ 5,000 rows), checkpointed, idempotent, throttled by the same clinical-latency guard as EN-036 (`p95 class C > 250 ms → pause`), observable, and re-runnable.
 5. Every migration file carries a `-- ROLLBACK:` block, and both directions are tested in CI against the previous release's seeded database (`09` §15 stage 5).
 6. Migrations run as a **separate DB role** with DDL rights that the application role does not have; the app role can never `ALTER`.
-7. **Zero-downtime deploys** require API version tolerance: release N's code must run against release N−1's *and* N's schema (asserted by a CI job that boots the previous image against the new schema).
+7. **Zero-downtime deploys** require API version tolerance: release N's code must run against release N−1's _and_ N's schema (asserted by a CI job that boots the previous image against the new schema).
 8. Data-fixing scripts are never run by hand on production. They are migrations or approved EN-036 batches, with an audit reason, an approver and a rollback plan.
 
 ---
@@ -237,6 +238,7 @@ overlapping key ids, partner API keys per partner policy, break-glass account cr
 use. A `secrets-inventory.md` per tenant records what exists, who owns it and when it rotates.
 
 **Observability stack** (`services/*` → OTel SDK → collector → backends):
+
 - **Collector** (`otelcol`) per cluster/host: receives OTLP 4317/4318, applies the **PHI scrubber processor** (deny-list of attribute keys plus a regex redactor for UHID/phone/Aadhaar patterns — verified by the `09` §8 leakage test), tail-samples traces (100 % of errors and slow spans, 5 % of the rest), exports to Tempo/Prometheus/Loki.
 - **Metrics**: Prometheus (or Grafana Cloud/Datadog), 15-day local retention, 13 months downsampled. RED metrics per endpoint class, per module; business metrics too (registrations/hour, unbilled charges, DLQ depth, pending pre-auths) — because operational health and hospital health are the same dashboard for the customer.
 - **Logs**: pino JSON → Loki, 30 days hot, 1 year archived (DPDP Rules require **security logs ≥ 1 year**, CERT-In requires 180 days in India). No PHI, ever; correlation is by `trace_id` + `patient_ref` (an opaque per-request token that resolves only inside the app with permission).
@@ -250,28 +252,28 @@ use. A `secrets-inventory.md` per tenant records what exists, who owns it and wh
 Severity → routing. **P1 pages** (phone call + push, 24×7); **P2 pages during business hours, tickets otherwise**;
 **P3 tickets**. Baseline thresholds from `07` §8; this table adds ownership.
 
-| # | Alert | Condition | Sev | Pages |
-|---|---|---|---|---|
-| 1 | Failed clinical write | any 5xx or DB error on a clinical write path, count ≥ 1 | P1 | Platform on-call + module owner |
-| 2 | Critical alert not delivered | EN-037 delivery failure or unacknowledged past escalation tier 2 | P1 | Platform on-call **and** hospital nursing supervisor |
-| 3 | Service down | `/healthz` failing 2 consecutive probes, any service | P1 | Platform on-call |
-| 4 | Database failover / primary unreachable | replica promoted, or 3 failed connections in 60 s | P1 | Platform on-call + DBA |
-| 5 | Error rate | 5xx > 2 % of requests for 5 min | P1 | Platform on-call |
-| 6 | Replica lag | > 60 s for 5 min | P1 | DBA |
-| 7 | Queue `critical` backlog | depth > 50 or oldest job > 60 s | P1 | Platform on-call |
-| 8 | Disk | data or WAL volume > 85 %, or < 4 h to full at current rate | P1 | Platform on-call |
-| 9 | Backup failure | nightly pgBackRest exit ≠ 0, or newest backup > 26 h old | P1 | DBA |
-| 10 | Security | auth bypass signature, privilege-escalation attempt, break-glass burst (> 3/h), WAF critical, new secret detected | P1 | Security on-call + DPO |
-| 11 | Interface down | analyzer/PACS/ABDM connector no traffic for its `expect_traffic` window, or circuit breaker open | P2 | Integration owner + hospital lab/radiology IT |
-| 12 | DLQ | new fingerprint on a clinical connector (P1) / depth > 500 (P2) | P1/P2 | Integration owner |
-| 13 | Latency regression | class C p95 > 250 ms for 30 min | P2 | Platform on-call |
-| 14 | Redis memory | > 85 % maxmemory or evictions > 0 | P2 | Platform on-call |
-| 15 | Print agent down | agent heartbeat missing > 5 min | P2 | Hospital IT (business hours), P1 during OPD peak |
-| 16 | Certificate expiry | < 14 days | P2 | Platform on-call |
-| 17 | Licence/entitlement | tenant at 95 % of seats/rows, or expiring < 30 d | P3 | Account manager |
-| 18 | Integrity invariant breach | nightly data-integrity job failure (`09` §9) | P1 if money/clinical, else P2 | Module owner + Finance/MRD counterpart |
-| 19 | Capacity trigger | any `07` §6 trigger true 3 days running | P3 | Platform lead |
-| 20 | UPS on battery / power | UPS event > 2 min (on-prem, via SNMP) | P2 | Hospital facilities + IT |
+| #   | Alert                                   | Condition                                                                                                         | Sev                           | Pages                                                |
+| --- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------- |
+| 1   | Failed clinical write                   | any 5xx or DB error on a clinical write path, count ≥ 1                                                           | P1                            | Platform on-call + module owner                      |
+| 2   | Critical alert not delivered            | EN-037 delivery failure or unacknowledged past escalation tier 2                                                  | P1                            | Platform on-call **and** hospital nursing supervisor |
+| 3   | Service down                            | `/healthz` failing 2 consecutive probes, any service                                                              | P1                            | Platform on-call                                     |
+| 4   | Database failover / primary unreachable | replica promoted, or 3 failed connections in 60 s                                                                 | P1                            | Platform on-call + DBA                               |
+| 5   | Error rate                              | 5xx > 2 % of requests for 5 min                                                                                   | P1                            | Platform on-call                                     |
+| 6   | Replica lag                             | > 60 s for 5 min                                                                                                  | P1                            | DBA                                                  |
+| 7   | Queue `critical` backlog                | depth > 50 or oldest job > 60 s                                                                                   | P1                            | Platform on-call                                     |
+| 8   | Disk                                    | data or WAL volume > 85 %, or < 4 h to full at current rate                                                       | P1                            | Platform on-call                                     |
+| 9   | Backup failure                          | nightly pgBackRest exit ≠ 0, or newest backup > 26 h old                                                          | P1                            | DBA                                                  |
+| 10  | Security                                | auth bypass signature, privilege-escalation attempt, break-glass burst (> 3/h), WAF critical, new secret detected | P1                            | Security on-call + DPO                               |
+| 11  | Interface down                          | analyzer/PACS/ABDM connector no traffic for its `expect_traffic` window, or circuit breaker open                  | P2                            | Integration owner + hospital lab/radiology IT        |
+| 12  | DLQ                                     | new fingerprint on a clinical connector (P1) / depth > 500 (P2)                                                   | P1/P2                         | Integration owner                                    |
+| 13  | Latency regression                      | class C p95 > 250 ms for 30 min                                                                                   | P2                            | Platform on-call                                     |
+| 14  | Redis memory                            | > 85 % maxmemory or evictions > 0                                                                                 | P2                            | Platform on-call                                     |
+| 15  | Print agent down                        | agent heartbeat missing > 5 min                                                                                   | P2                            | Hospital IT (business hours), P1 during OPD peak     |
+| 16  | Certificate expiry                      | < 14 days                                                                                                         | P2                            | Platform on-call                                     |
+| 17  | Licence/entitlement                     | tenant at 95 % of seats/rows, or expiring < 30 d                                                                  | P3                            | Account manager                                      |
+| 18  | Integrity invariant breach              | nightly data-integrity job failure (`09` §9)                                                                      | P1 if money/clinical, else P2 | Module owner + Finance/MRD counterpart               |
+| 19  | Capacity trigger                        | any `07` §6 trigger true 3 days running                                                                           | P3                            | Platform lead                                        |
+| 20  | UPS on battery / power                  | UPS event > 2 min (on-prem, via SNMP)                                                                             | P2                            | Hospital facilities + IT                             |
 
 Escalation: P1 unacknowledged in **5 min** → secondary on-call; **15 min** → engineering manager; **30 min** →
 CTO and hospital IT head. Every P1 opens an incident record and a post-incident review within 7 days (`04` §8).
@@ -353,13 +355,14 @@ in the last 100 days. A failed drill is a P1.
 
 ## 9. Disaster recovery
 
-| Tier | Who | RPO | RTO | Mechanism |
-|---|---|---|---|---|
-| **T1 Enterprise** (≥ 500 beds, trauma centres, group HQ) | cloud Multi-AZ or on-prem HA pair + cloud replica | **≤ 5 min** | **≤ 1 h** | synchronous-ish streaming replica in a second failure domain + WAL to immutable off-site; automated promotion with a manual gate |
-| **T2 Standard** (200–500 beds) | single site + warm standby | ≤ 15 min | ≤ 4 h | async streaming replica on the standby server; restore from repo2 if the site is lost |
-| **T3 Basic** (< 200 beds, single server) | nightly + WAL | ≤ 15 min (WAL) | ≤ 8 h | rebuild from bundle + PITR restore; documented and *accepted in writing* by the hospital |
+| Tier                                                     | Who                                               | RPO            | RTO       | Mechanism                                                                                                                        |
+| -------------------------------------------------------- | ------------------------------------------------- | -------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **T1 Enterprise** (≥ 500 beds, trauma centres, group HQ) | cloud Multi-AZ or on-prem HA pair + cloud replica | **≤ 5 min**    | **≤ 1 h** | synchronous-ish streaming replica in a second failure domain + WAL to immutable off-site; automated promotion with a manual gate |
+| **T2 Standard** (200–500 beds)                           | single site + warm standby                        | ≤ 15 min       | ≤ 4 h     | async streaming replica on the standby server; restore from repo2 if the site is lost                                            |
+| **T3 Basic** (< 200 beds, single server)                 | nightly + WAL                                     | ≤ 15 min (WAL) | ≤ 8 h     | rebuild from bundle + PITR restore; documented and _accepted in writing_ by the hospital                                         |
 
 **Failover procedure (T1/T2), on-prem:**
+
 1. Declare (incident commander named in `04` §8). Announce read-only/downtime protocol to wards via EN-018 boards and SMS.
 2. Confirm the primary is genuinely lost (not a network partition) — check from two vantage points; **fencing first** to avoid split-brain (stop the old primary's Postgres and disable its systemd unit).
 3. Promote: `pg_ctl promote -D /data/pg` (or Patroni-managed failover where deployed). Verify `pg_is_in_recovery() = false` and the last replayed LSN.
@@ -409,7 +412,7 @@ delivered; hospital's TLS certificate (or internal CA) available; named hospital
    between APs without session loss; VLAN 30/40 have no internet route; guest VLAN cannot reach VLAN 10;
    egress allow-list permits exactly the required partner endpoints and nothing else.
 9. **Observability & backup.** Bring up the LGTM stack, import dashboards and alert rules, wire alert routing to
-   the hospital's channel *and* VIMS on-call, configure pgBackRest with both repos, run a **full backup and a
+   the hospital's channel _and_ VIMS on-call, configure pgBackRest with both repos, run a **full backup and a
    restore drill before go-live** — a backup that has never been restored is not a backup.
 10. **Remote support access.** WireGuard tunnel or a hospital-provided jump host; named individual accounts (no
     shared logins), MFA, time-boxed and approved per session, all sessions recorded, and every access logged in
@@ -421,16 +424,16 @@ delivered; hospital's TLS certificate (or internal CA) available; named hospital
 
 ## 11. Upgrade, patching and capacity
 
-| Layer | Cadence | Window | Notes |
-|---|---|---|---|
-| Application (cloud) | fortnightly minor, patch on demand | rolling, no downtime | staged waves (`09` §16) |
-| Application (on-prem) | monthly, after cloud wave 1 is clean | agreed window, typically Sun 01:00–04:00 | signed bundle; B2 (k3s) is rolling; B1 (compose) has a ≤ 5-min blip unless replicas are used |
-| Security patches (critical CVE) | within **7 days** (48 h if actively exploited) | emergency window | out-of-band release allowed |
-| OS packages | monthly, unattended security updates daily | 02:00 | reboots only in a window, one node at a time |
-| PostgreSQL minor | quarterly, within 90 days of release | maintenance window | replica first, then failover, then old primary |
-| PostgreSQL major | planned, ≥ annually reviewed | project, not a window | logical replication / `pg_createsubscriber` for near-zero downtime (`02` §1) |
-| Container base images | monthly rebuild | with the release | Trivy gate blocks known-critical bases |
-| Firmware/BIOS/RAID | annually or on advisory | scheduled downtime | with the hardware vendor |
+| Layer                           | Cadence                                        | Window                                   | Notes                                                                                        |
+| ------------------------------- | ---------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Application (cloud)             | fortnightly minor, patch on demand             | rolling, no downtime                     | staged waves (`09` §16)                                                                      |
+| Application (on-prem)           | monthly, after cloud wave 1 is clean           | agreed window, typically Sun 01:00–04:00 | signed bundle; B2 (k3s) is rolling; B1 (compose) has a ≤ 5-min blip unless replicas are used |
+| Security patches (critical CVE) | within **7 days** (48 h if actively exploited) | emergency window                         | out-of-band release allowed                                                                  |
+| OS packages                     | monthly, unattended security updates daily     | 02:00                                    | reboots only in a window, one node at a time                                                 |
+| PostgreSQL minor                | quarterly, within 90 days of release           | maintenance window                       | replica first, then failover, then old primary                                               |
+| PostgreSQL major                | planned, ≥ annually reviewed                   | project, not a window                    | logical replication / `pg_createsubscriber` for near-zero downtime (`02` §1)                 |
+| Container base images           | monthly rebuild                                | with the release                         | Trivy gate blocks known-critical bases                                                       |
+| Firmware/BIOS/RAID              | annually or on advisory                        | scheduled downtime                       | with the hardware vendor                                                                     |
 
 Every upgrade: announce ≥ 7 days ahead (≥ 24 h for patches) with the plain-language clinical changelog, verify
 backup freshness, take a restore point, apply, run the smoke suite, watch for 24 h, and keep the rollback tag ready.
@@ -455,17 +458,17 @@ numbering block, catch-up entry) · `db-failover.md` · `replica-lag.md` · `res
 `disk-full.md` · `certificate-renewal.md` · `security-incident.md` (CERT-In 6 h, DPDP Board 72 h) ·
 `ransomware-response.md` · `new-branch-onboarding.md` · `tenant-offboarding-and-data-export.md`.
 
-**Support tiers.** *Naming note:* `04-security-compliance.md` §8 classifies **incidents** as S1–S4 (S1 patient-safety,
+**Support tiers.** _Naming note:_ `04-security-compliance.md` §8 classifies **incidents** as S1–S4 (S1 patient-safety,
 S2 data breach, S3 major outage, S4 degraded). The P1–P4 below classify **support tickets and alerts**. They are
 different axes: an S2 data breach is always a P1 ticket, but a P1 ticket is not necessarily a security incident.
 Both labels are carried on a record when both apply.
 
-| Sev | Definition | Response | Workaround | Resolution | Coverage |
-|---|---|---|---|---|---|
-| **P1** | Patient safety at risk, system down, data loss/breach, billing stopped hospital-wide | **15 min** | 2 h | 8 h or an agreed continuity plan | 24×7×365 |
-| **P2** | Major function degraded (a department blocked, an interface down, reports wrong) | 1 h (24×7) | 8 h | 3 business days | 24×7 |
-| **P3** | Minor defect, workaround exists, single user affected | 4 business hours | — | next release train | Mon–Sat 08:00–20:00 |
-| **P4** | Cosmetic, question, enhancement request | 1 business day | — | backlog / roadmap | business hours |
+| Sev    | Definition                                                                           | Response         | Workaround | Resolution                       | Coverage            |
+| ------ | ------------------------------------------------------------------------------------ | ---------------- | ---------- | -------------------------------- | ------------------- |
+| **P1** | Patient safety at risk, system down, data loss/breach, billing stopped hospital-wide | **15 min**       | 2 h        | 8 h or an agreed continuity plan | 24×7×365            |
+| **P2** | Major function degraded (a department blocked, an interface down, reports wrong)     | 1 h (24×7)       | 8 h        | 3 business days                  | 24×7                |
+| **P3** | Minor defect, workaround exists, single user affected                                | 4 business hours | —          | next release train               | Mon–Sat 08:00–20:00 |
+| **P4** | Cosmetic, question, enhancement request                                              | 1 business day   | —          | backlog / roadmap                | business hours      |
 
 Support is L1 (hospital super-users, triage from the quick-reference cards) → L2 (VIMS support desk, runbooks,
 config) → L3 (engineering). Availability SLA: **99.9 %** monthly for the cloud profile measured on the API and web

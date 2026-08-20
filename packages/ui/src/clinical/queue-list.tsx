@@ -46,12 +46,7 @@ export type QueueTokenState =
   | { readonly kind: 'completed' }
   | { readonly kind: 'no-show' };
 
-export type QueuePriority =
-  | 'emergency'
-  | 'senior-citizen'
-  | 'differently-abled'
-  | 'appointment'
-  | 'walk-in';
+export type QueuePriority = 'emergency' | 'senior-citizen' | 'differently-abled' | 'appointment' | 'walk-in';
 
 export interface QueueEntry {
   readonly tokenId: string;

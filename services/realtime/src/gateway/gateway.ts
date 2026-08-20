@@ -1,7 +1,11 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { Logger } from 'pino';
 import { Server, type Socket } from 'socket.io';
-import { readHandshakeToken, TokenVerificationError, type AccessTokenVerifier } from '../auth/access-token.js';
+import {
+  readHandshakeToken,
+  TokenVerificationError,
+  type AccessTokenVerifier,
+} from '../auth/access-token.js';
 import type { RealtimeEnv } from '../config/env.js';
 import {
   CoalescingEmitter,

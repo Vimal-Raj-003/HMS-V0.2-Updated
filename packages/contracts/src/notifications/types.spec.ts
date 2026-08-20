@@ -45,7 +45,9 @@ describe('severity defaults', () => {
     expect(SEVERITY_DEFAULTS.critical.quietHoursOverride).toBe(true);
     expect(SEVERITY_DEFAULTS.critical.quietHoursScope).toBe('never_respect');
     for (const severity of SEVERITIES.filter((s) => s !== 'critical')) {
-      expect(SEVERITY_DEFAULTS[severity].quietHoursOverride, `${severity} must respect quiet hours`).toBe(false);
+      expect(SEVERITY_DEFAULTS[severity].quietHoursOverride, `${severity} must respect quiet hours`).toBe(
+        false,
+      );
     }
   });
 
@@ -98,7 +100,9 @@ describe('severity defaults', () => {
 describe('external-channel content minimisation', () => {
   it('passes a template that carries only location and urgency', () => {
     // EN-037 §14 AC-9: a locked phone shows where to go and how urgent it is.
-    expect(findForbiddenExternalPlaceholders('Urgent: attend Ward 4B now. Open the app for details.')).toEqual([]);
+    expect(
+      findForbiddenExternalPlaceholders('Urgent: attend Ward 4B now. Open the app for details.'),
+    ).toEqual([]);
     expect(findForbiddenExternalPlaceholders('A result needs your attention in {{ward}}.')).toEqual([]);
   });
 
@@ -145,23 +149,29 @@ describe('external-channel content minimisation', () => {
 describe('audience expressions', () => {
   it('resolves a role within a named scope', () => {
     expect(
-      audienceExpressionSchema.safeParse({ kind: 'role_in_scope', roleKey: 'staff_nurse', scope: 'ward' }).success,
+      audienceExpressionSchema.safeParse({ kind: 'role_in_scope', roleKey: 'staff_nurse', scope: 'ward' })
+        .success,
     ).toBe(true);
     expect(
-      audienceExpressionSchema.safeParse({ kind: 'role_in_scope', roleKey: 'staff_nurse', scope: 'planet' }).success,
+      audienceExpressionSchema.safeParse({ kind: 'role_in_scope', roleKey: 'staff_nurse', scope: 'planet' })
+        .success,
     ).toBe(false);
   });
 
   it('resolves a care relation from the closed list of clinical relationships', () => {
-    expect(audienceExpressionSchema.safeParse({ kind: 'care_relation', relation: 'ordering_doctor' }).success).toBe(
-      true,
-    );
+    expect(
+      audienceExpressionSchema.safeParse({ kind: 'care_relation', relation: 'ordering_doctor' }).success,
+    ).toBe(true);
     // "the doctor who happens to be nearby" is not a care relation.
-    expect(audienceExpressionSchema.safeParse({ kind: 'care_relation', relation: 'any_doctor' }).success).toBe(false);
+    expect(
+      audienceExpressionSchema.safeParse({ kind: 'care_relation', relation: 'any_doctor' }).success,
+    ).toBe(false);
   });
 
   it('resolves the on-call holder, explicit users, subscribers and devices', () => {
-    expect(audienceExpressionSchema.safeParse({ kind: 'oncall', speciality: 'orthopaedics' }).success).toBe(true);
+    expect(audienceExpressionSchema.safeParse({ kind: 'oncall', speciality: 'orthopaedics' }).success).toBe(
+      true,
+    );
     expect(
       audienceExpressionSchema.safeParse({
         kind: 'explicit_users',
@@ -169,7 +179,8 @@ describe('audience expressions', () => {
       }).success,
     ).toBe(true);
     expect(
-      audienceExpressionSchema.safeParse({ kind: 'subscribers', topicKind: 'patient', topicRef: 'p-1' }).success,
+      audienceExpressionSchema.safeParse({ kind: 'subscribers', topicKind: 'patient', topicRef: 'p-1' })
+        .success,
     ).toBe(true);
     expect(audienceExpressionSchema.safeParse({ kind: 'devices', deviceKind: 'tv' }).success).toBe(true);
   });
@@ -181,8 +192,12 @@ describe('audience expressions', () => {
   });
 
   it('rejects a non-uuid user id and an unsupported device kind', () => {
-    expect(audienceExpressionSchema.safeParse({ kind: 'explicit_users', userIds: ['a.menon'] }).success).toBe(false);
-    expect(audienceExpressionSchema.safeParse({ kind: 'devices', deviceKind: 'printer' }).success).toBe(false);
+    expect(audienceExpressionSchema.safeParse({ kind: 'explicit_users', userIds: ['a.menon'] }).success).toBe(
+      false,
+    );
+    expect(audienceExpressionSchema.safeParse({ kind: 'devices', deviceKind: 'printer' }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -214,7 +229,9 @@ describe('escalation ladder', () => {
   });
 
   it('allows a rung that never repeats, but never a negative delay', () => {
-    expect(escalationRungSchema.safeParse({ ...rung, repeatEverySeconds: null, maxRepeats: 0 }).success).toBe(true);
+    expect(escalationRungSchema.safeParse({ ...rung, repeatEverySeconds: null, maxRepeats: 0 }).success).toBe(
+      true,
+    );
     expect(escalationRungSchema.safeParse({ ...rung, delaySeconds: -1 }).success).toBe(false);
     expect(escalationRungSchema.safeParse({ ...rung, repeatEverySeconds: 0 }).success).toBe(false);
   });
@@ -254,9 +271,15 @@ describe('notification type definitions', () => {
   });
 
   it('rejects an unknown severity, category, channel or lifecycle status', () => {
-    expect(notificationTypeDefinitionSchema.safeParse({ ...definition, severity: 'urgent' }).success).toBe(false);
-    expect(notificationTypeDefinitionSchema.safeParse({ ...definition, category: 'misc' }).success).toBe(false);
-    expect(notificationTypeDefinitionSchema.safeParse({ ...definition, status: 'draft' }).success).toBe(false);
+    expect(notificationTypeDefinitionSchema.safeParse({ ...definition, severity: 'urgent' }).success).toBe(
+      false,
+    );
+    expect(notificationTypeDefinitionSchema.safeParse({ ...definition, category: 'misc' }).success).toBe(
+      false,
+    );
+    expect(notificationTypeDefinitionSchema.safeParse({ ...definition, status: 'draft' }).success).toBe(
+      false,
+    );
     expect(
       notificationTypeDefinitionSchema.safeParse({
         ...definition,
@@ -288,15 +311,18 @@ describe('notification type definitions', () => {
   });
 
   it('requires a positive retention, because a notification is evidence of being told', () => {
-    expect(notificationTypeDefinitionSchema.safeParse({ ...definition, retentionDays: 0 }).success).toBe(false);
+    expect(notificationTypeDefinitionSchema.safeParse({ ...definition, retentionDays: 0 }).success).toBe(
+      false,
+    );
   });
 
   it('offers only the two documented external content policies', () => {
-    expect(notificationTypeDefinitionSchema.safeParse({ ...definition, externalContentPolicy: 'full' }).success).toBe(
-      false,
-    );
     expect(
-      notificationTypeDefinitionSchema.safeParse({ ...definition, externalContentPolicy: 'standard' }).success,
+      notificationTypeDefinitionSchema.safeParse({ ...definition, externalContentPolicy: 'full' }).success,
+    ).toBe(false);
+    expect(
+      notificationTypeDefinitionSchema.safeParse({ ...definition, externalContentPolicy: 'standard' })
+        .success,
     ).toBe(true);
   });
 

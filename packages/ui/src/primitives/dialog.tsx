@@ -43,7 +43,11 @@ export function DialogContent({
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className={overlayClassName} />
-      <DialogPrimitive.Content data-slot="dialog-content" className={cn(panelClassName, className)} {...props}>
+      <DialogPrimitive.Content
+        data-slot="dialog-content"
+        className={cn(panelClassName, className)}
+        {...props}
+      >
         {children}
         <DialogPrimitive.Close
           aria-label={closeLabel}
@@ -61,7 +65,9 @@ export function DialogContent({
 }
 
 export function DialogHeader({ className, ...props }: ComponentProps<'div'>): React.JSX.Element {
-  return <div data-slot="dialog-header" className={cn('flex flex-col gap-1 p-4 pe-12', className)} {...props} />;
+  return (
+    <div data-slot="dialog-header" className={cn('flex flex-col gap-1 p-4 pe-12', className)} {...props} />
+  );
 }
 
 export function DialogFooter({ className, ...props }: ComponentProps<'div'>): React.JSX.Element {
@@ -80,7 +86,11 @@ export function DialogTitle({
   ...props
 }: ComponentProps<typeof DialogPrimitive.Title>): React.JSX.Element {
   return (
-    <DialogPrimitive.Title data-slot="dialog-title" className={cn('text-xl font-semibold', className)} {...props} />
+    <DialogPrimitive.Title
+      data-slot="dialog-title"
+      className={cn('text-xl font-semibold', className)}
+      {...props}
+    />
   );
 }
 
@@ -98,7 +108,9 @@ export function DialogDescription({
 }
 
 export function DialogBody({ className, ...props }: ComponentProps<'div'>): React.JSX.Element {
-  return <div data-slot="dialog-body" className={cn('flex flex-col gap-3 px-4 pb-4', className)} {...props} />;
+  return (
+    <div data-slot="dialog-body" className={cn('flex flex-col gap-3 px-4 pb-4', className)} {...props} />
+  );
 }
 
 // ── hard stop ────────────────────────────────────────────────────────────────

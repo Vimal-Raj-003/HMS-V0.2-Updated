@@ -23,14 +23,30 @@ export async function seedFrontOffice(ctx: SeedContext, tenancy: SeededTenancy):
 }
 
 const PRACTITIONER_CODES = [
-  'DR001', 'DR002', 'DR003', 'DR004', 'DR005',
-  'DR006', 'DR007', 'DR008', 'DR009', 'DR010',
+  'DR001',
+  'DR002',
+  'DR003',
+  'DR004',
+  'DR005',
+  'DR006',
+  'DR007',
+  'DR008',
+  'DR009',
+  'DR010',
 ] as const;
 
 /** DR code → speciality, so a template inherits the right consult types. */
 const PRACTITIONER_SPECIALITY: Readonly<Record<string, string>> = {
-  DR001: 'GENMED', DR002: 'ORTHO', DR003: 'ORTHO', DR004: 'OBGYN', DR005: 'GENSURG',
-  DR006: 'PAED', DR007: 'CARDIO', DR008: 'DERMA', DR009: 'TRAUMA', DR010: 'PHYSIO',
+  DR001: 'GENMED',
+  DR002: 'ORTHO',
+  DR003: 'ORTHO',
+  DR004: 'OBGYN',
+  DR005: 'GENSURG',
+  DR006: 'PAED',
+  DR007: 'CARDIO',
+  DR008: 'DERMA',
+  DR009: 'TRAUMA',
+  DR010: 'PHYSIO',
 };
 
 // ── doctor schedules (OP-001 §3.6) ──────────────────────────────────────────
@@ -200,7 +216,9 @@ async function seedQueues(ctx: SeedContext, tenancy: SeededTenancy): Promise<voi
     ];
 
     for (const [code, name, kind, prefix, stageKey, avgSec] of shared) {
-      queues.push(queueRow(h.id, branch.id, h.code, branch.code, code, name, kind, prefix, stageKey, avgSec, null));
+      queues.push(
+        queueRow(h.id, branch.id, h.code, branch.code, code, name, kind, prefix, stageKey, avgSec, null),
+      );
     }
 
     // One queue per doctor, which is what OP-001 §16 Q6 defaults to and what
@@ -208,8 +226,16 @@ async function seedQueues(ctx: SeedContext, tenancy: SeededTenancy): Promise<voi
     PRACTITIONER_CODES.forEach((drCode, index) => {
       queues.push(
         queueRow(
-          h.id, branch.id, h.code, branch.code,
-          `DR-${drCode}`, `Dr. queue ${drCode}`, 'doctor', `D${index + 1}`, 'doctor', 600,
+          h.id,
+          branch.id,
+          h.code,
+          branch.code,
+          `DR-${drCode}`,
+          `Dr. queue ${drCode}`,
+          'doctor',
+          `D${index + 1}`,
+          'doctor',
+          600,
           seedId('mdm-practitioner-key', h.code, drCode),
         ),
       );
@@ -331,7 +357,10 @@ async function seedCounters(ctx: SeedContext, tenancy: SeededTenancy): Promise<v
     const cashier = users.find((u) => u.hospital.code === h.code && u.roleKey === 'cashier');
     const receptionist = users.find((u) => u.hospital.code === h.code && u.roleKey === 'receptionist');
 
-    for (const [code, name] of [['REG-1', 'Registration Desk 1'], ['REG-2', 'Registration Desk 2']] as const) {
+    for (const [code, name] of [
+      ['REG-1', 'Registration Desk 1'],
+      ['REG-2', 'Registration Desk 2'],
+    ] as const) {
       registration.push({
         id: seedId('registration-counter', h.code, branch.code, code),
         hospital_id: h.id,
@@ -467,11 +496,35 @@ async function seedCounters(ctx: SeedContext, tenancy: SeededTenancy): Promise<v
 // ── consent (EN-028) ────────────────────────────────────────────────────────
 
 /** key, name, category, validity, days, guardian allowed, gates. */
-const CONSENT_TYPES: readonly (readonly [string, string, string, string, number | null, boolean, readonly string[]])[] = [
+const CONSENT_TYPES: readonly (readonly [
+  string,
+  string,
+  string,
+  string,
+  number | null,
+  boolean,
+  readonly string[],
+])[] = [
   ['dpdp.notice', 'DPDP privacy notice acknowledgement', 'data', 'permanent', null, true, []],
   ['treatment.general', 'General consent to treatment', 'clinical', 'episode', null, true, ['visit.create']],
-  ['comms.service', 'Service communication (appointments, reports, receipts)', 'data', 'duration', 1095, true, []],
-  ['comms.marketing', 'Marketing communication', 'data', 'duration', 365, false, ['messaging.marketing.send']],
+  [
+    'comms.service',
+    'Service communication (appointments, reports, receipts)',
+    'data',
+    'duration',
+    1095,
+    true,
+    [],
+  ],
+  [
+    'comms.marketing',
+    'Marketing communication',
+    'data',
+    'duration',
+    365,
+    false,
+    ['messaging.marketing.send'],
+  ],
   ['abdm.share', 'ABDM health-record sharing', 'data', 'duration', 365, true, ['abdm.care_context.link']],
   ['photo.capture', 'Photograph and identity capture', 'administrative', 'permanent', null, true, []],
 ];
@@ -491,9 +544,10 @@ async function seedConsent(ctx: SeedContext, tenancy: SeededTenancy): Promise<vo
         key,
         name,
         category,
-        statutory_basis: category === 'data'
-          ? 'Digital Personal Data Protection Act 2023, s.6 read with DPDP Rules 2025'
-          : 'Indian Contract Act 1872 s.13; NABH 5th ed. PRE.3',
+        statutory_basis:
+          category === 'data'
+            ? 'Digital Personal Data Protection Act 2023, s.6 read with DPDP Rules 2025'
+            : 'Indian Contract Act 1872 s.13; NABH 5th ed. PRE.3',
         requires_witness: false,
         requires_counselling: false,
         requires_second_doctor: false,
@@ -510,9 +564,7 @@ async function seedConsent(ctx: SeedContext, tenancy: SeededTenancy): Promise<vo
         // testing) and POCSO each carve out a different age, and they are data
         // because they differ by statute and change by amendment.
         age_exceptions: jsonb(
-          key === 'treatment.general'
-            ? { hivTesting: 12, mtp: 18, pocsoReporting: 18 }
-            : {},
+          key === 'treatment.general' ? { hivTesting: 12, mtp: 18, pocsoReporting: 18 } : {},
         ),
         dpdp_purpose_code: category === 'data' ? key : null,
         abdm_purpose_code: key === 'abdm.share' ? 'CAREMGT' : null,
@@ -560,7 +612,10 @@ async function seedConsent(ctx: SeedContext, tenancy: SeededTenancy): Promise<vo
           benefits: jsonb([]),
           alternatives: jsonb([]),
           declaration_text: `I confirm that the contents of this form have been explained to me in ${language} and that I understand them.`,
-          signature_blocks: jsonb([{ role: 'patient', required: true }, { role: 'staff', required: true }]),
+          signature_blocks: jsonb([
+            { role: 'patient', required: true },
+            { role: 'staff', required: true },
+          ]),
           audio_file_id: null,
           translation_status: language === 'en-IN' ? 'approved' : 'reviewed',
           approved_by_clinical: null,
@@ -591,14 +646,39 @@ async function seedConsent(ctx: SeedContext, tenancy: SeededTenancy): Promise<vo
           'patient portal or at any registration desk, without affecting your right to treatment.',
         itemised_purposes: jsonb([
           { code: 'treatment', label: 'Providing clinical care', lawfulBasis: 'consent', optional: false },
-          { code: 'billing', label: 'Billing, insurance and claims', lawfulBasis: 'legitimate_use', optional: false },
-          { code: 'statutory', label: 'Statutory registers and notifiable disease reporting', lawfulBasis: 'legal_obligation', optional: false },
-          { code: 'communication', label: 'Appointment, report and receipt messages', lawfulBasis: 'consent', optional: true },
-          { code: 'marketing', label: 'Health camps, packages and offers', lawfulBasis: 'consent', optional: true },
-          { code: 'research', label: 'De-identified research and quality improvement', lawfulBasis: 'consent', optional: true },
+          {
+            code: 'billing',
+            label: 'Billing, insurance and claims',
+            lawfulBasis: 'legitimate_use',
+            optional: false,
+          },
+          {
+            code: 'statutory',
+            label: 'Statutory registers and notifiable disease reporting',
+            lawfulBasis: 'legal_obligation',
+            optional: false,
+          },
+          {
+            code: 'communication',
+            label: 'Appointment, report and receipt messages',
+            lawfulBasis: 'consent',
+            optional: true,
+          },
+          {
+            code: 'marketing',
+            label: 'Health camps, packages and offers',
+            lawfulBasis: 'consent',
+            optional: true,
+          },
+          {
+            code: 'research',
+            label: 'De-identified research and quality improvement',
+            lawfulBasis: 'consent',
+            optional: true,
+          },
         ]),
         retention_statement:
-          'Clinical records are retained for 8 years from the last encounter; a minor\'s record until 3 years past majority; ' +
+          "Clinical records are retained for 8 years from the last encounter; a minor's record until 3 years past majority; " +
           'medico-legal records for the life of the case. Financial records are retained for 8 years under the GST and ' +
           'Income-tax Acts. Consent records are retained with the clinical record and are not erased by a withdrawal request.',
         recipients: jsonb([
@@ -641,36 +721,149 @@ async function seedConsent(ctx: SeedContext, tenancy: SeededTenancy): Promise<vo
  * EN-009 §4.1's seeded catalogue, narrowed to what Phase 1 actually fires.
  * key, name, channel, category, class, owner module, event, body.
  */
-const MSG_TEMPLATES: readonly (readonly [string, string, string, string, string, string, string, string])[] = [
-  ['otp_login', 'Login OTP', 'sms', 'authentication', 'critical', 'EN-007', 'auth.otp.requested',
-    '{#var#} is your {#var#} verification code. Valid for {#var#} minutes. Do not share it with anyone.'],
-  ['patient_registered', 'Welcome and UHID', 'whatsapp', 'utility', 'transactional', 'OP-001', 'patient.registered',
-    'Welcome to {#var#}, {#var#}. Your UHID is {#var#}. Please carry it on every visit.'],
-  ['appointment_confirmed', 'Appointment confirmed', 'whatsapp', 'utility', 'transactional', 'OP-001', 'appointment.booked',
-    'Appointment confirmed: {#var#} with {#var#} on {#var#} at {#var#}, {#var#}. Reply CANCEL to cancel. {#var#}'],
-  ['appointment_reminder_24h', 'Appointment reminder (24 h)', 'whatsapp', 'utility', 'transactional', 'OP-001', 'appointment.reminder.24h',
-    'Reminder: your appointment with {#var#} is tomorrow at {#var#}, {#var#}. {#var#}'],
-  ['appointment_reminder_2h', 'Appointment reminder (2 h)', 'sms', 'transactional', 'transactional', 'OP-001', 'appointment.reminder.2h',
-    'Your appointment with {#var#} is at {#var#} today. Please arrive 15 minutes early. {#var#}'],
-  ['appointment_cancelled', 'Appointment cancelled', 'whatsapp', 'utility', 'transactional', 'OP-001', 'appointment.cancelled',
-    'Your appointment with {#var#} on {#var#} has been cancelled. To rebook, visit {#var#}.'],
-  ['appointment_rescheduled', 'Appointment rescheduled', 'whatsapp', 'utility', 'transactional', 'OP-001', 'appointment.rescheduled',
-    'Your appointment with {#var#} has moved to {#var#} at {#var#}. {#var#}'],
-  ['token_issued', 'Token issued', 'sms', 'transactional', 'transactional', 'EN-006', 'queue.token.issued',
-    'Token {#var#} for {#var#}. Approximate wait {#var#} minutes. Track live: {#var#}'],
-  ['queue_called', 'Your turn', 'whatsapp', 'utility', 'transactional', 'EN-006', 'queue.token.called',
-    'Token {#var#}: please proceed to {#var#} now.'],
-  ['receipt_issued', 'Payment receipt', 'whatsapp', 'utility', 'transactional', 'NC-001', 'payment.captured',
-    'Received {#var#} at {#var#}. Receipt no {#var#}. Thank you.'],
-  ['refund_processed', 'Refund processed', 'sms', 'transactional', 'transactional', 'NC-001', 'billing.refund.processed',
-    'Refund of {#var#} against receipt {#var#} has been processed. Reference {#var#}.'],
-  ['waitlist_offer', 'Waitlist slot offered', 'whatsapp', 'utility', 'transactional', 'OP-001', 'appointment.waitlist.offered',
-    'A slot with {#var#} is free on {#var#} at {#var#}. Accept within 30 minutes: {#var#}'],
-  ['abha_linked', 'ABHA linked', 'sms', 'transactional', 'transactional', 'EN-011', 'patient.abha.linked',
-    'Your ABHA {#var#} is now linked to your record at {#var#}.'],
-  ['camp_invite', 'Health camp invitation', 'whatsapp', 'marketing', 'promotional', 'NC-026', 'campaign.dispatch',
-    'Hello {#var#}, join our free {#var#} camp on {#var#}. Register: {#var#}'],
-];
+const MSG_TEMPLATES: readonly (readonly [string, string, string, string, string, string, string, string])[] =
+  [
+    [
+      'otp_login',
+      'Login OTP',
+      'sms',
+      'authentication',
+      'critical',
+      'EN-007',
+      'auth.otp.requested',
+      '{#var#} is your {#var#} verification code. Valid for {#var#} minutes. Do not share it with anyone.',
+    ],
+    [
+      'patient_registered',
+      'Welcome and UHID',
+      'whatsapp',
+      'utility',
+      'transactional',
+      'OP-001',
+      'patient.registered',
+      'Welcome to {#var#}, {#var#}. Your UHID is {#var#}. Please carry it on every visit.',
+    ],
+    [
+      'appointment_confirmed',
+      'Appointment confirmed',
+      'whatsapp',
+      'utility',
+      'transactional',
+      'OP-001',
+      'appointment.booked',
+      'Appointment confirmed: {#var#} with {#var#} on {#var#} at {#var#}, {#var#}. Reply CANCEL to cancel. {#var#}',
+    ],
+    [
+      'appointment_reminder_24h',
+      'Appointment reminder (24 h)',
+      'whatsapp',
+      'utility',
+      'transactional',
+      'OP-001',
+      'appointment.reminder.24h',
+      'Reminder: your appointment with {#var#} is tomorrow at {#var#}, {#var#}. {#var#}',
+    ],
+    [
+      'appointment_reminder_2h',
+      'Appointment reminder (2 h)',
+      'sms',
+      'transactional',
+      'transactional',
+      'OP-001',
+      'appointment.reminder.2h',
+      'Your appointment with {#var#} is at {#var#} today. Please arrive 15 minutes early. {#var#}',
+    ],
+    [
+      'appointment_cancelled',
+      'Appointment cancelled',
+      'whatsapp',
+      'utility',
+      'transactional',
+      'OP-001',
+      'appointment.cancelled',
+      'Your appointment with {#var#} on {#var#} has been cancelled. To rebook, visit {#var#}.',
+    ],
+    [
+      'appointment_rescheduled',
+      'Appointment rescheduled',
+      'whatsapp',
+      'utility',
+      'transactional',
+      'OP-001',
+      'appointment.rescheduled',
+      'Your appointment with {#var#} has moved to {#var#} at {#var#}. {#var#}',
+    ],
+    [
+      'token_issued',
+      'Token issued',
+      'sms',
+      'transactional',
+      'transactional',
+      'EN-006',
+      'queue.token.issued',
+      'Token {#var#} for {#var#}. Approximate wait {#var#} minutes. Track live: {#var#}',
+    ],
+    [
+      'queue_called',
+      'Your turn',
+      'whatsapp',
+      'utility',
+      'transactional',
+      'EN-006',
+      'queue.token.called',
+      'Token {#var#}: please proceed to {#var#} now.',
+    ],
+    [
+      'receipt_issued',
+      'Payment receipt',
+      'whatsapp',
+      'utility',
+      'transactional',
+      'NC-001',
+      'payment.captured',
+      'Received {#var#} at {#var#}. Receipt no {#var#}. Thank you.',
+    ],
+    [
+      'refund_processed',
+      'Refund processed',
+      'sms',
+      'transactional',
+      'transactional',
+      'NC-001',
+      'billing.refund.processed',
+      'Refund of {#var#} against receipt {#var#} has been processed. Reference {#var#}.',
+    ],
+    [
+      'waitlist_offer',
+      'Waitlist slot offered',
+      'whatsapp',
+      'utility',
+      'transactional',
+      'OP-001',
+      'appointment.waitlist.offered',
+      'A slot with {#var#} is free on {#var#} at {#var#}. Accept within 30 minutes: {#var#}',
+    ],
+    [
+      'abha_linked',
+      'ABHA linked',
+      'sms',
+      'transactional',
+      'transactional',
+      'EN-011',
+      'patient.abha.linked',
+      'Your ABHA {#var#} is now linked to your record at {#var#}.',
+    ],
+    [
+      'camp_invite',
+      'Health camp invitation',
+      'whatsapp',
+      'marketing',
+      'promotional',
+      'NC-026',
+      'campaign.dispatch',
+      'Hello {#var#}, join our free {#var#} camp on {#var#}. Register: {#var#}',
+    ],
+  ];
 
 async function seedMessaging(ctx: SeedContext, tenancy: SeededTenancy): Promise<void> {
   const providers: SeedRow[] = [];
@@ -706,8 +899,16 @@ async function seedMessaging(ctx: SeedContext, tenancy: SeededTenancy): Promise<
         // that reaches production the first time someone copies a demo tenant.
         credentials_ref: `vault://vims/${h.code.toLowerCase()}/messaging/${vendor}`,
         sender_ids: jsonb(channel === 'sms' ? ['VIMSHL'] : ['+918000000003']),
-        dlt: jsonb(channel === 'sms' ? { entityId: '1101000000000000000', headers: ['VIMSHL'], peTm: 'demo-pe-tm' } : {}),
-        waba: jsonb(channel === 'whatsapp' ? { wabaId: 'demo-waba', phoneNumberId: 'demo-phone', display: h.displayName, quality: 'GREEN' } : {}),
+        dlt: jsonb(
+          channel === 'sms'
+            ? { entityId: '1101000000000000000', headers: ['VIMSHL'], peTm: 'demo-pe-tm' }
+            : {},
+        ),
+        waba: jsonb(
+          channel === 'whatsapp'
+            ? { wabaId: 'demo-waba', phoneNumberId: 'demo-phone', display: h.displayName, quality: 'GREEN' }
+            : {},
+        ),
         routes: jsonb(channel === 'sms' ? { otp: 'transactional', default: 'transactional' } : {}),
         rate_limit_per_sec: 20,
         cost_config: jsonb(
@@ -835,7 +1036,8 @@ async function seedMessaging(ctx: SeedContext, tenancy: SeededTenancy): Promise<
             })),
           ),
           dlt_template_ref_id: language === 'en-IN' ? dltRefId : null,
-          wa_template_name: channel === 'whatsapp' ? `${key}_${language.replace('-', '_').toLowerCase()}` : null,
+          wa_template_name:
+            channel === 'whatsapp' ? `${key}_${language.replace('-', '_').toLowerCase()}` : null,
           wa_status: channel === 'whatsapp' ? 'approved' : null,
           wa_quality: channel === 'whatsapp' ? 'GREEN' : null,
           wa_rejection_reason: null,
@@ -860,7 +1062,8 @@ async function seedMessaging(ctx: SeedContext, tenancy: SeededTenancy): Promise<
         condition: jsonb({}),
         channel_policy: channel === 'whatsapp' ? 'wa_then_sms' : 'sms_only',
         delay_sec: 0,
-        offset_sec: key === 'appointment_reminder_24h' ? -86_400 : key === 'appointment_reminder_2h' ? -7_200 : null,
+        offset_sec:
+          key === 'appointment_reminder_24h' ? -86_400 : key === 'appointment_reminder_2h' ? -7_200 : null,
         module: ownerModule,
         // EN-009 §5: marketing needs explicit opt-in and a DND scrub, so the
         // campaign trigger ships switched off. A hospital turns it on when its

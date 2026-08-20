@@ -92,14 +92,10 @@ export interface RedisPresenceOptions {
   readonly keyPrefix?: string;
 }
 
-export function createRedisPresenceStore(
-  redis: PresenceRedis,
-  options: RedisPresenceOptions,
-): PresenceStore {
+export function createRedisPresenceStore(redis: PresenceRedis, options: RedisPresenceOptions): PresenceStore {
   const prefix = options.keyPrefix ?? 'rt:pres';
   // Tenant-prefixed, as `docs/07` §4 requires of every Redis key.
-  const socketsKey = (hospitalId: string, userId: string): string =>
-    `${prefix}:h:${hospitalId}:u:${userId}`;
+  const socketsKey = (hospitalId: string, userId: string): string => `${prefix}:h:${hospitalId}:u:${userId}`;
   const usersKey = (hospitalId: string): string => `${prefix}:h:${hospitalId}:users`;
 
   return {

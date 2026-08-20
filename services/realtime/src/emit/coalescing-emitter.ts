@@ -80,9 +80,7 @@ export class CoalescingEmitter<TDiff> {
     if (state.timer === undefined) {
       const since = this.clock.now() - state.lastEmitAt;
       const wait =
-        state.lastEmitAt === 0
-          ? this.options.intervalMs
-          : Math.max(0, this.options.intervalMs - since);
+        state.lastEmitAt === 0 ? this.options.intervalMs : Math.max(0, this.options.intervalMs - since);
       state.timer = setTimeout(() => {
         state.timer = undefined;
         this.flush(room);

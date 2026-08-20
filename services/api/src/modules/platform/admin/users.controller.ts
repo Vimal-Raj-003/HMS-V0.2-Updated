@@ -108,7 +108,9 @@ export class UsersController {
 
   @Permission('admin.user.read')
   @Get(':id/roles')
-  async roles(@Param('id', new ZodBody(idSchema)) id: string): Promise<{ items: readonly UserRoleAssignment[] }> {
+  async roles(
+    @Param('id', new ZodBody(idSchema)) id: string,
+  ): Promise<{ items: readonly UserRoleAssignment[] }> {
     return { items: await this.users.rolesFor(id) };
   }
 

@@ -141,9 +141,7 @@ describe('tenant isolation on rooms', () => {
 
     expect(ack.ok).toBe(false);
     expect(ack.joined).toEqual([]);
-    expect(ack.denied).toEqual([
-      { room: rooms.bedboard(hospitalB, branchA1), reason: 'cross_tenant' },
-    ]);
+    expect(ack.denied).toEqual([{ room: rooms.bedboard(hospitalB, branchA1), reason: 'cross_tenant' }]);
 
     const denials = capture.find('realtime.room.join_denied');
     expect(denials).toHaveLength(1);
@@ -242,9 +240,7 @@ describe('push delivery and backpressure end to end', () => {
       `since=${encodeURIComponent(stale.joined[0]?.cursor ?? '')}`,
     );
 
-    const current = await subscribe(reconnected, [
-      { room: bedboardA, since: stale.joined[0]?.cursor ?? '' },
-    ]);
+    const current = await subscribe(reconnected, [{ room: bedboardA, since: stale.joined[0]?.cursor ?? '' }]);
     expect(current.joined[0]?.resyncRequired).toBe(false);
   });
 });
@@ -274,14 +270,10 @@ describe('presence', () => {
 
   it('announces a colleague coming online to presence subscribers of that tenant only', async () => {
     const watcher = await open(await signAccessToken(claimsFor()));
-    await subscribe(watcher, [
-      { room: { kind: 'presence', hospitalId: hospitalA, branchId: branchA1 } },
-    ]);
+    await subscribe(watcher, [{ room: { kind: 'presence', hospitalId: hospitalA, branchId: branchA1 } }]);
 
     const change = once(watcher, 'presence:changed');
-    const colleague = await open(
-      await signAccessToken(claimsFor({ sub: userBob, sid: IDS.sessionAlice })),
-    );
+    const colleague = await open(await signAccessToken(claimsFor({ sub: userBob, sid: IDS.sessionAlice })));
     await helloOf(colleague);
 
     const payload = await change;

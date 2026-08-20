@@ -33,7 +33,13 @@ describe('Twilio configuration', () => {
     const factory = createTwilioFactory(new FakeHttpTransport());
     const config = twilioConnectorConfig();
     const result = validateConnectorConfig(
-      { ...config, options: { accountSid: 'AC0123456789abcdef0123456789abcdef', statusCallbackUrl: TWILIO_STATUS_CALLBACK_URL } },
+      {
+        ...config,
+        options: {
+          accountSid: 'AC0123456789abcdef0123456789abcdef',
+          statusCallbackUrl: TWILIO_STATUS_CALLBACK_URL,
+        },
+      },
       factory,
     );
     expect(result.ok).toBe(false);
@@ -43,7 +49,10 @@ describe('Twilio configuration', () => {
     const factory = createTwilioFactory(new FakeHttpTransport());
     const adapter = new TwilioAdapter(new FakeHttpTransport());
     const ctx = adapterContext(
-      { ...twilioConnectorConfig(), options: { ...twilioConnectorConfig().options, accountSid: 'AC00000000000000000000000000000000' } },
+      {
+        ...twilioConnectorConfig(),
+        options: { ...twilioConnectorConfig().options, accountSid: 'AC00000000000000000000000000000000' },
+      },
       factory,
     );
     await expect(adapter.configure(ctx)).rejects.toThrow(/another account/);
@@ -82,7 +91,10 @@ describe('Twilio send', () => {
 
   it('classifies a Twilio 4xx by its own error code', async () => {
     const transport = new FakeHttpTransport([
-      { match: '/Messages.json', response: jsonResponse(400, { code: 21610, message: 'Unsubscribed recipient' }) },
+      {
+        match: '/Messages.json',
+        response: jsonResponse(400, { code: 21610, message: 'Unsubscribed recipient' }),
+      },
     ]);
     const adapter = await adapterWith(transport);
     const result = await adapter.send('sendSms', outboundMessage('sendSms', SMS_PAYLOAD));
@@ -93,7 +105,9 @@ describe('Twilio send', () => {
   });
 
   it('fails loudly when a 2xx carries no SID', async () => {
-    const transport = new FakeHttpTransport([{ match: '/Messages.json', response: jsonResponse(201, { status: 'queued' }) }]);
+    const transport = new FakeHttpTransport([
+      { match: '/Messages.json', response: jsonResponse(201, { status: 'queued' }) },
+    ]);
     const adapter = await adapterWith(transport);
     const result = await adapter.send('sendSms', outboundMessage('sendSms', SMS_PAYLOAD));
     if (result.status !== 'failed') throw new Error('unreachable');

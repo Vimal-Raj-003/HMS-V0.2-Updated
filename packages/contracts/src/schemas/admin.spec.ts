@@ -93,8 +93,11 @@ describe('user creation', () => {
   it('carries the registration number that every prescription must print', () => {
     // NMC norms; the signature file is an approval-gated change (EN-007 §3.2.3).
     expect(
-      professionalDetailsSchema.safeParse({ registrationNo: 'KMC-45219', council: 'Karnataka Medical Council', signatureFileId: UUID })
-        .success,
+      professionalDetailsSchema.safeParse({
+        registrationNo: 'KMC-45219',
+        council: 'Karnataka Medical Council',
+        signatureFileId: UUID,
+      }).success,
     ).toBe(true);
     expect(professionalDetailsSchema.safeParse({ signatureFileId: 'signature.png' }).success).toBe(false);
     expect(professionalDetailsSchema.safeParse({}).success).toBe(true);
@@ -119,7 +122,9 @@ describe('user creation', () => {
     expect(
       createUserRequestSchema.safeParse({
         ...validUser,
-        roleAssignments: [{ roleId: UUID, branchId: null, validFrom: '2026-08-17T00:00:00.000Z', validTo: null }],
+        roleAssignments: [
+          { roleId: UUID, branchId: null, validFrom: '2026-08-17T00:00:00.000Z', validTo: null },
+        ],
       }).success,
     ).toBe(true);
     expect(
@@ -141,7 +146,12 @@ describe('user update and deactivation', () => {
   it('never lets an update rewrite the username, the roles or the invitation', () => {
     // Rewriting a username silently re-points every audit row a human would
     // search by; role changes go through the reviewed assign endpoint instead.
-    const parsed = updateUserRequestSchema.parse({ version: 3, name, username: 'someone.else', roleAssignments: [] });
+    const parsed = updateUserRequestSchema.parse({
+      version: 3,
+      name,
+      username: 'someone.else',
+      roleAssignments: [],
+    });
     expect(Object.hasOwn(parsed, 'username')).toBe(false);
     expect(Object.hasOwn(parsed, 'roleAssignments')).toBe(false);
     expect(Object.hasOwn(parsed, 'inviteVia')).toBe(false);
@@ -154,7 +164,9 @@ describe('user update and deactivation', () => {
   });
 
   it('requires a real reason to deactivate, because it is recorded in the audit log', () => {
-    expect(deactivateUserRequestSchema.safeParse({ reason: 'Left the hospital on 31 July.' }).success).toBe(true);
+    expect(deactivateUserRequestSchema.safeParse({ reason: 'Left the hospital on 31 July.' }).success).toBe(
+      true,
+    );
     expect(deactivateUserRequestSchema.safeParse({ reason: 'na' }).success).toBe(false);
     expect(deactivateUserRequestSchema.safeParse({}).success).toBe(false);
   });
@@ -162,10 +174,14 @@ describe('user update and deactivation', () => {
   it('lets pending approvals be reassigned to a named user', () => {
     // EN-038 §3.5: otherwise the leaver's queue silently stalls.
     expect(
-      deactivateUserRequestSchema.safeParse({ reason: 'Left the hospital.', reassignApprovalsToUserId: UUID }).success,
+      deactivateUserRequestSchema.safeParse({ reason: 'Left the hospital.', reassignApprovalsToUserId: UUID })
+        .success,
     ).toBe(true);
     expect(
-      deactivateUserRequestSchema.safeParse({ reason: 'Left the hospital.', reassignApprovalsToUserId: 'a.menon' }).success,
+      deactivateUserRequestSchema.safeParse({
+        reason: 'Left the hospital.',
+        reassignApprovalsToUserId: 'a.menon',
+      }).success,
     ).toBe(false);
   });
 });
@@ -223,13 +239,22 @@ describe('roles', () => {
   });
 
   it('validates the ABAC defaults rather than accepting free-form JSON', () => {
-    expect(createRoleRequestSchema.safeParse({ ...validRole, abacDefaults: { branchIds: ['BLR'] } }).success).toBe(false);
-    expect(createRoleRequestSchema.safeParse({ ...validRole, abacDefaults: { requiresSecondPerson: true } }).success).toBe(true);
+    expect(
+      createRoleRequestSchema.safeParse({ ...validRole, abacDefaults: { branchIds: ['BLR'] } }).success,
+    ).toBe(false);
+    expect(
+      createRoleRequestSchema.safeParse({ ...validRole, abacDefaults: { requiresSecondPerson: true } })
+        .success,
+    ).toBe(true);
   });
 
   it('demands a reason on every role edit and refuses to rename the key', () => {
     // EN-007 §5: a role edit changes who can do what.
-    const parsed = updateRoleRequestSchema.parse({ version: 2, reason: 'Adds ward indent dispensing.', key: 'other' });
+    const parsed = updateRoleRequestSchema.parse({
+      version: 2,
+      reason: 'Adds ward indent dispensing.',
+      key: 'other',
+    });
     expect(Object.hasOwn(parsed, 'key')).toBe(false);
     expect(updateRoleRequestSchema.safeParse({ version: 2 }).success).toBe(false);
     expect(updateRoleRequestSchema.safeParse({ version: 2, reason: 'fix' }).success).toBe(false);
@@ -237,10 +262,16 @@ describe('roles', () => {
 
   it('demands a justification on every role assignment', () => {
     expect(
-      assignRoleRequestSchema.safeParse({ roleId: UUID, branchId: null, justification: 'Covering the night shift.' }).success,
+      assignRoleRequestSchema.safeParse({
+        roleId: UUID,
+        branchId: null,
+        justification: 'Covering the night shift.',
+      }).success,
     ).toBe(true);
     expect(assignRoleRequestSchema.safeParse({ roleId: UUID, branchId: null }).success).toBe(false);
-    expect(assignRoleRequestSchema.safeParse({ roleId: UUID, branchId: null, justification: 'ok' }).success).toBe(false);
+    expect(
+      assignRoleRequestSchema.safeParse({ roleId: UUID, branchId: null, justification: 'ok' }).success,
+    ).toBe(false);
   });
 
   it('models the effective-permission simulator with a rule trace', () => {
@@ -254,14 +285,23 @@ describe('roles', () => {
     ).toBe(true);
     // Money in a policy question is a decimal string, never a float.
     expect(
-      policySimulateRequestSchema.safeParse({ userId: UUID, action: 'bill.discount.approve', resource: { type: 'bill', amount: 2500 } })
-        .success,
+      policySimulateRequestSchema.safeParse({
+        userId: UUID,
+        action: 'bill.discount.approve',
+        resource: { type: 'bill', amount: 2500 },
+      }).success,
     ).toBe(false);
     expect(
-      policySimulateResponseSchema.safeParse({ allowed: false, reason: 'amount_limit_exceeded', trace: ['role ok', 'ceiling 10%'], obligations: [] })
-        .success,
+      policySimulateResponseSchema.safeParse({
+        allowed: false,
+        reason: 'amount_limit_exceeded',
+        trace: ['role ok', 'ceiling 10%'],
+        obligations: [],
+      }).success,
     ).toBe(true);
-    expect(policySimulateResponseSchema.safeParse({ allowed: true, reason: null, obligations: [] }).success).toBe(false);
+    expect(
+      policySimulateResponseSchema.safeParse({ allowed: true, reason: null, obligations: [] }).success,
+    ).toBe(false);
   });
 });
 
@@ -269,25 +309,53 @@ describe('settings and feature flags', () => {
   it('always states the scope a setting is written at', () => {
     expect(settingScopeSchema.options).toEqual(['hospital', 'branch', 'department', 'user']);
     expect(
-      putSettingRequestSchema.safeParse({ key: 'session.idle_timeout_min', scope: 'hospital', scopeId: null, value: 15 }).success,
+      putSettingRequestSchema.safeParse({
+        key: 'session.idle_timeout_min',
+        scope: 'hospital',
+        scopeId: null,
+        value: 15,
+      }).success,
     ).toBe(true);
-    expect(putSettingRequestSchema.safeParse({ key: 'session.idle_timeout_min', scopeId: null, value: 15 }).success).toBe(false);
     expect(
-      putSettingRequestSchema.safeParse({ key: 'session.idle_timeout_min', scope: 'tenant', scopeId: null, value: 15 }).success,
+      putSettingRequestSchema.safeParse({ key: 'session.idle_timeout_min', scopeId: null, value: 15 })
+        .success,
+    ).toBe(false);
+    expect(
+      putSettingRequestSchema.safeParse({
+        key: 'session.idle_timeout_min',
+        scope: 'tenant',
+        scopeId: null,
+        value: 15,
+      }).success,
     ).toBe(false);
   });
 
   it('requires the scope id key to be present, even when it is null', () => {
     // A missing `scopeId` is ambiguous between "hospital-wide" and "forgot to send".
-    expect(putSettingRequestSchema.safeParse({ key: 'ui.default_theme', scope: 'user', value: 'dark' }).success).toBe(false);
+    expect(
+      putSettingRequestSchema.safeParse({ key: 'ui.default_theme', scope: 'user', value: 'dark' }).success,
+    ).toBe(false);
   });
 
   it('bounds a flag rollout to a percentage and lets it expire', () => {
-    expect(putFeatureFlagRequestSchema.safeParse({ key: 'module.sso.enabled', enabled: true, rolloutPct: 50 }).success).toBe(true);
-    expect(putFeatureFlagRequestSchema.safeParse({ key: 'module.sso.enabled', enabled: true, rolloutPct: 101 }).success).toBe(false);
-    expect(putFeatureFlagRequestSchema.safeParse({ key: 'module.sso.enabled', enabled: true, rolloutPct: -1 }).success).toBe(false);
     expect(
-      putFeatureFlagRequestSchema.safeParse({ key: 'module.sso.enabled', enabled: false, expiresAt: '2026-12-31T00:00:00.000Z' }).success,
+      putFeatureFlagRequestSchema.safeParse({ key: 'module.sso.enabled', enabled: true, rolloutPct: 50 })
+        .success,
+    ).toBe(true);
+    expect(
+      putFeatureFlagRequestSchema.safeParse({ key: 'module.sso.enabled', enabled: true, rolloutPct: 101 })
+        .success,
+    ).toBe(false);
+    expect(
+      putFeatureFlagRequestSchema.safeParse({ key: 'module.sso.enabled', enabled: true, rolloutPct: -1 })
+        .success,
+    ).toBe(false);
+    expect(
+      putFeatureFlagRequestSchema.safeParse({
+        key: 'module.sso.enabled',
+        enabled: false,
+        expiresAt: '2026-12-31T00:00:00.000Z',
+      }).success,
     ).toBe(true);
     expect(putFeatureFlagRequestSchema.safeParse({ key: 'module.sso.enabled' }).success).toBe(false);
   });
@@ -310,8 +378,12 @@ describe('numbering series', () => {
   });
 
   it('refuses a pattern with no sequence token, which would repeat one number forever', () => {
-    expect(createNumberingSeriesRequestSchema.safeParse({ ...validSeries, pattern: '{BR}/{FY}' }).success).toBe(false);
-    expect(createNumberingSeriesRequestSchema.safeParse({ ...validSeries, pattern: '{BR}/{FY}/{SEQ}' }).success).toBe(false);
+    expect(
+      createNumberingSeriesRequestSchema.safeParse({ ...validSeries, pattern: '{BR}/{FY}' }).success,
+    ).toBe(false);
+    expect(
+      createNumberingSeriesRequestSchema.safeParse({ ...validSeries, pattern: '{BR}/{FY}/{SEQ}' }).success,
+    ).toBe(false);
   });
 
   it('makes gaplessness an explicit choice, never a default', () => {
@@ -328,11 +400,15 @@ describe('numbering series', () => {
 
   it('offers exactly the five reset policies a financial year needs', () => {
     expect(numberingResetPolicySchema.options).toEqual(['fy', 'year', 'month', 'day', 'never']);
-    expect(createNumberingSeriesRequestSchema.safeParse({ ...validSeries, resetPolicy: 'quarter' }).success).toBe(false);
+    expect(
+      createNumberingSeriesRequestSchema.safeParse({ ...validSeries, resetPolicy: 'quarter' }).success,
+    ).toBe(false);
   });
 
   it('refuses a negative start value', () => {
-    expect(createNumberingSeriesRequestSchema.safeParse({ ...validSeries, startValue: -1 }).success).toBe(false);
+    expect(createNumberingSeriesRequestSchema.safeParse({ ...validSeries, startValue: -1 }).success).toBe(
+      false,
+    );
   });
 
   it('previews the next number and a sample, so an admin sees the shape before committing', () => {
@@ -363,17 +439,26 @@ describe('devices', () => {
   it('refuses a pairing code that is too short, too long or not alphanumeric', () => {
     for (const pairingCode of ['A1B2', 'A1B2C3D4E5F6', 'A1-B2C3']) {
       expect(
-        pairDeviceRequestSchema.safeParse({ pairingCode, name: 'kiosk', kind: 'kiosk', branchId: UUID }).success,
+        pairDeviceRequestSchema.safeParse({ pairingCode, name: 'kiosk', kind: 'kiosk', branchId: UUID })
+          .success,
         pairingCode,
       ).toBe(false);
     }
   });
 
   it('knows every device class the platform pairs', () => {
-    expect(deviceKindSchema.options).toEqual(['kiosk', 'tv', 'print_agent', 'workstation', 'mobile', 'analyzer']);
-    expect(pairDeviceRequestSchema.safeParse({ pairingCode: 'A1B2C3', name: 'x', kind: 'fridge', branchId: UUID }).success).toBe(
-      false,
-    );
+    expect(deviceKindSchema.options).toEqual([
+      'kiosk',
+      'tv',
+      'print_agent',
+      'workstation',
+      'mobile',
+      'analyzer',
+    ]);
+    expect(
+      pairDeviceRequestSchema.safeParse({ pairingCode: 'A1B2C3', name: 'x', kind: 'fridge', branchId: UUID })
+        .success,
+    ).toBe(false);
   });
 });
 
@@ -386,9 +471,10 @@ describe('audit viewer and break-glass', () => {
   });
 
   it('refuses a malformed date range rather than searching the wrong window', () => {
-    expect(auditSearchQuerySchema.safeParse({ from: '2026-08-01T00:00:00.000Z', to: '2026-08-31T23:59:59.000Z' }).success).toBe(
-      true,
-    );
+    expect(
+      auditSearchQuerySchema.safeParse({ from: '2026-08-01T00:00:00.000Z', to: '2026-08-31T23:59:59.000Z' })
+        .success,
+    ).toBe(true);
     expect(auditSearchQuerySchema.safeParse({ from: '2026-08-01' }).success).toBe(false);
   });
 
@@ -407,25 +493,38 @@ describe('audit viewer and break-glass', () => {
       }).success,
     ).toBe(true);
     expect(
-      breakGlassAccessRequestSchema.safeParse({ patientId: UUID, reasonCode: 'code_blue', reasonText: 'urgent' }).success,
+      breakGlassAccessRequestSchema.safeParse({
+        patientId: UUID,
+        reasonCode: 'code_blue',
+        reasonText: 'urgent',
+      }).success,
     ).toBe(false);
     expect(
-      breakGlassAccessRequestSchema.safeParse({ patientId: UUID, reasonCode: 'curious', reasonText: 'Arrest call in ER.' })
-        .success,
+      breakGlassAccessRequestSchema.safeParse({
+        patientId: UUID,
+        reasonCode: 'curious',
+        reasonText: 'Arrest call in ER.',
+      }).success,
     ).toBe(false);
   });
 
   it('records a reviewer’s verdict as one of three outcomes, with a note', () => {
     for (const reviewStatus of ['justified', 'not_justified', 'explained']) {
       expect(
-        breakGlassReviewRequestSchema.safeParse({ reviewStatus, reviewNote: 'Confirmed with the ER consultant.' }).success,
+        breakGlassReviewRequestSchema.safeParse({
+          reviewStatus,
+          reviewNote: 'Confirmed with the ER consultant.',
+        }).success,
         reviewStatus,
       ).toBe(true);
     }
-    expect(breakGlassReviewRequestSchema.safeParse({ reviewStatus: 'justified', reviewNote: 'ok' }).success).toBe(false);
-    expect(breakGlassReviewRequestSchema.safeParse({ reviewStatus: 'pending', reviewNote: 'Awaiting reply.' }).success).toBe(
-      false,
-    );
+    expect(
+      breakGlassReviewRequestSchema.safeParse({ reviewStatus: 'justified', reviewNote: 'ok' }).success,
+    ).toBe(false);
+    expect(
+      breakGlassReviewRequestSchema.safeParse({ reviewStatus: 'pending', reviewNote: 'Awaiting reply.' })
+        .success,
+    ).toBe(false);
   });
 
   it('demands a ticket reference and a reason before impersonation, and defaults to read-only', () => {
@@ -436,11 +535,13 @@ describe('audit viewer and break-glass', () => {
       reason: 'Reproducing a billing screen defect the user reported.',
     });
     expect(parsed.mode).toBe('read');
-    expect(startImpersonationRequestSchema.safeParse({ targetUserId: UUID, reason: 'Reproducing a defect.' }).success).toBe(
-      false,
-    );
     expect(
-      startImpersonationRequestSchema.safeParse({ targetUserId: UUID, ticketRef: 'HD-8842', reason: 'debug' }).success,
+      startImpersonationRequestSchema.safeParse({ targetUserId: UUID, reason: 'Reproducing a defect.' })
+        .success,
+    ).toBe(false);
+    expect(
+      startImpersonationRequestSchema.safeParse({ targetUserId: UUID, ticketRef: 'HD-8842', reason: 'debug' })
+        .success,
     ).toBe(false);
   });
 });
@@ -474,7 +575,8 @@ describe('branch onboarding', () => {
   it('refuses a PIN code that is not six digits', () => {
     for (const pincode of ['56001', '5600011', '560 001', 'ABC001']) {
       expect(
-        createBranchRequestSchema.safeParse({ ...validBranch, address: { ...validBranch.address, pincode } }).success,
+        createBranchRequestSchema.safeParse({ ...validBranch, address: { ...validBranch.address, pincode } })
+          .success,
         pincode,
       ).toBe(false);
     }
@@ -494,11 +596,17 @@ describe('branch onboarding', () => {
   });
 
   it('requires a two-character state code, which drives the CGST/SGST versus IGST split', () => {
-    expect(createBranchRequestSchema.safeParse({ ...validBranch, address: { ...validBranch.address, stateCode: '9' } }).success).toBe(
-      false,
-    );
     expect(
-      createBranchRequestSchema.safeParse({ ...validBranch, address: { ...validBranch.address, stateCode: 'KAR' } }).success,
+      createBranchRequestSchema.safeParse({
+        ...validBranch,
+        address: { ...validBranch.address, stateCode: '9' },
+      }).success,
+    ).toBe(false);
+    expect(
+      createBranchRequestSchema.safeParse({
+        ...validBranch,
+        address: { ...validBranch.address, stateCode: 'KAR' },
+      }).success,
     ).toBe(false);
   });
 
@@ -513,16 +621,24 @@ describe('branch onboarding', () => {
       'warehouse',
     ]);
     expect(createBranchRequestSchema.safeParse({ ...validBranch, kind: 'clinic' }).success).toBe(false);
-    expect(createBranchRequestSchema.safeParse({ ...validBranch, moduleProfile: 'everything' }).success).toBe(false);
+    expect(createBranchRequestSchema.safeParse({ ...validBranch, moduleProfile: 'everything' }).success).toBe(
+      false,
+    );
   });
 
   it('links a satellite to the branch that serves it', () => {
     // EN-041 §3.1: a collection centre depends on a parent for lab processing.
     expect(
-      createBranchRequestSchema.safeParse({ ...validBranch, kind: 'collection_centre', servesFromBranchId: UUID, parentBranchId: UUID_2 })
-        .success,
+      createBranchRequestSchema.safeParse({
+        ...validBranch,
+        kind: 'collection_centre',
+        servesFromBranchId: UUID,
+        parentBranchId: UUID_2,
+      }).success,
     ).toBe(true);
-    expect(createBranchRequestSchema.safeParse({ ...validBranch, servesFromBranchId: 'BLR-01' }).success).toBe(false);
+    expect(
+      createBranchRequestSchema.safeParse({ ...validBranch, servesFromBranchId: 'BLR-01' }).success,
+    ).toBe(false);
   });
 
   it('refuses a negative bed count', () => {
@@ -531,16 +647,28 @@ describe('branch onboarding', () => {
 
   it('requires at least one section when cloning a branch configuration', () => {
     // Cloning nothing is a no-op that would read as a successful onboarding step.
-    expect(cloneBranchConfigRequestSchema.safeParse({ sourceBranchId: UUID, sections: ['tariffs', 'branding'] }).success).toBe(
-      true,
+    expect(
+      cloneBranchConfigRequestSchema.safeParse({ sourceBranchId: UUID, sections: ['tariffs', 'branding'] })
+        .success,
+    ).toBe(true);
+    expect(cloneBranchConfigRequestSchema.safeParse({ sourceBranchId: UUID, sections: [] }).success).toBe(
+      false,
     );
-    expect(cloneBranchConfigRequestSchema.safeParse({ sourceBranchId: UUID, sections: [] }).success).toBe(false);
-    expect(cloneBranchConfigRequestSchema.safeParse({ sourceBranchId: UUID, sections: ['everything'] }).success).toBe(false);
+    expect(
+      cloneBranchConfigRequestSchema.safeParse({ sourceBranchId: UUID, sections: ['everything'] }).success,
+    ).toBe(false);
   });
 });
 
 describe('go-live smoke test', () => {
-  const check = { key: 'rls_isolation', label: 'RLS isolation', mandatory: true, status: 'passed', detail: null, remediation: null };
+  const check = {
+    key: 'rls_isolation',
+    label: 'RLS isolation',
+    mandatory: true,
+    status: 'passed',
+    detail: null,
+    remediation: null,
+  };
 
   it('reports each check with its remediation hint', () => {
     // EN-041 §14 AC-13: a failing mandatory check blocks go-live and must say why.
@@ -549,7 +677,15 @@ describe('go-live smoke test', () => {
         branchId: UUID,
         startedAt: '2026-08-17T10:00:00.000Z',
         finishedAt: null,
-        checks: [check, { ...check, status: 'failed', detail: 'Branch 2 rows visible', remediation: 'Re-apply the RLS policy.' }],
+        checks: [
+          check,
+          {
+            ...check,
+            status: 'failed',
+            detail: 'Branch 2 rows visible',
+            remediation: 'Re-apply the RLS policy.',
+          },
+        ],
         allMandatoryPassed: false,
         canGoLive: false,
       }).success,

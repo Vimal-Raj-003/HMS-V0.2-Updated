@@ -45,7 +45,12 @@ export const envSchema = z.object({
   REALTIME_CORS_ORIGINS: z
     .string()
     .default('')
-    .transform((raw) => raw.split(',').map((o) => o.trim()).filter((o) => o.length > 0)),
+    .transform((raw) =>
+      raw
+        .split(',')
+        .map((o) => o.trim())
+        .filter((o) => o.length > 0),
+    ),
 
   REALTIME_PING_INTERVAL_MS: z.coerce.number().int().min(1_000).default(25_000),
   REALTIME_PING_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(20_000),

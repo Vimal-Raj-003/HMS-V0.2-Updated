@@ -10,7 +10,14 @@
 import { z } from 'zod';
 
 import { defineTemplate, type PrintContext, type RegisteredTemplate, type RenderedHtml } from '../types.js';
-import { bdi, escapeHtml, letterheadStyles, renderDuplicateMark, renderLetterhead, renderPrintFooter } from './letterhead.js';
+import {
+  bdi,
+  escapeHtml,
+  letterheadStyles,
+  renderDuplicateMark,
+  renderLetterhead,
+  renderPrintFooter,
+} from './letterhead.js';
 
 const alignSchema = z.enum(['start', 'end']);
 

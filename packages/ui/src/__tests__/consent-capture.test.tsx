@@ -155,9 +155,7 @@ describe('ConsentCapture — EN-028 / DPDP', () => {
   it('keeps withdrawal visible at all times', () => {
     renderConsent(() => undefined);
     expect(screen.getByRole('button', { name: 'Withdraw consent' })).toBeInTheDocument();
-    expect(
-      screen.getByText('You may withdraw at any time; care will not be refused.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('You may withdraw at any time; care will not be refused.')).toBeInTheDocument();
   });
 
   it('exposes the notice as a focusable, labelled region', () => {

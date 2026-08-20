@@ -1,11 +1,6 @@
 import { newId } from '@vims/contracts';
 import type { TenantContext } from '@vims/db/tenancy';
-import {
-  createTenantFixture,
-  startTestPostgres,
-  type TenantFixture,
-  type TestPostgres,
-} from '@vims/testing';
+import { createTenantFixture, startTestPostgres, type TenantFixture, type TestPostgres } from '@vims/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Clock } from './adapter/types.js';
 import { canAttempt, onFailure } from './circuit/circuit-breaker.js';
@@ -436,7 +431,11 @@ describe('circuit breaker', () => {
         operationId: (await hub.connectors.get(ctxA, connector.key))?.operations[0]?.id ?? '',
       };
       const snapshot = await hub.circuits.load(tx, key);
-      const decision = canAttempt(snapshot, { failureThreshold: 3, errorRatePct: 50, coolDownSec: 60, halfOpenMaxProbes: 1 }, clock.now());
+      const decision = canAttempt(
+        snapshot,
+        { failureThreshold: 3, errorRatePct: 50, coolDownSec: 60, halfOpenMaxProbes: 1 },
+        clock.now(),
+      );
       expect(decision.allowed).toBe(true);
       expect(decision.snapshot.state).toBe('half_open');
       await hub.circuits.save(tx, key, decision.snapshot, clock.now());
@@ -460,13 +459,11 @@ describe('circuit breaker', () => {
     });
     expect(recovered.status).toBe('acknowledged');
 
-    const closed = await pg
-      .pool('migrator')
-      .query<{ state: string; consecutive_failures: number }>(
-        `SELECT state::text AS state, consecutive_failures
+    const closed = await pg.pool('migrator').query<{ state: string; consecutive_failures: number }>(
+      `SELECT state::text AS state, consecutive_failures
            FROM integration.ihub_circuit_state WHERE connector_id = $1`,
-        [connector.id],
-      );
+      [connector.id],
+    );
     expect(closed.rows[0]?.state).toBe('closed');
     expect(closed.rows[0]?.consecutive_failures).toBe(0);
   });
@@ -562,9 +559,7 @@ describe('tenant isolation', () => {
     // were not doing the work, they would return A's rows.
     const fromB = await hub.db.withTenant(ctxB, async (tx) => ({
       message: await hub.messages.get(tx, sent.messageId),
-      messageCount: await tx.rows<{ n: string }>(
-        'SELECT count(*)::text AS n FROM integration.ihub_messages',
-      ),
+      messageCount: await tx.rows<{ n: string }>('SELECT count(*)::text AS n FROM integration.ihub_messages'),
       circuits: await tx.rows<{ n: string }>(
         'SELECT count(*)::text AS n FROM integration.ihub_circuit_state WHERE connector_id = $1',
         [connector.id],

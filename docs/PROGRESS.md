@@ -5,14 +5,14 @@
 
 ## Current state
 
-| Field              | Value                                                                                                                                                                                     |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current phase | **Phase 0 complete — all eight exit gates met.** Ready for Phase 1 (Patient & Front Office). |
-| Repo status | every package and service has source; **172 tables**, 8 migrations, 4 idempotent seed tiers, a running API with login, and a building Next.js front-end |
-| Last green CI | `.github/workflows/ci.yml` complete (8 stages; not yet run on GitHub). Locally **all green**: `lint` · `typecheck` · `test` · `build` · `test:safety` · `test:integration` · `test:e2e` — **1,033 unit + 166 integration + 72 e2e = 1,271 tests** |
-| Modules complete   | 0 / 177 — Phase 0 builds platform _rails_, not modules                                                                                                                                    |
-| Blocking questions | none blocking. **O-9 closed** (contracts coverage 60.62 % → 97 %). See `docs/DECISIONS.md` → "Open" for O-1…O-8. |
-| Project path       | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                              |
+| Field              | Value                                                                                                                                                                                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Current phase      | **Phase 0 complete — all eight exit gates met.** Ready for Phase 1 (Patient & Front Office).                                                                                                                                                      |
+| Repo status        | every package and service has source; **172 tables**, 8 migrations, 4 idempotent seed tiers, a running API with login, and a building Next.js front-end                                                                                           |
+| Last green CI      | `.github/workflows/ci.yml` complete (8 stages; not yet run on GitHub). Locally **all green**: `lint` · `typecheck` · `test` · `build` · `test:safety` · `test:integration` · `test:e2e` — **1,033 unit + 166 integration + 72 e2e = 1,271 tests** |
+| Modules complete   | 0 / 177 — Phase 0 builds platform _rails_, not modules                                                                                                                                                                                            |
+| Blocking questions | none blocking. **O-9 closed** (contracts coverage 60.62 % → 97 %). See `docs/DECISIONS.md` → "Open" for O-1…O-8.                                                                                                                                  |
+| Project path       | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                      |
 
 ### Exit-gate status (`docs/prompts/phase-00-foundation.md`)
 
@@ -35,21 +35,22 @@
 
 **Exit gates — all eight now met**
 
-| # | Gate | |
-|---|---|---|
-| 1 | lint · typecheck · test · e2e · build | 🟩 all green, plus `test:safety` and `test:integration` |
-| 2 | login from a clean start | 🟩 |
-| 3 | eight roles, eight correct workspaces | 🟩 |
-| 4 | isolation tests break when a policy breaks | 🟩 automated mutation test |
-| 5 | audit shows login, role change, break-glass, chain intact | 🟩 **now complete** — the admin API's role-assign and deactivate routes are reason-required and each writes exactly one audit row with actor and trace id; asserted in the integration suite |
-| 6 | ESC/POS token + PDF letterhead | 🟩 |
-| 7 | Lighthouse ≥ 90, PWA installable, offline shell | 🟩 **now met** — service worker registers and controls; installable manifest with fetched icons; offline fallback; Lighthouse budgets in CI asserting `installable-manifest` and `service-worker` at 1.0 |
-| 8 | PROGRESS lists what exists, what is stubbed, every open question | 🟩 this file |
+| #   | Gate                                                             |                                                                                                                                                                                                          |
+| --- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | lint · typecheck · test · e2e · build                            | 🟩 all green, plus `test:safety` and `test:integration`                                                                                                                                                  |
+| 2   | login from a clean start                                         | 🟩                                                                                                                                                                                                       |
+| 3   | eight roles, eight correct workspaces                            | 🟩                                                                                                                                                                                                       |
+| 4   | isolation tests break when a policy breaks                       | 🟩 automated mutation test                                                                                                                                                                               |
+| 5   | audit shows login, role change, break-glass, chain intact        | 🟩 **now complete** — the admin API's role-assign and deactivate routes are reason-required and each writes exactly one audit row with actor and trace id; asserted in the integration suite             |
+| 6   | ESC/POS token + PDF letterhead                                   | 🟩                                                                                                                                                                                                       |
+| 7   | Lighthouse ≥ 90, PWA installable, offline shell                  | 🟩 **now met** — service worker registers and controls; installable manifest with fetched icons; offline fallback; Lighthouse budgets in CI asserting `installable-manifest` and `service-worker` at 1.0 |
+| 8   | PROGRESS lists what exists, what is stubbed, every open question | 🟩 this file                                                                                                                                                                                             |
 
 **Built**
+
 - **Admin console API** — 23 routes across users, roles, permission matrix, branches, settings, flags, licence and audit search. Every route carries a catalogue permission key, every mutation writes its audit row and outbox event in one transaction, and cursor pagination is used throughout (`OFFSET` is banned).
 - **Service entrypoints** — `services/worker/src/main.ts` mounts the outbox relay, chain sealer, partition maintenance and print queue across the five BullMQ priority classes from `docs/07` §4, with graceful shutdown. All three back-end services now start from `node dist/main.js` (ADR-0011).
-- **Infrastructure** — OTel collector with a PHI-scrubbing processor chain, Prometheus/Alertmanager/Loki/Tempo/Grafana, 16 alert rules with 16 runbooks, pgBackRest with separated credentials, a restore drill that verifies RLS and the audit chain in the *restored* copy, on-prem compose, nginx and a Helm skeleton.
+- **Infrastructure** — OTel collector with a PHI-scrubbing processor chain, Prometheus/Alertmanager/Loki/Tempo/Grafana, 16 alert rules with 16 runbooks, pgBackRest with separated credentials, a restore drill that verifies RLS and the audit chain in the _restored_ copy, on-prem compose, nginx and a Helm skeleton.
 - **CI** — stages 8 (browser) and 9 (clinical safety) added; the static stage now enforces the alert-runbook and hex-literal rules.
 
 **Six defects found by running things**
@@ -62,6 +63,7 @@
 6. **`services/integration-hub`'s entrypoint constructed the hub, logged, and exited** — nothing for a rolling deploy's readiness probe to gate on.
 
 **Closed**
+
 - **O-10 closed** — root cause found and fixed; a permanent `webkit-ipad` Playwright project now covers Safari, because this class of bug is invisible to Chromium-only CI.
 - **O-11 closed** — gate 7 met.
 
@@ -69,12 +71,12 @@
 The offline navigation fallback is verified on Chromium and **unverified on Safari/iPadOS**: Playwright's offline emulation does not drive WebKit's service-worker navigation handler. The worker registers and controls the page under WebKit, and the "never cache an API response" rule is asserted there. Needs a manual check on a real iPad before an iOS rollout.
 
 **Not done — this is Phase 1 onward**
+
 - Admin console **screens** (the API and the permission-driven nav exist; the pages do not).
 - `@vims/i18n` stays source-only (ADR-0011); no service imports it.
 - Print payload sourcing is a Phase-0 stand-in until the EN-039 render cache exists, and there is no LAN print-agent transport yet, so a job raises the browser-fallback error rather than a no-op transport reporting success.
 - The integration hub's mapping DSL, schedules, listeners and delivery workers.
 - The 177 clinical and administrative modules: Phases 1–13.
-
 
 ### 2026-08-19 (final) · Phase 0 · Realtime, integration hub, TV kiosk, printing, and the browser gates
 
@@ -82,44 +84,46 @@ Four more agents on disjoint services, plus the end-to-end gates directly.
 
 **Exit-gate status**
 
-| # | Gate | Status |
-|---|---|---|
-| 1 | lint · typecheck · test · e2e · build green | 🟩 all green locally; CI written, not yet run on GitHub |
-| 2 | login works from a clean start | 🟩 proved by e2e: the suite brings up PostgreSQL, seeds, starts the API and the built web server, and signs in |
-| 3 | eight roles, eight correct empty workspaces | 🟩 all eight sign in; the admin and patient menus are asserted **different**, with the administrative items absent rather than disabled |
-| 4 | isolation tests pass **and** break when a policy is broken | 🟩 automated mutation test since the previous session |
-| 5 | audit shows login, role change, break-glass, chain intact | 🟨 login and PHI-read audited with actor + trace id; chain seals and verifies; role-change and break-glass paths exist in the engine but have no admin UI to exercise them |
-| 6 | ESC/POS token printed, PDF with letterhead | 🟩 real PDF (A4 + A5, `/MediaBox` verified, hospital name extracted from the text layer) and a token slip decoded back to its token, counter and cut command |
-| 7 | Lighthouse ≥ 90, PWA installable, offline shell | 🟥 **not met** — no service worker is registered and no Lighthouse run exists. Accessibility is gated instead (axe, WCAG 2.2 AA, zero violations on login and workspace) |
+| #   | Gate                                                       | Status                                                                                                                                                                     |
+| --- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | lint · typecheck · test · e2e · build green                | 🟩 all green locally; CI written, not yet run on GitHub                                                                                                                    |
+| 2   | login works from a clean start                             | 🟩 proved by e2e: the suite brings up PostgreSQL, seeds, starts the API and the built web server, and signs in                                                             |
+| 3   | eight roles, eight correct empty workspaces                | 🟩 all eight sign in; the admin and patient menus are asserted **different**, with the administrative items absent rather than disabled                                    |
+| 4   | isolation tests pass **and** break when a policy is broken | 🟩 automated mutation test since the previous session                                                                                                                      |
+| 5   | audit shows login, role change, break-glass, chain intact  | 🟨 login and PHI-read audited with actor + trace id; chain seals and verifies; role-change and break-glass paths exist in the engine but have no admin UI to exercise them |
+| 6   | ESC/POS token printed, PDF with letterhead                 | 🟩 real PDF (A4 + A5, `/MediaBox` verified, hospital name extracted from the text layer) and a token slip decoded back to its token, counter and cut command               |
+| 7   | Lighthouse ≥ 90, PWA installable, offline shell            | 🟥 **not met** — no service worker is registered and no Lighthouse run exists. Accessibility is gated instead (axe, WCAG 2.2 AA, zero violations on login and workspace)   |
 
 **Built**
+
 - `services/realtime` — Socket.IO on the Redis adapter, verifying the **same** HS256 token as the API. Room names are a branded type only a builder can mint, so a room can never be string-concatenated at a call site, and the tenant check runs against the token rather than any hospital id the client supplies. Coalescing is **trailing**: a leading-edge throttle would render the oldest state of a burst, which on a bed board is confidently wrong.
 - `services/integration-hub` — adapter interface, connector registry, config validation, DLQ, circuit breaker, PHI-redacting message log, and a null/echo reference connector.
 - `apps/tv-kiosk` — pairing flow, dark 1080p board, and a transport that degrades from socket to polling. A stale feed flips the panel to "Last called — not live" rather than showing old tokens as current.
-- `services/worker/src/print` — Playwright PDF renderer and an ESC/POS emulator that decodes a stream back to its text *and* its control sequences.
-- `services/api` — `GET /me` behind a new `@AuthenticatedOnly()` decorator. Session introspection cannot require a permission key, because the client calls it to *learn* which keys it holds; marking it public would be worse. Permissions are resolved per request, so a revoked role stops working immediately rather than when the token expires.
+- `services/worker/src/print` — Playwright PDF renderer and an ESC/POS emulator that decodes a stream back to its text _and_ its control sequences.
+- `services/api` — `GET /me` behind a new `@AuthenticatedOnly()` decorator. Session introspection cannot require a permission key, because the client calls it to _learn_ which keys it holds; marking it public would be worse. Permissions are resolved per request, so a revoked role stops working immediately rather than when the token expires.
 - `apps/web` — permission-driven `RoleNav`, and a Playwright suite that stands the whole stack up.
 
 **Five defects found by running the stack end to end**
 
 1. **Every responsive utility in the product was inert.** The Tailwind bridge emitted `--breakpoint-md: var(--bp-md)`, but Tailwind v4 reads that at build time to construct media queries and cannot resolve a custom property — `@media (min-width: var(--bp-md))` is invalid, so the browser dropped it. The `md:block` class existed and matched nothing. Now literal values.
 2. **The API could not start under `tsx`.** esbuild does not emit decorator metadata, so Nest's type-based DI injected `undefined` and the failure surfaced only when something dereferenced it. Injection is now declared with explicit `@Inject(Type)` rather than inferred.
-3. **A boot failure was silent.** `bufferLogs: true` holds messages until initialisation completes, so a failure *during* initialisation was buffered and discarded — the process exited with nothing printed. Boot failures now go straight to stderr.
+3. **A boot failure was silent.** `bufferLogs: true` holds messages until initialisation completes, so a failure _during_ initialisation was buffered and discarded — the process exited with nothing printed. Boot failures now go straight to stderr.
 4. **`app.listen({ port, host })`** — the Fastify adapter takes positional arguments, so the object was coerced to a nonsense port and the server never bound.
 5. **A Nest `ValidationPipe` was wired** although this codebase validates with Zod; it required `class-validator`, which is not a dependency, and killed the process at boot.
 
 Also: the login screen's utility classes named tokens that do not exist (`text-default` rather than `text-fg-default`), so Tailwind emitted nothing and the browser inherited a near-white foreground — 1.34:1 against the canvas. axe caught it; review would not have.
 
 **Open questions raised**
+
 - **O-10 — Safari/iPadOS is unverified.** Under WebKit the session cookie is not retained across the navigation after sign-in, so every authenticated test times out. Weakening `SameSite` was tried and did not help, and was reverted. The tablet project runs Chromium at a tablet viewport, which covers the responsive layout but **not** Safari. iPads are a plausible ward device, so this needs isolating before any iOS rollout.
 - **O-11 — gate 7 is unmet.** `@serwist/next` is a declared dependency but no service worker is registered, so the PWA is not installable and there is no offline shell; no Lighthouse budget runs in CI.
 
 **Not done**
+
 - Admin console screens (users, roles matrix, audit viewer, flags, licence) — the API and nav entries exist; the pages do not.
 - `services/worker` has no `main.ts`; the print worker and outbox relay are ready to mount but nothing starts them.
 - `services/realtime` and `services/integration-hub` cannot run from `dist/` because `@vims/contracts` ships raw `.ts`; they run under `tsx`. Giving `packages/contracts` a build output is the fix.
 - The integration hub's mapping DSL, schedules, listeners and BullMQ workers; the print agent's real LAN transport.
-
 
 ### 2026-08-19 (later) · Phase 0 · API, front-end, worker, design system, 124 tables and seeds
 
@@ -127,6 +131,7 @@ Built with four parallel agents on disjoint directories plus direct work on
 `services/api`, `services/worker`, `apps/web` and CI.
 
 **`services/api` — the ten-step request lifecycle (`docs/01` §3) now runs**
+
 - Request context (ALS) → auth guard → tenant guard → Zod pipe → policy guard →
   `SET LOCAL` transaction → audit → outbox → RFC 9457 filter. Guards are
   registered **globally in lifecycle order**, so a new route is closed until it
@@ -134,24 +139,26 @@ Built with four parallel agents on disjoint directories plus direct work on
   programming error rather than treated as open.
 - The RBAC/ABAC engine is pure functions: deny by default, **role grants are
   additive** (any single grant may permit — intersecting them would mean adding
-  a role could remove access), and obligations are *returned* rather than
+  a role could remove access), and obligations are _returned_ rather than
   performed so a controller cannot discharge one by ignoring it.
 - `PermissionRegistryService` **verifies** the catalogue at boot instead of
   writing it, because `_grants` says `REVOKE INSERT, UPDATE, DELETE ON
-  core.permissions FROM hms_app` — the application role must not be able to
+core.permissions FROM hms_app` — the application role must not be able to
   author the list of things it may do. Drift fails startup.
 
 **`apps/web` — the front-end builds and runs**
+
 - `/login` renders problem+json including its `reference`; tokens live in
   httpOnly `sameSite=strict` cookies set by a server route, so no script in the
   page can lift a session; `?next=` is validated as a same-origin absolute path
   (an open redirect on a login screen is a phishing vector); middleware routes on
-  cookie *presence* only and says so — authorisation is the API's job.
+  cookie _presence_ only and says so — authorisation is the API's job.
 
 **`services/worker`** — outbox relay (`FOR UPDATE SKIP LOCKED`, at-least-once,
 dead-letter on exhaustion) and the audit chain sealer.
 
 **Agent results**
+
 - `packages/contracts`: 85 → **388 tests**, coverage 60.62 % → **97 %** (O-9 closed).
 - `packages/ui`: 330 tokens × 3 themes, **816 contrast obligations**, 19 primitives,
   the 14 first-wave clinical components, 74 tests.
@@ -161,7 +168,7 @@ dead-letter on exhaustion) and the audit chain sealer.
 
 **Six defects found by running things rather than reading them**
 
-1. **`--sp-0.5` is an invalid CSS custom-property *name*.** `.` is not legal in a
+1. **`--sp-0.5` is an invalid CSS custom-property _name_.** `.` is not legal in a
    CSS ident, so the browser discards the whole declaration — and every utility
    built on it — in silence. Both emitters now escape to `--sp-0\.5`.
 2. **The outbox relay never marked anything published.** `occurred_at` is
@@ -178,7 +185,7 @@ dead-letter on exhaustion) and the audit chain sealer.
 5. **A login could not read its own role grants.** The generated policy appends
    `(branch_id IS NULL OR branch_id = ANY(current_branch_ids()))`, and
    `current_branch_ids()` is empty when unset. Since the branch scope is derived
-   *from* the grants this is a genuine chicken-and-egg; `docs/05` resolves it by
+   _from_ the grants this is a genuine chicken-and-egg; `docs/05` resolves it by
    placing branch choice after the password step. Codified in
    `currentTenantContext()`.
 6. **`scripts/check-hex-literals.mjs` did not exist** although the root
@@ -195,6 +202,7 @@ still never crosses tenants — row-level security, not a WHERE clause, is doing
 the work.
 
 **Not done / next**
+
 - **`test:e2e`** — Playwright is configured in the manifests but no specs exist,
   so exit gates 2, 3 and 7 (login as each of 8 roles, Lighthouse ≥ 90, PWA
   installable/offline) are not yet demonstrable end-to-end in a browser.
@@ -207,7 +215,6 @@ the work.
   Phases 1–2 with a registry row each rather than invented.
 - Two ADRs are owed: the EN-018 `display_*` schema placement, and the
   global-catalogue RLS predicate `USING (cardinality(accessible_hospital_ids()) > 0)`.
-
 
 ### 2026-08-19 · Phase 0 · Step 0–1: git baseline + `packages/testing` harness
 

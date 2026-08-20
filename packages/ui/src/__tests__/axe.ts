@@ -20,9 +20,7 @@ export interface AxeViolationSummary {
   readonly help: string;
 }
 
-export async function findAccessibilityViolations(
-  container: Element,
-): Promise<AxeViolationSummary[]> {
+export async function findAccessibilityViolations(container: Element): Promise<AxeViolationSummary[]> {
   const results = await axe.run(container, {
     rules: { ...DISABLED_IN_JSDOM },
     resultTypes: ['violations'],

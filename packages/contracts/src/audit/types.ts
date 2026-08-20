@@ -116,7 +116,13 @@ export const DEFAULT_AUDIT_FIELD_POLICIES: readonly AuditFieldPolicy[] = Object.
   // Secrets — never recorded, not even masked.
   { entity: '*', column: 'password_hash', mask: 'exclude', dataClass: 'operational', reasonRequired: false },
   { entity: '*', column: 'pin_hash', mask: 'exclude', dataClass: 'operational', reasonRequired: false },
-  { entity: '*', column: 'recovery_codes_hash', mask: 'exclude', dataClass: 'operational', reasonRequired: false },
+  {
+    entity: '*',
+    column: 'recovery_codes_hash',
+    mask: 'exclude',
+    dataClass: 'operational',
+    reasonRequired: false,
+  },
   { entity: '*', column: 'token_hash', mask: 'exclude', dataClass: 'operational', reasonRequired: false },
   { entity: '*', column: 'refresh_token', mask: 'exclude', dataClass: 'operational', reasonRequired: false },
   { entity: '*', column: 'client_secret', mask: 'exclude', dataClass: 'operational', reasonRequired: false },
@@ -143,7 +149,13 @@ export const DEFAULT_AUDIT_FIELD_POLICIES: readonly AuditFieldPolicy[] = Object.
   { entity: '*', column: 'aadhaar_last4', mask: 'mask_partial', dataClass: 'phi', reasonRequired: true },
   { entity: '*', column: 'abha_token', mask: 'redact', dataClass: 'phi', reasonRequired: true },
   { entity: '*', column: 'abha_number', mask: 'mask_partial', dataClass: 'phi', reasonRequired: true },
-  { entity: '*', column: 'bank_account_no', mask: 'mask_partial', dataClass: 'financial', reasonRequired: true },
+  {
+    entity: '*',
+    column: 'bank_account_no',
+    mask: 'mask_partial',
+    dataClass: 'financial',
+    reasonRequired: true,
+  },
   { entity: '*', column: 'pan', mask: 'mask_partial', dataClass: 'financial', reasonRequired: false },
   // Contact details — masked for non-care roles by ABAC, masked in diffs always.
   { entity: '*', column: 'mobile', mask: 'mask_partial', dataClass: 'phi', reasonRequired: false },

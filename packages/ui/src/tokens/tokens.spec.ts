@@ -66,7 +66,11 @@ describe('the WCAG 2.2 AA gate', () => {
     const report = evaluateTheme(theme);
     expect(report.missing).toEqual([]);
     expect(report.checked).toBeGreaterThan(200);
-    expect(report.failures.map((failure) => `${failure.requirement.foreground} on ${failure.requirement.background}`)).toEqual([]);
+    expect(
+      report.failures.map(
+        (failure) => `${failure.requirement.foreground} on ${failure.requirement.background}`,
+      ),
+    ).toEqual([]);
   });
 
   it('FAILS when a token is regressed to a value docs/06 §3.3 says must be blocked', () => {
@@ -79,7 +83,9 @@ describe('the WCAG 2.2 AA gate', () => {
     const report = evaluateTheme('light', sabotaged);
     const names = report.failures.map((failure) => failure.requirement.foreground);
     expect(names).toContain('--color-warning-on-solid');
-    const failure = report.failures.find((item) => item.requirement.foreground === '--color-warning-on-solid');
+    const failure = report.failures.find(
+      (item) => item.requirement.foreground === '--color-warning-on-solid',
+    );
     expect(failure?.actual).toBeLessThan(4.5);
   });
 

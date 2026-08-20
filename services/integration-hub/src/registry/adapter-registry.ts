@@ -57,7 +57,9 @@ export class AdapterRegistry {
       throw new AdapterRegistryError(`adapter '${ref}' is already registered`);
     }
     if (factory.manifest.capabilities.operations.length === 0) {
-      throw new AdapterRegistryError(`adapter '${ref}' declares no operations, so nothing could ever be dispatched to it`);
+      throw new AdapterRegistryError(
+        `adapter '${ref}' declares no operations, so nothing could ever be dispatched to it`,
+      );
     }
     this.factories.set(ref, factory);
     return this;

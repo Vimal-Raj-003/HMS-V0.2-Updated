@@ -1,23 +1,25 @@
 # EN-032 — Email Integration (SMTP / Amazon SES / SendGrid Adapters, DKIM-SPF-DMARC, Shared Template Engine, PHI Attachment Policy, Bounce & Complaint Handling, Suppression List, Delivery Tracking, Transactional vs Bulk Separation)
 
-| Field | Value |
-|---|---|
-| Domain | Enabler |
-| Module ID | EN-032 |
-| Phase | 0 |
-| Priority | P0 |
-| Complexity | Medium |
-| Depends on | EN-017 (connector registry, credentials vault, retry/DLQ, webhook ingestion), EN-009 (shared template master, trigger catalogue, opt-in/opt-out ledger — email is a channel of the same messaging fabric), EN-039 (template designer & HTML/PDF rendering pipeline), EN-007 (settings, secrets, service accounts), EN-024 (audit), EN-037 (Notification Centre routes email as one delivery channel), EN-028 (consent for marketing/bulk email), EN-023 (secret rotation, TLS policy), EN-040 (per-tenant sending quota entitlement) |
-| Consumed by | EN-037 (notification channel), EN-030 (survey invitations), OP-004/OP-008 (lab & radiology report delivery), OP-005/IP-005/NC-012 (bill, receipt, statement of account), IP-002 (discharge summary), NC-011/EN-001 (scheduled report distribution), NC-005 (purchase orders to vendors), NC-010 (payslips, offer letters), EN-002/RC-001 (TPA claim correspondence), PE-001/PE-006/PE-007/PE-008 (portal invitations, password resets), NC-028 (helpdesk ticket mail), EN-012 (website enquiry replies) |
-| Feature flag | `module.email.enabled` (sub: `email.bulk`, `email.inbound`, `email.attachments_phi`, `email.tracking_pixel`) |
-| Primary roles | System/service accounts (automated sending), IT Admin (56 — provider config, deliverability), Marketing/CRM (55 — bulk campaigns) |
-| Secondary roles | Hospital Admin (2 — sender identities & policy), MRD (43 — report dispatch), Accounts (46 — statements), HR (47 — payslips), DPO (57 — PHI-by-email policy), Auditor (58) |
-| Regulatory | **DPDP Act 2023 & Rules 2025** — email of health data is a disclosure requiring lawful basis, purpose limitation and reasonable security; **IT Act §43A / SPDI Rules** (reasonable security practices, encryption of sensitive personal data in transit and, for PHI attachments, at rest); **CERT-In 2022 directions** (log retention 180 days, NTP sync, incident reporting); Indian Contract Act/GST — invoices emailed must carry the tax invoice format (NC-009); DPDP consent for **promotional** email (transactional is exempt but must remain genuinely transactional); global-ready: CAN-SPAM/GDPR-compatible unsubscribe, list-unsubscribe headers, and data-residency selection for the sending provider |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain          | Enabler                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Module ID       | EN-032                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Phase           | 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Priority        | P0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Complexity      | Medium                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Depends on      | EN-017 (connector registry, credentials vault, retry/DLQ, webhook ingestion), EN-009 (shared template master, trigger catalogue, opt-in/opt-out ledger — email is a channel of the same messaging fabric), EN-039 (template designer & HTML/PDF rendering pipeline), EN-007 (settings, secrets, service accounts), EN-024 (audit), EN-037 (Notification Centre routes email as one delivery channel), EN-028 (consent for marketing/bulk email), EN-023 (secret rotation, TLS policy), EN-040 (per-tenant sending quota entitlement)                                                                                                                                                                                 |
+| Consumed by     | EN-037 (notification channel), EN-030 (survey invitations), OP-004/OP-008 (lab & radiology report delivery), OP-005/IP-005/NC-012 (bill, receipt, statement of account), IP-002 (discharge summary), NC-011/EN-001 (scheduled report distribution), NC-005 (purchase orders to vendors), NC-010 (payslips, offer letters), EN-002/RC-001 (TPA claim correspondence), PE-001/PE-006/PE-007/PE-008 (portal invitations, password resets), NC-028 (helpdesk ticket mail), EN-012 (website enquiry replies)                                                                                                                                                                                                              |
+| Feature flag    | `module.email.enabled` (sub: `email.bulk`, `email.inbound`, `email.attachments_phi`, `email.tracking_pixel`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Primary roles   | System/service accounts (automated sending), IT Admin (56 — provider config, deliverability), Marketing/CRM (55 — bulk campaigns)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Secondary roles | Hospital Admin (2 — sender identities & policy), MRD (43 — report dispatch), Accounts (46 — statements), HR (47 — payslips), DPO (57 — PHI-by-email policy), Auditor (58)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Regulatory      | **DPDP Act 2023 & Rules 2025** — email of health data is a disclosure requiring lawful basis, purpose limitation and reasonable security; **IT Act §43A / SPDI Rules** (reasonable security practices, encryption of sensitive personal data in transit and, for PHI attachments, at rest); **CERT-In 2022 directions** (log retention 180 days, NTP sync, incident reporting); Indian Contract Act/GST — invoices emailed must carry the tax invoice format (NC-009); DPDP consent for **promotional** email (transactional is exempt but must remain genuinely transactional); global-ready: CAN-SPAM/GDPR-compatible unsubscribe, list-unsubscribe headers, and data-residency selection for the sending provider |
 
 ## 1. Purpose
+
 EN-032 is the hospital's single outbound (and optionally inbound) email service: provider adapters with failover, verified sender identities with DKIM/SPF/DMARC, one shared template engine with EN-009, a strict policy for how PHI may (and may not) leave by email, and full lifecycle tracking — queued, sent, delivered, opened, bounced, complained, suppressed. Transactional mail (reports, receipts, OTPs, alerts) and bulk mail (campaigns, newsletters) are deliberately separated onto different identities and IP pools so that a marketing complaint can never damage the deliverability of a lab report.
 
 ## 2. Users & Jobs-to-be-done
+
 - **IT Admin (56, desktop)**: configure providers and sender domains, verify DNS records, watch bounce/complaint rates and the deliverability dashboard, rotate credentials, and triage failed sends from the DLQ.
 - **Patient (59)**: receive a lab report as a password-protected PDF (or a secure link with OTP), a GST-compliant bill, an appointment confirmation and a portal invitation — and be able to unsubscribe from anything non-essential.
 - **Marketing/CRM (55)**: send a segmented health-camp campaign to consented recipients only, with unsubscribe honoured and per-campaign metrics.
@@ -28,6 +30,7 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 ## 3. Core Workflows
 
 ### 3.1 Provider & sender identity setup
+
 1. IT Admin registers an **email provider** as an EN-017 connector: adapter `smtp` (generic, e.g. hospital Exchange/Zimbra/Google Workspace relay), `ses` (Amazon SES with region choice for data residency — `ap-south-1` default), `sendgrid`, `postmark`, `mailgun`, or `msgraph` (Microsoft 365 Graph sendMail). Credentials (SMTP user/pass, API key, IAM role, OAuth2 client) go to the vault; TLS is enforced (STARTTLS required, TLS 1.2+; opportunistic TLS is rejected for PHI-bearing mail).
 2. **Sender identities** (`email_senders`) are created per purpose: `no-reply@`, `reports@`, `billing@`, `appointments@`, `hr@`, `marketing@`, plus per-branch variants. Each identity declares: display name, reply-to, category (**transactional | bulk | system**), provider binding, branch scope, footer/letterhead template, and whether it may carry attachments.
 3. **DNS authentication wizard** shows the exact records to publish and verifies them live:
@@ -35,12 +38,13 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
    - **DKIM**: provider-generated selector(s), 2048-bit, with rotation reminders; the wizard polls DNS until the CNAME/TXT resolves.
    - **DMARC**: `v=DMARC1; p=none → quarantine → reject` staged rollout with `rua`/`ruf` aggregate reports ingested and charted.
    - **Return-Path/MAIL FROM** custom subdomain for alignment; **BIMI** optional later.
-   A sender identity cannot be activated for production until SPF+DKIM verify and DMARC is at least `p=none` with reporting on.
+     A sender identity cannot be activated for production until SPF+DKIM verify and DMARC is at least `p=none` with reporting on.
 4. **Transactional vs bulk separation** is enforced: bulk-category identities must use a different subdomain (e.g. `mail.hospital.in` vs `news.hospital.in`) and, where the provider supports it, a different IP pool/sub-account. A campaign may not be sent from a transactional identity, and a transactional message may not be sent from a bulk identity (hard validation).
 5. **Warm-up**: for a new domain/IP, a warm-up schedule caps daily volume with a ramp; exceeding it queues rather than sends.
 6. Provider **failover**: identities may declare a primary and a secondary provider; on circuit-open (EN-017) transactional mail fails over automatically, bulk does not (to protect reputation).
 
 ### 3.2 Templates (shared with EN-009)
+
 - Templates live in the **shared template master** (EN-009 `msg_templates` family) with a channel dimension; email adds `subject`, `preheader`, `html_body`, `text_body` (mandatory plain-text alternative), `attachments[]` policy, `category`, `language`, and a `sender_identity_id`.
 - Rendering uses EN-039's engine: MJML-derived responsive HTML compiled at publish time into inlined-CSS HTML (dark-mode safe, table-based, ≤102 KB to avoid Gmail clipping), variables via a typed context (`{{patient.first_name}}`, `{{bill.no}}`, `{{report.link}}`) validated against the trigger's payload schema at publish.
 - **Seeded catalogue**: appointment confirmed / rescheduled / cancelled / reminder, OTP & password reset (no PHI), portal invitation, lab report ready + report attached, radiology report ready, discharge summary, bill/receipt/GST invoice, statement of account, insurance pre-auth correspondence, payslip, purchase order, vendor RFQ, helpdesk ticket updates, scheduled MIS report, survey invitation (EN-030), health-camp campaign (bulk), subscription/licence notices (EN-040).
@@ -48,6 +52,7 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 - Multi-language variants per template with a completeness meter; fallback to `en-IN`.
 
 ### 3.3 Send pipeline
+
 1. A module calls `POST /api/v1/email/send` (or EN-037 routes a notification to the email channel) with `{templateKey, to[], cc[], bcc[], context, attachments[], idempotencyKey, priority, refType, refId}`.
 2. **Pre-flight checks** in order: valid template & active version → recipient address syntax + MX/disposable-domain check → **suppression list** (hard bounce, complaint, unsubscribe, manual block) → consent check for bulk category (EN-028/EN-009 opt-in ledger) → per-tenant and per-recipient rate limits (default max 10 emails/recipient/day, configurable; OTP capped at 5/hour) → quota entitlement (EN-040) → PHI policy (§3.4) → warm-up cap.
 3. **Render** subject/HTML/text with the context; generate/attach documents through the worker (Playwright PDF from EN-039 templates); compute size (hard cap 10 MB total, provider-dependent; above that, switch to a secure link automatically).
@@ -57,6 +62,7 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 7. The source record (bill, report, PO) receives a **delivery evidence** back-link: status, timestamp, provider id — visible next to the document so a receptionist can answer "did the patient get the report?".
 
 ### 3.4 PHI attachment & link policy
+
 - **Default posture: no clinical attachment in plain email.** Three modes are configurable per template (subject to the template's PHI class):
   1. **Secure link + OTP (recommended default for `clinical`)**: the email contains a signed, single-use, expiring (default 72 h) link to the patient portal/report viewer; opening it requires an OTP to the registered mobile or a portal login. No PHI in the email body beyond the patient's first name and the document type.
   2. **Password-protected PDF attachment**: AES-256 encrypted PDF whose password is a documented, per-patient formula (e.g. DDMMYYYY of date of birth, or UHID last 6) communicated out-of-band via SMS (EN-009); the password is never in the same email. Used for bills, payslips, and reports where the recipient has no portal.
@@ -67,6 +73,7 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 - Third-party providers (SES/SendGrid) are **processors**: DPA reference, region and retention are recorded on the connector (EN-017 DPDP metadata); providers must be configured to not retain message bodies beyond the minimum, and PHI attachments are preferentially replaced by links to avoid content residing with the processor at all.
 
 ### 3.5 Bounce, complaint & suppression handling
+
 - **Hard bounce** (5.x.x, invalid mailbox/domain) → address added to `email_suppressions` (`reason=hard_bounce`, permanent) → the patient/vendor record is flagged "email invalid" so front office can correct it → future sends to that address are blocked pre-flight and reported as `suppressed`.
 - **Soft bounce** (mailbox full, greylisting, 4.x.x) → retry per policy; 5 soft bounces in 30 days promote to suppression with reason `repeated_soft_bounce`.
 - **Spam complaint** (FBL/provider complaint event) → immediate permanent suppression for **all categories** (not just bulk), plus an alert to Marketing; complaint rate is tracked per identity/campaign.
@@ -75,17 +82,20 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 - **Deliverability guardrails**: if bounce rate > 5 % or complaint rate > 0.1 % over a rolling 1000 messages on an identity, bulk sending on that identity auto-pauses and alerts IT + Marketing (transactional continues); DMARC aggregate reports are parsed into a pass/fail chart by source.
 
 ### 3.6 Inbound email (optional, `email.inbound`)
+
 - Inbound addresses can be routed to modules: `helpdesk@` → NC-028 ticket create/reply threading (by `In-Reply-To`/ticket token), `claims@` → EN-002 document intake, `careers@` → NC-010, `reports@` → bounce processing.
 - Ingestion via provider inbound parse webhook or IMAP polling (EN-017); attachments are virus-scanned (ClamAV) and size-capped; sender is matched to a known patient/vendor where possible; unmatched mail goes to a triage queue.
 - Auto-responders are suppressed on `Auto-Submitted` headers to prevent mail loops; a loop detector caps 3 automated exchanges per thread.
 
 ### 3.7 Exceptions
+
 - **Provider outage** → circuit opens (EN-017); transactional mail fails over to the secondary provider or, if none, queues (durable) and alerts IT; critical notifications (EN-037) fall back to SMS/WhatsApp automatically.
 - **Attachment generation failure** (PDF render error) → message is not sent; the source record shows "report could not be attached" and a DLQ item is raised — an email must never go out with a missing or wrong attachment.
 - **Wrong-recipient risk**: shared family email addresses are detected (same address on multiple patient records) and `clinical`-class mail to such an address requires the secure-link mode.
 - **Quota exhausted** (EN-040 plan limit) → non-critical bulk is paused first, transactional continues with an admin alert; hard exhaustion queues rather than drops.
 
 ## 4. Data Model (schema `engage`, prefix `email_`)
+
 - `email_providers` — id, hospital_id, connector_id (EN-017), adapter enum(smtp/ses/sendgrid/postmark/mailgun/msgraph), region, credentials_ref, tls_policy, daily_quota, ip_pool, warmup jsonb, status enum(draft/verifying/active/paused/failed), is_primary, failover_provider_id?, created…
 - `email_senders` — id, hospital_id, branch_id?, address citext, display_name, reply_to, category enum(transactional/bulk/system), provider_id, subdomain, spf_status, dkim_status, dkim_selectors text[], dmarc_policy enum(none/quarantine/reject), dmarc_rua, verified_at, allow_attachments bool, footer_template_id, status; UNIQUE(hospital_id, address).
 - `email_messages` — id uuidv7, hospital_id, branch_id?, sender_id, template_key, template_version, category, priority enum(critical/transactional/bulk), to_hash (sha256 of address for indexing), to_encrypted, cc_count, subject_redacted, phi_class enum(none/identifier_only/clinical), attachment_mode enum(none/plain/password_pdf/secure_link), attachment_refs jsonb, ref_type, ref_id, idempotency_key, provider_message_id, status enum(queued/rendering/sent/delivered/deferred/bounced/complained/failed/suppressed/cancelled), bounce_type enum(hard/soft)?, bounce_code, error_class, attempts, size_bytes, queued_at, sent_at, delivered_at, first_opened_at, open_count, click_count, complained_at, cost_units, campaign_id?; **partitioned monthly**; indexes (hospital_id, queued_at desc), (status, queued_at), (ref_type, ref_id), UNIQUE(hospital_id, idempotency_key).
@@ -99,6 +109,7 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 - Retention: message metadata **180 days online** (CERT-In) then archived 2 years; rendered bodies/attachments **not stored** (regenerated from template + context) except where legally required (invoices — keep the exact PDF); events 180 days; suppressions permanent; PHI disclosure records 10 years.
 
 ## 5. Business Rules & Validations
+
 - **Transactional and bulk are never mixed**: a bulk-category template cannot be sent from a transactional identity or vice versa; bulk requires recorded consent and honours unsubscribe; transactional-essential mail is exempt from unsubscribe but must be genuinely essential (an admin cannot flip a marketing template to transactional without DPO approval).
 - **No PHI in subject or preheader**; a publish-time lint blocks the sensitive-term list. Clinical attachments follow §3.4 (secure link or password-protected PDF); plain clinical attachments require an explicit, recorded patient instruction.
 - **Password for a protected PDF is never sent in the same email** — it goes by SMS (EN-009) or is a documented patient-known value; the email states which.
@@ -114,28 +125,30 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 - Bounce rate > 5 % or complaint rate > 0.1 % on an identity auto-pauses **bulk** on that identity and alerts; it never pauses transactional.
 
 ## 6. API Surface (`/api/v1/email`)
-| Method | Path | Purpose | Permission | Notes |
-|---|---|---|---|---|
-| GET/POST/PATCH | /providers ; /providers/:id | provider config | `email.provider.manage` | secrets write-only |
-| POST | /providers/:id/test | send a test message | `email.provider.manage` | to a verified staff address only |
-| GET/POST/PATCH | /senders ; /senders/:id | sender identities | `email.sender.manage` | |
-| POST | /senders/:id/verify-dns ; GET /senders/:id/dns-records | SPF/DKIM/DMARC wizard | `email.sender.manage` | live DNS check |
-| POST | /send | send a templated email | `email.send` (service + role-scoped) | Idempotency-Key required |
-| POST | /send/bulk | enqueue a campaign batch | `email.campaign.send` | consent + approval gated |
-| GET | /messages?status&sender&ref&from&to&q | message log (redacted) | `email.message.read` | cursor, partition-aware |
-| GET | /messages/:id | message detail + event timeline | `email.message.read` | recipient masked unless `email.recipient.read` |
-| POST | /messages/:id/resend \| /cancel | resend (new idempotency key) / cancel while queued | `email.message.resend` | audited, reason |
-| GET/POST/DELETE | /suppressions | suppression list management | `email.suppression.manage` | removal requires re-verification |
-| POST | /verifications/send ; GET /verifications/:token | double opt-in address verification | `email.verify.send` / public token | 7-day expiry |
-| GET/POST/PATCH | /campaigns ; POST /campaigns/:id/approve \| /schedule \| /pause \| /cancel | bulk campaigns | `email.campaign.manage` (+ DPO approval) | |
-| GET | /campaigns/:id/metrics | opens, clicks, bounces, unsubscribes | `email.report.read` | |
-| POST | /webhooks/:provider | provider delivery/bounce/complaint events | signature-verified public | idempotent, via EN-017 |
-| POST | /inbound/:address | inbound parse webhook | signature-verified public | virus-scanned |
-| GET | /deliverability | bounce/complaint rates, DMARC pass %, reputation | `email.report.read` | per identity |
-| GET | /phi-disclosures?patient&from&to | PHI-by-email register | `email.phi.read` (DPO, Auditor) | DSAR support |
-| GET | /templates?channel=email | email templates (shared master) | `msg.template.read` (EN-009) | authoring lives in EN-009/EN-039 |
+
+| Method          | Path                                                                       | Purpose                                            | Permission                               | Notes                                          |
+| --------------- | -------------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------- | ---------------------------------------------- |
+| GET/POST/PATCH  | /providers ; /providers/:id                                                | provider config                                    | `email.provider.manage`                  | secrets write-only                             |
+| POST            | /providers/:id/test                                                        | send a test message                                | `email.provider.manage`                  | to a verified staff address only               |
+| GET/POST/PATCH  | /senders ; /senders/:id                                                    | sender identities                                  | `email.sender.manage`                    |                                                |
+| POST            | /senders/:id/verify-dns ; GET /senders/:id/dns-records                     | SPF/DKIM/DMARC wizard                              | `email.sender.manage`                    | live DNS check                                 |
+| POST            | /send                                                                      | send a templated email                             | `email.send` (service + role-scoped)     | Idempotency-Key required                       |
+| POST            | /send/bulk                                                                 | enqueue a campaign batch                           | `email.campaign.send`                    | consent + approval gated                       |
+| GET             | /messages?status&sender&ref&from&to&q                                      | message log (redacted)                             | `email.message.read`                     | cursor, partition-aware                        |
+| GET             | /messages/:id                                                              | message detail + event timeline                    | `email.message.read`                     | recipient masked unless `email.recipient.read` |
+| POST            | /messages/:id/resend \| /cancel                                            | resend (new idempotency key) / cancel while queued | `email.message.resend`                   | audited, reason                                |
+| GET/POST/DELETE | /suppressions                                                              | suppression list management                        | `email.suppression.manage`               | removal requires re-verification               |
+| POST            | /verifications/send ; GET /verifications/:token                            | double opt-in address verification                 | `email.verify.send` / public token       | 7-day expiry                                   |
+| GET/POST/PATCH  | /campaigns ; POST /campaigns/:id/approve \| /schedule \| /pause \| /cancel | bulk campaigns                                     | `email.campaign.manage` (+ DPO approval) |                                                |
+| GET             | /campaigns/:id/metrics                                                     | opens, clicks, bounces, unsubscribes               | `email.report.read`                      |                                                |
+| POST            | /webhooks/:provider                                                        | provider delivery/bounce/complaint events          | signature-verified public                | idempotent, via EN-017                         |
+| POST            | /inbound/:address                                                          | inbound parse webhook                              | signature-verified public                | virus-scanned                                  |
+| GET             | /deliverability                                                            | bounce/complaint rates, DMARC pass %, reputation   | `email.report.read`                      | per identity                                   |
+| GET             | /phi-disclosures?patient&from&to                                           | PHI-by-email register                              | `email.phi.read` (DPO, Auditor)          | DSAR support                                   |
+| GET             | /templates?channel=email                                                   | email templates (shared master)                    | `msg.template.read` (EN-009)             | authoring lives in EN-009/EN-039               |
 
 ## 7. Domain Events (outbox)
+
 - `email.message.queued|sent|delivered|deferred|bounced|complained|failed|suppressed` → source module callbacks (attach delivery evidence to the bill/report/PO), EN-001 analytics.
 - `email.address.hard_bounced` → patient/vendor/employee record flagged "email invalid", front-office task to correct.
 - `email.recipient.unsubscribed` → EN-009/EN-037 preference centre, campaign segment refresh.
@@ -146,6 +159,7 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 - Consumes: `lab.report.released`, `rad.report.finalised`, `bill.finalized`, `receipt.issued`, `appointment.confirmed|reminder_due`, `ip.discharge.completed`, `payroll.payslip.generated`, `po.approved`, `report.schedule.due`, `ticket.updated`, `feedback.invitation.due`, `licence.expiry.warning`.
 
 ## 8. Screens (UI)
+
 - **Email Settings / Providers** (desktop, IT Admin): provider cards with status, region, daily quota used vs limit, failover chain, "Send test" action; credential fields write-only with a rotate action.
 - **Sender Identity & DNS Wizard** (desktop): per-identity card with three status chips (SPF / DKIM / DMARC), copy-to-clipboard DNS records with a "check now" button that polls and turns green, DMARC policy stepper (`none → quarantine → reject`) with a readiness check and the aggregate-report pass chart, warm-up progress bar for new domains.
 - **Message Log** (desktop): virtualised table (time, template, sender identity, recipient masked, subject redacted, status chip, opens, ref link), filter bar (status, identity, template, date, ref), row drawer with the event timeline, provider ids, error text, `Resend`, `Cancel`, and a "reveal recipient" action behind step-up auth. Shortcuts `F` filter, `R` resend, `Ctrl+K` jump to a ref.
@@ -157,6 +171,7 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 - Empty/error states: "DKIM not verified — production sending is disabled for reports@hospital.in", "This address hard-bounced on 12-Mar — correct it in the patient record to resume email", "Attachment could not be generated — email withheld (no partial sends)".
 
 ## 9. Integrations
+
 - **Providers**: Amazon SES (ap-south-1 for Indian data residency; SNS webhooks for bounce/complaint/delivery), SendGrid (Event Webhook), Postmark, Mailgun, Microsoft 365 Graph, and generic SMTP relays (hospital Exchange/Zimbra/Google Workspace) — all registered as EN-017 connectors with vault credentials, retry and circuit breakers.
 - **EN-009** shares the template master, trigger catalogue, opt-in/opt-out ledger and the preference centre so a patient's "stop contacting me" applies across SMS, WhatsApp and email.
 - **EN-039** renders HTML and generates PDF attachments (Playwright) with letterhead/watermark/QR verification; **EN-016** signs clinical PDFs before dispatch; **EN-013** supplies QR codes for report verification links.
@@ -164,6 +179,7 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 - Inbound: provider parse webhooks or IMAP polling into NC-028 (helpdesk) and EN-002 (claims documents), with ClamAV scanning.
 
 ## 10. Reports & Analytics
+
 - Volume by template, module, identity, branch and day; delivery rate, bounce rate (hard/soft), complaint rate, open/click rate (bulk only by default); median time queued→delivered.
 - Failure taxonomy (top bounce codes and their trend), DLQ ageing, resend counts.
 - Deliverability posture: DMARC pass % by source, unauthenticated senders detected (shadow IT), DKIM key age, TLS negotiation success %.
@@ -172,6 +188,7 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 - Read models: `analytics.mv_email_daily`, `analytics.mv_email_identity_health`.
 
 ## 11. Notifications
+
 - **To IT/on-call**: DNS verification failure, DKIM key expiring, provider circuit opened, failover activated, bounce/complaint threshold breached, bulk auto-paused, quota at 80/95/100 %.
 - **To Marketing**: campaign completed with metrics, complaint spike, high unsubscribe rate.
 - **To front office / MRD**: "patient email invalid — please correct" task on hard bounce; "report could not be emailed" with a suggested alternative channel.
@@ -179,9 +196,11 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 - **To patient**: address verification email; unsubscribe confirmation; nothing else that is itself unsolicited.
 
 ## 12. Permissions (RBAC keys)
+
 `email.provider.manage` (IT Admin 56) · `email.sender.manage` (IT Admin, Hospital Admin 2) · `email.send` (service accounts + roles scoped by template category) · `email.campaign.manage` / `email.campaign.send` (Marketing 55, with DPO 57 approval for health content) · `email.message.read` (IT, module owners scoped by ref via ABAC) · `email.recipient.read` (IT lead, DPO — step-up auth, audited) · `email.message.resend` (IT, MRD 43, Billing 27 for own refs) · `email.suppression.manage` (IT, Marketing) · `email.verify.send` (Front Office 24, Portal service) · `email.phi.read` (DPO 57, Auditor 58) · `email.report.read` (Admin, IT, Marketing).
 
 ## 13. Non-functional
+
 - **Volumes (2000-bed enterprise)**: ~8000–12 000 transactional emails/day (reports, bills, appointments, portal, HR, procurement) plus periodic campaigns of 20 000–50 000; peak burst 3000 messages in 10 minutes after the morning report release. Sustained throughput target ≥ 50 msg/s per identity, bounded by provider limits.
 - Latency: enqueue-to-provider p95 < 5 s for `critical` (OTP), < 60 s for `transactional`; PDF-attachment generation p95 < 4 s (async, never blocks the caller); webhook status update applied < 10 s after provider event.
 - Rendered bodies are **not persisted** (regenerated on demand from template version + context) to minimise PHI at rest; invoices are the exception and are stored as signed PDFs in object storage with lifecycle rules.
@@ -191,6 +210,7 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 - Accessibility & i18n: HTML templates meet WCAG 2.2 AA contrast, are readable with images off (plain-text alternative always present), support `hi/ta/te/ml/kn/mr/bn` and RTL for `ar`, and use system-safe fonts; every email includes a plain-text part.
 
 ## 14. Acceptance Criteria
+
 1. **Given** a new sender identity `reports@hospital.in`, **when** SPF and DKIM records are not yet verified, **then** production sending from that identity is blocked and the wizard shows the exact records with a live re-check button.
 2. **Given** a lab report is released for a patient with a verified email, **when** the report email is sent with the default policy, **then** the email contains a secure single-use link expiring in 72 hours (not the PDF), the subject contains no test name that reveals the condition, and a PHI disclosure record is written.
 3. **Given** password-protected-PDF mode is configured for bills, **when** the bill is emailed, **then** the PDF is AES-256 encrypted, the password is delivered by SMS in a separate message, and the email body states which value opens the file.
@@ -209,6 +229,7 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 16. **Given** an inbound email to `helpdesk@`, **when** it is parsed, **then** attachments are virus-scanned, a ticket is created or threaded in NC-028, and auto-submitted mail does not trigger an auto-reply loop.
 
 ## 15. Enhancements / Later phases
+
 - **BIMI** with a VMC certificate for the hospital logo in inboxes; MTA-STS and TLS-RPT policies; ARC for forwarded mail.
 - **Send-time optimisation** and per-recipient engagement scoring for campaigns; A/B subject testing.
 - **AMP for Email / interactive** appointment confirm-reschedule directly in the inbox.
@@ -219,6 +240,7 @@ EN-032 is the hospital's single outbound (and optionally inbound) email service:
 - Provider-agnostic **deliverability seed testing** (inbox placement checks) before large campaigns.
 
 ## 16. Open Questions for the Hospital
+
 1. Which **email provider** will be used (existing Microsoft 365/Google Workspace relay, or a dedicated SES/SendGrid account), and who controls the sending domain's DNS?
 2. What **sending domain and subdomains** should be used for transactional versus bulk, and is the hospital willing to move DMARC to `p=reject`?
 3. What is the hospital's policy for **emailing clinical documents** — secure link with OTP (recommended), password-protected PDF, or plain attachment on patient request? Who signs off on exceptions?

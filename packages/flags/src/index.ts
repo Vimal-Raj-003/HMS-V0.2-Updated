@@ -39,11 +39,7 @@ export {
   restrictedCapabilities,
 } from './degradation.js';
 
-export {
-  createFlagEvaluator,
-  type FlagEvaluator,
-  type FlagEvaluatorOptions,
-} from './evaluator.js';
+export { createFlagEvaluator, type FlagEvaluator, type FlagEvaluatorOptions } from './evaluator.js';
 
 export {
   ALL_DEGRADATION_TIERS,

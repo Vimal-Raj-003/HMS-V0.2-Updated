@@ -17,9 +17,7 @@ export interface HealthState {
 
 export const HEALTH_PATHS = { live: '/healthz', ready: '/readyz' } as const;
 
-export function createHealthHandler(
-  state: HealthState,
-): (req: IncomingMessage, res: ServerResponse) => void {
+export function createHealthHandler(state: HealthState): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {
     const path = (req.url ?? '').split('?')[0] ?? '';
     if (path !== HEALTH_PATHS.live && path !== HEALTH_PATHS.ready) {

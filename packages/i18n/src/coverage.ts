@@ -199,13 +199,17 @@ export function computeCoverage(input: CoverageInput): CoverageReport {
       );
     }
     if (extra.length > 0) {
-      localeFailures.push(`${locale}: ${extra.length} key(s) not present in ${DEFAULT_LOCALE}: ${extra.join(', ')}`);
+      localeFailures.push(
+        `${locale}: ${extra.length} key(s) not present in ${DEFAULT_LOCALE}: ${extra.join(', ')}`,
+      );
     }
     if (shapeMismatch.length > 0) {
       localeFailures.push(`${locale}: shape differs from ${DEFAULT_LOCALE} at ${shapeMismatch.join(', ')}`);
     }
     if (placeholderMismatch.length > 0) {
-      localeFailures.push(`${locale}: placeholder(s) dropped in translation: ${placeholderMismatch.join(', ')}`);
+      localeFailures.push(
+        `${locale}: placeholder(s) dropped in translation: ${placeholderMismatch.join(', ')}`,
+      );
     }
     if (missing.length > 0 && !allowedPartial) {
       localeFailures.push(
@@ -255,10 +259,17 @@ function bar(percent: number): string {
  */
 export function formatCoverageReport(report: CoverageReport, extraFailures: readonly string[] = []): string {
   const lines: string[] = [];
-  lines.push(`@vims/i18n translation coverage — reference ${report.reference} (${report.referenceKeyCount} keys)`);
+  lines.push(
+    `@vims/i18n translation coverage — reference ${report.reference} (${report.referenceKeyCount} keys)`,
+  );
   lines.push('');
   for (const locale of report.locales) {
-    const flag = locale.locale === report.reference ? 'reference' : locale.allowedPartial ? 'partial (allowed)' : 'required complete';
+    const flag =
+      locale.locale === report.reference
+        ? 'reference'
+        : locale.allowedPartial
+          ? 'partial (allowed)'
+          : 'required complete';
     lines.push(
       `  ${locale.locale.padEnd(6)} ${bar(locale.percent)} ${String(locale.percent).padStart(5)}%  ${String(locale.translated).padStart(3)}/${locale.total}  ${flag}`,
     );
@@ -277,7 +288,9 @@ export function formatCoverageReport(report: CoverageReport, extraFailures: read
   }
   const allFailures = [...report.failures, ...extraFailures];
   if (allFailures.length === 0) {
-    lines.push('  PASS — every locale is structurally valid, critical keys are complete, and gaps are declared.');
+    lines.push(
+      '  PASS — every locale is structurally valid, critical keys are complete, and gaps are declared.',
+    );
   } else {
     lines.push(`  FAIL — ${allFailures.length} problem(s):`);
     for (const failure of allFailures) {

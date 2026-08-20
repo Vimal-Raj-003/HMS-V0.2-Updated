@@ -78,14 +78,21 @@ describe('time window', () => {
 
   it('uses ISO weekdays 1–7 and rejects a zero-based day', () => {
     // Off-by-one here would roster a nurse on the wrong day.
-    expect(timeWindowSchema.parse({ startTime: '09:00', endTime: '17:00', daysOfWeek: [1, 7] }).daysOfWeek).toEqual([
-      1, 7,
-    ]);
-    expect(timeWindowSchema.safeParse({ startTime: '09:00', endTime: '17:00', daysOfWeek: [0] }).success).toBe(false);
-    expect(timeWindowSchema.safeParse({ startTime: '09:00', endTime: '17:00', daysOfWeek: [8] }).success).toBe(false);
     expect(
-      timeWindowSchema.safeParse({ startTime: '09:00', endTime: '17:00', daysOfWeek: [1, 2, 3, 4, 5, 6, 7, 1] })
-        .success,
+      timeWindowSchema.parse({ startTime: '09:00', endTime: '17:00', daysOfWeek: [1, 7] }).daysOfWeek,
+    ).toEqual([1, 7]);
+    expect(
+      timeWindowSchema.safeParse({ startTime: '09:00', endTime: '17:00', daysOfWeek: [0] }).success,
+    ).toBe(false);
+    expect(
+      timeWindowSchema.safeParse({ startTime: '09:00', endTime: '17:00', daysOfWeek: [8] }).success,
+    ).toBe(false);
+    expect(
+      timeWindowSchema.safeParse({
+        startTime: '09:00',
+        endTime: '17:00',
+        daysOfWeek: [1, 2, 3, 4, 5, 6, 7, 1],
+      }).success,
     ).toBe(false);
   });
 

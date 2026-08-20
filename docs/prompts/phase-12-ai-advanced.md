@@ -4,6 +4,7 @@ Phases 0–11 complete: a full, deterministic hospital system with a governed se
 add a model — as an assistant that can be switched off without anyone noticing a missing capability.
 
 ## Read first
+
 `CLAUDE.md`, `docs/PROGRESS.md`, then **AI-001 SECTION 0 — the AI Platform Foundation (§0.1–§0.14), which is
 normative for AI-001 … AI-008 and must be built before any feature**. Then **AI-001** (chatbot),
 **AI-002** (LLM layer over EN-029 — read §3.1, the precedence contract, before writing anything),
@@ -28,6 +29,7 @@ over budget or under-confident.
 ## Deliverables
 
 ### 12.1 AI platform foundation (AI-001 §0) — build alone, ship nothing on top until it is done
+
 - **Service topology** (`services/ai`) with the shared schema `ai`, isolated from the API's request path; no AI call
   ever sits on a clinical hot path.
 - **Provider abstraction and model routing** (§0.2): one adapter interface across Anthropic, Azure OpenAI, Bedrock,
@@ -51,12 +53,13 @@ over budget or under-confident.
   is fully usable with `module.ai_*.enabled = false`. Degradation is **visible** — a persistent
   "AI assist unavailable — using standard workflow" badge, never a silent behaviour change.
 - **Governance** (§0.8): every output is a suggestion with `status ∈ {proposed, accepted, edited, rejected,
-  expired}`, the accepting user, the edit diff and the timestamp captured; model cards; a governance committee
+expired}`, the accepting user, the edit diff and the timestamp captured; model cards; a governance committee
   record; an incident path.
 - Shared data model (§0.10), shared API surface (§0.11), shared events (§0.12), shared permissions (§0.13) and
   shared non-functional rules (§0.14).
 
 ### 12.2 Eval harness and golden datasets (AI-001 §0.9) — before any feature is enabled for a real user
+
 - **Golden dataset per feature**, de-identified, curated by the clinical or functional owner, versioned, at the
   minimum sizes the spec states (400 conversations including 80 red-flag cases for AI-001; 300 vignettes for
   AI-002; 500 documents per type for AI-003; 200 multi-accent, code-mixed consultations for AI-004; a held-out
@@ -78,6 +81,7 @@ over budget or under-confident.
   guardrail blocks, escalations, latency, cost per 1000 uses, cohort slices, drift and incidents.
 
 ### 12.3 Document extraction (AI-003)
+
 The universal capture → extract → **verify** → commit pipeline, where nothing commits without a human confirming
 the extracted fields against the source image shown side by side. Prescription OCR (the highest-risk path: drug
 name confusions are the failure mode — dose and drug fields require explicit confirmation and run the EN-029
@@ -86,6 +90,7 @@ documents with **Aadhaar masking applied at extraction time so the full number i
 discharge summaries, procurement invoices and GRNs, and bulk MRD digitisation.
 
 ### 12.4 Assisted coding (AI-006)
+
 Episode intake and coding readiness, ICD-10 diagnosis coding (ICD-11-ready), procedure coding, DRG-style and
 scheme-package grouping, the **coder review workflow in NC-003 where the coder accepts, edits or rejects every
 suggestion**, optional opt-in real-time hints during documentation, and a coding audit loop that feeds accepted
@@ -93,6 +98,7 @@ and rejected suggestions back into evaluation. Coding suggestions feed RC-001 cl
 but a claim is never submitted on an unreviewed code.
 
 ### 12.5 Predictive analytics (AI-005)
+
 A **feature store** built on the Phase 11 analytics schema, a training pipeline and model registry with lineage,
 scoring integrated into the operational screens (readmission risk on the discharge screen, no-show probability on
 the appointment book, LOS and bed-demand forecasts in IP-025, inventory demand in NC-006), and per-model guardrails
@@ -101,12 +107,14 @@ language, branch) is part of the deliverable, not a follow-up** — a model whos
 paused. Every prediction carries a confidence and a deterministic heuristic fallback.
 
 ### 12.6 Chatbot (AI-001)
+
 Channel onboarding with the identity ladder (anonymous → mobile-verified → authenticated), the turn pipeline, a
 **closed, tool-backed intent catalogue** (no free-form action invention), symptom triage with safety rails where
 any red-flag phrasing routes immediately to a human and to emergency advice, hand-off to EN-033 with full context,
 and the staff-helper persona. The fallback is a numbered-menu bot plus call-centre hand-off.
 
 ### 12.7 Conversational BI (AI-008)
+
 Natural-language question → **governed SQL generated only against the Phase 11 semantic layer and dataset
 registry**, executed on the read replica under the asking user's RLS session; a strict refusal list for questions
 the module will not answer; chart selection with explanation; **k-anonymity guardrails on aggregates**; saved and
@@ -114,6 +122,7 @@ verified questions; and scheduled natural-language digests. Every answer shows t
 it used.
 
 ### 12.8 Voice and ambient scribe (AI-004)
+
 **Consent is the gate for everything ambient** — patient and clinician consent recorded per encounter, with the
 recording indicator always visible and a one-tap stop. Push-to-talk dictation (no ambient recording), ambient
 consultation capture producing a SOAP **draft that the doctor must edit and sign**, voice commands for navigation
@@ -122,6 +131,7 @@ Indian-language and code-mixed support is a first-class requirement, and audio r
 enforced.
 
 ### 12.9 Clinical decision support layer (AI-002) — subordinate to EN-029 by construction
+
 Implement §3.1 exactly: **EN-029 evaluates first, synchronously, on its 100 ms budget, and its alerts render
 before an AI-002 call is dispatched.** AI-002 runs afterwards, asynchronously, into a visually distinct
 "AI suggestions" area, and **may not** suppress, hide, collapse, delay, downgrade, re-rank or auto-acknowledge any
@@ -134,6 +144,7 @@ stewardship advice, risk signals from unstructured notes, drug–diagnosis appro
 rule-drafting tool for the informaticist (which produces a **draft EN-029 rule for human review**, never a live one).
 
 ### 12.10 Radiology assist (AI-007) — integration only
+
 **Vim's HMS builds no diagnostic imaging models. It builds an adapter layer.** Each engine is registered with
 vendor, version, modality, body part, indications, intended use, limitations, deployment mode, data-handling terms
 and **regulatory clearance references (CDSCO licence, CE-MDR, FDA 510(k)/De Novo) with expiry dates**.
@@ -147,14 +158,16 @@ enabled by configuration.** Outputs are worklist prioritisation, viewer overlays
 all of which a radiologist must accept, edit or reject.
 
 ### 12.11 The CDSCO SaMD boundary — write it down and enforce it
+
 Produce an ADR stating precisely where Vim's HMS sits relative to Software as a Medical Device: what the product
-claims (workflow, documentation, decision *support* with a human always in the loop), what it explicitly does not
+claims (workflow, documentation, decision _support_ with a human always in the loop), what it explicitly does not
 claim (diagnosis, treatment decision, autonomous action), which components are regulated third-party devices used
 under their own clearance (AI-007 engines, connected monitors, analyzers), and the intended-use statement shown to
 users. **Any feature that would cross the line into a regulatory claim is out of scope until a regulatory pathway
 exists** — and the ADR names who decides that. Every AI surface carries its standing disclaimer.
 
 ## Constraints & watch-outs
+
 - **EN-029 always wins.** Deterministic alerts take precedence over every AI output, in every feature, at every
   interruption level. Write the test that fails if an AI path can hide, delay or re-rank a deterministic alert.
 - **Human-in-the-loop is absolute.** No AI output is auto-committed to a clinical, financial or legal record.
@@ -174,6 +187,7 @@ exists** — and the ADR names who decides that. Every AI surface carries its st
   the design is wrong.
 
 ## Exit gate
+
 1. The platform foundation exists and is tested independently: provider routing, on-prem model option, residency
    refusal, prompt registry versioning, PHI redaction, retrieval tenant isolation, metering and budgets.
 2. Golden datasets exist at the required sizes for every feature built; the eval harness runs in CI and blocks a

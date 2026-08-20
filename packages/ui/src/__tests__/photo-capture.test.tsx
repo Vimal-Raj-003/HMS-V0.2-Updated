@@ -74,10 +74,7 @@ describe('PhotoCapture — phase-01 §1.2', () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(container.querySelector('[data-slot="photo-capture"]')).toHaveAttribute(
-      'data-state',
-      'streaming',
-    );
+    expect(container.querySelector('[data-slot="photo-capture"]')).toHaveAttribute('data-state', 'streaming');
     expect(screen.getByRole('button', { name: /Take photo/ })).toBeInTheDocument();
   });
 
@@ -101,10 +98,7 @@ describe('PhotoCapture — phase-01 §1.2', () => {
         initialDataUrl="data:image/png;base64,iVBORw0KGgo="
       />,
     );
-    expect(container.querySelector('[data-slot="photo-capture"]')).toHaveAttribute(
-      'data-state',
-      'captured',
-    );
+    expect(container.querySelector('[data-slot="photo-capture"]')).toHaveAttribute('data-state', 'captured');
     expect(screen.getByAltText('Photo of the patient')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Retake/ })).toBeInTheDocument();
   });

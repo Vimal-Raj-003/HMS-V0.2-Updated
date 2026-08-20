@@ -232,7 +232,8 @@ async function seedNotificationCatalogue(ctx: SeedContext, tenancy: SeededTenanc
       // EN-037 §5: an SMS preview may carry location and urgency only.
       external_content_policy: 'minimal',
       payload_schema: jsonb({}),
-      payload_fields: t.category === 'clinical_safety' ? ['patient_banner', 'location', 'urgency'] : ['summary'],
+      payload_fields:
+        t.category === 'clinical_safety' ? ['patient_banner', 'location', 'urgency'] : ['summary'],
       retention_days: t.retentionDays,
       owner_module: t.ownerModule,
       status: 'active',
@@ -471,7 +472,12 @@ async function seedTemplates(ctx: SeedContext, tenancy: SeededTenancy): Promise<
         family,
         page:
           output === 'pdf'
-            ? { size: 'A4', orientation: 'portrait', margins: { top: 18, right: 12, bottom: 18, left: 12 }, duplex: true }
+            ? {
+                size: 'A4',
+                orientation: 'portrait',
+                margins: { top: 18, right: 12, bottom: 18, left: 12 },
+                duplex: true,
+              }
             : { size: output === 'zpl' ? 'label_2x1' : '80mm', orientation: 'portrait' },
         header: { branding: true, patientBanner: family === 'clinical' },
         footer: { pageXofY: output === 'pdf' },
@@ -760,14 +766,78 @@ async function seedDisplay(ctx: SeedContext, tenancy: SeededTenancy): Promise<vo
         widgets: jsonb(
           purpose === 'opd_token'
             ? [
-                { id: 'w1', type: 'now_serving', x: 0, y: 0, w: 8, h: 5, params: {}, style: {}, refresh_sec: 2 },
-                { id: 'w2', type: 'next_tokens', x: 8, y: 0, w: 4, h: 5, params: {}, style: {}, refresh_sec: 5 },
-                { id: 'w3', type: 'announcement_ticker', x: 0, y: 5, w: 12, h: 1, params: {}, style: {}, refresh_sec: 30 },
-                { id: 'w4', type: 'clock_date', x: 0, y: 6, w: 12, h: 2, params: {}, style: {}, refresh_sec: 30 },
+                {
+                  id: 'w1',
+                  type: 'now_serving',
+                  x: 0,
+                  y: 0,
+                  w: 8,
+                  h: 5,
+                  params: {},
+                  style: {},
+                  refresh_sec: 2,
+                },
+                {
+                  id: 'w2',
+                  type: 'next_tokens',
+                  x: 8,
+                  y: 0,
+                  w: 4,
+                  h: 5,
+                  params: {},
+                  style: {},
+                  refresh_sec: 5,
+                },
+                {
+                  id: 'w3',
+                  type: 'announcement_ticker',
+                  x: 0,
+                  y: 5,
+                  w: 12,
+                  h: 1,
+                  params: {},
+                  style: {},
+                  refresh_sec: 30,
+                },
+                {
+                  id: 'w4',
+                  type: 'clock_date',
+                  x: 0,
+                  y: 6,
+                  w: 12,
+                  h: 2,
+                  params: {},
+                  style: {},
+                  refresh_sec: 30,
+                },
               ]
             : purpose === 'ward_status'
-              ? [{ id: 'w1', type: 'ward_status', x: 0, y: 0, w: 12, h: 8, params: { unit: 'W-4B' }, style: {}, refresh_sec: 10 }]
-              : [{ id: 'w1', type: 'kpi_tile', x: 0, y: 0, w: 12, h: 8, params: {}, style: {}, refresh_sec: 60 }],
+              ? [
+                  {
+                    id: 'w1',
+                    type: 'ward_status',
+                    x: 0,
+                    y: 0,
+                    w: 12,
+                    h: 8,
+                    params: { unit: 'W-4B' },
+                    style: {},
+                    refresh_sec: 10,
+                  },
+                ]
+              : [
+                  {
+                    id: 'w1',
+                    type: 'kpi_tile',
+                    x: 0,
+                    y: 0,
+                    w: 12,
+                    h: 8,
+                    params: {},
+                    style: {},
+                    refresh_sec: 60,
+                  },
+                ],
         ),
         theme_overrides: {},
         status: 'active',

@@ -143,9 +143,9 @@ describe('AllergyEditor — the four states are never conflated', () => {
     expect(isSafeToAssumeNoAllergy({ kind: 'not-recorded' })).toBe(false);
     expect(isSafeToAssumeNoAllergy({ kind: 'unable-to-assess', reason: 'Unconscious' })).toBe(false);
     expect(isSafeToAssumeNoAllergy({ kind: 'known', entries: [penicillin] })).toBe(false);
-    expect(
-      isSafeToAssumeNoAllergy({ kind: 'none-known', assertedBy: 'X', assertedOn: '20-08-2026' }),
-    ).toBe(true);
+    expect(isSafeToAssumeNoAllergy({ kind: 'none-known', assertedBy: 'X', assertedOn: '20-08-2026' })).toBe(
+      true,
+    );
   });
 
   it('keeps an unverified allergy visibly unverified', () => {
@@ -232,9 +232,10 @@ describe('AllergyEditor — the four states are never conflated', () => {
       reactionNotDocumented: 'Reaction not documented',
     };
     expect(bannerStatusFor({ kind: 'not-recorded' }, bannerLabels)).toEqual({ kind: 'not-recorded' });
-    expect(
-      bannerStatusFor({ kind: 'unable-to-assess', reason: 'Unconscious' }, bannerLabels),
-    ).toEqual({ kind: 'unable-to-assess', reason: 'Unable to assess — Unconscious' });
+    expect(bannerStatusFor({ kind: 'unable-to-assess', reason: 'Unconscious' }, bannerLabels)).toEqual({
+      kind: 'unable-to-assess',
+      reason: 'Unable to assess — Unconscious',
+    });
     expect(
       bannerStatusFor({ kind: 'none-known', assertedBy: 'N', assertedOn: '20-08-2026' }, bannerLabels),
     ).toEqual({ kind: 'none-known', verifiedOn: '20-08-2026' });

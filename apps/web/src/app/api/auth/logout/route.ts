@@ -1,10 +1,5 @@
 import { NextResponse } from 'next/server';
-import {
-  ACCESS_COOKIE,
-  REFRESH_COOKIE,
-  WORKSPACE_COOKIE,
-  cookiesMaySkipSecure,
-} from '@/lib/session';
+import { ACCESS_COOKIE, REFRESH_COOKIE, WORKSPACE_COOKIE, cookiesMaySkipSecure } from '@/lib/session';
 
 export function POST(request: Request): NextResponse {
   const response = NextResponse.json({ ok: true });

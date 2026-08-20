@@ -74,7 +74,10 @@ export interface EffectiveSetting {
  * a response body, an audit diff or a log line — not in the UI, where forgetting
  * it once leaks the key.
  */
-export function maskIfSecret(definition: SettingDefinition, value: unknown): { value: unknown; masked: boolean } {
+export function maskIfSecret(
+  definition: SettingDefinition,
+  value: unknown,
+): { value: unknown; masked: boolean } {
   if (definition.sensitivity !== 'secret') return { value, masked: false };
   return { value: value === undefined || value === null ? null : REDACTION_PLACEHOLDER, masked: true };
 }

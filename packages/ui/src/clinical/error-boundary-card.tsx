@@ -79,11 +79,7 @@ export class ErrorBoundaryCard extends Component<ErrorBoundaryCardProps, ErrorBo
     }
 
     return (
-      <Card
-        data-slot="error-boundary-card"
-        role="alert"
-        className={cn('border-danger-border', className)}
-      >
+      <Card data-slot="error-boundary-card" role="alert" className={cn('border-danger-border', className)}>
         <CardHeader>
           <CardTitle className="text-danger-fg">{labels.title}</CardTitle>
         </CardHeader>

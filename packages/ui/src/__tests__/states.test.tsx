@@ -106,7 +106,11 @@ describe('OfflineBadge — docs/06 §5.2 #34', () => {
   it('opens the queue from the keyboard when a handler is supplied', () => {
     const onOpenQueue = vi.fn();
     render(
-      <OfflineBadge state={{ kind: 'offline', queued: 2 }} labels={OFFLINE_LABELS} onOpenQueue={onOpenQueue} />,
+      <OfflineBadge
+        state={{ kind: 'offline', queued: 2 }}
+        labels={OFFLINE_LABELS}
+        onOpenQueue={onOpenQueue}
+      />,
     );
     const button = screen.getByRole('status');
     expect(button.tagName).toBe('BUTTON');

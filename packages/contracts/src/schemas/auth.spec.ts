@@ -103,9 +103,9 @@ describe('login request', () => {
     // EN-007 §3.4.2: remembering a device weakens MFA, so it is opt-in.
     const parsed = loginRequestSchema.parse({ identifier: 'a.menon', password: 'correct horse battery' });
     expect(parsed.rememberDevice).toBe(false);
-    expect(loginRequestSchema.parse({ identifier: 'a.menon', password: 'x', rememberDevice: true }).rememberDevice).toBe(
-      true,
-    );
+    expect(
+      loginRequestSchema.parse({ identifier: 'a.menon', password: 'x', rememberDevice: true }).rememberDevice,
+    ).toBe(true);
   });
 
   it('does not apply the password policy to the login field itself', () => {
@@ -121,9 +121,13 @@ describe('login request', () => {
   });
 
   it('bounds the device fingerprint so it cannot become an unbounded field', () => {
-    expect(loginRequestSchema.safeParse({ identifier: 'a.menon', password: 'x', deviceFingerprint: 'f'.repeat(129) }).success).toBe(
-      false,
-    );
+    expect(
+      loginRequestSchema.safeParse({
+        identifier: 'a.menon',
+        password: 'x',
+        deviceFingerprint: 'f'.repeat(129),
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -165,25 +169,49 @@ describe('login challenge', () => {
     const withBranches = {
       status: 'branch_selection_required',
       challengeToken: 'ct_2',
-      branches: [{ branchId: UUID, code: 'BLR', name: 'Bengaluru', city: 'Bengaluru', colourToken: 'brand.blue', roles: ['doctor_ip'] }],
+      branches: [
+        {
+          branchId: UUID,
+          code: 'BLR',
+          name: 'Bengaluru',
+          city: 'Bengaluru',
+          colourToken: 'brand.blue',
+          roles: ['doctor_ip'],
+        },
+      ],
     };
     expect(loginChallengeSchema.safeParse(withBranches).success).toBe(true);
     expect(
       loginChallengeSchema.safeParse({
         ...withBranches,
-        branches: [{ branchId: 'BLR', code: 'BLR', name: 'Bengaluru', city: null, colourToken: 'brand.blue', roles: [] }],
+        branches: [
+          {
+            branchId: 'BLR',
+            code: 'BLR',
+            name: 'Bengaluru',
+            city: null,
+            colourToken: 'brand.blue',
+            roles: [],
+          },
+        ],
       }).success,
     ).toBe(false);
   });
 
   it('models a forced password change and names why', () => {
     expect(
-      loginChallengeSchema.safeParse({ status: 'password_change_required', challengeToken: 'ct_3', reason: 'first_login' })
-        .success,
+      loginChallengeSchema.safeParse({
+        status: 'password_change_required',
+        challengeToken: 'ct_3',
+        reason: 'first_login',
+      }).success,
     ).toBe(true);
     expect(
-      loginChallengeSchema.safeParse({ status: 'password_change_required', challengeToken: 'ct_3', reason: 'because' })
-        .success,
+      loginChallengeSchema.safeParse({
+        status: 'password_change_required',
+        challengeToken: 'ct_3',
+        reason: 'because',
+      }).success,
     ).toBe(false);
   });
 
@@ -208,9 +236,13 @@ describe('login challenge', () => {
   });
 
   it('models the force-SSO redirect rather than an error', () => {
-    expect(loginChallengeSchema.safeParse({ status: 'use_sso', providerKey: 'azure', providerName: 'Hospital SSO' }).success).toBe(
-      true,
-    );
+    expect(
+      loginChallengeSchema.safeParse({
+        status: 'use_sso',
+        providerKey: 'azure',
+        providerName: 'Hospital SSO',
+      }).success,
+    ).toBe(true);
   });
 
   it('rejects a status the client has no branch for', () => {
@@ -224,16 +256,19 @@ describe('MFA and step-up', () => {
   it('accepts a recovery code at verification but never at enrolment', () => {
     // A recovery code is a break-glass credential; enrolling *with* one would
     // make it a second factor rather than a fallback.
-    expect(mfaVerifyRequestSchema.safeParse({ challengeToken: 'ct', method: 'recovery_code', code: 'abcd-efgh' }).success).toBe(
-      true,
-    );
+    expect(
+      mfaVerifyRequestSchema.safeParse({ challengeToken: 'ct', method: 'recovery_code', code: 'abcd-efgh' })
+        .success,
+    ).toBe(true);
     expect(mfaEnrolRequestSchema.safeParse({ method: 'recovery_code' }).success).toBe(false);
     expect(mfaEnrolRequestSchema.safeParse({ method: 'sms' }).success).toBe(false);
     expect(mfaEnrolRequestSchema.safeParse({ method: 'totp' }).success).toBe(true);
   });
 
   it('defaults device remembering off at MFA verification too', () => {
-    expect(mfaVerifyRequestSchema.parse({ challengeToken: 'ct', method: 'totp', code: '123456' }).rememberDevice).toBe(false);
+    expect(
+      mfaVerifyRequestSchema.parse({ challengeToken: 'ct', method: 'totp', code: '123456' }).rememberDevice,
+    ).toBe(false);
   });
 
   it('returns the provisioning material as optional, because it is shown exactly once', () => {
@@ -255,7 +290,9 @@ describe('MFA and step-up', () => {
   it('requires both the challenge token and a real branch id at branch selection', () => {
     expect(branchSelectRequestSchema.safeParse({ challengeToken: 'ct', branchId: UUID }).success).toBe(true);
     expect(branchSelectRequestSchema.safeParse({ challengeToken: '', branchId: UUID }).success).toBe(false);
-    expect(branchSelectRequestSchema.safeParse({ challengeToken: 'ct', branchId: 'BLR' }).success).toBe(false);
+    expect(branchSelectRequestSchema.safeParse({ challengeToken: 'ct', branchId: 'BLR' }).success).toBe(
+      false,
+    );
   });
 
   it('names the action a step-up is being demanded for', () => {
@@ -281,8 +318,12 @@ describe('MFA and step-up', () => {
         challengeToken: null,
       }).success,
     ).toBe(false);
-    expect(stepUpVerifyRequestSchema.safeParse({ challengeToken: 'ct', method: 'pin', code: '1234' }).success).toBe(true);
-    expect(stepUpVerifyRequestSchema.safeParse({ challengeToken: 'ct', method: 'sms', code: '1234' }).success).toBe(false);
+    expect(
+      stepUpVerifyRequestSchema.safeParse({ challengeToken: 'ct', method: 'pin', code: '1234' }).success,
+    ).toBe(true);
+    expect(
+      stepUpVerifyRequestSchema.safeParse({ challengeToken: 'ct', method: 'sms', code: '1234' }).success,
+    ).toBe(false);
   });
 });
 
@@ -302,29 +343,47 @@ describe('password change and reset', () => {
   it('requires either the current password or a challenge token, never neither', () => {
     // Without one of the two, anyone holding a session could rotate the password
     // of the user whose screen they walked up to.
-    expect(passwordChangeRequestSchema.safeParse({ newPassword: strong, confirmPassword: strong }).success).toBe(false);
     expect(
-      passwordChangeRequestSchema.safeParse({ currentPassword: 'old password here', newPassword: strong, confirmPassword: strong })
-        .success,
+      passwordChangeRequestSchema.safeParse({ newPassword: strong, confirmPassword: strong }).success,
+    ).toBe(false);
+    expect(
+      passwordChangeRequestSchema.safeParse({
+        currentPassword: 'old password here',
+        newPassword: strong,
+        confirmPassword: strong,
+      }).success,
     ).toBe(true);
     expect(
-      passwordChangeRequestSchema.safeParse({ challengeToken: 'ct', newPassword: strong, confirmPassword: strong }).success,
+      passwordChangeRequestSchema.safeParse({
+        challengeToken: 'ct',
+        newPassword: strong,
+        confirmPassword: strong,
+      }).success,
     ).toBe(true);
   });
 
   it('applies the password policy to the new password, not to the old one', () => {
     expect(
-      passwordChangeRequestSchema.safeParse({ currentPassword: 'x', newPassword: 'short', confirmPassword: 'short' }).success,
+      passwordChangeRequestSchema.safeParse({
+        currentPassword: 'x',
+        newPassword: 'short',
+        confirmPassword: 'short',
+      }).success,
     ).toBe(false);
   });
 
   it('accepts only a bounded reset token, and still checks the confirmation', () => {
     const token = 't'.repeat(32);
-    expect(passwordResetRequestSchema.safeParse({ token, newPassword: strong, confirmPassword: strong }).success).toBe(true);
-    expect(passwordResetRequestSchema.safeParse({ token: 'short', newPassword: strong, confirmPassword: strong }).success).toBe(
-      false,
-    );
-    expect(passwordResetRequestSchema.safeParse({ token, newPassword: strong, confirmPassword: 'other' }).success).toBe(false);
+    expect(
+      passwordResetRequestSchema.safeParse({ token, newPassword: strong, confirmPassword: strong }).success,
+    ).toBe(true);
+    expect(
+      passwordResetRequestSchema.safeParse({ token: 'short', newPassword: strong, confirmPassword: strong })
+        .success,
+    ).toBe(false);
+    expect(
+      passwordResetRequestSchema.safeParse({ token, newPassword: strong, confirmPassword: 'other' }).success,
+    ).toBe(false);
   });
 
   it('takes any identifier shape for a forgotten password, to avoid enumeration', () => {
@@ -356,7 +415,11 @@ describe('patient OTP and staff PIN', () => {
     // EN-007 §3.4.6: a PIN is a shortcut for an already-proven identity.
     expect(pinSetRequestSchema.safeParse({ pin: '4821', confirmPin: '4821' }).success).toBe(false);
     expect(
-      pinSetRequestSchema.safeParse({ pin: '4821', confirmPin: '4821', currentPassword: 'correct horse battery' }).success,
+      pinSetRequestSchema.safeParse({
+        pin: '4821',
+        confirmPin: '4821',
+        currentPassword: 'correct horse battery',
+      }).success,
     ).toBe(true);
   });
 
@@ -368,7 +431,10 @@ describe('patient OTP and staff PIN', () => {
 
   it('refuses the PINs everyone tries first', () => {
     for (const pin of ['1234', '12345', '123456', '0000']) {
-      expect(pinSetRequestSchema.safeParse({ pin, confirmPin: pin, currentPassword: 'pw' }).success, pin).toBe(false);
+      expect(
+        pinSetRequestSchema.safeParse({ pin, confirmPin: pin, currentPassword: 'pw' }).success,
+        pin,
+      ).toBe(false);
     }
   });
 
@@ -391,11 +457,16 @@ describe('second-person authorisation', () => {
         actionKey: 'blood.unit.issue',
       }).success,
     ).toBe(true);
-    expect(secondPersonAuthSchema.safeParse({ credential: '482193', credentialKind: 'totp', actionKey: 'blood.unit.issue' }).success).toBe(
-      false,
-    );
     expect(
-      secondPersonAuthSchema.safeParse({ identifier: 'r.iyer', credential: '482193', credentialKind: 'totp' }).success,
+      secondPersonAuthSchema.safeParse({
+        credential: '482193',
+        credentialKind: 'totp',
+        actionKey: 'blood.unit.issue',
+      }).success,
+    ).toBe(false);
+    expect(
+      secondPersonAuthSchema.safeParse({ identifier: 'r.iyer', credential: '482193', credentialKind: 'totp' })
+        .success,
     ).toBe(false);
     expect(
       secondPersonAuthSchema.safeParse({
@@ -428,7 +499,9 @@ describe('session and identity responses', () => {
 
   it('requires offset-bearing timestamps, never a naive local time', () => {
     // docs/03 §Table rules: timestamptz only. "10:05" in whose timezone?
-    expect(sessionSummarySchema.safeParse({ ...session, lastSeenAt: '2026-08-17 10:05:00' }).success).toBe(false);
+    expect(sessionSummarySchema.safeParse({ ...session, lastSeenAt: '2026-08-17 10:05:00' }).success).toBe(
+      false,
+    );
     expect(sessionSummarySchema.safeParse({ ...session, expiresAt: '17/08/2026' }).success).toBe(false);
   });
 
@@ -454,7 +527,13 @@ describe('session and identity responses', () => {
       enabledLocales: ['en-IN', 'hi'],
       fiscalYearStartMonth: 4,
     },
-    branch: { branchId: UUID, code: 'BLR', name: 'Bengaluru', colourToken: 'brand.blue', timezone: 'Asia/Kolkata' },
+    branch: {
+      branchId: UUID,
+      code: 'BLR',
+      name: 'Bengaluru',
+      colourToken: 'brand.blue',
+      timezone: 'Asia/Kolkata',
+    },
     grantedBranches: [{ branchId: UUID, code: 'BLR', name: 'Bengaluru', colourToken: 'brand.blue' }],
     scope: 'branch',
     roles: [{ roleId: UUID_2, key: 'doctor_ip', name: 'Doctor (IP)', branchId: UUID }],
@@ -481,9 +560,15 @@ describe('session and identity responses', () => {
 
   it('always states the licence degradation tier, inside the 0–4 ladder', () => {
     // EN-040 §8: the shell renders the degradation banner from exactly this.
-    expect(meResponseSchema.safeParse({ ...me, licence: { ...me.licence, degradeTier: 4 } }).success).toBe(true);
-    expect(meResponseSchema.safeParse({ ...me, licence: { ...me.licence, degradeTier: 5 } }).success).toBe(false);
-    expect(meResponseSchema.safeParse({ ...me, licence: { ...me.licence, degradeTier: -1 } }).success).toBe(false);
+    expect(meResponseSchema.safeParse({ ...me, licence: { ...me.licence, degradeTier: 4 } }).success).toBe(
+      true,
+    );
+    expect(meResponseSchema.safeParse({ ...me, licence: { ...me.licence, degradeTier: 5 } }).success).toBe(
+      false,
+    );
+    expect(meResponseSchema.safeParse({ ...me, licence: { ...me.licence, degradeTier: -1 } }).success).toBe(
+      false,
+    );
   });
 
   it('always states whether an impersonation banner must be shown', () => {
@@ -493,12 +578,18 @@ describe('session and identity responses', () => {
     expect(
       meResponseSchema.safeParse({
         ...me,
-        impersonation: { impersonatorName: 'IT Support', mode: 'read', expiresAt: '2026-08-17T10:30:00.000Z' },
+        impersonation: {
+          impersonatorName: 'IT Support',
+          mode: 'read',
+          expiresAt: '2026-08-17T10:30:00.000Z',
+        },
       }).success,
     ).toBe(true);
     expect(
-      meResponseSchema.safeParse({ ...me, impersonation: { impersonatorName: 'IT Support', mode: 'delete', expiresAt: 'x' } })
-        .success,
+      meResponseSchema.safeParse({
+        ...me,
+        impersonation: { impersonatorName: 'IT Support', mode: 'delete', expiresAt: 'x' },
+      }).success,
     ).toBe(false);
   });
 
@@ -510,14 +601,22 @@ describe('session and identity responses', () => {
 
   it('bounds the fiscal-year start to a real month', () => {
     // The FY drives every gapless invoice series (docs/03 §Numbering series).
-    expect(meResponseSchema.safeParse({ ...me, hospital: { ...me.hospital, fiscalYearStartMonth: 13 } }).success).toBe(false);
-    expect(meResponseSchema.safeParse({ ...me, hospital: { ...me.hospital, fiscalYearStartMonth: 0 } }).success).toBe(false);
+    expect(
+      meResponseSchema.safeParse({ ...me, hospital: { ...me.hospital, fiscalYearStartMonth: 13 } }).success,
+    ).toBe(false);
+    expect(
+      meResponseSchema.safeParse({ ...me, hospital: { ...me.hospital, fiscalYearStartMonth: 0 } }).success,
+    ).toBe(false);
   });
 
   it('offers only the three themes and three densities the design system defines', () => {
     // docs/06 §6.3.
-    expect(meResponseSchema.safeParse({ ...me, preferences: { ...me.preferences, theme: 'sepia' } }).success).toBe(false);
-    expect(meResponseSchema.safeParse({ ...me, preferences: { ...me.preferences, density: 'cosy' } }).success).toBe(false);
+    expect(
+      meResponseSchema.safeParse({ ...me, preferences: { ...me.preferences, theme: 'sepia' } }).success,
+    ).toBe(false);
+    expect(
+      meResponseSchema.safeParse({ ...me, preferences: { ...me.preferences, density: 'cosy' } }).success,
+    ).toBe(false);
     expect(meResponseSchema.safeParse({ ...me, scope: 'planet' }).success).toBe(false);
   });
 

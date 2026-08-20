@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ConsentLedger, InMemoryConsentStore, consentClassFor, insidePromotionalWindow } from './consent-ledger.js';
+import {
+  ConsentLedger,
+  InMemoryConsentStore,
+  consentClassFor,
+  insidePromotionalWindow,
+} from './consent-ledger.js';
 import type { MessageClass } from './types.js';
 
 const HOSPITAL = '11111111-1111-4111-8111-111111111111';
@@ -15,7 +20,11 @@ function ledger(): ConsentLedger {
   return new ConsentLedger(new InMemoryConsentStore());
 }
 
-async function decide(l: ConsentLedger, messageClass: MessageClass, at: Date = MIDDAY): Promise<ReturnType<ConsentLedger['decide']>> {
+async function decide(
+  l: ConsentLedger,
+  messageClass: MessageClass,
+  at: Date = MIDDAY,
+): Promise<ReturnType<ConsentLedger['decide']>> {
   return l.decide({ hospitalId: HOSPITAL, phoneE164: PHONE, channel: 'sms', messageClass, at, timeZone: TZ });
 }
 

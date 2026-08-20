@@ -102,7 +102,11 @@ function tailwindTheme(): string {
   for (const key of Object.keys(zIndex)) entries.push([`--z-index-${key}`, `var(--z-${key})`]);
   for (const key of Object.keys(density)) entries.push([`--spacing-row-${key}`, `var(--row-${key})`]);
 
-  return block('@theme inline', entries, 'Tailwind v4 bridge — utilities resolve to the themed custom properties');
+  return block(
+    '@theme inline',
+    entries,
+    'Tailwind v4 bridge — utilities resolve to the themed custom properties',
+  );
 }
 
 export function renderTokensCss(): string {
@@ -130,11 +134,23 @@ export function renderTokensCss(): string {
   return [
     HEADER,
     '',
-    block(themeSelectors.light, rootEntries, 'Light Clinical — the default for clinical and data-entry work (docs/06 §2.1)'),
+    block(
+      themeSelectors.light,
+      rootEntries,
+      'Light Clinical — the default for clinical and data-entry work (docs/06 §2.1)',
+    ),
     '',
-    block(themeSelectors.dark, darkEntries, 'Dark Layered Stack — dashboards, command centres, TV boards (docs/06 §2.2)'),
+    block(
+      themeSelectors.dark,
+      darkEntries,
+      'Dark Layered Stack — dashboards, command centres, TV boards (docs/06 §2.2)',
+    ),
     '',
-    block(themeSelectors.high, semanticEntries(themes.high), 'High-contrast Light — bright wards and the ER ambulance bay (docs/06 §7)'),
+    block(
+      themeSelectors.high,
+      semanticEntries(themes.high),
+      'High-contrast Light — bright wards and the ER ambulance bay (docs/06 §7)',
+    ),
     '',
     '/* docs/06 §3.7: prefers-reduced-motion collapses every duration; transforms are',
     '   disabled in component CSS and pulsing "live" dots become static rings. */',

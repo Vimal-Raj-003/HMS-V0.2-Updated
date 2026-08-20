@@ -32,7 +32,12 @@ export const professionalDetailsSchema = z.object({
 });
 
 export const createUserRequestSchema = z.object({
-  username: z.string().trim().min(3).max(64).regex(/^[a-zA-Z0-9._-]+$/, 'Letters, numbers, dot, underscore and hyphen only'),
+  username: z
+    .string()
+    .trim()
+    .min(3)
+    .max(64)
+    .regex(/^[a-zA-Z0-9._-]+$/, 'Letters, numbers, dot, underscore and hyphen only'),
   email: emailSchema.optional(),
   mobile: indianMobileSchema.optional(),
   name: personNameSchema,
@@ -89,7 +94,12 @@ export const listUsersQuerySchema = z.object({
 // ── roles ────────────────────────────────────────────────────────────────────
 
 export const createRoleRequestSchema = z.object({
-  key: z.string().trim().min(3).max(64).regex(/^[a-z][a-z0-9_]*$/, 'Lower snake_case'),
+  key: z
+    .string()
+    .trim()
+    .min(3)
+    .max(64)
+    .regex(/^[a-z][a-z0-9_]*$/, 'Lower snake_case'),
   name: z.string().trim().min(1).max(160),
   description: z.string().trim().max(1000),
   /** Clone from a system template rather than starting blank (EN-007 §3.3.2). */
@@ -99,11 +109,14 @@ export const createRoleRequestSchema = z.object({
   homeWorkspace: z.string().min(3).max(64),
 });
 
-export const updateRoleRequestSchema = createRoleRequestSchema.partial().omit({ key: true }).extend({
-  version: z.number().int().nonnegative(),
-  /** Every role edit needs a reason: it changes who can do what (EN-007 §5). */
-  reason: z.string().trim().min(5).max(500),
-});
+export const updateRoleRequestSchema = createRoleRequestSchema
+  .partial()
+  .omit({ key: true })
+  .extend({
+    version: z.number().int().nonnegative(),
+    /** Every role edit needs a reason: it changes who can do what (EN-007 §5). */
+    reason: z.string().trim().min(5).max(500),
+  });
 
 export const assignRoleRequestSchema = z.object({
   roleId: z.string().uuid(),
@@ -126,8 +139,14 @@ export const policySimulateRequestSchema = z.object({
     departmentId: z.string().uuid().nullable().optional(),
     wardId: z.string().uuid().nullable().optional(),
     patientId: z.string().uuid().nullable().optional(),
-    amount: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
-    percent: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+    amount: z
+      .string()
+      .regex(/^\d+(\.\d{1,2})?$/)
+      .optional(),
+    percent: z
+      .string()
+      .regex(/^\d+(\.\d{1,2})?$/)
+      .optional(),
   }),
 });
 
@@ -287,7 +306,12 @@ export const branchKindSchema = z.enum([
 ]);
 
 export const createBranchRequestSchema = z.object({
-  code: z.string().trim().min(2).max(16).regex(/^[A-Z0-9-]+$/, 'Upper case letters, digits and hyphen'),
+  code: z
+    .string()
+    .trim()
+    .min(2)
+    .max(16)
+    .regex(/^[A-Z0-9-]+$/, 'Upper case letters, digits and hyphen'),
   name: z.string().trim().min(1).max(200),
   shortName: z.string().trim().min(1).max(40),
   kind: branchKindSchema,
@@ -300,7 +324,10 @@ export const createBranchRequestSchema = z.object({
     city: z.string().trim().min(1).max(120),
     district: z.string().trim().max(120).optional(),
     stateCode: z.string().trim().length(2),
-    pincode: z.string().trim().regex(/^\d{6}$/, 'Six-digit PIN code'),
+    pincode: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, 'Six-digit PIN code'),
     country: z.string().trim().length(2).default('IN'),
   }),
   gstin: z

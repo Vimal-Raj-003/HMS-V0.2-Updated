@@ -34,8 +34,17 @@ export interface OfflineBadgeProps {
   readonly className?: string;
 }
 
-export function OfflineBadge({ state, labels, onOpenQueue, className }: OfflineBadgeProps): React.JSX.Element {
-  const presentation = ((): { readonly text: string; readonly tone: string; readonly icon: React.JSX.Element } => {
+export function OfflineBadge({
+  state,
+  labels,
+  onOpenQueue,
+  className,
+}: OfflineBadgeProps): React.JSX.Element {
+  const presentation = ((): {
+    readonly text: string;
+    readonly tone: string;
+    readonly icon: React.JSX.Element;
+  } => {
     switch (state.kind) {
       case 'online':
         return {
@@ -99,7 +108,10 @@ export function OfflineBadge({ state, labels, onOpenQueue, className }: OfflineB
       role="status"
       aria-label={`${presentation.text} — ${labels.openQueue}`}
       onClick={onOpenQueue}
-      className={cn(shared, 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus')}
+      className={cn(
+        shared,
+        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+      )}
     >
       {content}
     </button>

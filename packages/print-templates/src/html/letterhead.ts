@@ -45,7 +45,11 @@ function logoBlock(context: PrintContext): string {
 }
 
 function contactLine(context: PrintContext): string {
-  const parts = [context.branch.phone ?? context.hospital.phone, context.hospital.email, context.hospital.website]
+  const parts = [
+    context.branch.phone ?? context.hospital.phone,
+    context.hospital.email,
+    context.hospital.website,
+  ]
     .filter((part): part is string => part !== undefined && part.length > 0)
     .map(escapeHtml);
   return parts.length === 0 ? '' : `<div class="lh-contact">${parts.join(' &middot; ')}</div>`;
@@ -102,9 +106,7 @@ export function renderDuplicateMark(context: PrintContext): string {
 /** Printed-by / printed-at / document reference strip that closes every page. */
 export function renderPrintFooter(context: PrintContext): string {
   const ref =
-    context.documentRef === null
-      ? ''
-      : `<span class="pf-ref">Ref: ${bdi(context.documentRef)}</span>`;
+    context.documentRef === null ? '' : `<span class="pf-ref">Ref: ${bdi(context.documentRef)}</span>`;
   return [
     '<footer class="pf">',
     ref,

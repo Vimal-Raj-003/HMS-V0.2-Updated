@@ -43,7 +43,13 @@ export interface SeededTenancy {
   readonly hospitals: readonly SeededHospital[];
 }
 
-function branch(hospitalCode: string, code: string, name: string, shortName: string, isMain: boolean): SeededBranch {
+function branch(
+  hospitalCode: string,
+  code: string,
+  name: string,
+  shortName: string,
+  isMain: boolean,
+): SeededBranch {
   return { id: seedId('branch', hospitalCode, code), code, name, shortName, isMain };
 }
 
@@ -83,33 +89,30 @@ export function mainBranchOf(hospital: SeededHospital): SeededBranch {
 }
 
 export async function seedTenancy(ctx: SeedContext, tenancy: SeededTenancy): Promise<void> {
-  await ctx.write(
-    { table: 'core.org_groups', conflict: ['id'] },
-    [
-      {
-        id: tenancy.groupId,
-        name: "Vim's Demo Healthcare Group",
-        legal_name: "Vim's Healthcare Group Private Limited",
-        brand: "Vim's HMS",
-        logo_file_id: null,
-        default_currency: 'INR',
-        default_timezone: 'Asia/Kolkata',
-        hq_address: {
-          line1: '1 Demo Tower, Residency Road',
-          city: 'Bengaluru',
-          state: 'Karnataka',
-          country: 'IN',
-          pincode: '560025',
-        },
-        status: 'active',
-        created_at: SEED_EPOCH,
-        created_by: null,
-        updated_at: SEED_EPOCH,
-        updated_by: null,
-        version: 0,
+  await ctx.write({ table: 'core.org_groups', conflict: ['id'] }, [
+    {
+      id: tenancy.groupId,
+      name: "Vim's Demo Healthcare Group",
+      legal_name: "Vim's Healthcare Group Private Limited",
+      brand: "Vim's HMS",
+      logo_file_id: null,
+      default_currency: 'INR',
+      default_timezone: 'Asia/Kolkata',
+      hq_address: {
+        line1: '1 Demo Tower, Residency Road',
+        city: 'Bengaluru',
+        state: 'Karnataka',
+        country: 'IN',
+        pincode: '560025',
       },
-    ],
-  );
+      status: 'active',
+      created_at: SEED_EPOCH,
+      created_by: null,
+      updated_at: SEED_EPOCH,
+      updated_by: null,
+      version: 0,
+    },
+  ]);
 
   const hospitals: SeedRow[] = tenancy.hospitals.map((h) => ({
     id: h.id,

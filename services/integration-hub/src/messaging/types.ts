@@ -46,7 +46,12 @@ export type MessageClass = (typeof MESSAGE_CLASSES)[number];
 export const messageClassSchema = z.enum(MESSAGE_CLASSES);
 
 /** TRAI DLT content-template categories. */
-export const DLT_CATEGORIES = ['transactional', 'service_implicit', 'service_explicit', 'promotional'] as const;
+export const DLT_CATEGORIES = [
+  'transactional',
+  'service_implicit',
+  'service_explicit',
+  'promotional',
+] as const;
 export type DltCategory = (typeof DLT_CATEGORIES)[number];
 export const dltCategorySchema = z.enum(DLT_CATEGORIES);
 

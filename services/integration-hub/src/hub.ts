@@ -23,7 +23,11 @@ import { HealthCheckRunner } from './health/health-check-runner.js';
 import { InMemoryPayloadStore, type PayloadStore } from './payload/payload-store.js';
 import { nullEchoFactory } from './adapters/null-echo/null-echo.adapter.js';
 import { silentLogger } from './logger.js';
-import { TemplateCatalogue, InMemoryTemplateStore, type TemplateStore } from './messaging/template-catalogue.js';
+import {
+  TemplateCatalogue,
+  InMemoryTemplateStore,
+  type TemplateStore,
+} from './messaging/template-catalogue.js';
 import {
   DltTemplateRegistry,
   InMemoryDltRegistrationStore,

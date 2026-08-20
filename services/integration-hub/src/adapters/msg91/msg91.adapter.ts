@@ -68,7 +68,10 @@ export const msg91OptionsSchema = z
     /** Header name the callback carries the shared token in. */
     webhookTokenHeader: z.string().min(1).max(64).default('x-vims-webhook-token'),
     /** Default country for numbers MSG91 wants without a `+`. */
-    country: z.string().regex(/^\d{1,3}$/).default('91'),
+    country: z
+      .string()
+      .regex(/^\d{1,3}$/)
+      .default('91'),
     /** MSG91 route ids. 4 = transactional/service, 1 = promotional. */
     transactionalRoute: z.string().min(1).max(8).default('4'),
     promotionalRoute: z.string().min(1).max(8).default('1'),
@@ -209,7 +212,13 @@ export class Msg91Adapter implements ConnectorAdapter {
     const ctx = this.context;
     if (ctx === undefined) throw new Error(NOT_CONFIGURED);
     if (this.closed) {
-      return { status: 'failed', errorClass: 'network', message: 'adapter is closed', retryable: true, latencyMs: 0 };
+      return {
+        status: 'failed',
+        errorClass: 'network',
+        message: 'adapter is closed',
+        retryable: true,
+        latencyMs: 0,
+      };
     }
     if (operationKey !== 'sendSms') {
       return {
@@ -254,7 +263,10 @@ export class Msg91Adapter implements ConnectorAdapter {
     const started = ctx.clock.now();
     const body = JSON.stringify({
       sender: payload.senderId,
-      route: payload.dltCategory === 'promotional' ? this.options.promotionalRoute : this.options.transactionalRoute,
+      route:
+        payload.dltCategory === 'promotional'
+          ? this.options.promotionalRoute
+          : this.options.transactionalRoute,
       country: this.options.country,
       DLT_TE_ID: payload.dltTemplateId,
       // MSG91 wants the entity id on the account, but echoing it makes the
@@ -290,7 +302,9 @@ export class Msg91Adapter implements ConnectorAdapter {
         latencyMs,
         now: ctx.clock.now(),
         code: 'MSG91_HTTP',
-        ...(envelope.success && envelope.data.message !== undefined ? { message: envelope.data.message } : {}),
+        ...(envelope.success && envelope.data.message !== undefined
+          ? { message: envelope.data.message }
+          : {}),
       });
     }
 
@@ -427,7 +441,12 @@ export class Msg91Adapter implements ConnectorAdapter {
       }
       const balance = Number.parseFloat(response.body.trim());
       if (Number.isFinite(balance) && balance <= 0) {
-        return { status: 'warn', latencyMs, checkedAt: ctx.clock.now(), detail: 'MSG91 credit balance is zero' };
+        return {
+          status: 'warn',
+          latencyMs,
+          checkedAt: ctx.clock.now(),
+          detail: 'MSG91 credit balance is zero',
+        };
       }
       return { status: 'pass', latencyMs, checkedAt: ctx.clock.now(), detail: `MSG91 ${kind} ok` };
     } catch (error) {
@@ -450,10 +469,7 @@ export class Msg91Adapter implements ConnectorAdapter {
   }
 }
 
-export function headerValue(
-  headers: Readonly<Record<string, string>>,
-  name: string,
-): string | undefined {
+export function headerValue(headers: Readonly<Record<string, string>>, name: string): string | undefined {
   const wanted = name.toLowerCase();
   for (const [key, value] of Object.entries(headers)) {
     if (key.toLowerCase() === wanted) return value;

@@ -6,13 +6,7 @@ import { cn } from '../lib/cn.js';
 import { Button } from '../primitives/button.js';
 import { Input, inputClassName } from '../primitives/input.js';
 import { Label } from '../primitives/label.js';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../primitives/select.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../primitives/select.js';
 
 /**
  * `AddressForm` — the Indian postal address of OP-001 registration
@@ -207,7 +201,11 @@ export function AddressForm({
     const message = errorFor(key);
     if (message === undefined) return null;
     return (
-      <p id={`${fieldId}-${key}-error`} role="alert" className="flex items-center gap-1 text-xs text-danger-fg">
+      <p
+        id={`${fieldId}-${key}-error`}
+        role="alert"
+        className="flex items-center gap-1 text-xs text-danger-fg"
+      >
         <CircleAlert aria-hidden="true" className="size-3" />
         {message}
       </p>

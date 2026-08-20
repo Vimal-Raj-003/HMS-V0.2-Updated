@@ -1,18 +1,18 @@
 # AI-001 — AI Chatbot ("Intellibot": Patient WhatsApp/Web/App Assistant + Staff Helper, Intent Automation, Safety-Railed Symptom Triage, Multilingual Retrieval, Human Hand-off)
 
-| Field | Value |
-|---|---|
-| Domain | AI & Advanced Tech |
-| Module ID | AI-001 |
-| Phase | 12 |
-| Priority | P2 |
-| Complexity | High |
-| Depends on | **§0 AI Platform Foundation (defined here, used by AI-002…AI-008)**, EN-009 (WhatsApp Cloud API / SMS / DLT), EN-012 (website widget), EN-033 (IVR & call-centre hand-off), EN-034 (kiosk), PE-001/OP-020 (patient portal & app surface), PE-003 (health education corpus), OP-001 (appointments, doctor schedule), OP-004/OP-008 (report status), OP-005/EN-010 (bill enquiry, payment links), EN-002 (insurance/TPA FAQ), EN-028 (consent), EN-024 (audit), EN-037 (notifications), EN-027 (masters), EN-007 (roles/settings/secrets), NC-004 (staff SOP corpus), NC-028 (IT helpdesk ticketing) |
-| Consumed by | PE-001, PE-002 (follow-up conversion), OP-001 (bot-originated appointments), NC-026 (lead capture), NC-032 (complaint intake), EN-006 (token status) |
-| Feature flag | `module.ai_chatbot.enabled` (sub: `chatbot.whatsapp`, `chatbot.web`, `chatbot.app`, `chatbot.staff_helper`, `chatbot.triage`, `chatbot.transactional`, `chatbot.voice_note_input`) |
-| Primary roles | Patient (59), Family/Attendant (60), Call Centre Agent (25 — hand-off desk), Receptionist (24) |
-| Secondary roles | Marketing/CRM (55 — content & campaigns), IT Admin (56 — channel health), Medical Superintendent (4 — triage content sign-off), DPO (57 — consent & retention), Hospital Admin (2 — KPIs), all staff roles for the staff helper |
-| Regulatory | DPDP Act 2023 + DPDP Rules 2025 (consent notice before chat, purpose limitation, retention, erasure), TRAI DLT (SMS fallback templates), Meta WhatsApp Business Policy (template approval, 24-h session window, no unsolicited health advice), NMC Telemedicine Practice Guidelines 2020 (a bot may **not** diagnose or prescribe; only a Registered Medical Practitioner may), CDSCO/India MDR — symptom triage is a **non-diagnostic information & navigation aid**, explicitly not Software as a Medical Device (see §0.8), ABDM (no HIU data pulled into chat without consent artefact), IT Act 43A/SPDI, Consumer Protection (no misleading health claims) |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain          | AI & Advanced Tech                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Module ID       | AI-001                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Phase           | 12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Priority        | P2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Complexity      | High                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Depends on      | **§0 AI Platform Foundation (defined here, used by AI-002…AI-008)**, EN-009 (WhatsApp Cloud API / SMS / DLT), EN-012 (website widget), EN-033 (IVR & call-centre hand-off), EN-034 (kiosk), PE-001/OP-020 (patient portal & app surface), PE-003 (health education corpus), OP-001 (appointments, doctor schedule), OP-004/OP-008 (report status), OP-005/EN-010 (bill enquiry, payment links), EN-002 (insurance/TPA FAQ), EN-028 (consent), EN-024 (audit), EN-037 (notifications), EN-027 (masters), EN-007 (roles/settings/secrets), NC-004 (staff SOP corpus), NC-028 (IT helpdesk ticketing)                                                              |
+| Consumed by     | PE-001, PE-002 (follow-up conversion), OP-001 (bot-originated appointments), NC-026 (lead capture), NC-032 (complaint intake), EN-006 (token status)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Feature flag    | `module.ai_chatbot.enabled` (sub: `chatbot.whatsapp`, `chatbot.web`, `chatbot.app`, `chatbot.staff_helper`, `chatbot.triage`, `chatbot.transactional`, `chatbot.voice_note_input`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Primary roles   | Patient (59), Family/Attendant (60), Call Centre Agent (25 — hand-off desk), Receptionist (24)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Secondary roles | Marketing/CRM (55 — content & campaigns), IT Admin (56 — channel health), Medical Superintendent (4 — triage content sign-off), DPO (57 — consent & retention), Hospital Admin (2 — KPIs), all staff roles for the staff helper                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Regulatory      | DPDP Act 2023 + DPDP Rules 2025 (consent notice before chat, purpose limitation, retention, erasure), TRAI DLT (SMS fallback templates), Meta WhatsApp Business Policy (template approval, 24-h session window, no unsolicited health advice), NMC Telemedicine Practice Guidelines 2020 (a bot may **not** diagnose or prescribe; only a Registered Medical Practitioner may), CDSCO/India MDR — symptom triage is a **non-diagnostic information & navigation aid**, explicitly not Software as a Medical Device (see §0.8), ABDM (no HIU data pulled into chat without consent artefact), IT Act 43A/SPDI, Consumer Protection (no misleading health claims) |
 
 ---
 
@@ -22,6 +22,7 @@
 > repeat it. Nothing in Domain 8 may bypass these controls. Where a Domain-8 module conflicts with §0, §0 wins.
 
 ## 0.1 Service topology
+
 - All AI work lives in **`services/ai`** (separate Node process, own pods, own rate limits) — never inside `services/api`
   request threads. The API calls it over an internal contract; the worker calls it for batch jobs.
 - Sub-components: `gateway` (auth, tenant resolution, quota, guardrails in/out), `router` (provider/model selection),
@@ -32,6 +33,7 @@
   (document extraction, nightly predictions, coding suggestions). No AI call ever sits inside a database transaction.
 
 ## 0.2 Provider abstraction & model routing
+
 - **Primary LLM: Claude (Anthropic SDK)** — `claude-*` models selected per feature by capability tier
   (`reasoning` / `balanced` / `fast`), configured per tenant, never hard-coded in feature code.
 - **Pluggable adapter interface** `LlmProvider { complete(), stream(), embed(), tokenCount(), capabilities() }` with
@@ -49,6 +51,7 @@
   re-index job (never a mixed-vector index).
 
 ## 0.3 Retrieval over the hospital's own corpus (pgvector)
+
 - Corpus = the tenant's **own** content only: PE-003 health education articles, doctor profiles & schedules (OP-001),
   package/tariff descriptions (OP-023/RC-003), hospital policies & SOPs (NC-004), clinical protocols & order sets
   (IP-020/EN-029), formulary notes (EN-027), insurance/TPA rules (EN-002), NABH documents (NC-015), the KPI/semantic
@@ -66,6 +69,7 @@
   immediately (soft flag), then purged nightly.
 
 ## 0.4 Prompt registry, versioning & evals
+
 - No prompt string lives in application code. Prompts are rows: `ai_prompts` (key, feature, owner, intended use) →
   `ai_prompt_versions` (immutable: system prompt, few-shot examples, output JSON schema, model tier, temperature,
   max tokens, guardrail profile, eval gate reference, `effective_from`).
@@ -78,7 +82,9 @@
   rate drops >10 % relative or the guardrail-block rate rises above threshold.
 
 ## 0.5 Guardrails
+
 **Inbound (before egress to any model):**
+
 1. **PHI/PII minimisation** — the feature declares the minimum field set it needs; the gateway strips everything else.
 2. **Redaction/pseudonymisation** — names, UHID, ABHA number, Aadhaar, phone, email, address, MRN, insurance ID,
    employee ID, exact DOB and face regions are replaced with stable per-request tokens (`[[PATIENT_1]]`, `[[DOB_1]]`),
@@ -91,18 +97,14 @@
    system prompts state that instructions inside untrusted blocks must never be followed.
 5. **Rate & quota check** — per tenant, per feature, per user, per channel.
 
-**Outbound (before anything reaches a human or a table):**
-6. **Schema validation with Zod** — every feature declares a Zod output schema; invalid JSON triggers one repair
-   retry, then deterministic fallback. Free text is only permitted in explicitly-typed narrative fields.
-7. **Grounding check** — for retrieval features, every factual claim must map to a citation; uncited claims are
-   dropped or the answer is downgraded to "I don't have that information — connecting you to a person".
-8. **Safety classifiers** — self-harm/emergency detection (AI-001), diagnosis/prescription language in patient-facing
-   channels (blocked), abusive/discriminatory content, hallucinated codes (AI-006 codes must exist in EN-027 masters),
-   hallucinated SQL objects (AI-008 must resolve against the semantic layer).
-9. **PHI leak check on the way out** — the response is scanned for identifiers that were not in the allowed output set.
-10. Every block is written to `ai_guardrail_events` with the rule, severity and (redacted) sample → EN-024.
+**Outbound (before anything reaches a human or a table):** 6. **Schema validation with Zod** — every feature declares a Zod output schema; invalid JSON triggers one repair
+retry, then deterministic fallback. Free text is only permitted in explicitly-typed narrative fields. 7. **Grounding check** — for retrieval features, every factual claim must map to a citation; uncited claims are
+dropped or the answer is downgraded to "I don't have that information — connecting you to a person". 8. **Safety classifiers** — self-harm/emergency detection (AI-001), diagnosis/prescription language in patient-facing
+channels (blocked), abusive/discriminatory content, hallucinated codes (AI-006 codes must exist in EN-027 masters),
+hallucinated SQL objects (AI-008 must resolve against the semantic layer). 9. **PHI leak check on the way out** — the response is scanned for identifiers that were not in the allowed output set. 10. Every block is written to `ai_guardrail_events` with the rule, severity and (redacted) sample → EN-024.
 
 ## 0.6 Cost, tokens, latency
+
 - `meter` records per request: input/output tokens, cached tokens, provider, model, latency (queue, model, total),
   retry count, cost in ₹ (provider price table, versioned), feature, tenant, branch, user, channel.
 - **Budgets** per tenant per month per feature (`ai_budgets`): soft threshold (80 % → notify Hospital Admin + IT),
@@ -114,23 +116,25 @@
   tenant+feature+normalised question+corpus version) for non-PHI FAQ answers only, TTL 24 h.
 
 ## 0.7 Deterministic fallback (non-negotiable)
+
 Every AI feature declares its **fallback path**, and the product must be fully usable with `module.ai_*.enabled = false`:
 
-| Feature | Fallback when AI unavailable / over budget / low confidence |
-|---|---|
-| AI-001 | Menu-driven bot (numbered options) + hand-off to EN-033 call centre |
-| AI-002 | EN-029 deterministic rules only (already the primary safety layer) |
-| AI-003 | Manual data entry form with the source image side-by-side |
-| AI-004 | Type the note; template/macro library (EN-039) |
-| AI-005 | Rule/heuristic scores (e.g. LACE-style readmission heuristic, historical no-show rate) |
-| AI-006 | Coder searches ICD/procedure masters manually (NC-003) |
-| AI-007 | Normal PACS worklist ordering by priority/time (EN-008/OP-008) |
-| AI-008 | Saved reports & dashboards (EN-001 / NC-011) |
+| Feature | Fallback when AI unavailable / over budget / low confidence                            |
+| ------- | -------------------------------------------------------------------------------------- |
+| AI-001  | Menu-driven bot (numbered options) + hand-off to EN-033 call centre                    |
+| AI-002  | EN-029 deterministic rules only (already the primary safety layer)                     |
+| AI-003  | Manual data entry form with the source image side-by-side                              |
+| AI-004  | Type the note; template/macro library (EN-039)                                         |
+| AI-005  | Rule/heuristic scores (e.g. LACE-style readmission heuristic, historical no-show rate) |
+| AI-006  | Coder searches ICD/procedure masters manually (NC-003)                                 |
+| AI-007  | Normal PACS worklist ordering by priority/time (EN-008/OP-008)                         |
+| AI-008  | Saved reports & dashboards (EN-001 / NC-011)                                           |
 
 Degradation is **visible**: a persistent badge "AI assist unavailable — using standard workflow", never a silent
 behaviour change.
 
 ## 0.8 Governance
+
 - **Human-in-the-loop is absolute.** No AI output is ever auto-committed to a clinical, financial or legal record.
   Every output is a **suggestion** with `status ∈ {proposed, accepted, edited, rejected, expired}` recorded in
   `ai_suggestions`, with the reviewing human's identity, timestamp and (for edits) the diff. Writes to source-of-truth
@@ -151,8 +155,8 @@ behaviour change.
   transcribes, a human verifies; AI-007 **does not** ship self-built diagnostic models — any abnormality-detection
   engine must be a third-party product holding CE-MDR / US-FDA 510(k) / CDSCO licence, integrated through an adapter,
   with its clearance reference recorded per study (AI-007 §5). Every AI screen carries the standing statement:
-  *"AI-generated suggestion. Not a diagnosis. A registered medical practitioner is responsible for all clinical
-  decisions."* If a hospital or a future feature crosses into diagnostic claims, that feature must be registered as
+  _"AI-generated suggestion. Not a diagnosis. A registered medical practitioner is responsible for all clinical
+  decisions."_ If a hospital or a future feature crosses into diagnostic claims, that feature must be registered as
   SaMD before enablement — the platform blocks enablement of any feature whose `samd_class` is set and whose
   `regulatory_clearance_ref` is empty.
 - **DPDP Act 2023 / Rules 2025**: AI processing is a declared purpose in the consent notice (EN-028), separately
@@ -179,6 +183,7 @@ behaviour change.
   (`ai.feature.killswitch`, propagated < 30 s via Redis pub/sub) by MS or IT on-call.
 
 ## 0.9 Evaluation & release gates
+
 - **Golden dataset per feature** (`ai_eval_datasets`): de-identified, curated by the clinical/functional owner,
   versioned, minimum sizes — AI-001 400 conversations (incl. 80 red-flag cases), AI-002 300 vignettes, AI-003 500
   documents per document type, AI-004 200 consultations (multi-accent, code-mixed), AI-005 held-out temporal split,
@@ -200,6 +205,7 @@ behaviour change.
   guardrail blocks, escalations, latency, cost/1000 uses, cohort slices, drift indices, incident count.
 
 ## 0.10 Shared data model (schema `ai`)
+
 - `ai_providers` — id, key enum(anthropic/azure_openai/bedrock/vllm_local/deepgram/whisper_local/vendor_adapter),
   display_name, endpoint, region, auth_secret_ref (EN-007 vault), retention_terms, dpa_ref, status, created…
 - `ai_models` — id, provider_id, model_key, modality enum(text/vision/audio/embedding/rerank), tier
@@ -246,20 +252,22 @@ behaviour change.
   they evidence what the clinician was shown, guardrail events 24 months, eval artefacts indefinitely.
 
 ## 0.11 Shared API surface (`/api/v1/ai`)
-| Method | Path | Purpose | Permission |
-|---|---|---|---|
-| GET/PATCH | /features ; /features/:key | registry, rollout stage, killswitch | `ai.feature.read` / `ai.feature.manage` |
-| GET/POST | /prompts ; /prompts/:key/versions ; POST /prompts/:key/publish | prompt registry | `ai.prompt.read` / `.manage` / `.publish` |
-| GET/POST | /routes | model routing per tenant/feature | `ai.route.manage` |
-| GET/POST | /providers ; POST /providers/:id/test | provider config & connectivity test | `ai.provider.manage` |
-| POST | /evals/:datasetKey/run ; GET /evals/runs/:id | offline eval harness | `ai.eval.run` |
-| GET | /suggestions?feature&status&subject ; POST /suggestions/:id/accept\|edit\|reject | HITL review spine | `ai.suggestion.review` |
-| GET | /requests/:id ; POST /requests/:id/replay | provenance & reproduction | `ai.audit.read` |
-| GET | /usage?feature&from&to ; GET/PUT /budgets | cost metering | `ai.usage.read` / `ai.budget.manage` |
-| POST | /corpus/reindex ; GET /corpus/sources ; POST /corpus/sources/:id/retire | retrieval corpus | `ai.corpus.manage` |
-| GET | /guardrails/events ; GET /drift?feature | safety & drift monitoring | `ai.audit.read` |
+
+| Method    | Path                                                                             | Purpose                             | Permission                                |
+| --------- | -------------------------------------------------------------------------------- | ----------------------------------- | ----------------------------------------- |
+| GET/PATCH | /features ; /features/:key                                                       | registry, rollout stage, killswitch | `ai.feature.read` / `ai.feature.manage`   |
+| GET/POST  | /prompts ; /prompts/:key/versions ; POST /prompts/:key/publish                   | prompt registry                     | `ai.prompt.read` / `.manage` / `.publish` |
+| GET/POST  | /routes                                                                          | model routing per tenant/feature    | `ai.route.manage`                         |
+| GET/POST  | /providers ; POST /providers/:id/test                                            | provider config & connectivity test | `ai.provider.manage`                      |
+| POST      | /evals/:datasetKey/run ; GET /evals/runs/:id                                     | offline eval harness                | `ai.eval.run`                             |
+| GET       | /suggestions?feature&status&subject ; POST /suggestions/:id/accept\|edit\|reject | HITL review spine                   | `ai.suggestion.review`                    |
+| GET       | /requests/:id ; POST /requests/:id/replay                                        | provenance & reproduction           | `ai.audit.read`                           |
+| GET       | /usage?feature&from&to ; GET/PUT /budgets                                        | cost metering                       | `ai.usage.read` / `ai.budget.manage`      |
+| POST      | /corpus/reindex ; GET /corpus/sources ; POST /corpus/sources/:id/retire          | retrieval corpus                    | `ai.corpus.manage`                        |
+| GET       | /guardrails/events ; GET /drift?feature                                          | safety & drift monitoring           | `ai.audit.read`                           |
 
 ## 0.12 Shared domain events (outbox)
+
 `ai.request.completed` · `ai.request.failed` · `ai.guardrail.blocked` · `ai.phi.egress_blocked` ·
 `ai.suggestion.created|accepted|edited|rejected` · `ai.eval.run_completed` · `ai.eval.gate_failed` ·
 `ai.feature.rollout_changed` · `ai.feature.killswitch_activated` · `ai.budget.threshold_reached|exceeded` ·
@@ -267,6 +275,7 @@ behaviour change.
 (AI KPI dashboards), EN-037 (alerts to IT/MS/Admin), NC-015 (quality/incidents).
 
 ## 0.13 Shared permissions
+
 `ai.feature.read` · `ai.feature.manage` (Hospital Admin 2 + MS 4) · `ai.prompt.read|manage|publish` (clinical
 informaticist; publish adds EN-038 approval) · `ai.route.manage` / `ai.provider.manage` (IT Admin 56) ·
 `ai.eval.run` · `ai.suggestion.review` (role-scoped per feature) · `ai.audit.read` (Auditor 58, DPO 57, MS 4) ·
@@ -274,6 +283,7 @@ informaticist; publish adds EN-038 approval) · `ai.route.manage` / `ai.provider
 patient content) · `ai.killswitch` (MS 4, IT Admin 56).
 
 ## 0.14 Shared non-functional rules
+
 - AI never blocks a clinical or billing action. Timeouts return the deterministic path.
 - No PHI in logs, in prompts beyond the declared minimum, or in provider-side retention (ZDR terms required for
   cloud providers handling any PHI).
@@ -288,6 +298,7 @@ patient content) · `ai.killswitch` (MS 4, IT Admin 56).
 # AI-001 — MODULE SPECIFICATION
 
 ## 1. Purpose
+
 AI-001 is the hospital's conversational front door: a multilingual assistant on WhatsApp, the website, the patient
 app/portal and kiosks that answers hospital questions from the hospital's own content, completes transactional jobs
 (book/reschedule an appointment, check report status, check a bill, get a payment link, get directions), performs a
@@ -297,6 +308,7 @@ and hands off cleanly to the call centre with full transcript. A second persona,
 without a human) at zero safety incidents.
 
 ## 2. Users & Jobs-to-be-done
+
 - **Patient / attendant (phone, WhatsApp primary)**: book or move an appointment at 10 pm, ask if the blood report is
   ready, ask what a package costs, ask visiting hours for the ICU, get the OPD block directions, pay a pending bill.
   Several times per episode of care.
@@ -314,18 +326,20 @@ without a human) at zero safety incidents.
 ## 3. Core Workflows
 
 ### 3.1 Channel onboarding & identity ladder
+
 1. Patient messages the hospital WhatsApp number / opens the web widget → bot sends the **consent notice** (DPDP,
    language picker) → "Continue" records `ai_consents(purpose=chatbot)` linked to EN-028 → Event `chatbot.session.started`.
 2. **Tier 0 (anonymous)**: general information only — timings, departments, doctor profiles, package prices, directions,
    insurance panels, education content (PE-003). No PHI is ever emitted.
 3. **Tier 1 (OTP-verified)**: patient sends phone → OTP via EN-009 → matched to OP-001 MPI. Unlocks own appointments,
-   report *status* (ready / not ready, never values), bill balance & payment link, token position (EN-006).
+   report _status_ (ready / not ready, never values), bill balance & payment link, token position (EN-006).
 4. **Tier 2 (portal-linked / ABHA)**: full PE-001 parity in chat — report download links (short-lived, single-use),
-   prescription copy, follow-up booking. Report *values* are never rendered in WhatsApp text; only a link into the
+   prescription copy, follow-up booking. Report _values_ are never rendered in WhatsApp text; only a link into the
    authenticated portal.
 5. Identity ladder failures (3 wrong OTPs) lock the number for 15 min → Event `chatbot.otp.locked`.
 
 ### 3.2 Turn processing (the pipeline)
+
 1. Inbound message → normalise (text, voice note → AI-004 ASR, image → AI-003 OCR when the flow expects a document)
    → **language detect** (incl. Romanised Hindi/Tamil "Hinglish") → set reply language.
 2. **Safety pre-classifier runs first, always**: emergency/red-flag, self-harm, abuse, prompt injection. A red flag
@@ -342,31 +356,33 @@ without a human) at zero safety incidents.
    at close → Event `chatbot.session.closed`.
 
 ### 3.3 Intent catalogue (closed set, tool-backed)
-| Intent | Tool / source | Auth tier | Output |
-|---|---|---|---|
-| `appointment.book` | OP-001 slots API | 1 | department/doctor → date → slot → confirm → booking + token; `appointment.booked` |
-| `appointment.reschedule` / `.cancel` | OP-001 | 1 | policy-checked (cancellation window, refund rules) |
-| `appointment.status` | OP-001 / EN-006 | 1 | "You are #7, ~35 min" (live from queue) |
-| `report.status` | OP-004 / OP-008 | 1 | ready/pending + ETA; link to portal for values |
-| `bill.enquiry` | OP-005 | 1 | outstanding balance, last receipt; **no line-item PHI in WhatsApp** |
-| `bill.pay` | EN-010 | 1 | payment link (single-use, 15 min), receipt on success |
-| `directions.wayfinding` | facility map (NC-025) | 0 | block/floor/counter, map image, parking |
-| `visiting_hours` / `attendant_policy` | NC-004 policy corpus | 0 | ward-specific hours, bystander pass rules (EN-015) |
-| `insurance.faq` | EN-002 payer master + policy corpus | 0/1 | is my TPA empanelled, cashless steps, documents needed |
-| `doctor.availability` / `doctor.profile` | OP-001 | 0 | qualifications, OPD days, fee, next slot |
-| `package.enquiry` | OP-014/OP-023 | 0 | inclusions, price, fasting prep |
-| `pharmacy.refill` | OP-003 | 2 | refill request → pharmacy queue (never auto-dispense) |
-| `ambulance.request` | NC-013 | 0 | dispatch request with location share + immediate human call-back |
-| `feedback.submit` / `complaint.raise` | EN-030 / NC-032 | 0/1 | creates the ticket, returns reference |
-| `health_education` | PE-003 corpus | 0 | article/video links in the patient's language |
-| `symptom.triage` | §3.4 | 0 | disposition only |
-| `staff.*` (helper persona) | NC-004 SOPs, NC-030 roster, EN-007 settings, module how-to corpus | staff SSO | cited answer; can raise an NC-028 ticket |
-| `human.handoff` | EN-033 | any | queue to agent |
+
+| Intent                                   | Tool / source                                                     | Auth tier | Output                                                                            |
+| ---------------------------------------- | ----------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------- |
+| `appointment.book`                       | OP-001 slots API                                                  | 1         | department/doctor → date → slot → confirm → booking + token; `appointment.booked` |
+| `appointment.reschedule` / `.cancel`     | OP-001                                                            | 1         | policy-checked (cancellation window, refund rules)                                |
+| `appointment.status`                     | OP-001 / EN-006                                                   | 1         | "You are #7, ~35 min" (live from queue)                                           |
+| `report.status`                          | OP-004 / OP-008                                                   | 1         | ready/pending + ETA; link to portal for values                                    |
+| `bill.enquiry`                           | OP-005                                                            | 1         | outstanding balance, last receipt; **no line-item PHI in WhatsApp**               |
+| `bill.pay`                               | EN-010                                                            | 1         | payment link (single-use, 15 min), receipt on success                             |
+| `directions.wayfinding`                  | facility map (NC-025)                                             | 0         | block/floor/counter, map image, parking                                           |
+| `visiting_hours` / `attendant_policy`    | NC-004 policy corpus                                              | 0         | ward-specific hours, bystander pass rules (EN-015)                                |
+| `insurance.faq`                          | EN-002 payer master + policy corpus                               | 0/1       | is my TPA empanelled, cashless steps, documents needed                            |
+| `doctor.availability` / `doctor.profile` | OP-001                                                            | 0         | qualifications, OPD days, fee, next slot                                          |
+| `package.enquiry`                        | OP-014/OP-023                                                     | 0         | inclusions, price, fasting prep                                                   |
+| `pharmacy.refill`                        | OP-003                                                            | 2         | refill request → pharmacy queue (never auto-dispense)                             |
+| `ambulance.request`                      | NC-013                                                            | 0         | dispatch request with location share + immediate human call-back                  |
+| `feedback.submit` / `complaint.raise`    | EN-030 / NC-032                                                   | 0/1       | creates the ticket, returns reference                                             |
+| `health_education`                       | PE-003 corpus                                                     | 0         | article/video links in the patient's language                                     |
+| `symptom.triage`                         | §3.4                                                              | 0         | disposition only                                                                  |
+| `staff.*` (helper persona)               | NC-004 SOPs, NC-030 roster, EN-007 settings, module how-to corpus | staff SSO | cited answer; can raise an NC-028 ticket                                          |
+| `human.handoff`                          | EN-033                                                            | any       | queue to agent                                                                    |
 
 Anything outside the set → "I can't help with that yet" + hand-off offer. The bot never free-associates on medical
 content.
 
 ### 3.4 Symptom triage with safety rails (the highest-risk flow)
+
 1. Triage is **opt-in per hospital**, requires Medical Superintendent sign-off of the question set and disposition
    table, and is off by default.
 2. **Red-flag detection runs before any conversation logic** on every inbound message, in every supported language,
@@ -390,8 +406,8 @@ content.
    (suggest specialty + book), `self_care_information` (PE-003 article + safety-netting advice on when to come back).
    The output schema literally has no field for a diagnosis, a differential, a drug or a dose; a model output that
    contains such content is blocked outbound and the turn falls back to `urgent_today` + hand-off.
-6. Mandatory disclaimer on every triage turn: *"This is guidance, not a diagnosis. If you feel worse or are worried,
-   come to the hospital or call 108."* Plus safety-netting text on every close.
+6. Mandatory disclaimer on every triage turn: _"This is guidance, not a diagnosis. If you feel worse or are worried,
+   come to the hospital or call 108."_ Plus safety-netting text on every close.
 7. **Under-18 and pregnancy** paths are conservative by design: any paediatric symptom in a child <2 years or any
    pregnancy-related symptom defaults at least to `urgent_today`.
 8. Every triage session is stored with the question path, disposition, red-flag verdict and model versions
@@ -399,6 +415,7 @@ content.
    MS's delegate; disagreements become golden-dataset cases.
 
 ### 3.5 Hand-off to a human
+
 1. Triggers: user asks; intent unresolved after 2 clarifications; sentiment/anger classifier; red flag; complaint;
    any Tier-2 action the bot cannot complete; explicit intents (`billing dispute`, `medico-legal`, `death certificate`,
    `refund`, `doctor complaint`) that are **hard-routed to humans** and never bot-handled.
@@ -411,6 +428,7 @@ content.
 5. `chatbot.handoff.requested|accepted|resolved` events feed containment and CSAT metrics.
 
 ### 3.6 Staff helper persona
+
 - Authenticated via the normal staff session (no separate login); corpus scoped by role — a receptionist cannot
   retrieve HR salary policy, a nurse cannot retrieve procurement rate contracts. Visibility is enforced by the
   retrieval filter, not the prompt.
@@ -419,6 +437,7 @@ content.
   from the product help corpus. It never executes privileged actions — it links to the screen with the right filters.
 
 ### 3.7 Exceptions
+
 - **Provider outage / budget cap** → menu bot (numbered options covering the top 8 intents) + hand-off; banner in the
   admin console; no silent degradation of the red-flag list (it is deterministic and local).
 - **WhatsApp 24-hour session window expiry** → only approved templates may be sent; the bot queues the reply and
@@ -431,6 +450,7 @@ content.
   §0.5, logged, and the tool layer would refuse anyway because authorisation is the user's own.
 
 ## 4. Data Model (schema `engage`, prefix `chat_`; shared AI tables per §0.10)
+
 - `chat_channels` — id, hospital_id, branch_id?, type enum(whatsapp/web/app/kiosk/ivr/staff), provider_ref (EN-009
   WABA id / widget key), display_name, languages[], business_hours jsonb, persona enum(patient/staff), status,
   welcome_flow_id, handoff_queue_ref (EN-033).
@@ -459,6 +479,7 @@ content.
   3 years as safety evidence); media 30 days; erasure on DPDP request cascades to messages, media and embeddings.
 
 ## 5. Business Rules & Validations
+
 - **The bot never states a diagnosis, never names a drug or dose, never interprets a lab/radiology value, and never
   gives a prognosis.** These are outbound-blocked classes; a violation blocks the message and logs a guardrail event.
 - **Red-flag detection is deterministic-first**: the curated multilingual phrase set must fire even if the LLM is down;
@@ -481,23 +502,25 @@ content.
   user-initiated "delete my chat" (legal-hold rule, disclosed in the privacy notice).
 
 ## 6. API Surface (`/api/v1/chatbot`)
-| Method | Path | Purpose | Permission | Notes |
-|---|---|---|---|---|
-| POST | /webhooks/whatsapp | inbound WhatsApp (EN-009 relay) | signature-verified service | idempotent by message id |
-| POST | /web/sessions ; POST /web/sessions/:id/messages | website & app widget | public (rate-limited) / patient session | SSE streaming |
-| POST | /sessions/:id/verify-otp | identity ladder tier 1 | public + OTP | 3 attempts |
-| GET | /sessions?patient&channel&from&to ; GET /sessions/:id | transcript review | `chatbot.session.read` | PHI-audited |
-| POST | /sessions/:id/handoff ; POST /sessions/:id/takeover ; POST /sessions/:id/return | human hand-off | `chatbot.handoff.manage` (agent 25) | |
-| POST | /sessions/:id/close | end session + CSAT | patient/agent | |
-| GET/POST/PATCH | /intents ; /intents/:key | intent catalogue | `chatbot.intent.manage` | |
-| GET/PUT | /triage/config | question set, dispositions, red-flag phrases | `chatbot.triage.manage` (MS 4) | versioned + EN-038 approval |
-| GET | /triage/events?disposition&from&to ; POST /triage/events/:id/review | safety review queue | `chatbot.triage.review` | 100 % of emergency_now |
-| GET | /faq-gaps ; POST /faq-gaps/:id/resolve | unanswered-question backlog | `chatbot.content.manage` (55) | |
-| GET | /metrics/containment ; /metrics/csat ; /metrics/redflags | KPIs | `chatbot.report.read` | read models |
-| POST | /blocklist ; DELETE /blocklist/:ref | abuse control | `chatbot.block.manage` | |
-| POST | /staff/ask | staff helper turn | staff session | role-scoped retrieval |
+
+| Method         | Path                                                                            | Purpose                                      | Permission                              | Notes                       |
+| -------------- | ------------------------------------------------------------------------------- | -------------------------------------------- | --------------------------------------- | --------------------------- |
+| POST           | /webhooks/whatsapp                                                              | inbound WhatsApp (EN-009 relay)              | signature-verified service              | idempotent by message id    |
+| POST           | /web/sessions ; POST /web/sessions/:id/messages                                 | website & app widget                         | public (rate-limited) / patient session | SSE streaming               |
+| POST           | /sessions/:id/verify-otp                                                        | identity ladder tier 1                       | public + OTP                            | 3 attempts                  |
+| GET            | /sessions?patient&channel&from&to ; GET /sessions/:id                           | transcript review                            | `chatbot.session.read`                  | PHI-audited                 |
+| POST           | /sessions/:id/handoff ; POST /sessions/:id/takeover ; POST /sessions/:id/return | human hand-off                               | `chatbot.handoff.manage` (agent 25)     |                             |
+| POST           | /sessions/:id/close                                                             | end session + CSAT                           | patient/agent                           |                             |
+| GET/POST/PATCH | /intents ; /intents/:key                                                        | intent catalogue                             | `chatbot.intent.manage`                 |                             |
+| GET/PUT        | /triage/config                                                                  | question set, dispositions, red-flag phrases | `chatbot.triage.manage` (MS 4)          | versioned + EN-038 approval |
+| GET            | /triage/events?disposition&from&to ; POST /triage/events/:id/review             | safety review queue                          | `chatbot.triage.review`                 | 100 % of emergency_now      |
+| GET            | /faq-gaps ; POST /faq-gaps/:id/resolve                                          | unanswered-question backlog                  | `chatbot.content.manage` (55)           |                             |
+| GET            | /metrics/containment ; /metrics/csat ; /metrics/redflags                        | KPIs                                         | `chatbot.report.read`                   | read models                 |
+| POST           | /blocklist ; DELETE /blocklist/:ref                                             | abuse control                                | `chatbot.block.manage`                  |                             |
+| POST           | /staff/ask                                                                      | staff helper turn                            | staff session                           | role-scoped retrieval       |
 
 ## 7. Domain Events (outbox)
+
 - `chatbot.session.started|closed` → analytics, PE-002 (nurture), NC-026 (lead if anonymous + enquiry intent).
 - `chatbot.intent.resolved` → {intent, contained} → containment read model.
 - `chatbot.redflag.detected` / `chatbot.emergency.escalated` → EN-037 to ER desk & call centre, NC-015 safety log,
@@ -511,6 +534,7 @@ content.
   `queue.token.called`, `education.article.published`, `sop.published`.
 
 ## 8. Screens (UI)
+
 - **WhatsApp / web chat surface** (phone primary, desktop web widget): message list, quick-reply chips (top intents),
   language switcher, "Talk to a person" always visible in the header, AI disclosure banner on first turn, typing
   indicator, streamed replies. Offline (PWA): messages queue and send on reconnect with a pending badge.
@@ -537,6 +561,7 @@ content.
   information — connecting you to our team", "For your safety I can't answer medical questions here".
 
 ## 9. Integrations
+
 - **EN-009 / WhatsApp Cloud API**: message templates (pre-approved: appointment confirmation, report ready, payment
   link, call-back), 24-hour session window handling, media upload, delivery receipts, opt-out (`STOP`) honouring the
   DND/consent ledger. SMS fallback uses TRAI-DLT-registered templates.
@@ -548,6 +573,7 @@ content.
 - **AI-004** for voice-note transcription, **AI-003** for photographed documents (e.g. an insurance card sent in chat).
 
 ## 10. Reports & Analytics
+
 - **Containment rate** = sessions resolved without a human ÷ total (target ≥ 60 % at 6 months, ≥ 70 % at 12), by
   channel, intent and language.
 - Deflection value: bookings, reschedules, payments, report-status checks handled by bot × avoided call minutes.
@@ -559,6 +585,7 @@ content.
 - Read models `analytics.mv_chatbot_daily`, `mv_chatbot_intent_daily`, `mv_chatbot_handoff_sla`.
 
 ## 11. Notifications
+
 - To patient: appointment confirmation/reminder (EN-009 templates), payment receipt, report-ready nudge, call-back
   scheduled confirmation.
 - To ER desk / call centre: `chatbot.emergency.escalated` (immediate, with the transcript and the caller's number).
@@ -567,12 +594,14 @@ content.
 - To IT/Admin: channel down (WhatsApp webhook failures), provider errors > 2 %, budget 80 %/100 %.
 
 ## 12. Permissions (RBAC keys)
+
 `chatbot.session.read` (agent 25 for own queue, MS 4/Quality 54 tenant-wide, DPO 57, Auditor 58) ·
 `chatbot.handoff.manage` (25, 24) · `chatbot.intent.manage` (2, 55) · `chatbot.content.manage` (55, 54) ·
 `chatbot.triage.manage` (4 only, + EN-038) · `chatbot.triage.review` (4 and delegates) · `chatbot.block.manage`
 (56, 25 supervisor) · `chatbot.report.read` (2, 4, 55) · `chatbot.staff_helper.use` (all staff) · plus §0.13.
 
 ## 13. Non-functional
+
 - **Volumes (2000-bed group)**: 5000 OP visits/day ⇒ ~4000 chat sessions/day, peak 12 concurrent turns/s at 08:00–10:00
   and 19:00–21:00; ~14 000 messages/day; 90-day transcript store ≈ 1.3 M messages.
 - **Latency**: first token < 1.2 s p95, full reply < 4 s p95, red-flag script < 500 ms (deterministic path, no model
@@ -591,6 +620,7 @@ content.
   red-flag regression that fails CI on a single missed canonical emergency phrase.
 
 ## 14. Acceptance Criteria
+
 1. **Given** a WhatsApp user writes "seene me dard ho raha hai aur pasina aa raha hai", **when** the message is
    received, **then** the red-flag path fires in under 500 ms **without any LLM call**, the emergency script with the
    108 button and ER address is returned, no further triage questions are asked, `chatbot.emergency.escalated` is
@@ -599,7 +629,7 @@ content.
    red-flag list still evaluates, the menu bot offers appointment booking, report status and hand-off, and a
    degradation badge is visible in the admin console.
 3. **Given** an anonymous (tier 0) user asks "what is my blood report result", **when** the bot answers, **then** no
-   PHI is emitted, the bot requests OTP verification, and after verification it returns only *status* plus an
+   PHI is emitted, the bot requests OTP verification, and after verification it returns only _status_ plus an
    authenticated portal link — never the values in chat.
 4. **Given** a triage session that does not hit a red flag, **when** the disposition is produced, **then** the output
    validates against a schema with no diagnosis/drug/dose field, carries the standard disclaimer, and any model text
@@ -636,6 +666,7 @@ content.
     approved template is sent, and free-form PHI content is not attempted.
 
 ## 15. Enhancements / Later phases
+
 - **Proactive care conversations**: post-discharge day-3 check-in, medication adherence nudges, pre-op fasting
   reminders — all opt-in and PE-002-governed (market: MocDoc engagement suite).
 - **Voice-first WhatsApp** end-to-end (voice note in → voice reply out) for low-literacy users, using AI-004 ASR/TTS.
@@ -649,6 +680,7 @@ content.
 - **Sentiment-driven service recovery**: an angry session auto-creates an NC-032 complaint with priority.
 
 ## 16. Open Questions for the Hospital
+
 1. Which channels at go-live — WhatsApp only, or web widget and app too? Does the hospital already own a verified
    WhatsApp Business Account and display name, and who owns the Meta business manager?
 2. **Is symptom triage wanted at all?** If yes, who (named clinician) signs off the question set, the red-flag list and

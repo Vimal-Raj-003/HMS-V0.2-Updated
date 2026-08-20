@@ -71,9 +71,7 @@ function renderCombobox(overrides: {
     .fn<(query: string, mode: string) => Promise<readonly PatientSearchResult[]>>()
     .mockImplementation(overrides.search ?? (() => Promise.resolve([ramesh, rameshOther])));
   const onSelect = vi.fn<(result: PatientSearchResult) => void>(overrides.onSelect);
-  const onBreakGlassRequired = vi.fn<(result: PatientSearchResult) => void>(
-    overrides.onBreakGlassRequired,
-  );
+  const onBreakGlassRequired = vi.fn<(result: PatientSearchResult) => void>(overrides.onBreakGlassRequired);
   const view = render(
     <PatientSearchCombobox
       labels={labels}

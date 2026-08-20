@@ -208,11 +208,8 @@ export class CursorService implements CursorCodec {
     limit: number,
     options: { readonly hospitalId: string; readonly resource: string; readonly direction: 'asc' | 'desc' },
   ): Page<T> {
-    const page = buildPage(
-      fetched,
-      limit,
-      { ...options, sortKeys: (row) => [row.cursor_key] },
-      (payload) => this.encode(payload),
+    const page = buildPage(fetched, limit, { ...options, sortKeys: (row) => [row.cursor_key] }, (payload) =>
+      this.encode(payload),
     );
 
     return {

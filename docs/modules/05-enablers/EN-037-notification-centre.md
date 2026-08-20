@@ -1,25 +1,27 @@
 # EN-037 — Notification Centre (Unified Model across In-App Bell, Web Push/FCM, SMS/WhatsApp, Email, TV; Severity Levels, Role & On-Call Routing, Escalation Ladders with Acknowledgement & Timeout, Quiet Hours & DND for Staff, Deduplication & Coalescing, Per-User Preference Centre, Critical-Alert Guarantee, Delivery Tracking, Alert-Fatigue Metrics)
 
-| Field | Value |
-|---|---|
-| Domain | Enabler |
-| Module ID | EN-037 |
-| Phase | 0 |
-| Priority | P0 |
-| Complexity | High |
-| Depends on | EN-007 (users, roles, sessions, device registry), EN-009 (SMS & WhatsApp delivery), EN-032 (email delivery), EN-018 (TV/digital signage surface), EN-024 (audit), EN-027 (department/ward masters for routing scope), NC-030 (Duty Roster — who is on call right now), EN-041 (branch scoping of routing rules), EN-017 (push provider connectors), EN-040 (per-plan notification quotas), EN-039 (notification card/template rendering) |
-| Consumed by | **Every module.** Notably EN-029 (critical values, deterioration, sepsis — the must-acknowledge path), OP-004/OP-008 (results & critical findings), IP-003/IP-009 (nursing & ICU alerts), OP-006/TR-001 (ER & trauma activation), IP-007 (blood availability), EN-038 (approval requests & SLA breaches), NC-005/NC-006 (indent approvals, stock-outs, expiry), NC-028 (helpdesk), EN-017/EN-023/EN-022 (IT & security alerts), EN-030 (feedback low-score alerts), RC-001/EN-002 (claim & pre-auth events), NC-013 (ambulance dispatch), EN-034/EN-042 (device faults) |
-| Feature flag | `module.notifications.enabled` (always on; sub-flags `notify.web_push`, `notify.fcm`, `notify.escalation`, `notify.digest`, `notify.tv`) |
-| Primary roles | Every authenticated staff role (bell + preferences); Nurse (17/18/19), Doctor (6/7/8), Intensivist (11), Pharmacist (30/31), Lab (33/35), IT Admin (56) |
-| Secondary roles | Hospital Admin (2 — routing policy), Nurse Supervisor (22 — escalation targets), Medical Superintendent (4 — final escalation tier & alert-fatigue governance), Quality (54), Auditor (58), DPO (57 — content minimisation on external channels) |
-| Regulatory | **NABH 6th edn COP/MOM** — critical result and deterioration communication must be timely, closed-loop and documented; **NABL 112** critical-value read-back; **DPDP Act 2023 & Rules 2025** — notification content sent outside the application (SMS/WhatsApp/email/push preview) is a disclosure: PHI minimisation, purpose limitation, and no clinical detail on lock-screen previews; **TRAI DLT** for the SMS leg (EN-009); labour/working-time considerations for off-duty staff contact (quiet hours are a policy, not a nicety); CERT-In log retention for delivery logs |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain          | Enabler                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Module ID       | EN-037                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Phase           | 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Priority        | P0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Complexity      | High                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Depends on      | EN-007 (users, roles, sessions, device registry), EN-009 (SMS & WhatsApp delivery), EN-032 (email delivery), EN-018 (TV/digital signage surface), EN-024 (audit), EN-027 (department/ward masters for routing scope), NC-030 (Duty Roster — who is on call right now), EN-041 (branch scoping of routing rules), EN-017 (push provider connectors), EN-040 (per-plan notification quotas), EN-039 (notification card/template rendering)                                                                                                                                         |
+| Consumed by     | **Every module.** Notably EN-029 (critical values, deterioration, sepsis — the must-acknowledge path), OP-004/OP-008 (results & critical findings), IP-003/IP-009 (nursing & ICU alerts), OP-006/TR-001 (ER & trauma activation), IP-007 (blood availability), EN-038 (approval requests & SLA breaches), NC-005/NC-006 (indent approvals, stock-outs, expiry), NC-028 (helpdesk), EN-017/EN-023/EN-022 (IT & security alerts), EN-030 (feedback low-score alerts), RC-001/EN-002 (claim & pre-auth events), NC-013 (ambulance dispatch), EN-034/EN-042 (device faults)          |
+| Feature flag    | `module.notifications.enabled` (always on; sub-flags `notify.web_push`, `notify.fcm`, `notify.escalation`, `notify.digest`, `notify.tv`)                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Primary roles   | Every authenticated staff role (bell + preferences); Nurse (17/18/19), Doctor (6/7/8), Intensivist (11), Pharmacist (30/31), Lab (33/35), IT Admin (56)                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Secondary roles | Hospital Admin (2 — routing policy), Nurse Supervisor (22 — escalation targets), Medical Superintendent (4 — final escalation tier & alert-fatigue governance), Quality (54), Auditor (58), DPO (57 — content minimisation on external channels)                                                                                                                                                                                                                                                                                                                                 |
+| Regulatory      | **NABH 6th edn COP/MOM** — critical result and deterioration communication must be timely, closed-loop and documented; **NABL 112** critical-value read-back; **DPDP Act 2023 & Rules 2025** — notification content sent outside the application (SMS/WhatsApp/email/push preview) is a disclosure: PHI minimisation, purpose limitation, and no clinical detail on lock-screen previews; **TRAI DLT** for the SMS leg (EN-009); labour/working-time considerations for off-duty staff contact (quiet hours are a policy, not a nicety); CERT-In log retention for delivery logs |
 
 ## 1. Purpose
-EN-037 is the one place where "somebody needs to know something" is turned into a delivered, tracked and — where it matters clinically — **acknowledged** message. It defines a single notification model (event → audience → severity → channels → escalation), resolves audiences by role, ward, care team and live on-call roster, respects each person's channel preferences and quiet hours *except* for critical clinical alerts, deduplicates and coalesces noise, guarantees delivery of must-acknowledge alerts through an escalation ladder, and measures alert fatigue so the system can be tuned rather than ignored.
+
+EN-037 is the one place where "somebody needs to know something" is turned into a delivered, tracked and — where it matters clinically — **acknowledged** message. It defines a single notification model (event → audience → severity → channels → escalation), resolves audiences by role, ward, care team and live on-call roster, respects each person's channel preferences and quiet hours _except_ for critical clinical alerts, deduplicates and coalesces noise, guarantees delivery of must-acknowledge alerts through an escalation ladder, and measures alert fatigue so the system can be tuned rather than ignored.
 
 ## 2. Users & Jobs-to-be-done
+
 - **Nurse (17/18/19, tablet/phone at the bedside)**: see a short, prioritised task-like bell list; get a loud, unmissable alert when a patient deteriorates or a critical result lands; acknowledge with one tap; not be woken at 03:00 for a stock-reorder notice.
-- **Doctor (6/7/8, phone + desktop)**: receive critical results and deterioration alerts for *their* patients wherever they are; choose to receive routine notifications as a twice-daily digest; hand over their alerts when off duty so nothing lands in a void.
+- **Doctor (6/7/8, phone + desktop)**: receive critical results and deterioration alerts for _their_ patients wherever they are; choose to receive routine notifications as a twice-daily digest; hand over their alerts when off duty so nothing lands in a void.
 - **On-call consultant / intensivist (11)**: be the second rung of the escalation ladder and be reachable by push, then SMS, then voice — automatically, without anyone hunting for a phone number.
 - **Pharmacist / Lab / Store (30/33/44)**: get work-queue notifications (verification pending, QC due, stock below reorder) batched sensibly.
 - **Approver (HOD, Admin, Finance)**: get approval requests with enough context to decide on a phone, and be reminded before the SLA expires (EN-038).
@@ -30,7 +32,9 @@ EN-037 is the one place where "somebody needs to know something" is turned into 
 ## 3. Core Workflows
 
 ### 3.1 The unified notification model
+
 Every notification is produced by a **notification type** (`notif_types`) — a registered, versioned definition rather than an ad-hoc call, so the catalogue is governable:
+
 ```
 type: lab.critical_value
 category: clinical_safety
@@ -47,17 +51,19 @@ payload_fields: [patient_banner, test_name, value, unit, reference, prior_value,
 external_content_policy: minimal   # SMS/push preview carries no value or diagnosis
 retention_days: 3650
 ```
+
 - **Severity** drives defaults for channel set, quiet-hour behaviour, dedupe, TTL and escalation. Five levels:
-  | Severity | Example | Channels (default) | Quiet hours | Ack |
-  |---|---|---|---|---|
-  | `critical` | critical lab value, NEWS2 ≥7, code blue, blood reaction, fire/security | in-app + push + SMS + voice escalation + TV | **overridden** | mandatory, escalates |
-  | `high` | pre-auth rejected, OT case cancelled, stock-out of an emergency drug, integration circuit open | in-app + push (+ SMS if unread 15 min) | overridden for on-duty only | optional ack |
-  | `normal` | approval request, report ready for verification, indent raised | in-app + push | respected | no |
-  | `low` | routine reminders, roster published, document expiring in 30 days | in-app (+ digest) | respected | no |
-  | `info` | system announcements, marketing to staff | in-app digest only | respected | no |
+  | Severity   | Example                                                                                        | Channels (default)                          | Quiet hours                 | Ack                  |
+  | ---------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------- | --------------------------- | -------------------- |
+  | `critical` | critical lab value, NEWS2 ≥7, code blue, blood reaction, fire/security                         | in-app + push + SMS + voice escalation + TV | **overridden**              | mandatory, escalates |
+  | `high`     | pre-auth rejected, OT case cancelled, stock-out of an emergency drug, integration circuit open | in-app + push (+ SMS if unread 15 min)      | overridden for on-duty only | optional ack         |
+  | `normal`   | approval request, report ready for verification, indent raised                                 | in-app + push                               | respected                   | no                   |
+  | `low`      | routine reminders, roster published, document expiring in 30 days                              | in-app (+ digest)                           | respected                   | no                   |
+  | `info`     | system announcements, marketing to staff                                                       | in-app digest only                          | respected                   | no                   |
 - A notification instance is **one logical fact with many deliveries**: `notif_notifications` (the fact) → `notif_recipients` (who) → `notif_deliveries` (per channel attempt). Read/ack state lives on the recipient row, so the same fact can be read on the phone and appear read on the desktop within a second.
 
 ### 3.2 Audience resolution & routing
+
 1. A module raises `Notify.publish({type, context, refs})` — it never names channels or people. EN-037 resolves the audience from **audience expressions** in the type definition:
    - **Static role in scope**: `role:nurse_incharge @ ward(patient.ward_id)`, `role:pharmacist @ branch`.
    - **Care-team relation**: `ordering_doctor`, `attending_doctor`, `primary_nurse`, `consultant_of_record`, `referring_doctor`.
@@ -66,9 +72,10 @@ retention_days: 3650
 2. **Routing rules** (`notif_routing_rules`) can override or extend per hospital/branch/department: "send stock-out alerts to the store in-charge and CC the purchase officer during month-end", "route ER activations to the trauma group chat device". Rules are ordered, effective-dated, and simulate-able.
 3. **Deduplication**: identical `(type, dedupe_key, recipient)` within the type's dedupe window collapses into the existing notification with an occurrence counter (`×3`) and a bumped timestamp rather than a new row — this alone removes most alert spam.
 4. **Coalescing/digest**: `low`/`info` types can be coalesced into a per-user digest (immediate / hourly / twice daily / daily at HH:MM) rendered as one grouped notification ("7 documents expiring this week").
-5. **Suppression windows**: a recipient may snooze a *type* for a bounded period (max 8 h, never for `critical`); a hospital may suppress a type entirely (retiring it from the catalogue with an audit entry).
+5. **Suppression windows**: a recipient may snooze a _type_ for a bounded period (max 8 h, never for `critical`); a hospital may suppress a type entirely (retiring it from the catalogue with an audit entry).
 
 ### 3.3 Channel fan-out & delivery
+
 1. For each recipient, the effective channel set = type defaults ∩ user preferences ∪ severity overrides, filtered by what the user actually has (registered push device, verified mobile, verified email).
 2. **In-app** is always written (the bell is the system of record for "you were told"), even when other channels are chosen — an alert never exists only as an SMS.
 3. **Web Push / FCM**: browser push (VAPID) for the PWA on desktop/tablet, FCM/APNs for the future native apps (Phase 13). Payloads are **content-minimised**: title "Critical result — Ward 4B, Bed 12", body "Tap to view" — never the value, never the diagnosis, because lock screens are public. Deep link opens the exact record.
@@ -79,9 +86,10 @@ retention_days: 3650
 8. **Delivery tracking**: each attempt records queued/sent/delivered/failed with provider ids; failure on one channel promotes to the next channel in the ladder immediately for `critical`, or after the type's `promote_after` for others.
 
 ### 3.4 Escalation ladders with acknowledgement & timeout (the critical-alert guarantee)
+
 1. A `must_acknowledge` notification starts an **escalation instance** with the ladder from the type (overridable per hospital/ward).
 2. **L1** targets fire immediately across their channels. A visible countdown to the next rung is shown in the app.
-3. If no acknowledgement within `ack_window` (default 10 min for critical labs, 15 min for deterioration, configurable), **L2** fires *in addition to* L1 (never instead of — the original recipient stays informed), then L3, then L4.
+3. If no acknowledgement within `ack_window` (default 10 min for critical labs, 15 min for deterioration, configurable), **L2** fires _in addition to_ L1 (never instead of — the original recipient stays informed), then L3, then L4.
 4. **Acknowledgement** is an explicit action carrying identity, time, channel and (where the type requires) a **structured response**: for critical values, the read-back/call-back record (who was called, at what time, read-back confirmed); for deterioration, the intended action ("attending now", "orders placed", "escalating to ICU").
 5. **Acknowledging stops the ladder** for everyone and notifies the already-escalated rungs that it is handled ("Dr Rao acknowledged at 14:22"), so nobody duplicates effort.
 6. **No acknowledgement at the final rung** raises `notification.escalation.exhausted` — a distinct, loud event that appears on the nursing command centre and the Medical Superintendent's dashboard and is a reportable quality incident. The system never gives up silently.
@@ -89,20 +97,23 @@ retention_days: 3650
 8. **Handover**: when a user goes off duty (roster transition or explicit "hand over my alerts"), their unacknowledged notifications transfer to the incoming shift holder with a visible handover note — unacknowledged critical alerts are never orphaned by a shift change.
 
 ### 3.5 Quiet hours, DND & the override rules
+
 - Each user sets **quiet hours** (e.g. 22:00–07:00) and per-category channel preferences. Quiet hours suppress push/SMS for `info`/`low`/`normal`; the in-app bell still accumulates.
-- **`high`** respects quiet hours only for staff who are **off duty** per the roster; on-duty staff receive high alerts regardless (being on duty *is* the consent).
+- **`high`** respects quiet hours only for staff who are **off duty** per the roster; on-duty staff receive high alerts regardless (being on duty _is_ the consent).
 - **`critical` always overrides** quiet hours, DND and preferences on every channel — this is non-configurable and is stated plainly in the preference UI ("Critical patient-safety alerts always reach you").
 - **Off-duty protection**: a member of staff who is not rostered is not targeted for ward-scoped operational alerts at all (their alerts route to the on-duty holder), preventing the common failure where the doctor who set up a patient two weeks ago is paged at midnight.
 - **Do-not-disturb for procedures**: a surgeon in an OT session (from IP-006 status) or a doctor in a consultation can enable a bounded focus mode; critical alerts still land, everything else queues and is delivered on exit.
 - **Fatigue guardrail**: if a single recipient would receive more than N notifications in a rolling window (default 25/hour for non-critical), further non-critical notifications auto-coalesce into a digest and a `notification.flood_detected` event is raised for governance.
 
 ### 3.6 Preference centre & subscriptions
+
 - A per-user page lists **categories** (clinical safety, my patients, orders & results, approvals, roster & HR, inventory, IT & system, quality, announcements) × **channels** (bell, push, SMS, WhatsApp, email) as a matrix with sensible role-based defaults pre-set, plus quiet hours, digest schedule, language, and device management (registered push devices with last-seen and a revoke button).
 - Categories that cannot be switched off are shown locked with the reason ("patient safety — always on").
 - **Topic subscriptions**: a user can subscribe to specific scopes (a ward, a doctor's list, a store, a project) and unsubscribe just as easily; subscriptions are audited so nobody quietly subscribes to another department's clinical feed (permission-checked at subscribe time and re-checked at delivery).
 - **Delegation**: "while I'm on leave, send my approvals to X" (shared with EN-038's delegation model) — clinical safety alerts are **not** delegable, they follow the roster.
 
 ### 3.7 Exceptions & failure modes
+
 - **All channels fail for a critical alert** → the escalation continues to the next rung immediately, the nursing command centre and the TV board show the unreachable alert, and `notification.delivery.total_failure` pages IT. Silence is treated as a failure, never as success.
 - **User has no push device and no verified mobile** → they are flagged as "unreachable off-site" in the roster view; ladders skip them with a logged defect so a ward is never protected only on paper.
 - **Push token expired/unregistered** → token pruned, user notified in-app to re-enable notifications; if the user is a critical-ladder target, an admin task is raised.
@@ -111,6 +122,7 @@ retention_days: 3650
 - **Patient-facing content leakage** → external channel payloads pass a content-minimisation filter; a type whose external template contains clinical placeholders fails publication.
 
 ## 4. Data Model (schema `core`, prefix `notif_`)
+
 - `notif_types` — id, hospital_id (null = system catalogue), key citext, name, category enum(clinical_safety/my_patients/orders_results/approvals/roster_hr/inventory/finance/it_system/quality/announcement), severity enum(info/low/normal/high/critical), must_acknowledge bool, ack_window_sec, audience_expr jsonb, channels_by_severity jsonb, quiet_hours_override bool, dedupe_key_expr, dedupe_window_sec, coalesce_policy enum(none/digest_hourly/digest_daily/custom), escalation_ladder_id?, external_content_policy enum(minimal/standard), payload_schema jsonb, retention_days, owner_module, status enum(active/deprecated/suppressed), version, created…; UNIQUE(hospital_id, key).
 - `notif_escalation_ladders` — id, hospital_id, key, name, scope jsonb (ward/department/branch overrides), rungs jsonb[] (level, delay_sec, audience_expr, channels, repeat_every_sec, max_repeats), exhausted_action jsonb, active, version.
 - `notif_routing_rules` — id, hospital_id, branch_id?, type_key?, category?, condition jsonb, action jsonb (add/remove audience, force channels, override severity, suppress), priority int, effective_from, effective_to, created_by, active.
@@ -126,6 +138,7 @@ retention_days: 3650
 - Retention: notifications per type (`retention_days`; clinical safety 10 years, operational 1 year, info 90 days); deliveries 180 days (CERT-In); acknowledgement records follow the clinical record.
 
 ## 5. Business Rules & Validations
+
 - **Every notification is written in-app first.** No notification exists only on an external channel; the bell is the record of "you were told".
 - **`critical` severity always overrides** quiet hours, DND, focus mode and user channel preferences; this is non-configurable, and the preference UI states it.
 - **Must-acknowledge notifications never expire silently.** They escalate through the ladder and, if unacknowledged at the final rung, raise `notification.escalation.exhausted`, which is a quality incident, not a log line.
@@ -142,29 +155,31 @@ retention_days: 3650
 - Every notification carries `correlation_id` so the full chain (source event → notification → deliveries → acknowledgement → clinical action) is traceable in EN-024.
 
 ## 6. API Surface (`/api/v1/notifications`)
-| Method | Path | Purpose | Permission | Notes |
-|---|---|---|---|---|
-| POST | /publish | raise a notification (module → centre) | service token, `notify.publish` | typed payload validated against the type schema; idempotent by (type, dedupe_key, source event id) |
-| GET | /me?status&category&cursor | my bell list | authenticated | cursor, unread-first, p95 <150 ms |
-| GET | /me/count | unread + must-ack counts | authenticated | cached, WS-pushed |
-| POST | /me/:id/read \| /dismiss \| /snooze | per-notification actions | authenticated | snooze bounded, never for critical |
-| POST | /me/:id/acknowledge | acknowledge (with structured response) | authenticated | stops the ladder; response schema per type |
-| GET | /me/preferences ; PUT /me/preferences | preference centre | authenticated | locked categories read-only |
-| GET/POST/DELETE | /me/devices | push device registration | authenticated | VAPID/FCM tokens encrypted |
-| GET/POST/DELETE | /me/subscriptions | topic subscriptions | authenticated + scope permission | re-checked at delivery |
-| POST | /me/handover {toUserId, until, note} | hand over unacknowledged alerts | authenticated (roster-validated) | audited |
-| GET | /notifications?type&severity&status&user&from&to | admin/ops search | `notify.admin.read` | PHI-audited |
-| GET | /notifications/:id | detail incl. recipients & deliveries | `notify.admin.read` | |
-| POST | /notifications/:id/cancel \| /resolve | stop an in-flight escalation | `notify.admin.manage` | reason mandatory |
-| GET/POST/PATCH | /types ; /types/:key | notification catalogue | `notify.type.manage` | publish gated by content lint |
-| POST | /types/:key/simulate {context} | preview audience, channels & ladder | `notify.type.manage` | resolves live roster; sends nothing |
-| POST | /types/:key/test-send | send to self only | `notify.type.manage` | |
-| GET/POST/PATCH | /ladders ; /routing-rules | escalation & routing config | `notify.policy.manage` (Admin/MS) | effective-dated, simulate-able |
-| GET | /escalations/active | live escalation board | `notify.escalation.read` (nursing command centre) | WS |
-| GET | /metrics/fatigue ; /metrics/delivery ; /metrics/escalations | governance reports | `notify.report.read` | read models |
-| GET | /health/channels | channel/provider health | `notify.admin.read` | degraded-channel banner source |
+
+| Method          | Path                                                        | Purpose                                | Permission                                        | Notes                                                                                              |
+| --------------- | ----------------------------------------------------------- | -------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| POST            | /publish                                                    | raise a notification (module → centre) | service token, `notify.publish`                   | typed payload validated against the type schema; idempotent by (type, dedupe_key, source event id) |
+| GET             | /me?status&category&cursor                                  | my bell list                           | authenticated                                     | cursor, unread-first, p95 <150 ms                                                                  |
+| GET             | /me/count                                                   | unread + must-ack counts               | authenticated                                     | cached, WS-pushed                                                                                  |
+| POST            | /me/:id/read \| /dismiss \| /snooze                         | per-notification actions               | authenticated                                     | snooze bounded, never for critical                                                                 |
+| POST            | /me/:id/acknowledge                                         | acknowledge (with structured response) | authenticated                                     | stops the ladder; response schema per type                                                         |
+| GET             | /me/preferences ; PUT /me/preferences                       | preference centre                      | authenticated                                     | locked categories read-only                                                                        |
+| GET/POST/DELETE | /me/devices                                                 | push device registration               | authenticated                                     | VAPID/FCM tokens encrypted                                                                         |
+| GET/POST/DELETE | /me/subscriptions                                           | topic subscriptions                    | authenticated + scope permission                  | re-checked at delivery                                                                             |
+| POST            | /me/handover {toUserId, until, note}                        | hand over unacknowledged alerts        | authenticated (roster-validated)                  | audited                                                                                            |
+| GET             | /notifications?type&severity&status&user&from&to            | admin/ops search                       | `notify.admin.read`                               | PHI-audited                                                                                        |
+| GET             | /notifications/:id                                          | detail incl. recipients & deliveries   | `notify.admin.read`                               |                                                                                                    |
+| POST            | /notifications/:id/cancel \| /resolve                       | stop an in-flight escalation           | `notify.admin.manage`                             | reason mandatory                                                                                   |
+| GET/POST/PATCH  | /types ; /types/:key                                        | notification catalogue                 | `notify.type.manage`                              | publish gated by content lint                                                                      |
+| POST            | /types/:key/simulate {context}                              | preview audience, channels & ladder    | `notify.type.manage`                              | resolves live roster; sends nothing                                                                |
+| POST            | /types/:key/test-send                                       | send to self only                      | `notify.type.manage`                              |                                                                                                    |
+| GET/POST/PATCH  | /ladders ; /routing-rules                                   | escalation & routing config            | `notify.policy.manage` (Admin/MS)                 | effective-dated, simulate-able                                                                     |
+| GET             | /escalations/active                                         | live escalation board                  | `notify.escalation.read` (nursing command centre) | WS                                                                                                 |
+| GET             | /metrics/fatigue ; /metrics/delivery ; /metrics/escalations | governance reports                     | `notify.report.read`                              | read models                                                                                        |
+| GET             | /health/channels                                            | channel/provider health                | `notify.admin.read`                               | degraded-channel banner source                                                                     |
 
 ## 7. Domain Events (outbox)
+
 - `notification.published` → EN-024, analytics.
 - `notification.delivered` / `notification.delivery.failed` / `notification.delivery.total_failure` → channel health, IT paging.
 - `notification.read` / `notification.acknowledged` (with response payload) → source module callback (EN-029 closes the critical-value loop, EN-038 records approver seen), clinical record where applicable.
@@ -175,6 +190,7 @@ retention_days: 3650
 - Consumes: essentially every domain event in the system via type definitions; and `roster.shift.changed` (handover), `user.deactivated` (audience pruning), `patient.transferred` (re-scope open ward notifications).
 
 ## 8. Screens (UI)
+
 - **Bell / Notification drawer** (all devices, in the app shell): unread badge with a separate **must-acknowledge** count in red; list grouped by "Needs action" → "Today" → "Earlier"; each row shows a severity stripe, title, one-line context, relative time, occurrence badge (`×3`) and inline actions (Acknowledge, Open, Snooze, Dismiss). Real-time via WebSocket (<1 s). Keyboard: `N` open bell, `J/K` navigate, `Enter` open, `A` acknowledge, `S` snooze, `Esc` close. Empty state: "Nothing needs your attention".
 - **Critical Alert overlay** (tablet/phone/desktop): a full-attention card that cannot be dismissed without acting — patient banner, the alert, the required response form (read-back fields or action selection), a visible countdown to the next escalation rung and who it will reach. Audible alert tone (respecting device volume policy, with a ward-configurable tone), repeats until acknowledged. Never covers an active resuscitation screen — it docks instead.
 - **Notification Centre page** (desktop): full history with filters (category, severity, status, date, patient, ref), search, and per-item delivery detail (which channels, when, delivered/failed) so a nurse can prove she was never told.
@@ -187,12 +203,14 @@ retention_days: 3650
 - Empty/error states: "Push notifications are blocked in this browser — critical alerts will reach you by SMS. Enable push", "You are not on the duty roster today; ward alerts are routing to the on-call team", "This alert escalated to the Medical Superintendent at 14:41 without acknowledgement".
 
 ## 9. Integrations
+
 - **Web Push** (VAPID, service worker in the PWA) and **FCM/APNs** for native apps (Phase 13) via an EN-017 connector; token lifecycle managed here.
 - **EN-009** (SMS/WhatsApp with DLT templates and the shared opt-out ledger — staff opt-outs may not disable critical alerts, which is stated at onboarding), **EN-032** (email & digests), **EN-033** (voice escalation with DTMF acknowledgement), **EN-018** (TV boards for area alerts), **EN-006** (queue calls are a distinct display path, not notifications).
 - **NC-030** duty roster for on-call resolution and handover; **EN-007** for user/session/device identity; **EN-038** for approval notifications and SLA reminders; **EN-029** as the biggest clinical producer with the strictest contract.
 - **Observability**: OpenTelemetry spans from source event → publish → fan-out → delivery → acknowledgement, with `correlation_id` propagated; Prometheus metrics per type and channel.
 
 ## 10. Reports & Analytics
+
 - **Delivery**: volume by type/category/severity/channel/hour; delivery success rate per channel; median and p95 latency publish→delivered; failures by error class; unreachable-user report.
 - **Responsiveness**: median and p95 time-to-read and time-to-acknowledge by type, ward, shift and role; acknowledgement rate; escalation rate by rung; **exhausted-ladder count** (the headline safety metric); handover completeness.
 - **Alert fatigue**: notifications per user per shift (p50/p95), types by volume vs action rate, dismissed-without-action %, snooze rate, flood events, and the tuning recommendations list.
@@ -201,15 +219,18 @@ retention_days: 3650
 - Read models: `analytics.mv_notif_type_daily`, `analytics.mv_notif_user_load_daily`, `analytics.mv_notif_escalation_daily`.
 
 ## 11. Notifications (about the system itself)
+
 - To **IT**: channel provider degraded/down, push token failure spike, publish backlog above threshold, flood detected, delivery total failure for a critical alert.
 - To **Nurse Supervisor / Medical Superintendent**: escalation exhausted (immediate), roster gap detected, ward with abnormal alert volume.
 - To **module owners**: your type was auto-downgraded due to volume; your type has a 0 % action rate over 90 days.
 - To **users**: "push is blocked — enable it", "your alerts were handed over to X", monthly personal summary (optional).
 
 ## 12. Permissions (RBAC keys)
+
 `notify.publish` (service accounts; modules only) · `notify.type.manage` (IT Admin 56 + module owners; clinical types require Medical Superintendent 4 co-approval) · `notify.policy.manage` (Hospital Admin 2, Medical Superintendent 4 — ladders, routing, severity) · `notify.admin.read` (IT, Admin, Quality — searching others' notifications is PHI-audited) · `notify.admin.manage` (cancel/resolve an escalation — Nurse Supervisor 22, Medical Superintendent 4, with reason) · `notify.escalation.read` (nursing command centre, ICU, ER) · `notify.report.read` (Admin, MS, Quality 54, Auditor 58) · self-service (`/me/*`) is available to every authenticated user without an explicit key, scoped to their own data.
 
 ## 13. Non-functional
+
 - **Volumes (2000-bed enterprise)**: ~**150 000–250 000 notifications/day** (clinical results, orders, tasks, approvals, operational) fanning out to ~350 000 deliveries; peak 600 publishes/minute during the 08:00–11:00 window and during a mass-casualty activation.
 - **Latency**: publish → in-app bell visible p95 **< 1 s**; publish → push delivered p95 < 3 s; publish → SMS queued < 2 s; critical alert publish → first channel delivered p95 **< 5 s**. Bell list query p95 < 150 ms (indexed on `user_id, read_at, created_at desc`, unread counts cached in Redis).
 - **Real-time**: Socket.IO with Redis pub/sub; a user with 4 open tabs receives one logical update; read state syncs across devices within 1 s.
@@ -221,6 +242,7 @@ retention_days: 3650
 - **Security/privacy**: payload fields are PHI-classified; external channels receive only minimised content; notification search by admins is audited as PHI access; push endpoints and tokens encrypted at rest.
 
 ## 14. Acceptance Criteria
+
 1. **Given** a critical lab value is published, **when** fan-out runs, **then** the in-app notification exists within 1 second, push and SMS are dispatched within 5 seconds, and an escalation instance starts with a visible countdown.
 2. **Given** a must-acknowledge alert is unacknowledged after its window, **when** the timer fires, **then** level 2 targets are notified **in addition to** level 1, the escalation board shows the new rung, and the original recipient still sees the alert.
 3. **Given** a doctor acknowledges a critical alert with a read-back record, **when** the acknowledgement is saved, **then** the ladder stops for all rungs, already-escalated recipients are told who acknowledged and when, and the structured response is persisted with the clinical record.
@@ -241,6 +263,7 @@ retention_days: 3650
 18. **Given** a user loses access to a ward, **when** a notification for that ward is delivered, **then** the delivery is suppressed by the permission re-check and the subscription is revoked.
 
 ## 15. Enhancements / Later phases
+
 - **Native mobile apps** (Phase 13) with FCM/APNs, critical-alert channels that bypass silent mode (Android notification channels / iOS critical alerts entitlement), and wearable/smartwatch delivery for nurses.
 - **Pager/DECT/nurse-call integration** for hospitals with legacy paging and bedside call systems (an EN-042/EN-017 connector), so EN-037 becomes the single escalation brain.
 - **Presence-aware routing**: route to the device the user is actively using, and to the ward workstation when a nurse is at the station rather than her phone.
@@ -251,6 +274,7 @@ retention_days: 3650
 - **SLA-linked notification** for service-level automation across EN-038, NC-028 and RC-001, with predictive "this will breach in 20 minutes" pre-alerts.
 
 ## 16. Open Questions for the Hospital
+
 1. What are the **escalation ladders** per critical type — who is L1/L2/L3/L4 for critical labs, deterioration, code blue, blood reaction — and what are the acknowledgement windows at each rung?
 2. Is the **duty roster (NC-030)** accurate and maintained in real time? If not, what is the interim source of truth for "who is on call right now"?
 3. What are the hospital's **quiet-hours** expectations for staff, and does management accept that `critical` alerts override them unconditionally?

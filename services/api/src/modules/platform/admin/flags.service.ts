@@ -8,7 +8,13 @@ import { OutboxService } from '../../../core/outbox/outbox.service.js';
 import { AppError } from '../../../core/problem/app-error.js';
 import { currentTenantContext } from '../../../core/tenancy/tenant-context.js';
 import { adminEvent } from './admin.events.js';
-import { checkFlagToggle, resolveFlags, scopeOfFlag, type FlagRow, type ResolvedFlag } from './entitlements.logic.js';
+import {
+  checkFlagToggle,
+  resolveFlags,
+  scopeOfFlag,
+  type FlagRow,
+  type ResolvedFlag,
+} from './entitlements.logic.js';
 import { LicenceService } from './licence.service.js';
 
 export type PutFeatureFlagRequest = z.infer<typeof putFeatureFlagRequestSchema>;

@@ -60,7 +60,9 @@ describe('entitlement resolution', () => {
   });
 
   it('honours a row that grants a commercial module', () => {
-    const resolved = resolveEntitlements([entitlementRow({ key: 'module.api_gateway.enabled', allowed: true })]);
+    const resolved = resolveEntitlements([
+      entitlementRow({ key: 'module.api_gateway.enabled', allowed: true }),
+    ]);
     expect(resolved.find((e) => e.key === 'module.api_gateway.enabled')?.allowed).toBe(true);
   });
 
@@ -162,7 +164,10 @@ describe('flag grid', () => {
 
   it('surfaces a fine-grained flag that is not a licensed module', () => {
     const grid = resolveFlags([flagRow({ key: 'admin.impersonation', enabled: true })], entitlements, NOW);
-    expect(grid.find((f) => f.key === 'admin.impersonation')).toMatchObject({ configured: true, licensed: true });
+    expect(grid.find((f) => f.key === 'admin.impersonation')).toMatchObject({
+      configured: true,
+      licensed: true,
+    });
   });
 
   it('reports the narrowest scope a flag row targets', () => {

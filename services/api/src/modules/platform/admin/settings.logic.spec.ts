@@ -101,7 +101,11 @@ describe('effective value resolution', () => {
   });
 
   it('ignores rows for another key entirely', () => {
-    const effective = resolveEffectiveSetting(definition(), [row({ key: 'ui.default_density', value: 'dark' })], query);
+    const effective = resolveEffectiveSetting(
+      definition(),
+      [row({ key: 'ui.default_density', value: 'dark' })],
+      query,
+    );
     expect(effective.source).toBe('default');
   });
 
@@ -113,14 +117,23 @@ describe('effective value resolution', () => {
 });
 
 describe('secret masking', () => {
-  const secret = definition({ key: 'sms.api_key', sensitivity: 'secret', schema: z.string(), defaultValue: '' });
+  const secret = definition({
+    key: 'sms.api_key',
+    sensitivity: 'secret',
+    schema: z.string(),
+    defaultValue: '',
+  });
 
   it('never returns the stored value of a secret key', () => {
     expect(maskIfSecret(secret, 'live_key_abc123')).toEqual({ value: REDACTION_PLACEHOLDER, masked: true });
   });
 
   it('masks the default as well, so a seeded credential cannot leak either', () => {
-    const effective = resolveEffectiveSetting(secret, [row({ key: 'sms.api_key', value: 'live_key_abc123' })], query);
+    const effective = resolveEffectiveSetting(
+      secret,
+      [row({ key: 'sms.api_key', value: 'live_key_abc123' })],
+      query,
+    );
     expect(effective.value).toBe(REDACTION_PLACEHOLDER);
     expect(effective.defaultValue).toBe(REDACTION_PLACEHOLDER);
     expect(effective.masked).toBe(true);
@@ -149,7 +162,12 @@ describe('write checks', () => {
   });
 
   it('refuses a value the definition schema rejects', () => {
-    const result = checkSettingWrite({ definition: definition(), scope: 'hospital', value: 'neon', reason: null });
+    const result = checkSettingWrite({
+      definition: definition(),
+      scope: 'hospital',
+      value: 'neon',
+      reason: null,
+    });
     expect(result).toMatchObject({ ok: false, code: 'invalid_value' });
   });
 
@@ -187,7 +205,12 @@ describe('write checks', () => {
   });
 
   it('accepts a valid ordinary write and returns the parsed value', () => {
-    const result = checkSettingWrite({ definition: definition(), scope: 'hospital', value: 'dark', reason: null });
+    const result = checkSettingWrite({
+      definition: definition(),
+      scope: 'hospital',
+      value: 'dark',
+      reason: null,
+    });
     expect(result).toEqual({ ok: true, value: 'dark' });
   });
 });

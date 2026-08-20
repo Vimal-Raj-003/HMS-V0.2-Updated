@@ -9,11 +9,7 @@ export const metadata: Metadata = { title: "Sign in · Vim's HMS" };
  * workspace — the user never picks "what kind of user am I", because they get it
  * wrong and because the answer is already known.
  */
-export default function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string }>;
-}) {
+export default function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   return (
     <main className="grid min-h-dvh place-items-center px-4 py-10">
       <div className="w-full max-w-[26rem]">

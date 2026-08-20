@@ -6,7 +6,11 @@ import { ZodBody } from '../../../core/validation/zod.pipe.js';
 import { FlagsService } from './flags.service.js';
 import type { ResolvedFlag } from './entitlements.logic.js';
 
-const flagKeySchema = z.string().min(3).max(128).regex(/^[a-z][a-z0-9_.]*$/, 'Lower snake_case, dot-separated');
+const flagKeySchema = z
+  .string()
+  .min(3)
+  .max(128)
+  .regex(/^[a-z][a-z0-9_.]*$/, 'Lower snake_case, dot-separated');
 
 /**
  * `/api/v1/admin/flags` — EN-007 §6.

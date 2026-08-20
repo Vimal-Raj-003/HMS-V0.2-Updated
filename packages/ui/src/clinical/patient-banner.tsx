@@ -55,14 +55,7 @@ export type AllergyStatus =
   | { readonly kind: 'none-known'; readonly verifiedOn: string }
   | { readonly kind: 'known'; readonly allergies: readonly AllergyRecord[] };
 
-export type PatientAlertKind =
-  | 'vip'
-  | 'fall-risk'
-  | 'dnr'
-  | 'infection'
-  | 'deteriorating'
-  | 'npo'
-  | 'other';
+export type PatientAlertKind = 'vip' | 'fall-risk' | 'dnr' | 'infection' | 'deteriorating' | 'npo' | 'other';
 
 export interface PatientAlert {
   readonly kind: PatientAlertKind;
@@ -199,7 +192,10 @@ function AllergyFlag({
     return (
       <span
         data-flag="allergy-unable-to-assess"
-        className={cn(chipClassName, 'border-violet-border bg-violet-surface text-violet-on-surface font-semibold')}
+        className={cn(
+          chipClassName,
+          'border-violet-border bg-violet-surface text-violet-on-surface font-semibold',
+        )}
       >
         <AlertTriangle aria-hidden="true" />
         {labels.allergiesUnableToAssess(status.reason)}
@@ -228,7 +224,9 @@ function AllergyFlag({
     <button
       type="button"
       data-flag="allergy"
-      title={first?.recordedBy === undefined ? undefined : `${first.recordedBy} ${first.recordedAt ?? ''}`.trim()}
+      title={
+        first?.recordedBy === undefined ? undefined : `${first.recordedBy} ${first.recordedAt ?? ''}`.trim()
+      }
       onClick={() => {
         onFlagSelect?.('allergy');
       }}
@@ -282,7 +280,9 @@ export function PatientBanner(props: PatientBannerProps): React.JSX.Element {
                 : undefined
             }
           >
-            {patient.photoUrl === undefined || masked ? initials(patient.familyName, patient.givenName) : null}
+            {patient.photoUrl === undefined || masked
+              ? initials(patient.familyName, patient.givenName)
+              : null}
           </div>
         )}
 

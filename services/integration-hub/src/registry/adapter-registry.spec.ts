@@ -45,7 +45,9 @@ describe('AdapterRegistry', () => {
   it('refuses an adapter that declares no operations', () => {
     const registry = new AdapterRegistry();
     expect(() =>
-      registry.register(factoryWith({ capabilities: { ...NULL_ECHO_MANIFEST.capabilities, operations: [] } })),
+      registry.register(
+        factoryWith({ capabilities: { ...NULL_ECHO_MANIFEST.capabilities, operations: [] } }),
+      ),
     ).toThrow(/declares no operations/);
   });
 

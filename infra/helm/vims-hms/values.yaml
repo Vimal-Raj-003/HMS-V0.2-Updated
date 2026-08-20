@@ -4,7 +4,7 @@
 
 image:
   registry: ghcr.io/vims
-  tag: ''            # required; never defaults to `latest` (docs/10 §6 needs a signed, pinned tag)
+  tag: '' # required; never defaults to `latest` (docs/10 §6 needs a signed, pinned tag)
   pullPolicy: IfNotPresent
 
 # Rolling deploy per docs/10 §6: maxUnavailable 0 so a ward never loses every
@@ -17,7 +17,7 @@ api:
   replicas: 3
   resources:
     requests: { cpu: 500m, memory: 512Mi }
-    limits:   { memory: 1Gi }
+    limits: { memory: 1Gi }
   # Liveness must NOT touch the database: a brief database blip would otherwise
   # restart every pod and turn a degradation into an outage.
   livenessPath: /healthz
@@ -27,7 +27,7 @@ worker:
   replicas: 2
   resources:
     requests: { cpu: 500m, memory: 1Gi }
-    limits:   { memory: 2Gi }
+    limits: { memory: 2Gi }
 
 realtime:
   replicas: 2
@@ -35,7 +35,7 @@ realtime:
     requests: { cpu: 250m, memory: 256Mi }
 
 integrationHub:
-  replicas: 1        # MLLP listeners bind device-facing ports; scale with care
+  replicas: 1 # MLLP listeners bind device-facing ports; scale with care
   resources:
     requests: { cpu: 250m, memory: 512Mi }
 

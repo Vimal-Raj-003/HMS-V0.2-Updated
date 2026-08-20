@@ -87,14 +87,15 @@ export interface DndEntry {
 }
 
 export type ConsentRefusal =
-  | 'number_blocked'
-  | 'opted_out'
-  | 'consent_missing'
-  | 'dnd_registered'
-  | 'outside_promotional_window';
+  'number_blocked' | 'opted_out' | 'consent_missing' | 'dnd_registered' | 'outside_promotional_window';
 
 export type ConsentDecision =
-  | { readonly allowed: true; readonly consentClass: ConsentClass; readonly overrodeDnd: boolean; readonly note?: string }
+  | {
+      readonly allowed: true;
+      readonly consentClass: ConsentClass;
+      readonly overrodeDnd: boolean;
+      readonly note?: string;
+    }
   | {
       readonly allowed: false;
       readonly consentClass: ConsentClass;
@@ -158,7 +159,10 @@ export class InMemoryConsentStore implements ConsentStore {
   private readonly decisions: ConsentDecisionRecord[] = [];
 
   putConsent(entry: ConsentEntry): Promise<void> {
-    this.consents.set(consentKey(entry.hospitalId, entry.phoneE164, entry.channel, entry.consentClass), entry);
+    this.consents.set(
+      consentKey(entry.hospitalId, entry.phoneE164, entry.channel, entry.consentClass),
+      entry,
+    );
     return Promise.resolve();
   }
 
@@ -196,7 +200,9 @@ export class InMemoryConsentStore implements ConsentStore {
 
   listDecisions(hospitalId: string, phoneE164?: string): Promise<readonly ConsentDecisionRecord[]> {
     return Promise.resolve(
-      this.decisions.filter((d) => d.hospitalId === hospitalId && (phoneE164 === undefined || d.phoneE164 === phoneE164)),
+      this.decisions.filter(
+        (d) => d.hospitalId === hospitalId && (phoneE164 === undefined || d.phoneE164 === phoneE164),
+      ),
     );
   }
 }
@@ -311,8 +317,7 @@ export class ConsentLedger {
       input.channel,
       consentClass,
     );
-    const expired =
-      recorded?.expiresAt !== undefined && recorded.expiresAt.getTime() <= input.at.getTime();
+    const expired = recorded?.expiresAt !== undefined && recorded.expiresAt.getTime() <= input.at.getTime();
 
     if (recorded?.status === 'opted_out' && !expired) {
       if (isCritical) {
@@ -342,10 +347,9 @@ export class ConsentLedger {
           allowed: false,
           consentClass,
           reason: 'consent_missing',
-          detail:
-            expired
-              ? 'the recorded service consent for this number has expired'
-              : 'service-explicit traffic needs a recorded consent for this number and class (EN-009 §5, DPDP Act 2023 §6)',
+          detail: expired
+            ? 'the recorded service consent for this number has expired'
+            : 'service-explicit traffic needs a recorded consent for this number and class (EN-009 §5, DPDP Act 2023 §6)',
         };
       }
       return { allowed: true, consentClass, overrodeDnd: false };
@@ -357,7 +361,8 @@ export class ConsentLedger {
         allowed: false,
         consentClass,
         reason: 'consent_missing',
-        detail: 'promotional traffic needs an explicit marketing opt-in for this number (TRAI TCCCPR 2018, DPDP Act 2023)',
+        detail:
+          'promotional traffic needs an explicit marketing opt-in for this number (TRAI TCCCPR 2018, DPDP Act 2023)',
       };
     }
     const dnd = await this.store.getDnd(input.phoneE164);

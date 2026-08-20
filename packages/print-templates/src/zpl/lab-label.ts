@@ -44,7 +44,14 @@ export function renderLabLabel(payload: LabLabelPayload, context: PrintContext):
   builder.text(2, 1.5, `${payload.patientName} ${payload.ageSex}`, dpi === 300 ? 26 : 18);
   builder.text(2, 6, `UHID ${payload.uhid}`, dpi === 300 ? 22 : 15);
   builder.code128(2, 10, payload.barcodeData ?? payload.accessionNo, dpi === 300 ? 60 : 40);
-  builder.textBlock(2, 20, WIDTH_MM - 4, `${payload.testName} | ${payload.containerLabel}`, dpi === 300 ? 20 : 14, 1);
+  builder.textBlock(
+    2,
+    20,
+    WIDTH_MM - 4,
+    `${payload.testName} | ${payload.containerLabel}`,
+    dpi === 300 ? 20 : 14,
+    1,
+  );
   builder.text(2, 22.6, `${payload.collectedAtLabel} | ${context.branch.name}`, dpi === 300 ? 17 : 12);
 
   if (payload.priority === 'stat') {

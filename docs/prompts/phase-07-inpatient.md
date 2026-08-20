@@ -4,6 +4,7 @@ Phases 0–6 complete: the ER can admit but there is nowhere to admit to. This i
 beds, nurses, theatres, intensive care, blood and a correct final bill.
 
 ## Read first
+
 `CLAUDE.md`, `docs/PROGRESS.md`, then, per step: **IP-001** (admission & beds), **IP-025** (bed command centre),
 **NC-018** (housekeeping), **NC-030** (roster), **IP-018** (transfer), **IP-003** (nursing station),
 **IP-004** (nursing mobile), **IP-014** (ward stock & unit dose), **IP-012** (infection control),
@@ -33,6 +34,7 @@ cleaned and back on the board within minutes.
 ### Step 7A — Admission, beds, ADT, housekeeping and the command centre
 
 #### 7A.1 Ward/bed configuration and admission (IP-001)
+
 Buildings, floors, wards, ward types, room and bed classes with tariff linkage (RC-003), bed attributes (isolation
 capable, oxygen point, monitor, ventilator point, attendant bed), sex/age policies, and a bed status machine
 (available / occupied / reserved / cleaning / blocked / retired).
@@ -44,6 +46,7 @@ ER fast-track admission uses the same series with `registration_complete = false
 linkage (NC-003), day-care and observation admissions.
 
 #### 7A.2 Bed allocation, transfers and holds (IP-001 + IP-018)
+
 Allocation is **transactional** (`SELECT … FOR UPDATE SKIP LOCKED` on the bed row) with an exclusion constraint as
 the last line of defence. Bed transfers record exact timestamps and show a **proration preview before confirmation**
 (IP-005 applies the policy). Bed holds with TTL (2 h ER, 6 h elective, 24 h OT/ICU return) that expire and notify.
@@ -52,6 +55,7 @@ Temporary leave, blocking with approval beyond 24 h. IP-018 covers intra-facilit
 inter-branch transfer (EN-041), and transfer-in.
 
 #### 7A.3 Housekeeping, turnover and the command centre (NC-018 + IP-025)
+
 Cleaning tasks auto-dispatched on vacate with ward-type SLAs, mobile acceptance and completion, inspection/QC,
 breach escalation, and the rule that **a bed cannot become `available` without a cleaning confirmation** (manual
 override with reason only); plus NC-018's routine schedules, checklists and consumables. IP-025 adds the
@@ -62,21 +66,25 @@ and surge mode wired to the Phase 6 MCI declaration.
 ### Step 7B — Nursing station, MAR, assessments, mobile
 
 #### 7B.1 Ward dashboard and assignment (IP-003)
+
 Patient assignment per shift from the NC-030 roster with nurse-patient ratio checks, a single ward screen showing
 every patient's due tasks, vitals status, MAR due/overdue, pending orders, alerts, isolation and fall/pressure-risk
 flags, and nurse-call response times.
 
 #### 7B.2 Assessments and care plans (IP-003 + EN-039)
+
 Nursing admission assessment, care plans with goals and interventions, and the risk scales — falls (Morse),
 pressure injury (Braden), pain, restraint, nutrition screening, DVT — each with a scheduled reassessment cadence and
 a due/overdue state that is visible on the ward dashboard.
 
 #### 7B.3 Vitals, NEWS2 and escalation (IP-003 + EN-029)
+
 Scheduled vitals per acuity, **NEWS2/PEWS computed server-side on every save**, and a documented escalation ladder
 (nurse → senior nurse → RMO → consultant → rapid response/code) with acknowledgement, timers and audit. Escalation
 must fire even if the nurse closes the tab. Deterioration also prompts re-triage/step-up.
 
 #### 7B.4 MAR with 5 Rights (IP-003 §3.4 + IP-014 + EN-013)
+
 Order → **pharmacist verification (IP-014) → MAR release**. Administration requires **scan patient wristband +
 scan drug barcode**; the system verifies right patient, drug, dose, route and time, and refuses silently-wrong
 combinations. **High-alert drugs (insulin, heparin, concentrated electrolytes, chemotherapy, opioids) require a
@@ -86,6 +94,7 @@ Unit-dose and patient-specific dispensing, ward indents, floor-stock par levels,
 ADR capture (PvPI) and medication-error reporting.
 
 #### 7B.5 I/O, notes, handover and nursing mobile (IP-003 + IP-004)
+
 Intake/output with running fluid balance, SBAR nursing notes, wound and drain charting, the nursing task engine,
 and **shift handover** that composes automatically from the shift's events and is signed by both nurses.
 IP-004 as an installable PWA (native is Phase 13): wristband-first bedside identification, bedside vitals, barcode
@@ -93,6 +102,7 @@ medication verification, push alerts with escalation, wound photo capture, task 
 with the per-entity conflict rules from the spec.
 
 #### 7B.6 Infection control (IP-012)
+
 Automatic device-days and denominators from IP-009/IP-003 data, HAI candidate detection and adjudication (CLABSI,
 CAUTI, VAP, SSI), isolation management, the microbiology/antibiogram feed from OP-004, hand-hygiene audits,
 outbreak detection, environmental and sterilisation surveillance (with EN-003), staff exposures, and stewardship
@@ -101,6 +111,7 @@ hooks.
 ### Step 7C — IP billing
 
 #### 7C.1 Bill lifecycle and automatic room rent (IP-005 §3.1–3.2)
+
 One open bill per admission opened at admission with payer setup; lines immutable after posting; corrections by
 reversal lines only. Then the room-rent engine: a scheduled job at the hospital cut-off, and on every
 `ip.transferred` / `ip.discharge.completed`, reads the bed occupancy timeline and posts room rent, nursing, RMO,
@@ -111,17 +122,20 @@ the configured threshold taxable at 5 % on the room line only. **Every auto line
 (admission_id, charge_date, charge_code, occupancy_id) — reruns never duplicate.**
 
 #### 7C.2 Event-driven posting, deposits and credit limits (IP-005 §3.3–3.4)
+
 Consumers for pharmacy issues and returns, lab and radiology, OT (theatre time slabs, anaesthesia, surgeon and
 assistant fees by grade, equipment, scanned consumables, implants with UDI from TR-003/NC-007), blood, procedures
 and doctor visits (auto-visit only from a signed rounds note). Deposits, top-ups, **TPA credit limits with alerts
 at 70/85/95 %**, above-limit flagging and an auto-drafted enhancement request with the interim bill.
 
 #### 7C.3 Interim bills, packages, family view (IP-005 + IP-008)
+
 Interim bills, holds and disputes; package versus itemised billing with IP-008 (versioned package definitions,
 utilisation alerts, conversion and settlement, variance and profitability); a family-facing running-cost view and
 bill explainer; estimate-variance notification above 20 %.
 
 #### 7C.4 Discharge clearance (IP-005 §3.7)
+
 Final bill on gapless numbering per branch per financial year, requiring zero held items, no `rate_pending` line
 and an authorised TPA amount (or an audited "settle as self" override). 269ST cash cap and PAN capture enforced.
 Late charges after clearance become a supplementary bill with approval — never an edit.
@@ -129,6 +143,7 @@ Late charges after clearance become a supplementary bill with approval — never
 ### Step 7D — Operation theatre, anaesthesia, CSSD, implants
 
 #### 7D.1 OT configuration, scheduling and pre-op readiness (IP-006 + IP-024)
+
 Theatres, sessions, surgeon blocks, equipment sets and staffing; booking request with procedure, duration estimate,
 anaesthesia type, implants and special equipment; scheduling board with conflict detection, elective list
 publication, and **emergency override (TR-004)** that bumps an elective case with a recorded reason and notifies
@@ -138,18 +153,21 @@ pre-op antibiotics ordered. **Site marking** with the patient
 involved. IP-024 PAC clinic with ASA grade, airway assessment, investigations and optimisation plan.
 
 #### 7D.2 WHO Surgical Safety Checklist (IP-006 §3.4) — a hard gate
+
 Sign-in, **time-out** and sign-out, each timestamped and attributed to the named person who performed it.
 **Incision cannot be recorded before the time-out is complete; the case cannot be closed before sign-out
 (including instrument, swab and sharps counts reconciling).** Configuration may add items but may never remove or
 bypass the three phases. Count discrepancy triggers a mandatory imaging/reconciliation workflow.
 
 #### 7D.3 Intra-op and post-op (IP-006 §3.5–3.8 + IP-024 + TR-004)
+
 Intra-op record (team, times, findings, procedure performed vs planned, specimens to histopath, blood loss,
 consumables scanned, implants scanned via TR-003), **anaesthesia record with device feed** (IP-024), C-arm dose log
 (TR-004), operative note and post-op orders, PACU scoring and discharge criteria, turnover and cleaning, CSSD
 set return.
 
 #### 7D.4 CSSD (EN-003)
+
 Instrument sets and trays with barcodes, the full cycle (receipt → decontamination → inspection/assembly →
 sterilisation → cool/quarantine → store → issue → return), load records with **Bowie-Dick, biological and chemical
 indicator results**, parameter capture from the autoclave, expiry by pack type, **a load that fails BI cannot be
@@ -159,6 +177,7 @@ issue/return traceability to the OT case, and turnaround/rework analytics.
 ### Step 7E — ICU, HDU, crash cart, code blue
 
 #### 7E.1 ICU/CCU (IP-009) and HDU (IP-016)
+
 Admission criteria and baseline scores (APACHE II, SOFA), **hourly flowsheet** with device integration
 (monitors, ventilators, syringe pumps — EN-042 adapters, manual entry always available), ventilator tracking and
 weaning, haemodynamics and infusion protocols, bundles (VAP, CLABSI, CAUTI, sedation, DVT, stress ulcer, glycaemic),
@@ -168,6 +187,7 @@ survey, trauma-specific bundles, the multi-organ trauma board, and the Phase 6 h
 injury list forward.
 
 #### 7E.2 Crash cart and code blue (IP-013)
+
 Cart register with sealed-lot contents, **shift/daily seal checks and full open-checks with expiry verification**,
 code blue activation and broadcast (EN-037 + EN-018 + overhead), the **resuscitation flowsheet** recording rhythm,
 shocks, drugs, CPR cycles and ROSC with a running clock, post-code restock/re-seal, debrief and review, and
@@ -176,11 +196,13 @@ code-to-first-shock/first-drug time metrics.
 ### Step 7F — Blood bank
 
 #### 7F.1 Donor to component (IP-007 §3.1–3.5)
+
 Donor registration, screening, deferral rules, collection and donor adverse events, TTI and grouping tests,
 component preparation and labelling, inventory with **storage temperature monitoring and excursion handling**,
 expiry management.
 
 #### 7F.2 Request to transfusion (IP-007 §3.6–3.9)
+
 Request with clinical indication, sample with a **separate, independently-drawn group-check sample rule**,
 cross-match, **two-person issue** and **two-person bedside verification against the wristband before the first
 drop** — this check is a hard gate that cannot be skipped, deferred or configured away. Transfusion observations,
@@ -191,6 +213,7 @@ procedures, autologous and directed donation, and external units received from a
 ### Step 7G — Discharge, summary, mortuary, transfer-out
 
 #### 7G.1 Planning, initiation and medication reconciliation (IP-002 §3.1–3.3)
+
 Expected discharge date from admission, discharge planning tasks, doctor-initiated discharge with the clinical
 summary skeleton pre-composed from the episode. Then reconciliation: home meds → inpatient meds → discharge meds
 compared line by line, each with continue / stop / change / new and a reason; unresolved discrepancies **block** the
@@ -198,22 +221,26 @@ summary from being signed; the discharge Rx runs the full EN-029
 checks and flows to IP-014 take-home dispensing.
 
 #### 7G.2 Discharge summary (IP-002 §3.5)
+
 Versioned, signed, immutable clinical document assembled from diagnoses, procedures, course, investigations,
 medications, condition on discharge, follow-up plan and red-flag advice; resident-drafted with consultant co-sign;
 patient copy in the patient's language; ABDM DischargeSummaryRecord bundle prepared for Phase 11.
 
 #### 7G.3 Clearance and physical discharge (IP-002 §3.6–3.7)
+
 **Clearance blocks on: pending orders or unreported results, unreturned ward stock and unreconciled narcotics,
 unreturned equipment, incomplete MLC set (TR-008), unsigned summary, and an unsettled patient share or unapproved
 credit.** Once cleared: gate pass, bed release, housekeeping dispatch, follow-up appointment booked, transport,
 documents pack, and the discharge-lounge flow.
 
 #### 7G.4 Other exits (IP-002 §3.8 + IP-017 + IP-018)
+
 DAMA/LAMA with witnessed consent and risk explanation, absconded, referred out, and death — declaration, MLC check,
 last office, body tag, **IP-017 mortuary receipt, cold-storage allocation, MCCD Form 4/4A and Registrar report,
 post-mortem coordination, embalming, NOK verification and body release with clearance**.
 
 ## Constraints & watch-outs
+
 - **The bed board is derived, never denormalised into a second source of truth.** Occupancy comes from the
   admissions/occupancy tables through a read model that can be rebuilt from scratch at any time; write a test that
   rebuilds it and asserts it matches. Any code that keeps a hand-maintained `beds_free` counter will drift and
@@ -237,6 +264,7 @@ post-mortem coordination, embalming, NOK verification and body release with clea
   task rather than billing zero.
 
 ## Exit gate
+
 1. Admit from ER and from OPD: bed allocated transactionally, deposit and consent captured, pre-auth case created,
    wristband printed. Run 50 concurrent allocation attempts on one bed — exactly one succeeds.
 2. Rebuild the bed-board read model from the admissions tables and assert it matches the live board exactly.

@@ -282,8 +282,8 @@ export class UsersService {
       // the group). A username taken in a sibling hospital is therefore invisible
       // to the check and shows up here — as a conflict, not as a 500.
       await insertOrConflict(tx, 'That username is already in use.', () =>
-      tx.query(
-        `INSERT INTO core.users (
+        tx.query(
+          `INSERT INTO core.users (
            id, hospital_id, group_id, username, email, mobile, name, display_name,
            employee_id, type, status, professional, preferences,
            must_change_password, created_by, updated_by, updated_at
@@ -292,22 +292,22 @@ export class UsersService {
            $9, $10::core."UserType", 'invited'::core."UserStatus", $11::jsonb, $12::jsonb,
            true, $13, $13, now()
          )`,
-        [
-          id,
-          ctx.hospitalId,
-          hospital.group_id,
-          body.username,
-          body.email ?? null,
-          body.mobile ?? null,
-          JSON.stringify(body.name),
-          displayNameOf(body),
-          body.employeeId ?? null,
-          body.type,
-          JSON.stringify(body.professional ?? {}),
-          JSON.stringify(body.preferences ?? {}),
-          ctx.userId,
-        ],
-      ),
+          [
+            id,
+            ctx.hospitalId,
+            hospital.group_id,
+            body.username,
+            body.email ?? null,
+            body.mobile ?? null,
+            JSON.stringify(body.name),
+            displayNameOf(body),
+            body.employeeId ?? null,
+            body.type,
+            JSON.stringify(body.professional ?? {}),
+            JSON.stringify(body.preferences ?? {}),
+            ctx.userId,
+          ],
+        ),
       );
 
       const grants: Array<{ userRoleId: string; roleId: string; branchId: string | null }> = [];
@@ -550,7 +550,10 @@ export class UsersService {
     });
   }
 
-  async resetPassword(id: string, body: ResetPasswordRequest): Promise<{ readonly mustChangePassword: boolean }> {
+  async resetPassword(
+    id: string,
+    body: ResetPasswordRequest,
+  ): Promise<{ readonly mustChangePassword: boolean }> {
     const ctx = getContext();
 
     const failures = this.passwords.validateStrength(body.newPassword);
@@ -667,7 +670,12 @@ export class UsersService {
         businessKey: `${user.username}:${role.key}`,
         dataClass: 'operational',
         before: null,
-        after: { user_id: userId, role_id: body.roleId, branch_id: body.branchId, valid_to: body.validTo ?? null },
+        after: {
+          user_id: userId,
+          role_id: body.roleId,
+          branch_id: body.branchId,
+          valid_to: body.validTo ?? null,
+        },
         reasonText: body.justification,
       });
 
@@ -688,7 +696,11 @@ export class UsersService {
     return this.rolesFor(userId);
   }
 
-  async revokeRole(userId: string, userRoleId: string, reason: string): Promise<readonly UserRoleAssignment[]> {
+  async revokeRole(
+    userId: string,
+    userRoleId: string,
+    reason: string,
+  ): Promise<readonly UserRoleAssignment[]> {
     await this.db.withTenant(currentTenantContext(), async (tx) => {
       const grant = await tx.maybeOne<{ role_id: string; role_key: string; active: boolean }>(
         `SELECT ur.role_id, r.key AS role_key, ur.active
@@ -751,7 +763,9 @@ export class UsersService {
 
   private async assertBranchAssignable(tx: TransactionClient, branchId: string | null): Promise<void> {
     if (branchId === null) return;
-    const branch = await tx.maybeOne<{ id: string }>(`SELECT id FROM core.branches WHERE id = $1`, [branchId]);
+    const branch = await tx.maybeOne<{ id: string }>(`SELECT id FROM core.branches WHERE id = $1`, [
+      branchId,
+    ]);
     if (branch === undefined) throw AppError.notFound('The branch');
 
     const ctx = getContext();
@@ -800,7 +814,10 @@ export function changedKeys<T extends Record<string, unknown>>(before: T, after:
   return Object.keys(after).filter((key) => before[key] !== after[key]);
 }
 
-export function pick<T extends Record<string, unknown>>(source: T, keys: readonly string[]): Record<string, unknown> {
+export function pick<T extends Record<string, unknown>>(
+  source: T,
+  keys: readonly string[],
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const key of keys) result[key] = source[key];
   return result;

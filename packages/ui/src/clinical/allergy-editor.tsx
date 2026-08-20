@@ -7,13 +7,7 @@ import { Badge } from '../primitives/badge.js';
 import { Button } from '../primitives/button.js';
 import { Input } from '../primitives/input.js';
 import { Label } from '../primitives/label.js';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../primitives/select.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../primitives/select.js';
 import type { AllergyStatus } from './patient-banner.js';
 
 /**
@@ -43,13 +37,7 @@ import type { AllergyStatus } from './patient-banner.js';
  */
 
 export type AllergenCategory =
-  | 'drug'
-  | 'drug-class'
-  | 'food'
-  | 'environment'
-  | 'contrast-media'
-  | 'latex'
-  | 'other';
+  'drug' | 'drug-class' | 'food' | 'environment' | 'contrast-media' | 'latex' | 'other';
 
 /** FHIR AllergyIntolerance criticality. `unable-to-assess` is explicit, never absent. */
 export type AllergyCriticality = 'low' | 'high' | 'unable-to-assess';
@@ -125,10 +113,7 @@ export interface BannerStatusLabels {
  * every distinction: `unable-to-assess` maps to the banner's own `unable-to-assess`
  * arm, never to `none-known`.
  */
-export function bannerStatusFor(
-  statement: AllergyStatement,
-  labels: BannerStatusLabels,
-): AllergyStatus {
+export function bannerStatusFor(statement: AllergyStatement, labels: BannerStatusLabels): AllergyStatus {
   switch (statement.kind) {
     case 'not-recorded':
       return { kind: 'not-recorded' };
@@ -241,11 +226,7 @@ function VerificationChip({
   switch (verification.kind) {
     case 'unverified':
       return (
-        <Badge
-          tone="warning"
-          data-verification="unverified"
-          icon={<ShieldQuestion aria-hidden="true" />}
-        >
+        <Badge tone="warning" data-verification="unverified" icon={<ShieldQuestion aria-hidden="true" />}>
           {labels.verificationUnverified}
         </Badge>
       );
@@ -366,9 +347,7 @@ export function AllergyEditor({
       id: newEntryId(),
       allergen: { display: allergen, category: draftCategory },
       reactions:
-        reactionText === ''
-          ? { kind: 'not-documented' }
-          : { kind: 'documented', reactions: [reactionText] },
+        reactionText === '' ? { kind: 'not-documented' } : { kind: 'documented', reactions: [reactionText] },
       severity: draftSeverity,
       criticality: draftCriticality,
       // A newly typed allergy is always UNVERIFIED. There is no code path that

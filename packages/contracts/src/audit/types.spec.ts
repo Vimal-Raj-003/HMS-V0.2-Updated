@@ -208,7 +208,10 @@ describe('retention floors', () => {
     // specific regulation cited" — a floor with no citation cannot be defended.
     for (const floor of RETENTION_FLOORS) {
       expect(floor.floorDays, `${floor.dataClass}/${floor.actionClass} has no floor`).toBeGreaterThan(0);
-      expect(floor.regulation.length, `${floor.dataClass}/${floor.actionClass} cites nothing`).toBeGreaterThan(15);
+      expect(
+        floor.regulation.length,
+        `${floor.dataClass}/${floor.actionClass} cites nothing`,
+      ).toBeGreaterThan(15);
     }
   });
 

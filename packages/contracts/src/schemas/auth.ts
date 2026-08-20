@@ -119,7 +119,9 @@ export const loginChallengeSchema = z.discriminatedUnion('status', [
       /** Where `/login` should route to (docs/05 §Login/UX flow step 1). */
       homeWorkspace: z.string(),
       /** Multi-role users get a switcher (docs/05 §Login model). */
-      availableWorkspaces: z.array(z.object({ workspace: z.string(), roleKey: z.string(), roleName: z.string() })),
+      availableWorkspaces: z.array(
+        z.object({ workspace: z.string(), roleKey: z.string(), roleName: z.string() }),
+      ),
     }),
   }),
   z.object({
@@ -299,11 +301,20 @@ export const meResponseSchema = z.object({
     z.object({ branchId: z.string().uuid(), code: z.string(), name: z.string(), colourToken: z.string() }),
   ),
   scope: z.enum(['branch', 'entity', 'group']),
-  roles: z.array(z.object({ roleId: z.string().uuid(), key: z.string(), name: z.string(), branchId: z.string().uuid().nullable() })),
+  roles: z.array(
+    z.object({
+      roleId: z.string().uuid(),
+      key: z.string(),
+      name: z.string(),
+      branchId: z.string().uuid().nullable(),
+    }),
+  ),
   /** Flat permission set — the left nav is generated from exactly this (docs/06 §4.1). */
   permissions: z.array(z.string()),
   homeWorkspace: z.string(),
-  availableWorkspaces: z.array(z.object({ workspace: z.string(), roleKey: z.string(), roleName: z.string() })),
+  availableWorkspaces: z.array(
+    z.object({ workspace: z.string(), roleKey: z.string(), roleName: z.string() }),
+  ),
   preferences: z.object({
     locale: z.string(),
     theme: z.enum(['light', 'dark', 'system']),
@@ -311,7 +322,12 @@ export const meResponseSchema = z.object({
     highContrast: z.boolean(),
     fontScale: z.number(),
   }),
-  mfa: z.object({ enabled: z.boolean(), methods: z.array(z.string()), mandatory: z.boolean(), graceDaysRemaining: z.number().int().nullable() }),
+  mfa: z.object({
+    enabled: z.boolean(),
+    methods: z.array(z.string()),
+    mandatory: z.boolean(),
+    graceDaysRemaining: z.number().int().nullable(),
+  }),
   pinSet: z.boolean(),
   /** Non-null while an impersonation session is active; the banner cannot be hidden. */
   impersonation: z
@@ -325,7 +341,11 @@ export const meResponseSchema = z.object({
     bannerMessage: z.string().nullable(),
   }),
   /** Read-only mode, e.g. during DB failover (docs/06 §6.7). */
-  readOnlyMode: z.object({ active: z.boolean(), since: z.string().nullable(), reason: z.string().nullable() }),
+  readOnlyMode: z.object({
+    active: z.boolean(),
+    since: z.string().nullable(),
+    reason: z.string().nullable(),
+  }),
 });
 
 export type MeResponse = z.infer<typeof meResponseSchema>;

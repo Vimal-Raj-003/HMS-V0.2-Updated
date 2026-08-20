@@ -40,7 +40,9 @@ describe('a licensed module', () => {
 
 describe('a licence-disabled module is blocked', () => {
   it('is blocked when it is simply not in the plan, with the plan message and an upgrade CTA', () => {
-    const decision = createFlagEvaluator(flagSet({ entitlements: [] })).evaluate('module.multi_branch.enabled');
+    const decision = createFlagEvaluator(flagSet({ entitlements: [] })).evaluate(
+      'module.multi_branch.enabled',
+    );
     expect(decision.enabled).toBe(false);
     expect(decision.reason).toBe('not_licensed');
     expect(decision.message).toBe('Multiple branches are not included in your plan.');
@@ -132,7 +134,9 @@ describe('a clinical-safety-exempt key is NOT blocked', () => {
   it('keeps the hospital able to export its own data at every tier (EN-040 §14 AC-6)', () => {
     const evaluator = createFlagEvaluator(expiredEverything);
     expect(evaluator.isEnabled('feature.data_export.enabled')).toBe(true);
-    expect(evaluator.evaluate('feature.data_export.enabled').message).toBe('You can always export your own data.');
+    expect(evaluator.evaluate('feature.data_export.enabled').message).toBe(
+      'You can always export your own data.',
+    );
   });
 
   it('appears in enabledKeys even though the plan grants nothing', () => {
@@ -146,9 +150,9 @@ describe('a clinical-safety-exempt key is NOT blocked', () => {
 
 describe('administrator switches', () => {
   it('can turn a licensed module off — that is configuration, not commerce', () => {
-    const decision = createFlagEvaluator(
-      flagSet({ overrides: { 'module.sso.enabled': false } }),
-    ).evaluate('module.sso.enabled');
+    const decision = createFlagEvaluator(flagSet({ overrides: { 'module.sso.enabled': false } })).evaluate(
+      'module.sso.enabled',
+    );
     expect(decision.enabled).toBe(false);
     expect(decision.reason).toBe('override_off');
     expect(decision.message).toBe('This has been switched off for your hospital.');
@@ -184,11 +188,13 @@ describe('sub-flags (switches inside an already-licensed module)', () => {
   });
 
   it('follow the administrator switch, hospital or branch', () => {
-    expect(createFlagEvaluator(flagSet({ overrides: { 'print.agent': true } })).evaluate('print.agent')).toMatchObject(
-      { enabled: true, reason: 'override_on' },
-    );
     expect(
-      createFlagEvaluator(flagSet({ branchOverrides: { 'print.autoprint': false } })).evaluate('print.autoprint'),
+      createFlagEvaluator(flagSet({ overrides: { 'print.agent': true } })).evaluate('print.agent'),
+    ).toMatchObject({ enabled: true, reason: 'override_on' });
+    expect(
+      createFlagEvaluator(flagSet({ branchOverrides: { 'print.autoprint': false } })).evaluate(
+        'print.autoprint',
+      ),
     ).toMatchObject({ enabled: false, reason: 'override_off' });
   });
 });

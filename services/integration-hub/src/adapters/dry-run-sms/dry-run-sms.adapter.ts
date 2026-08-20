@@ -44,7 +44,11 @@ import {
   type RawInbound,
 } from '../../adapter/types.js';
 import { outboundSmsPayloadSchema } from '../../messaging/payload-schemas.js';
-import { CANONICAL_DELIVERY_RECEIPT, type DeliveryEnvelopePayload, type DeliveryStatus } from '../../messaging/types.js';
+import {
+  CANONICAL_DELIVERY_RECEIPT,
+  type DeliveryEnvelopePayload,
+  type DeliveryStatus,
+} from '../../messaging/types.js';
 
 export const DRY_RUN_SMS_ADAPTER_ID = 'vims.sms-dry-run';
 export const DRY_RUN_SMS_ADAPTER_VERSION = '0.1.0';

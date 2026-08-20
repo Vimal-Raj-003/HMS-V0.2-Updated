@@ -529,9 +529,7 @@ export class ConnectorRegistry {
     // one hospital's configuration of it, and storing it twice would let the
     // copies disagree. Validation already refuses a config that contradicts the
     // manifest, so the manifest is the authority on read.
-    const declared = new Map(
-      factory.manifest.capabilities.operations.map((op) => [op.key, op.direction]),
-    );
+    const declared = new Map(factory.manifest.capabilities.operations.map((op) => [op.key, op.direction]));
     const directionOf = (key: string): ConnectorDirection => declared.get(key) ?? row.direction;
 
     const { auth, adapterOptions, ...endpoint } = row.endpoint as {

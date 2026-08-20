@@ -1,20 +1,21 @@
 # AI-006 — AI-Assisted Coding (ICD-10 Diagnosis Coding from Notes with ICD-11 Readiness, Procedure Coding, DRG / PMJAY-HBP Package Grouping, Coder Review Workflow, Coding Audit & Anti-Upcoding Guardrails, Accuracy KPIs & Feedback Loop)
 
-| Field | Value |
-|---|---|
-| Domain | AI & Advanced Tech |
-| Module ID | AI-006 |
-| Phase | 12 |
-| Priority | P2 |
-| Complexity | High |
-| Depends on | **AI-001 §0 (AI Platform Foundation — mandatory)**, EN-027 (ICD-10/ICD-11/SNOMED CT/CPT-equivalent procedure & PMJAY-HBP masters, code validity dates), NC-003 (Digital MRD — the coding queue and deficiency workflow owner), OP-002 (consultation notes, diagnoses), IP-002 (discharge summary — the primary coding source), IP-006 (operative notes, procedures), RC-007 (PMJAY/CGHS/ECHS/ESIC package grouping), RC-001/RC-002 (claims & pre-auth), RC-004 (denial reasons feed back), EN-002 (payer rules), EN-024 (audit), EN-038 (approval), AI-002 (note understanding), AI-003 (external summaries), AI-004 (scribe-drafted notes) |
-| Consumed by | NC-003 (coder worklist), RC-001/RC-002 (claim coding), RC-007 (scheme packages), EN-001 (case-mix analytics), NC-015 (quality indicators), IP-002 (discharge completion), NC-011 (MIS) |
-| Feature flag | `module.ai_coding.enabled` (sub: `coding.icd10`, `coding.icd11_dual`, `coding.procedures`, `coding.drg_grouper`, `coding.hbp_packages`, `coding.audit`, `coding.realtime_hints`) |
-| Primary roles | MRD Officer / Coder (43), Insurance/TPA Desk (28) |
-| Secondary roles | Doctor (6/7/9 — query responses and confirmation), Medical Superintendent (4), Billing Executive (27), Finance Manager (46), Quality Manager (54), Auditor (58), Compliance/Legal |
-| Regulatory | **ICD-10 (WHO, India adaptation) mandated for ABDM/NHCX claims and NABH/HMIS reporting; ICD-11 readiness (India has adopted ICD-11 for phased use — dual coding must be supportable)**; **NHA/PMJAY Health Benefit Package (HBP 2.2+) grouping rules and PMJAY anti-fraud guidelines (NAFU) — upcoding is a punishable offence with de-empanelment risk**; IRDAI claim documentation norms; NABH 6th edn IMS (medical record completeness & coding accuracy), MRD retention rules; DPDP (clinical text processing purpose-limited); CDSCO — coding assistance is administrative, explicitly not SaMD (AI-001 §0.8); Companies Act/GST for the financial consequences of coding |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Domain          | AI & Advanced Tech                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Module ID       | AI-006                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Phase           | 12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Priority        | P2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Complexity      | High                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Depends on      | **AI-001 §0 (AI Platform Foundation — mandatory)**, EN-027 (ICD-10/ICD-11/SNOMED CT/CPT-equivalent procedure & PMJAY-HBP masters, code validity dates), NC-003 (Digital MRD — the coding queue and deficiency workflow owner), OP-002 (consultation notes, diagnoses), IP-002 (discharge summary — the primary coding source), IP-006 (operative notes, procedures), RC-007 (PMJAY/CGHS/ECHS/ESIC package grouping), RC-001/RC-002 (claims & pre-auth), RC-004 (denial reasons feed back), EN-002 (payer rules), EN-024 (audit), EN-038 (approval), AI-002 (note understanding), AI-003 (external summaries), AI-004 (scribe-drafted notes)                                    |
+| Consumed by     | NC-003 (coder worklist), RC-001/RC-002 (claim coding), RC-007 (scheme packages), EN-001 (case-mix analytics), NC-015 (quality indicators), IP-002 (discharge completion), NC-011 (MIS)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Feature flag    | `module.ai_coding.enabled` (sub: `coding.icd10`, `coding.icd11_dual`, `coding.procedures`, `coding.drg_grouper`, `coding.hbp_packages`, `coding.audit`, `coding.realtime_hints`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Primary roles   | MRD Officer / Coder (43), Insurance/TPA Desk (28)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Secondary roles | Doctor (6/7/9 — query responses and confirmation), Medical Superintendent (4), Billing Executive (27), Finance Manager (46), Quality Manager (54), Auditor (58), Compliance/Legal                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Regulatory      | **ICD-10 (WHO, India adaptation) mandated for ABDM/NHCX claims and NABH/HMIS reporting; ICD-11 readiness (India has adopted ICD-11 for phased use — dual coding must be supportable)**; **NHA/PMJAY Health Benefit Package (HBP 2.2+) grouping rules and PMJAY anti-fraud guidelines (NAFU) — upcoding is a punishable offence with de-empanelment risk**; IRDAI claim documentation norms; NABH 6th edn IMS (medical record completeness & coding accuracy), MRD retention rules; DPDP (clinical text processing purpose-limited); CDSCO — coding assistance is administrative, explicitly not SaMD (AI-001 §0.8); Companies Act/GST for the financial consequences of coding |
 
 ## 1. Purpose
+
 AI-006 reads the clinical documentation of a completed episode and proposes the codes a human coder would assign:
 principal and secondary ICD-10 diagnoses (with ICD-11 dual-coding readiness), procedures, present-on-admission flags,
 the DRG-style/HBP package grouping used by PMJAY and other schemes, and the documentation queries needed where the
@@ -23,6 +24,7 @@ guardrails are deliberately asymmetric: it is designed to be **conservative abou
 reimbursement** and vocal about documentation gaps.
 
 ## 2. Users & Jobs-to-be-done
+
 - **Coder / MRD officer (43, desktop, all day)**: open an episode, see suggested codes with the exact supporting text
   quoted from the record, accept in bulk what is obvious, focus their expertise on the 20 % that is hard, and clear
   the coding backlog within the discharge-to-code TAT the hospital promises payers.
@@ -39,6 +41,7 @@ reimbursement** and vocal about documentation gaps.
 ## 3. Core Workflows
 
 ### 3.1 Episode intake and coding readiness
+
 1. On `patient.discharged` (IP) or `encounter.closed` (OP day-care/procedure), NC-003 creates the coding task.
    AI-006 first runs a **documentation-completeness check**: is the discharge summary signed? Are operative notes
    present for every scheduled procedure? Are pathology/imaging reports finalised? → incomplete episodes are held with
@@ -51,6 +54,7 @@ reimbursement** and vocal about documentation gaps.
    payer-specific rules, previously audited exemplars) → Event `coding.suggestion.requested`.
 
 ### 3.2 Diagnosis coding (ICD-10, ICD-11-ready)
+
 1. The model proposes a **schema-validated** set: `principal_diagnosis` (one), `secondary_diagnoses[]`, each with
    `icd10_code`, `icd10_title`, `evidence_quotes[]` (verbatim spans with document id + offset), `confidence`,
    `poa_flag` enum(present_on_admission/hospital_acquired/unknown/not_applicable), `chronic_vs_acute`, `laterality`,
@@ -61,7 +65,7 @@ reimbursement** and vocal about documentation gaps.
    not proposed; a code supported only by an external document is proposed with an explicit "external evidence only —
    requires clinician confirmation" flag.
 4. **Principal-diagnosis selection follows the coding rules the hospital uses** ("the condition established after
-   study to be chiefly responsible for the admission"), and the model must state *why* it chose it. Where two
+   study to be chiefly responsible for the admission"), and the model must state _why_ it chose it. Where two
    candidates are close, both are presented for the coder to choose — the system does not silently pick the
    higher-weighted one (this is an anti-upcoding control, §5).
 5. **ICD-11 dual coding**: when `coding.icd11_dual` is on, the ICD-11 stem code + any postcoordination cluster is
@@ -72,6 +76,7 @@ reimbursement** and vocal about documentation gaps.
    promote a symptom to a diagnosis.
 
 ### 3.3 Procedure coding
+
 1. Procedures are extracted from operative notes, OT records (IP-006), procedure console entries (OP-010) and the
    billed service lines — **and cross-checked**: a procedure code proposed with no corresponding OT/procedure record
    is flagged as a documentation discrepancy, and a performed procedure with no code is flagged as a missed code
@@ -82,10 +87,11 @@ reimbursement** and vocal about documentation gaps.
    own service master mapped to scheme package codes) — EN-027 owns the master; AI-006 only proposes within it.
 
 ### 3.4 DRG-style / scheme package grouping
+
 1. Once diagnoses and procedures are proposed, the **grouper** runs. The grouper itself is **deterministic**, not
    generative: it is a rules table (`coding_grouper_rules`) mapping (principal dx, secondary dx set, procedures, age,
    sex, discharge status, LOS, comorbidity/complication level) → package/DRG. The model's role is only to supply the
-   codes and to *explain* the grouping in plain language.
+   codes and to _explain_ the grouping in plain language.
 2. For **PMJAY**, grouping targets the current HBP version (RC-007), respecting package hierarchy, exclusions,
    stratification (e.g. ICU days), pre-defined implant add-ons, and the "unbundling is prohibited" rules. For CGHS/
    ECHS/ESIC and private payers, their own package masters apply (RC-003/EN-002).
@@ -95,6 +101,7 @@ reimbursement** and vocal about documentation gaps.
 4. **Anti-unbundling and anti-upcoding checks run here** (§5) and can downgrade or block a package suggestion.
 
 ### 3.5 Coder review workflow (NC-003)
+
 1. The coder opens the episode in a split view: documents left (with evidence quotes highlighted in situ), suggestions
    right. Each suggested code has Accept / Edit / Reject with a reason, and a keyboard-first flow.
 2. **Bulk-accept is permitted only for high-confidence codes that carry internal evidence quotes**, and never for the
@@ -112,6 +119,7 @@ reimbursement** and vocal about documentation gaps.
    coder disagrees fundamentally → reject-all with reason, which becomes a golden-dataset case.
 
 ### 3.6 Real-time coding hints (optional, opt-in)
+
 - While the doctor writes the discharge summary (or during an AI-004 scribe review), AI-006 can show passive hints:
   "documenting the organism would support a more specific code", "laterality not stated". Hints are **documentation
   prompts only** — they never name a reimbursement amount, never suggest adding a diagnosis the patient does not have,
@@ -119,6 +127,7 @@ reimbursement** and vocal about documentation gaps.
   documentation improvement and inducement.
 
 ### 3.7 Coding audit & the feedback loop
+
 1. Every episode stores the triple: AI suggestion → coder decision → (if sampled) auditor verdict. From this the
    system computes AI precision/recall per code chapter, coder agreement, and audit-confirmed accuracy.
 2. **Denial feedback**: RC-004 denial reasons that are coding-related (invalid code, code–procedure mismatch,
@@ -129,6 +138,7 @@ reimbursement** and vocal about documentation gaps.
    an explicit check that CMI drift is explained by case mix and not by coding behaviour.
 
 ## 4. Data Model (schema `ai`, prefix `coding_`; coded record of truth stays in NC-003)
+
 - `coding_episodes` — id uuidv7, hospital_id, branch_id, encounter_id, patient_id, episode_type enum(ip/op/daycare/
   procedure/er), discharge_at, documents_ref jsonb (document ids + types + signed flags), readiness
   enum(not_ready/ready/held), deficiency_list jsonb, status enum(pending/suggested/in_review/coded/queried/
@@ -161,6 +171,7 @@ reimbursement** and vocal about documentation gaps.
   audits and upcoding flags 10 years (payer audit defence).
 
 ## 5. Business Rules & Validations
+
 - **A coder, not the model, assigns codes.** The coded record is written by the coder's action; suggestions never
   auto-post, even at maximum confidence, and never post to a claim directly.
 - **No code without internal documented evidence.** Every proposed code carries a verbatim quote from a signed
@@ -193,24 +204,26 @@ reimbursement** and vocal about documentation gaps.
   quote, the coder, the reviewer and any query raised.
 
 ## 6. API Surface (`/api/v1/coding`)
-| Method | Path | Purpose | Permission | Notes |
-|---|---|---|---|---|
-| GET | /episodes?status&coder&scheme&from&to | coding worklist | `coding.episode.read` (43, 28) | cursor; sorted by payer deadline |
-| POST | /episodes/:id/suggest | run/re-run suggestion | `coding.suggest.run` | async; blocked if not ready |
-| GET | /episodes/:id/suggestions | suggestion set with evidence | `coding.episode.read` | quotes + offsets |
-| POST | /episodes/:id/lines/:lineId/accept \| /edit \| /reject | per-code decision | `coding.line.decide` (43) | reason on reject/edit |
-| POST | /episodes/:id/bulk-accept | accept high-confidence non-principal lines | `coding.line.decide` | principal & rate-changing excluded |
-| POST | /episodes/:id/group | run the deterministic grouper | `coding.group.run` | shows alternatives & rejections |
-| POST | /episodes/:id/finalise | write the coded record to NC-003 | `coding.episode.finalise` (43) | triggers second review where required |
-| POST | /episodes/:id/second-review | four-eyes review | `coding.episode.review` (43 senior, 4) | different user enforced |
-| POST | /queries ; POST /queries/:id/answer ; GET /queries?clinician&status | documentation queries | `coding.query.raise` (43) / `coding.query.answer` (6/7/9) | non-leading check |
-| GET/POST | /grouper-rules ; POST /grouper-rules/import | package rule maintenance | `coding.grouper.manage` (28, 46 + EN-038) | versioned, effective-dated |
-| GET | /audits ; POST /audits/:episodeId | coding audit | `coding.audit.perform` (54, 58, 43 senior) | sampling engine |
-| GET | /upcoding-flags ; POST /upcoding-flags/:id/resolve | compliance review | `coding.compliance.read|manage` (4, 54) | |
-| GET | /metrics/accuracy ; /metrics/tat ; /metrics/cmi | KPIs | `coding.report.read` | read models |
-| POST | /hints/note | real-time documentation hints (opt-in) | `coding.hint.use` (6/7/9) | no rate/value in output |
+
+| Method   | Path                                                                | Purpose                                    | Permission                                                | Notes                                 |
+| -------- | ------------------------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------- | ------------------------------------- |
+| GET      | /episodes?status&coder&scheme&from&to                               | coding worklist                            | `coding.episode.read` (43, 28)                            | cursor; sorted by payer deadline      |
+| POST     | /episodes/:id/suggest                                               | run/re-run suggestion                      | `coding.suggest.run`                                      | async; blocked if not ready           |
+| GET      | /episodes/:id/suggestions                                           | suggestion set with evidence               | `coding.episode.read`                                     | quotes + offsets                      |
+| POST     | /episodes/:id/lines/:lineId/accept \| /edit \| /reject              | per-code decision                          | `coding.line.decide` (43)                                 | reason on reject/edit                 |
+| POST     | /episodes/:id/bulk-accept                                           | accept high-confidence non-principal lines | `coding.line.decide`                                      | principal & rate-changing excluded    |
+| POST     | /episodes/:id/group                                                 | run the deterministic grouper              | `coding.group.run`                                        | shows alternatives & rejections       |
+| POST     | /episodes/:id/finalise                                              | write the coded record to NC-003           | `coding.episode.finalise` (43)                            | triggers second review where required |
+| POST     | /episodes/:id/second-review                                         | four-eyes review                           | `coding.episode.review` (43 senior, 4)                    | different user enforced               |
+| POST     | /queries ; POST /queries/:id/answer ; GET /queries?clinician&status | documentation queries                      | `coding.query.raise` (43) / `coding.query.answer` (6/7/9) | non-leading check                     |
+| GET/POST | /grouper-rules ; POST /grouper-rules/import                         | package rule maintenance                   | `coding.grouper.manage` (28, 46 + EN-038)                 | versioned, effective-dated            |
+| GET      | /audits ; POST /audits/:episodeId                                   | coding audit                               | `coding.audit.perform` (54, 58, 43 senior)                | sampling engine                       |
+| GET      | /upcoding-flags ; POST /upcoding-flags/:id/resolve                  | compliance review                          | `coding.compliance.read                                   | manage` (4, 54)                       |     |
+| GET      | /metrics/accuracy ; /metrics/tat ; /metrics/cmi                     | KPIs                                       | `coding.report.read`                                      | read models                           |
+| POST     | /hints/note                                                         | real-time documentation hints (opt-in)     | `coding.hint.use` (6/7/9)                                 | no rate/value in output               |
 
 ## 7. Domain Events (outbox)
+
 - `coding.episode.not_ready` → NC-003 deficiency workflow, clinician task.
 - `coding.suggestion.generated` → coder worklist.
 - `coding.line.accepted|edited|rejected` → `ai.suggestion.*` spine, accuracy read model.
@@ -225,6 +238,7 @@ reimbursement** and vocal about documentation gaps.
   `claim.denied` (RC-004 reasons), `mdm.icd.version_published`.
 
 ## 8. Screens (UI)
+
 - **Coder Worklist** (desktop, MRD): episodes with age since discharge, payer submission deadline countdown, scheme
   chip, suggestion-ready badge, deficiency indicator, value band, assigned coder; filters and saved views; sorted by
   deadline risk. Shortcuts: `J/K` navigate, `Enter` open, `A` assign to me.
@@ -253,6 +267,7 @@ reimbursement** and vocal about documentation gaps.
   (masters and search work normally)".
 
 ## 9. Integrations
+
 - **EN-027** for ICD-10 / ICD-11 / procedure / HBP masters with effective dating and the ICD-10↔ICD-11 concept map;
   a new master version publishes an event that invalidates cached suggestions for un-finalised episodes.
 - **NC-003** owns the coded record, the deficiency workflow and retention; AI-006 writes only through its API.
@@ -264,6 +279,7 @@ reimbursement** and vocal about documentation gaps.
   hospitals that already licence one — the rules table is then read-only and sourced from the vendor.
 
 ## 10. Reports & Analytics
+
 - **AI quality**: precision/recall/F1 per ICD chapter and per procedure family, top-1 principal-diagnosis agreement,
   POA accuracy, evidence-quote validity rate (does the quote actually support the code, sampled), acceptance rate
   and edit distance, all sliced by model/prompt version.
@@ -277,6 +293,7 @@ reimbursement** and vocal about documentation gaps.
   `mv_coding_compliance_monthly`.
 
 ## 11. Notifications
+
 - Coder: new episodes assigned, deadline at risk (payer submission window), suggestion re-run needed after a master
   version change.
 - Clinician: documentation query raised (in-app + one reminder at 24 h), query expiring, unsigned operative note
@@ -287,6 +304,7 @@ reimbursement** and vocal about documentation gaps.
 - Governance: monthly coding-quality pack; AI accuracy regression after a prompt/model change.
 
 ## 12. Permissions (RBAC keys)
+
 `coding.episode.read` (43, 28, 4, 54, 58) · `coding.suggest.run` (43) · `coding.line.decide` (43 only — clinicians
 cannot self-code their episodes) · `coding.episode.finalise` (43) · `coding.episode.review` (senior 43, 4) ·
 `coding.group.run` (43, 28) · `coding.grouper.manage` (28, 46 + EN-038) · `coding.query.raise` (43) /
@@ -295,6 +313,7 @@ cannot self-code their episodes) · `coding.episode.finalise` (43) · `coding.ep
 plus AI-001 §0.13.
 
 ## 13. Non-functional
+
 - **Volumes (2000-bed)**: ~180 IP discharges/day + ~120 day-care/procedure episodes + selective OP coding ⇒
   ~300 coding episodes/day, ~2500 code lines/day; peak batch after the 10:00–14:00 discharge wave.
 - **Latency**: suggestion generation p95 < 45 s per IP episode (documents can be long — generated asynchronously and
@@ -321,6 +340,7 @@ plus AI-001 §0.13.
   compliance test asserting the model context contains no rate/price field; four-eyes enforcement tested at the API.
 
 ## 14. Acceptance Criteria
+
 1. **Given** an episode whose operative note is unsigned, **when** the coding job runs, **then** it is held with a
    deficiency list, `coding.episode.not_ready` is emitted, and no codes are suggested from partial documentation.
 2. **Given** a suggested diagnosis code, **when** displayed, **then** it carries at least one verbatim quote from a
@@ -357,6 +377,7 @@ plus AI-001 §0.13.
     evidence quote, the coder's decision, the reviewer, any query raised and the model/prompt versions.
 
 ## 15. Enhancements / Later phases
+
 - **Computer-assisted CDI (clinical documentation improvement) programme**: concurrent (during admission) queries
   rather than post-discharge, which is where the real documentation quality gain is — sequenced after query fatigue
   is measured.
@@ -370,6 +391,7 @@ plus AI-001 §0.13.
 - **Continuous fine-tuning** on the hospital's own audited coding decisions (on-prem, consented, de-identified).
 
 ## 16. Open Questions for the Hospital
+
 1. Which coding standards are in use today — ICD-10 only, or is ICD-11 dual coding required, and which procedure code
    system (ICD-10-PCS, a CPT-equivalent, or the hospital's service master)?
 2. Which schemes does the hospital participate in (PMJAY/CGHS/ECHS/ESIC/state), and which HBP/package version is

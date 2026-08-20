@@ -1,13 +1,6 @@
 export { Button, IconButton, buttonVariants, type ButtonProps, type IconButtonProps } from './button.js';
 export { Badge, badgeVariants, type BadgeProps } from './badge.js';
-export {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from './card.js';
+export { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './card.js';
 export { Checkbox } from './checkbox.js';
 export {
   Command,

@@ -1,7 +1,13 @@
 import { Buffer } from 'node:buffer';
 import type { CursorPayload } from '@vims/contracts';
 import { describe, expect, it } from 'vitest';
-import { CursorService, buildPage, decodeCursorWith, deriveCursorKey, encodeCursorWith } from './cursor.service.js';
+import {
+  CursorService,
+  buildPage,
+  decodeCursorWith,
+  deriveCursorKey,
+  encodeCursorWith,
+} from './cursor.service.js';
 import type { Env } from '../config/env.js';
 
 const HOSPITAL_A = '018f4b5c-0000-7000-8000-00000000000a';

@@ -16,7 +16,11 @@ export function mmToDots(mm: number, dpi: LabelDpi): number {
   return Math.round(mm * DOTS_PER_MM[dpi]);
 }
 
-export function labelDots(widthMm: number, heightMm: number, dpi: LabelDpi): { width: number; height: number } {
+export function labelDots(
+  widthMm: number,
+  heightMm: number,
+  dpi: LabelDpi,
+): { width: number; height: number } {
   return { width: mmToDots(widthMm, dpi), height: mmToDots(heightMm, dpi) };
 }
 

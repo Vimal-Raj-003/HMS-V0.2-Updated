@@ -104,7 +104,10 @@ describe('the check is honest — it fails on real problems', () => {
   });
 
   it('fails on a key that does not exist in en-IN (a typo or a stale key)', () => {
-    const broken: MessageTree = { ...getRawCatalogue('hi'), nav: { ...(getRawCatalogue('hi')['nav'] as MessageTree), adminn: 'प्रशासन' } };
+    const broken: MessageTree = {
+      ...getRawCatalogue('hi'),
+      nav: { ...(getRawCatalogue('hi')['nav'] as MessageTree), adminn: 'प्रशासन' },
+    };
     const report = computeCoverage({ catalogues: withOverride('hi', broken) });
     expect(report.ok).toBe(false);
     expect(report.failures.join('\n')).toContain('nav.adminn');
@@ -123,7 +126,10 @@ describe('the check is honest — it fails on real problems', () => {
   });
 
   it('fails when a leaf becomes a namespace', () => {
-    const broken: MessageTree = { ...getRawCatalogue('hi'), errors: { ...(getRawCatalogue('hi')['errors'] as MessageTree), network: { deep: 'x' } } };
+    const broken: MessageTree = {
+      ...getRawCatalogue('hi'),
+      errors: { ...(getRawCatalogue('hi')['errors'] as MessageTree), network: { deep: 'x' } },
+    };
     const report = computeCoverage({ catalogues: withOverride('hi', broken) });
     expect(report.ok).toBe(false);
     expect(report.failures.join('\n')).toContain('shape differs');

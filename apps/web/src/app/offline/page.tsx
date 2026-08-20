@@ -19,9 +19,8 @@ export default function OfflinePage(): React.JSX.Element {
           Vim&rsquo;s HMS cannot reach the hospital network. Nothing on this screen is current.
         </p>
         <p className="mt-3 text-sm text-fg-subtle">
-          Patient records, orders and alerts are <strong>not</strong> being shown. If you are waiting
-          on a critical result or an alert, use the ward telephone — do not assume that no news is
-          good news.
+          Patient records, orders and alerts are <strong>not</strong> being shown. If you are waiting on a
+          critical result or an alert, use the ward telephone — do not assume that no news is good news.
         </p>
         <p className="mt-6 text-sm text-fg-subtle">
           This page recovers automatically when the connection returns.

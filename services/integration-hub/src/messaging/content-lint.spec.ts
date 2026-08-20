@@ -78,12 +78,25 @@ describe('templates that must be allowed', () => {
       'Welcome to Vims Hospital. Your UHID card is ready at reception.',
     ];
     for (const body of allowed) {
-      expect(lint(body, [variable('patient'), { index: 2, name: 'slot', type: 'datetime', maxLength: 30 }])).toEqual([]);
+      expect(
+        lint(body, [variable('patient'), { index: 2, name: 'slot', type: 'datetime', maxLength: 30 }]),
+      ).toEqual([]);
     }
   });
 
   it('allows the neutral variable names the seeded catalogue uses', () => {
-    const names = ['patient', 'doctor', 'token', 'counter', 'branch', 'amount', 'receiptNo', 'link', 'code', 'date'];
+    const names = [
+      'patient',
+      'doctor',
+      'token',
+      'counter',
+      'branch',
+      'amount',
+      'receiptNo',
+      'link',
+      'code',
+      'date',
+    ];
     for (const name of names) {
       expect(lint('Dear {{1}}.', [variable(name)])).toEqual([]);
     }

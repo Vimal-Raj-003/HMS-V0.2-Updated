@@ -41,7 +41,8 @@ export type TextDirection = 'ltr' | 'rtl';
 /** `docs/06 §8`: Indian grouping `##,##,###.##` vs Western `###,###,###.##`. */
 export type DigitGrouping = 'indian' | 'western';
 
-export type LocaleScript = 'Latn' | 'Deva' | 'Taml' | 'Telu' | 'Mlym' | 'Knda' | 'Beng' | 'Gujr' | 'Orya' | 'Guru' | 'Arab';
+export type LocaleScript =
+  'Latn' | 'Deva' | 'Taml' | 'Telu' | 'Mlym' | 'Knda' | 'Beng' | 'Gujr' | 'Orya' | 'Guru' | 'Arab';
 
 export interface LocaleMeta {
   readonly code: LocaleCode;

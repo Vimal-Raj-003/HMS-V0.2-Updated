@@ -61,9 +61,22 @@ async function syncCatalogues(): Promise<void> {
          sensitive_grant, requires_second_person, requires_reason, requires_step_up, phi_read, clinical_safety_exempt)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        ON CONFLICT (key) DO NOTHING`,
-      [p.key, p.module, p.resource, p.action, p.description, p.dataClass, p.risk, p.phase,
-       p.sensitiveGrant ?? false, p.requiresSecondPerson ?? false, p.requiresReason ?? false,
-       p.requiresStepUp ?? false, p.phiRead ?? false, p.clinicalSafetyExempt ?? false],
+      [
+        p.key,
+        p.module,
+        p.resource,
+        p.action,
+        p.description,
+        p.dataClass,
+        p.risk,
+        p.phase,
+        p.sensitiveGrant ?? false,
+        p.requiresSecondPerson ?? false,
+        p.requiresReason ?? false,
+        p.requiresStepUp ?? false,
+        p.phiRead ?? false,
+        p.clinicalSafetyExempt ?? false,
+      ],
     );
   }
 
@@ -78,8 +91,17 @@ async function syncCatalogues(): Promise<void> {
           requires_approval, dual_control)
        VALUES ($1,$2,$3,$4,$5,'{}'::jsonb,$6::jsonb,$7,$8,$9)
        ON CONFLICT (key) DO NOTHING`,
-      [d.key, d.module, d.label, d.description, [...d.scopes], JSON.stringify(d.defaultValue),
-       d.sensitivity, d.requiresApproval, d.dualControl],
+      [
+        d.key,
+        d.module,
+        d.label,
+        d.description,
+        [...d.scopes],
+        JSON.stringify(d.defaultValue),
+        d.sensitivity,
+        d.requiresApproval,
+        d.dualControl,
+      ],
     );
   }
 }
@@ -91,7 +113,12 @@ async function seedActor(
   permissionKeys: readonly string[],
 ): Promise<void> {
   const pool = pg.pool('migrator');
-  const hash = await argon2.hash(PASSWORD, { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 });
+  const hash = await argon2.hash(PASSWORD, {
+    type: argon2.argon2id,
+    memoryCost: 19456,
+    timeCost: 2,
+    parallelism: 1,
+  });
 
   await pool.query(
     `INSERT INTO core.roles (id, hospital_id, key, name, description, home_workspace, category, updated_at)
@@ -111,8 +138,15 @@ async function seedActor(
                              password_hash, status, type, updated_at)
      VALUES ($1, $2, (SELECT group_id FROM core.hospitals WHERE id = $2), $3, $4, $5::jsonb, $6, $7,
              'active', 'staff', now())`,
-    [actor.userId, hospitalId, actor.username, `${actor.username}@example.invalid`,
-     JSON.stringify({ given: 'Test', family: actor.username }), `Test ${actor.username}`, hash],
+    [
+      actor.userId,
+      hospitalId,
+      actor.username,
+      `${actor.username}@example.invalid`,
+      JSON.stringify({ given: 'Test', family: actor.username }),
+      `Test ${actor.username}`,
+      hash,
+    ],
   );
 
   await pool.query(
@@ -128,7 +162,13 @@ async function seedFiller(hospitalId: string): Promise<void> {
     await pool.query(
       `INSERT INTO core.users (id, hospital_id, group_id, username, name, display_name, status, type, updated_at)
        VALUES ($1, $2, (SELECT group_id FROM core.hospitals WHERE id = $2), $3, $4::jsonb, $5, 'active', 'staff', now())`,
-      [user.id, hospitalId, user.username, JSON.stringify({ given: 'Filler', family: user.username }), `Filler ${user.username}`],
+      [
+        user.id,
+        hospitalId,
+        user.username,
+        JSON.stringify({ given: 'Filler', family: user.username }),
+        `Filler ${user.username}`,
+      ],
     );
   }
 }
@@ -219,7 +259,11 @@ describe('users — reads', () => {
   it('lists the caller’s own hospital', async () => {
     const res = await call({ method: 'GET', url: '/api/v1/admin/users?limit=50', token: adminA.token });
     expect(res.statusCode).toBe(200);
-    const body = res.json<{ items: Array<{ username: string }>; nextCursor: string | null; hasMore: boolean }>();
+    const body = res.json<{
+      items: Array<{ username: string }>;
+      nextCursor: string | null;
+      hasMore: boolean;
+    }>();
     expect(body.items.map((u) => u.username)).toContain(adminA.username);
     expect(body).toHaveProperty('hasMore');
     expect(body).not.toHaveProperty('total');
@@ -242,14 +286,22 @@ describe('users — reads', () => {
    * exists, which is an existence oracle across tenants.
    */
   it('returns 404 — not 403 — for a user id belonging to another hospital', async () => {
-    const res = await call({ method: 'GET', url: `/api/v1/admin/users/${adminB.userId}`, token: adminA.token });
+    const res = await call({
+      method: 'GET',
+      url: `/api/v1/admin/users/${adminB.userId}`,
+      token: adminA.token,
+    });
     expect(res.statusCode).toBe(404);
     expect(res.json()).toMatchObject({ type: expect.stringContaining('not-found') });
   });
 
   it('returns the same 404 for an id that exists nowhere, so the two are indistinguishable', async () => {
     const ghost = await call({ method: 'GET', url: `/api/v1/admin/users/${newId()}`, token: adminA.token });
-    const foreign = await call({ method: 'GET', url: `/api/v1/admin/users/${adminB.userId}`, token: adminA.token });
+    const foreign = await call({
+      method: 'GET',
+      url: `/api/v1/admin/users/${adminB.userId}`,
+      token: adminA.token,
+    });
     expect(ghost.statusCode).toBe(foreign.statusCode);
     expect(ghost.json<{ detail: string }>().detail).toBe(foreign.json<{ detail: string }>().detail);
   });
@@ -318,7 +370,11 @@ describe('users — cursor pagination', () => {
   });
 
   it('refuses a tampered cursor rather than silently restarting at page one', async () => {
-    const res = await call({ method: 'GET', url: '/api/v1/admin/users?limit=2&cursor=bm90LWEtY3Vyc29y.zzzz', token: adminA.token });
+    const res = await call({
+      method: 'GET',
+      url: '/api/v1/admin/users?limit=2&cursor=bm90LWEtY3Vyc29y.zzzz',
+      token: adminA.token,
+    });
     expect(res.statusCode).toBe(400);
   });
 });
@@ -394,7 +450,11 @@ describe('users — writes', () => {
   });
 
   it('updates a user under an optimistic lock', async () => {
-    const before = await call({ method: 'GET', url: `/api/v1/admin/users/${created.id}`, token: adminA.token });
+    const before = await call({
+      method: 'GET',
+      url: `/api/v1/admin/users/${created.id}`,
+      token: adminA.token,
+    });
     const version = before.json<{ version: number }>().version;
 
     const res = await call({
@@ -463,10 +523,11 @@ describe('users — writes', () => {
   });
 
   it('never hard-deletes: the row survives deactivation', async () => {
-    const row = await pg.pool('migrator').query(
-      `SELECT status::text AS status, deleted_at, deactivation_reason FROM core.users WHERE id = $1`,
-      [created.id],
-    );
+    const row = await pg
+      .pool('migrator')
+      .query(`SELECT status::text AS status, deleted_at, deactivation_reason FROM core.users WHERE id = $1`, [
+        created.id,
+      ]);
     expect(row.rows[0]).toMatchObject({ status: 'deactivated', deleted_at: null });
   });
 
@@ -504,10 +565,12 @@ describe('users — writes', () => {
     expect(res.statusCode).toBe(201);
     expect(res.json()).toMatchObject({ mustChangePassword: true });
 
-    const row = await pg.pool('migrator').query(
-      `SELECT must_change_password, password_hash IS NOT NULL AS has_hash FROM core.users WHERE id = $1`,
-      [target?.id],
-    );
+    const row = await pg
+      .pool('migrator')
+      .query(
+        `SELECT must_change_password, password_hash IS NOT NULL AS has_hash FROM core.users WHERE id = $1`,
+        [target?.id],
+      );
     expect(row.rows[0]).toMatchObject({ must_change_password: true, has_hash: true });
 
     // The hash must never appear in the audit trail, in either direction.
@@ -572,7 +635,11 @@ describe('roles and the permission matrix', () => {
 
     const audit = await auditRowsForTrace(res.headers['x-trace-id']);
     expect(audit).toHaveLength(1);
-    expect(audit[0]).toMatchObject({ entity: 'core.roles', action: 'config_change', actor_user_id: adminA.userId });
+    expect(audit[0]).toMatchObject({
+      entity: 'core.roles',
+      action: 'config_change',
+      actor_user_id: adminA.userId,
+    });
     const events = await outboxRowsForTrace(res.headers['x-trace-id']);
     expect(events.map((e) => e['event_type'])).toContain('admin.role.created');
   });
@@ -595,7 +662,11 @@ describe('roles and the permission matrix', () => {
   });
 
   it('updates a role, reporting exactly what was added and removed', async () => {
-    const before = await call({ method: 'GET', url: `/api/v1/admin/roles/${custom.id}`, token: adminA.token });
+    const before = await call({
+      method: 'GET',
+      url: `/api/v1/admin/roles/${custom.id}`,
+      token: adminA.token,
+    });
     const version = before.json<{ version: number }>().version;
 
     const res = await call({
@@ -609,7 +680,10 @@ describe('roles and the permission matrix', () => {
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json<{ permissions: string[] }>().permissions).toEqual(['admin.settings.read', 'admin.user.read']);
+    expect(res.json<{ permissions: string[] }>().permissions).toEqual([
+      'admin.settings.read',
+      'admin.user.read',
+    ]);
 
     const events = await outboxRowsForTrace(res.headers['x-trace-id']);
     const updated = events.find((e) => e['event_type'] === 'admin.role.updated');
@@ -617,7 +691,11 @@ describe('roles and the permission matrix', () => {
   });
 
   it('returns 404 for another hospital’s role', async () => {
-    const res = await call({ method: 'GET', url: `/api/v1/admin/roles/${adminB.roleId}`, token: adminA.token });
+    const res = await call({
+      method: 'GET',
+      url: `/api/v1/admin/roles/${adminB.roleId}`,
+      token: adminA.token,
+    });
     expect(res.statusCode).toBe(404);
   });
 
@@ -626,7 +704,13 @@ describe('roles and the permission matrix', () => {
       method: 'POST',
       url: '/api/v1/admin/roles',
       token: limitedA.token,
-      payload: { key: 'nope', name: 'Nope', description: 'x', permissions: [], homeWorkspace: 'admin_console' },
+      payload: {
+        key: 'nope',
+        name: 'Nope',
+        description: 'x',
+        permissions: [],
+        homeWorkspace: 'admin_console',
+      },
     });
     expect(res.statusCode).toBe(403);
   });
@@ -670,7 +754,11 @@ describe('role assignment', () => {
       method: 'POST',
       url: `/api/v1/admin/users/${filler[3]?.id ?? ''}/roles`,
       token: adminA.token,
-      payload: { roleId: limitedA.roleId, branchId: tenants.branchA, justification: 'No header reason supplied' },
+      payload: {
+        roleId: limitedA.roleId,
+        branchId: tenants.branchA,
+        justification: 'No header reason supplied',
+      },
     });
     expect(res.statusCode).toBe(403);
   });
@@ -692,7 +780,11 @@ describe('role assignment', () => {
       url: `/api/v1/admin/users/${filler[3]?.id ?? ''}/roles`,
       token: adminA.token,
       reason: 'cross tenant probe',
-      payload: { roleId: limitedA.roleId, branchId: tenants.branchB, justification: 'Cross-tenant branch probe' },
+      payload: {
+        roleId: limitedA.roleId,
+        branchId: tenants.branchB,
+        justification: 'Cross-tenant branch probe',
+      },
     });
     expect(res.statusCode).toBe(404);
   });
@@ -706,7 +798,9 @@ describe('role assignment', () => {
     });
     expect(res.statusCode).toBe(200);
 
-    const row = await pg.pool('migrator').query(`SELECT active FROM core.user_roles WHERE id = $1`, [userRoleId]);
+    const row = await pg
+      .pool('migrator')
+      .query(`SELECT active FROM core.user_roles WHERE id = $1`, [userRoleId]);
     expect(row.rows).toHaveLength(1);
     expect(row.rows[0]).toMatchObject({ active: false });
 
@@ -726,13 +820,21 @@ describe('branches', () => {
   });
 
   it('returns a branch, marking whether the caller is granted in it', async () => {
-    const res = await call({ method: 'GET', url: `/api/v1/admin/branches/${tenants.branchA}`, token: adminA.token });
+    const res = await call({
+      method: 'GET',
+      url: `/api/v1/admin/branches/${tenants.branchA}`,
+      token: adminA.token,
+    });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ id: tenants.branchA, granted_to_caller: true });
   });
 
   it('returns 404 for another hospital’s branch', async () => {
-    const res = await call({ method: 'GET', url: `/api/v1/admin/branches/${tenants.branchB}`, token: adminA.token });
+    const res = await call({
+      method: 'GET',
+      url: `/api/v1/admin/branches/${tenants.branchB}`,
+      token: adminA.token,
+    });
     expect(res.statusCode).toBe(404);
   });
 
@@ -752,11 +854,15 @@ describe('settings', () => {
   });
 
   it('resolves effective values, falling back to the declared default', async () => {
-    const res = await call({ method: 'GET', url: '/api/v1/admin/settings?q=default_theme', token: adminA.token });
+    const res = await call({
+      method: 'GET',
+      url: '/api/v1/admin/settings?q=default_theme',
+      token: adminA.token,
+    });
     expect(res.statusCode).toBe(200);
-    const item = res.json<{ items: Array<{ key: string; value: unknown; source: string }> }>().items.find(
-      (i) => i.key === 'ui.default_theme',
-    );
+    const item = res
+      .json<{ items: Array<{ key: string; value: unknown; source: string }> }>()
+      .items.find((i) => i.key === 'ui.default_theme');
     expect(item).toMatchObject({ value: 'light', source: 'default' });
   });
 
@@ -772,7 +878,11 @@ describe('settings', () => {
 
     const audit = await auditRowsForTrace(res.headers['x-trace-id']);
     expect(audit).toHaveLength(1);
-    expect(audit[0]).toMatchObject({ entity: 'core.settings', action: 'config_change', actor_user_id: adminA.userId });
+    expect(audit[0]).toMatchObject({
+      entity: 'core.settings',
+      action: 'config_change',
+      actor_user_id: adminA.userId,
+    });
     expect(audit[0]?.['before']).toEqual({ value: 'light' });
     expect(audit[0]?.['after']).toEqual({ value: 'dark' });
 
@@ -790,18 +900,24 @@ describe('settings', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ value: 'system' });
 
-    const rows = await pg.pool('migrator').query(
-      `SELECT count(*)::int AS n FROM core.settings WHERE hospital_id = $1 AND key = 'ui.default_theme'`,
-      [tenants.hospitalA],
-    );
+    const rows = await pg
+      .pool('migrator')
+      .query(
+        `SELECT count(*)::int AS n FROM core.settings WHERE hospital_id = $1 AND key = 'ui.default_theme'`,
+        [tenants.hospitalA],
+      );
     expect(rows.rows[0]).toMatchObject({ n: 1 });
   });
 
   it('does not leak the change into the other tenant', async () => {
-    const res = await call({ method: 'GET', url: '/api/v1/admin/settings?q=default_theme', token: adminB.token });
-    const item = res.json<{ items: Array<{ key: string; value: unknown; source: string }> }>().items.find(
-      (i) => i.key === 'ui.default_theme',
-    );
+    const res = await call({
+      method: 'GET',
+      url: '/api/v1/admin/settings?q=default_theme',
+      token: adminB.token,
+    });
+    const item = res
+      .json<{ items: Array<{ key: string; value: unknown; source: string }> }>()
+      .items.find((i) => i.key === 'ui.default_theme');
     expect(item).toMatchObject({ value: 'light', source: 'default' });
   });
 
@@ -825,9 +941,9 @@ describe('settings', () => {
     expect(res.statusCode).toBe(422);
     expect(res.json<{ detail: string }>().detail).toMatch(/approval/i);
 
-    const rows = await pg.pool('migrator').query(
-      `SELECT count(*)::int AS n FROM core.settings WHERE key = 'session.idle_timeout_min'`,
-    );
+    const rows = await pg
+      .pool('migrator')
+      .query(`SELECT count(*)::int AS n FROM core.settings WHERE key = 'session.idle_timeout_min'`);
     expect(rows.rows[0]).toMatchObject({ n: 0 });
   });
 
@@ -878,9 +994,9 @@ describe('feature flags and licence', () => {
 
     const events = await outboxRowsForTrace(res.headers['x-trace-id']);
     expect(events).toHaveLength(0);
-    const rows = await pg.pool('migrator').query(
-      `SELECT count(*)::int AS n FROM core.feature_flags WHERE key = 'module.api_gateway.enabled'`,
-    );
+    const rows = await pg
+      .pool('migrator')
+      .query(`SELECT count(*)::int AS n FROM core.feature_flags WHERE key = 'module.api_gateway.enabled'`);
     expect(rows.rows[0]).toMatchObject({ n: 0 });
   });
 
@@ -914,15 +1030,19 @@ describe('feature flags and licence', () => {
 
   it('does not show one tenant’s flags to another', async () => {
     const res = await call({ method: 'GET', url: '/api/v1/admin/flags', token: adminB.token });
-    const audit = res.json<{ items: Array<{ key: string; configured: boolean }> }>().items.find(
-      (f) => f.key === 'module.audit.enabled',
-    );
+    const audit = res
+      .json<{ items: Array<{ key: string; configured: boolean }> }>()
+      .items.find((f) => f.key === 'module.audit.enabled');
     expect(audit?.configured).toBe(false);
   });
 
   it('refuses both routes to a role without the key', async () => {
-    expect((await call({ method: 'GET', url: '/api/v1/admin/flags', token: limitedA.token })).statusCode).toBe(403);
-    expect((await call({ method: 'GET', url: '/api/v1/admin/licence', token: limitedA.token })).statusCode).toBe(403);
+    expect(
+      (await call({ method: 'GET', url: '/api/v1/admin/flags', token: limitedA.token })).statusCode,
+    ).toBe(403);
+    expect(
+      (await call({ method: 'GET', url: '/api/v1/admin/licence', token: limitedA.token })).statusCode,
+    ).toBe(403);
   });
 });
 
@@ -949,7 +1069,11 @@ describe('audit log viewer', () => {
   });
 
   it('filters by action', async () => {
-    const res = await call({ method: 'GET', url: '/api/v1/admin/audit?action=config_change&limit=100', token: adminA.token });
+    const res = await call({
+      method: 'GET',
+      url: '/api/v1/admin/audit?action=config_change&limit=100',
+      token: adminA.token,
+    });
     expect(res.statusCode).toBe(200);
     const rows = res.json<{ items: Array<{ action: string }> }>().items;
     expect(rows.length).toBeGreaterThan(0);
@@ -957,7 +1081,11 @@ describe('audit log viewer', () => {
   });
 
   it('rejects an action that is not in the enum, as a field error not a 500', async () => {
-    const res = await call({ method: 'GET', url: '/api/v1/admin/audit?action=nonsense', token: adminA.token });
+    const res = await call({
+      method: 'GET',
+      url: '/api/v1/admin/audit?action=nonsense',
+      token: adminA.token,
+    });
     expect(res.statusCode).toBe(400);
   });
 

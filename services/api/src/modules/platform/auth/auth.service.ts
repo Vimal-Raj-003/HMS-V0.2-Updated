@@ -1,5 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ProblemType, abacConditionsSchema, newId, type AbacConditions, type PolicyContext } from '@vims/contracts';
+import {
+  ProblemType,
+  abacConditionsSchema,
+  newId,
+  type AbacConditions,
+  type PolicyContext,
+} from '@vims/contracts';
 import { ENV, type Env } from '../../../core/config/env.js';
 import { PasswordService } from '../../../core/auth/password.service.js';
 import { TokenService } from '../../../core/auth/token.service.js';
@@ -85,7 +91,10 @@ export class AuthService {
     if (!user || user.password_hash === null) {
       // Still spend the cost of a verify so a missing account is not detectably
       // faster than a wrong password.
-      await this.passwords.verify('$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$0000000000000000000000000000000000000000000', input.password);
+      await this.passwords.verify(
+        '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$0000000000000000000000000000000000000000000',
+        input.password,
+      );
       throw invalid;
     }
     // `invited` counts as not-yet-usable: an invitation that was never accepted

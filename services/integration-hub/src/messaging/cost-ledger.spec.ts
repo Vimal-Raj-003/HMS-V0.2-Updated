@@ -23,8 +23,12 @@ async function ledger(): Promise<CostLedger> {
 describe('SMS pricing', () => {
   it('charges per segment plus the DLT charge once', async () => {
     const l = await ledger();
-    expect((await l.priceSms({ hospitalId: HOSPITAL, segments: 1, destinationCountryCode: '91' })).amount).toBe(21);
-    expect((await l.priceSms({ hospitalId: HOSPITAL, segments: 3, destinationCountryCode: '91' })).amount).toBe(57);
+    expect(
+      (await l.priceSms({ hospitalId: HOSPITAL, segments: 1, destinationCountryCode: '91' })).amount,
+    ).toBe(21);
+    expect(
+      (await l.priceSms({ hospitalId: HOSPITAL, segments: 3, destinationCountryCode: '91' })).amount,
+    ).toBe(57);
   });
 
   it('prices an international destination differently', async () => {
@@ -46,7 +50,12 @@ describe('SMS pricing', () => {
 describe('WhatsApp conversation pricing', () => {
   it('charges the first message of a category and nothing for the next one inside 24 hours', async () => {
     const l = await ledger();
-    const first = await l.priceWhatsApp({ hospitalId: HOSPITAL, phoneE164: '+919876543210', category: 'UTILITY', at: AT });
+    const first = await l.priceWhatsApp({
+      hospitalId: HOSPITAL,
+      phoneE164: '+919876543210',
+      category: 'UTILITY',
+      at: AT,
+    });
     expect(first.amount).toBe(115);
     expect(first.freeInsideConversation).toBe(false);
 
@@ -95,9 +104,39 @@ describe('roll-ups', () => {
       freeInsideConversation: false,
       at: AT,
     };
-    await l.record({ ...base, messageId: 'm1', channel: 'whatsapp', module: 'OP-001', templateKey: 'appointment_confirmed', campaignId: null, segments: 1, amount: 115, isFallback: false });
-    await l.record({ ...base, messageId: 'm2', channel: 'sms', module: 'OP-001', templateKey: 'appointment_confirmed', campaignId: null, segments: 2, amount: 39, isFallback: true });
-    await l.record({ ...base, messageId: 'm3', channel: 'sms', module: 'NC-026', templateKey: 'camp_invite', campaignId: 'camp-1', segments: 1, amount: 21, isFallback: false });
+    await l.record({
+      ...base,
+      messageId: 'm1',
+      channel: 'whatsapp',
+      module: 'OP-001',
+      templateKey: 'appointment_confirmed',
+      campaignId: null,
+      segments: 1,
+      amount: 115,
+      isFallback: false,
+    });
+    await l.record({
+      ...base,
+      messageId: 'm2',
+      channel: 'sms',
+      module: 'OP-001',
+      templateKey: 'appointment_confirmed',
+      campaignId: null,
+      segments: 2,
+      amount: 39,
+      isFallback: true,
+    });
+    await l.record({
+      ...base,
+      messageId: 'm3',
+      channel: 'sms',
+      module: 'NC-026',
+      templateKey: 'camp_invite',
+      campaignId: 'camp-1',
+      segments: 1,
+      amount: 21,
+      isFallback: false,
+    });
 
     const byChannel = await l.totals(HOSPITAL, { groupBy: 'channel' });
     expect(byChannel.get('sms')?.amount).toBe(60);

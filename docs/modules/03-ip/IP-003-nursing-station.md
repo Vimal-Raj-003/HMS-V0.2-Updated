@@ -1,22 +1,24 @@
 # IP-003 — Nursing Station (ward dashboard, scheduled vitals with NEWS2/PEWS/MEWS, MAR with 5 Rights, I/O, SBAR notes, assessments, care plans, handover, nurse call, restraints)
 
-| Field | Value |
-|---|---|
-| Domain | IP / Inpatient |
-| Module ID | IP-003 |
-| Phase | 7 |
-| Priority | P0 |
-| Complexity | Very High |
-| Depends on | IP-001 (admissions/beds/census), OP-002 (CPOE: medication, lab, imaging, diet, nursing orders), OP-007 (vitals device patterns), EN-029 (CDSS: NEWS2/PEWS/MEWS, sepsis, allergy/interaction, dose range), EN-013 (wristband & drug barcodes), IP-014 (ward stock/unit dose, narcotic double-check), OP-003 (pharmacy), OP-004/OP-008 (results), IP-004 (nursing mobile), IP-010 (doctor mobile), IP-005 (nursing/consumable charge posting), IP-002 (discharge checklist), IP-006 (pre-op checklist), IP-007 (transfusion bedside), IP-009 (ICU flowsheet extends this), IP-012 (isolation, HAI), IP-013 (code blue), OP-011 (diet), OP-015 (physio), NC-030 (roster, ratios, workload), NC-018 (housekeeping), EN-018 (ward TV), EN-037 (alerts/escalation), EN-039 (forms), EN-042 (device gateway: monitors, nurse call), EN-024 (audit), NC-015 (quality indicators, incidents) |
-| Feature flag | `module.nursing_station.enabled` (sub: `nursing.barcode_mar`, `nursing.news2`, `nursing.pews`, `nursing.mews`, `nursing.sepsis_screen`, `nursing.nurse_call`, `nursing.workload`, `nursing.restraints`, `nursing.care_plans`) |
-| Primary roles | Nurse — Ward (17), Nurse — ICU (18, via IP-009), Nurse Supervisor/Matron (22), Ward in-charge |
-| Secondary roles | Doctor — IP (7), Resident (14), Surgeon (9), Intensivist (11), Pharmacist IP (31), Dietician (39), Physio (40), Ward boy (23), Infection control nurse (21), Quality (54), Patient/Family (60, nurse call/education), Auditor (58) |
-| Regulatory | NABH 5th ed. COP.2 (initial assessment ≤ 24 h, reassessment), COP.4 (nursing care plan), COP.5 (high-risk patients), COP.7 (restraints), COP.11/12 (pain, falls, pressure injury), MOM.5–MOM.7 (medication administration, high-alert drugs, verbal orders read-back, self-medication), PSQ (indicators: medication errors, falls, pressure injuries, NEWS2 escalation), NABH nursing indicators, INC (Indian Nursing Council) documentation norms, RCP NEWS2 (2017), PEWS (Brighton/Bedside), Modified Early Obstetric Warning Score, ISMP high-alert medication list, WHO 5 Rights/9 Rights, NDPS Act (narcotic administration record), DPDP, BMW 2016 (sharps) |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain          | IP / Inpatient                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Module ID       | IP-003                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Phase           | 7                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Priority        | P0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Complexity      | Very High                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Depends on      | IP-001 (admissions/beds/census), OP-002 (CPOE: medication, lab, imaging, diet, nursing orders), OP-007 (vitals device patterns), EN-029 (CDSS: NEWS2/PEWS/MEWS, sepsis, allergy/interaction, dose range), EN-013 (wristband & drug barcodes), IP-014 (ward stock/unit dose, narcotic double-check), OP-003 (pharmacy), OP-004/OP-008 (results), IP-004 (nursing mobile), IP-010 (doctor mobile), IP-005 (nursing/consumable charge posting), IP-002 (discharge checklist), IP-006 (pre-op checklist), IP-007 (transfusion bedside), IP-009 (ICU flowsheet extends this), IP-012 (isolation, HAI), IP-013 (code blue), OP-011 (diet), OP-015 (physio), NC-030 (roster, ratios, workload), NC-018 (housekeeping), EN-018 (ward TV), EN-037 (alerts/escalation), EN-039 (forms), EN-042 (device gateway: monitors, nurse call), EN-024 (audit), NC-015 (quality indicators, incidents) |
+| Feature flag    | `module.nursing_station.enabled` (sub: `nursing.barcode_mar`, `nursing.news2`, `nursing.pews`, `nursing.mews`, `nursing.sepsis_screen`, `nursing.nurse_call`, `nursing.workload`, `nursing.restraints`, `nursing.care_plans`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Primary roles   | Nurse — Ward (17), Nurse — ICU (18, via IP-009), Nurse Supervisor/Matron (22), Ward in-charge                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Secondary roles | Doctor — IP (7), Resident (14), Surgeon (9), Intensivist (11), Pharmacist IP (31), Dietician (39), Physio (40), Ward boy (23), Infection control nurse (21), Quality (54), Patient/Family (60, nurse call/education), Auditor (58)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Regulatory      | NABH 5th ed. COP.2 (initial assessment ≤ 24 h, reassessment), COP.4 (nursing care plan), COP.5 (high-risk patients), COP.7 (restraints), COP.11/12 (pain, falls, pressure injury), MOM.5–MOM.7 (medication administration, high-alert drugs, verbal orders read-back, self-medication), PSQ (indicators: medication errors, falls, pressure injuries, NEWS2 escalation), NABH nursing indicators, INC (Indian Nursing Council) documentation norms, RCP NEWS2 (2017), PEWS (Brighton/Bedside), Modified Early Obstetric Warning Score, ISMP high-alert medication list, WHO 5 Rights/9 Rights, NDPS Act (narcotic administration record), DPDP, BMW 2016 (sharps)                                                                                                                                                                                                                   |
 
 ## 1. Purpose
+
 IP-003 is the nurse's operating system for the ward: a live ward dashboard (acuity, alerts, tasks), scheduled vitals with automatic early-warning scores and escalation, an electronic Medication Administration Record generated from CPOE with barcode 5-Rights verification and second-nurse checks for high-alert/narcotic drugs, intake/output balance, structured SBAR nursing notes and risk assessments (Morse, Braden, pain, GCS, nutrition MUST, VTE), nursing care plans, shift handover with digital sign-off, nurse call with response-time tracking, restraint documentation and a task engine that turns every doctor order into a timed nursing task. It replaces paper TPR charts, MAR sheets and handover books, and is the data source for nursing quality indicators.
 
 ## 2. Users & Jobs-to-be-done
+
 - **Ward nurse** (nursing-station desktop + bedside tablet + phone IP-004; 1:6–1:8 ratio, 30–40 beds/ward): start the shift with a clear task list; chart vitals q4h (or per order) in < 30 s per patient; administer 60–120 doses/shift with scan verification; document I/O, notes (SBAR), assessments on schedule; escalate NEWS2 ≥ 5 within minutes; hand over 30 patients in ≤ 15 min.
 - **Ward in-charge / supervisor** (desktop/TV): see whole ward acuity, overdue tasks, staffing vs workload, incidents; audit MAR compliance; reassign patients.
 - **Doctor** (desktop/phone): see vitals trends, MAR (given/held/refused), notes; receive escalations; enter orders (OP-002) that become nursing tasks; acknowledge alerts.
@@ -28,16 +30,19 @@ IP-003 is the nurse's operating system for the ward: a live ward dashboard (acui
 ## 3. Core Workflows
 
 ### 3.1 Ward dashboard & patient assignment
+
 1. `ip.admitted`/`ip.transferred` events place the patient on the ward board; **In-charge** assigns nurses to beds per shift (from NC-030 roster; ratio check `nursing.workload`); assignments drive task routing and push notifications.
 2. Board tile per bed: patient (photo, name/initials, age/sex, UHID/IP no.), diagnosis, day of admission (LOS), consultant, **acuity** (auto: latest NEWS2 band + doctor-set level 1–4), colour alert (red critical/orange attention/green stable), isolation, allergy, fall/pressure risk badges, DNR/code status, pending tasks count, overdue tasks (blink), next vitals due, IV lines/catheters days, diet, NPO, expected discharge; sorted by acuity or bed.
 3. Right rail: alerts (critical results, NEWS2 escalations, nurse calls, new orders), tasks due now, handover pending. TV variant (EN-018) shows bed/initials/acuity/tasks only.
 
 ### 3.2 Nursing admission assessment & care plan (`nursing.care_plans`)
+
 1. On arrival (IP-001 "Received"): **Nurse** completes **initial nursing assessment** ≤ 24 h (NABH COP.2; template EN-039): history, allergies (verified → patient banner), home medications (feeds IP-002 reconciliation), vitals + NEWS2, pain, **Morse Fall Scale**, **Braden**, nutrition (MUST/NRS-2002), VTE risk (Padua/Caprini per order), functional status, skin inspection with body map, lines/tubes inventory, belongings, education needs, language, spiritual/cultural needs, abuse screening (where policy) → Event `nursing.assessment.completed`.
 2. Assessment scores drive **care-plan** suggestions (NANDA-style nursing diagnoses → goals → interventions with frequencies): e.g. Morse ≥ 45 → falls bundle (bed low, rails, call bell in reach, hourly rounding, yellow band, non-slip); Braden ≤ 18 → pressure-injury bundle (turn q2h, support surface, skin check q shift, nutrition referral); pain ≥ 4 → reassess 30–60 min post-analgesia; VTE risk → prophylaxis prompt to doctor. Nurse accepts/edits; interventions become scheduled tasks; **reassessment schedule** auto (Morse daily/after fall, Braden daily/on change, pain q shift & PRN, GCS per order).
 3. Doctor-set vitals/monitoring frequency (Q1H/Q2H/Q4H/Q6H/Q8H/BD/OD or "per NEWS2 protocol") comes from CPOE nursing orders; default per ward type.
 
 ### 3.3 Scheduled vitals, early-warning scores, escalation
+
 1. Vitals task due → **Nurse** enters (bedside tablet/phone with wristband scan or station desktop): temperature (°C/°F), pulse, RR, BP (sys/dia, MAP auto), SpO2 (+ O2 device/flow → NEWS2 scale 1/2), consciousness (ACVPU), pain (NRS/Wong-Baker/FLACC/CPOT), blood glucose (if ordered), weight (daily where ordered), urine output summary; device auto-fill (EN-042 monitor/vitals cart via HL7 ORU) with confirm.
 2. **System** computes **NEWS2** (adult; scale 2 for hypercapnic COPD flag set by doctor), **PEWS** (paediatric age bands), **MEWS/MEOWS** (obstetric admissions), stores components; abnormal ranges per age/pregnancy → flags; **escalation ladder** (configurable, RCP default): NEWS2 0 → q12h; 1–4 → q4–6h, inform nurse in-charge; 3 in single parameter → urgent review; 5–6 → urgent (doctor review ≤ 30 min, monitoring q1h); ≥ 7 → emergency (rapid response/ICU registrar, continuous monitoring) → tasks & push (EN-037) with acknowledgement tracking and auto-escalation to next tier if not acknowledged (default 10 min).
 3. **Sepsis screen** (`nursing.sepsis_screen`, EN-029): NEWS2 ≥ 5 + suspected infection (or qSOFA ≥ 2 / SIRS) → prompt sepsis screening form → "Sepsis Six" bundle timers (O2, cultures, IV antibiotics ≤ 1 h, fluids, lactate, urine output) → doctor alert.
@@ -45,6 +50,7 @@ IP-003 is the nurse's operating system for the ward: a live ward dashboard (acui
 5. Missed vitals (> 15 min past due) → overdue task; > 60 min → in-charge alert; missed-vitals KPI.
 
 ### 3.4 Medication Administration Record (MAR) & barcode 5 Rights (`nursing.barcode_mar`)
+
 1. **CPOE order** (OP-002/IP-010: drug, dose, route, frequency, start/stop, PRN with indication & max/24 h, infusion rate/duration, taper schedule, "stat/now", conditional e.g. SOS) → pharmacist verification (IP-014, if configured) → **System** generates MAR schedule per hospital's standard administration times (e.g. OD 08:00, BD 08/20, TDS 08/14/20, QID 06/12/18/22, Q6H 00/06/12/18, HS 21:00; configurable per ward; first dose "now" rounding rules) → tasks per dose.
 2. **Administration**: nurse opens due dose → scans wristband (Right Patient) → scans drug barcode/unit-dose label (Right Drug — GTIN/batch via EN-013 or IP-014 label) → system checks Right Dose (matches order; dose-range EN-029; weight-based paeds), Right Route, Right Time (window ± 30 min default; early/late needs reason), plus allergy re-check, duplicate therapy, latest relevant lab (e.g. K⁺ for KCl, INR for warfarin, glucose for insulin — configurable "check before give" rules), vitals gate (hold if HR < 50 for beta-blocker, SBP < 90 for antihypertensive — order-level parameters), fasting/NPO conflict → green ✓ or red ✗ with reason.
 3. **High-alert drugs** (ISMP list + hospital list: insulin, heparin/anticoagulants, KCl/concentrated electrolytes, opioids, chemo, neuromuscular blockers, paediatric IV meds) and **narcotics** (NDPS) require **second-nurse witness**: second nurse authenticates (PIN/2FA on same device or their phone) → both recorded; narcotic administration also writes to IP-014 register with wastage witness.
@@ -55,9 +61,11 @@ IP-003 is the nurse's operating system for the ward: a live ward dashboard (acui
 8. Charge capture: given doses post consumption to IP-005 via IP-014 issue records (unit dose) or ward-stock consumption (`nursing.consumable.used`); returns credited.
 
 ### 3.5 Intake / Output & fluid balance
+
 - Intake: IV fluids (from infusion records + manual), oral, enteral (RT/PEG), blood products (IP-007 transfusion volumes), IV medications volume; Output: urine (catheter/void with volumes or counts), drains by site, emesis, stool (count/volume), NG aspirate, insensible (optional calc) → per-shift and 24 h balance auto; daily weight; targets from doctor (e.g. fluid restriction 1.5 L, UO ≥ 0.5 mL/kg/h) → alerts on breach; catheter days for CAUTI (IP-012).
 
 ### 3.6 Nursing notes (SBAR) & other documentation
+
 - **SBAR** structured note (Situation, Background, Assessment, Recommendation) with free-text option, quick phrases, voice-to-text (later AI-004); note types: shift note, event note (fall, transfusion reaction, code), doctor-communication note (SBAR call log with time/doctor/response), education note, wound care note (with photo IP-004/OP-017), pre-op checklist (IP-006), transfer note, discharge note (IP-002).
 - Notes append-only, signed by nurse; late entries labelled; co-sign for students.
 - **Wound/pressure injury** register: site body-map, stage (NPIAP 1–4/unstageable/DTI), size, exudate, dressing, photos, present-on-admission flag; hospital-acquired → incident (NC-015) + IP-012.
@@ -70,18 +78,22 @@ IP-003 is the nurse's operating system for the ward: a live ward dashboard (acui
 - **Patient education**: topics with materials (OP-038), teach-back documented.
 
 ### 3.7 Nursing tasks engine
+
 - Every order → tasks (medication doses, vitals, samples to collect for OP-004 with label print, send-to-imaging with transport request, diet change, physio, dressing, position change q2h, hourly rounding, care-plan interventions, discharge checklist); task states: due/overdue/done/skipped(reason)/cancelled(order stopped); assignment by bed → nurse; workload heat-map (`nursing.workload`) per nurse for balancing; TV/board counters.
 - Sample collection: order → task → scan wristband + print barcode label (EN-013/EN-005) at bedside → collected time → OP-004 accession.
 
 ### 3.8 Shift handover
+
 1. At shift end, **outgoing nurse** opens handover: **System** pre-populates per patient (I-PASS/SBAR): identity & code status, illness severity (NEWS2, acuity), summary/active issues, pending orders/results, meds due next hours (incl. held/refused), lines/tubes, I/O balance, alerts (allergy, isolation, fall/pressure), family concerns, to-do; nurse adds free text; **incoming nurse** reviews at bedside (optional walk-round mode with wristband scan), asks questions, **acknowledges** each patient → digital sign-off both parties → immutable handover document → Event `nursing.handover.completed`.
 2. Ward-level handover: staffing, equipment issues, crash cart check (IP-013), narcotic count (IP-014 double count with keys handover), incidents.
 3. Unacknowledged patients after shift start + 30 min → supervisor alert.
 
 ### 3.9 Nurse call & response time (`nursing.nurse_call`)
+
 - Bedside call unit / patient app button (EN-042 gateway or app) → call appears on board & assigned nurse phone (priority: normal/bathroom/pain/emergency) → accept/attend/complete → response time & attend time logged; escalation to any nurse after N min; family "code blue" button (IP-013). KPI: median response time by ward/shift.
 
 ### 3.10 Exceptions & offline
+
 1. **Barcode unreadable/missing** → manual override with reason + second nurse verify (KPI: scan compliance %).
 2. **Wrong-patient scan** → hard stop; near-miss auto-logged to NC-015 (anonymous option).
 3. **Order stopped after dose prepared** → task cancelled with banner; if already given, doctor notified.
@@ -91,6 +103,7 @@ IP-003 is the nurse's operating system for the ward: a live ward dashboard (acui
 7. **Nurse reassignment mid-shift** → tasks move; handover-lite required.
 
 ## 4. Data Model (schema `ip`/`clinical`)
+
 - **ip.ward_shifts** (id, hospital_id, branch_id, ward_id, shift_code (M/E/N/custom), starts_at, ends_at, in_charge_id, staffing jsonb, notes).
 - **ip.nurse_assignments** (shift_id, nurse_id, bed_id/admission_id, role enum(primary/secondary/float), from, to).
 - **clinical.vitals** (existing; monthly partitioned): + admission_id, ward_id, scheduled_task_id, source enum(manual/device/backfill), device_id, o2_device, o2_flow, acvpu, pain_scale, pain_score, glucose, weight, corrected_of?, entered_by, entered_at, verified bool.
@@ -113,6 +126,7 @@ IP-003 is the nurse's operating system for the ward: a live ward dashboard (acui
 - Read models: `analytics.mv_ward_board` (Redis + table), `analytics.mv_mar_compliance_daily`, `analytics.mv_ews_escalations`, `analytics.mv_nursing_indicators`.
 
 ## 5. Business Rules & Validations
+
 - Initial nursing assessment due ≤ 24 h of admission (configurable, ICU ≤ 1 h) → overdue task; reassessment schedule per score thresholds; Morse ≥ 45 & Braden ≤ 18 auto-activate bundles.
 - NEWS2 computed on every complete vitals set (missing parameter → score marked incomplete, no escalation suppression); scale 2 only when doctor sets `hypercapnic_copd`; PEWS for age < 16 (age-banded thresholds), MEOWS for obstetric admissions; escalation tiers configurable, defaults RCP; acknowledgement SLA 10 min then auto-escalate; all escalations audited.
 - MAR generation strictly from verified orders (pharmacist verification step configurable per drug class); standard times configurable per ward; ± 30 min window default (± 60 for OD non-critical), early/late administration requires reason; PRN respects max/24 h and min interval; STAT due immediately, must be given ≤ 30 min else escalates.
@@ -129,36 +143,38 @@ IP-003 is the nurse's operating system for the ward: a live ward dashboard (acui
 - Ward TV shows no full names unless configured; PHI-free push notifications (deep links).
 
 ## 6. API Surface (`/api/v1/nursing`)
-| Method | Path | Purpose | Permission | Idem | Pag |
-|---|---|---|---|---|---|
-| GET | /wards/{wardId}/board | ward board read model | nursing.board.read | – | – |
-| POST/GET | /wards/{wardId}/shifts, /assignments | shifts & nurse-bed assignments | nursing.assignment.manage | Y | cursor |
-| GET | /tasks?ward=&nurse=&status=&due_before= | task list | nursing.task.read | – | cursor |
-| POST | /tasks/{id}/complete|skip|reassign | task actions | nursing.task.update | Y | – |
-| POST | /admissions/{id}/vitals | record vitals (returns EWS) | nursing.vitals.write | Y | – |
-| GET | /admissions/{id}/vitals?from=&to= | vitals + trends | nursing.vitals.read | – | cursor |
-| POST | /ews/{id}/acknowledge | acknowledge escalation | nursing.ews.acknowledge | Y | – |
-| GET | /admissions/{id}/mar?date= | MAR grid | nursing.mar.read | – | – |
-| POST | /mar/{scheduleId}/verify-scan | patient/drug scan check (5R) | nursing.mar.administer | Y | – |
-| POST | /mar/{scheduleId}/administer | given/held/refused/omitted (+ witness token) | nursing.mar.administer | Y | – |
-| POST | /mar/{scheduleId}/witness | second-nurse witness auth | nursing.mar.witness | Y | – |
-| POST | /admissions/{id}/mar/prn | PRN administration | nursing.mar.administer | Y | – |
-| POST | /admissions/{id}/verbal-orders | record verbal order | nursing.verbal_order.record | Y | – |
-| POST | /verbal-orders/{id}/cosign | doctor co-sign | opd.order.sign (OP-002) | Y | – |
-| POST/GET | /admissions/{id}/io | intake/output entries & balance | nursing.io.write / read | Y | cursor |
-| POST/GET | /admissions/{id}/notes | SBAR & other notes | nursing.note.write / read | Y | cursor |
-| POST/GET | /admissions/{id}/assessments | Morse/Braden/pain/GCS/… | nursing.assessment.write / read | Y | cursor |
-| POST/GET/PATCH | /admissions/{id}/care-plan | care plan | nursing.careplan.write | Y | – |
-| POST/GET | /admissions/{id}/wounds, /lines, /falls | registers | nursing.register.write | Y | cursor |
-| POST/GET | /admissions/{id}/restraints, /restraints/{id}/monitoring | restraints | nursing.restraint.write | Y | cursor |
-| POST/GET | /wards/{wardId}/handover, /handover/{id}/ack, /sign | handover | nursing.handover.write / ack | Y | – |
-| POST | /nurse-calls, /nurse-calls/{id}/accept|attend|complete | nurse call | nursing.call.handle | Y | – |
-| POST | /sync/batch | offline batch (vitals/MAR/IO/notes) with client ids | nursing.* (per item) | Y | – |
-| GET | /reports/indicators?ward=&from= | nursing KPIs | nursing.report.read | – | – |
-| GET/PUT | /config/admin-times, /config/ews-ladder, /config/high-alert-list, /config/task-templates | configuration | nursing.configure | Y | – |
-| Consumes | `order.created|updated|cancelled` (OP-002), `ip.admitted|transferred|discharge.initiated|completed`, `lab.result.critical`, `pharmacy.unit_dose.issued` (IP-014), `device.vitals.received` (EN-042), `roster.published` (NC-030) | | | | |
+
+| Method         | Path                                                                                     | Purpose                                             | Permission                      | Idem         | Pag                 |
+| -------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------- | ------------ | ------------------- |
+| GET            | /wards/{wardId}/board                                                                    | ward board read model                               | nursing.board.read              | –            | –                   |
+| POST/GET       | /wards/{wardId}/shifts, /assignments                                                     | shifts & nurse-bed assignments                      | nursing.assignment.manage       | Y            | cursor              |
+| GET            | /tasks?ward=&nurse=&status=&due_before=                                                  | task list                                           | nursing.task.read               | –            | cursor              |
+| POST           | /tasks/{id}/complete                                                                     | skip                                                | reassign                        | task actions | nursing.task.update | Y                                                                                                                                   | –   |
+| POST           | /admissions/{id}/vitals                                                                  | record vitals (returns EWS)                         | nursing.vitals.write            | Y            | –                   |
+| GET            | /admissions/{id}/vitals?from=&to=                                                        | vitals + trends                                     | nursing.vitals.read             | –            | cursor              |
+| POST           | /ews/{id}/acknowledge                                                                    | acknowledge escalation                              | nursing.ews.acknowledge         | Y            | –                   |
+| GET            | /admissions/{id}/mar?date=                                                               | MAR grid                                            | nursing.mar.read                | –            | –                   |
+| POST           | /mar/{scheduleId}/verify-scan                                                            | patient/drug scan check (5R)                        | nursing.mar.administer          | Y            | –                   |
+| POST           | /mar/{scheduleId}/administer                                                             | given/held/refused/omitted (+ witness token)        | nursing.mar.administer          | Y            | –                   |
+| POST           | /mar/{scheduleId}/witness                                                                | second-nurse witness auth                           | nursing.mar.witness             | Y            | –                   |
+| POST           | /admissions/{id}/mar/prn                                                                 | PRN administration                                  | nursing.mar.administer          | Y            | –                   |
+| POST           | /admissions/{id}/verbal-orders                                                           | record verbal order                                 | nursing.verbal_order.record     | Y            | –                   |
+| POST           | /verbal-orders/{id}/cosign                                                               | doctor co-sign                                      | opd.order.sign (OP-002)         | Y            | –                   |
+| POST/GET       | /admissions/{id}/io                                                                      | intake/output entries & balance                     | nursing.io.write / read         | Y            | cursor              |
+| POST/GET       | /admissions/{id}/notes                                                                   | SBAR & other notes                                  | nursing.note.write / read       | Y            | cursor              |
+| POST/GET       | /admissions/{id}/assessments                                                             | Morse/Braden/pain/GCS/…                             | nursing.assessment.write / read | Y            | cursor              |
+| POST/GET/PATCH | /admissions/{id}/care-plan                                                               | care plan                                           | nursing.careplan.write          | Y            | –                   |
+| POST/GET       | /admissions/{id}/wounds, /lines, /falls                                                  | registers                                           | nursing.register.write          | Y            | cursor              |
+| POST/GET       | /admissions/{id}/restraints, /restraints/{id}/monitoring                                 | restraints                                          | nursing.restraint.write         | Y            | cursor              |
+| POST/GET       | /wards/{wardId}/handover, /handover/{id}/ack, /sign                                      | handover                                            | nursing.handover.write / ack    | Y            | –                   |
+| POST           | /nurse-calls, /nurse-calls/{id}/accept                                                   | attend                                              | complete                        | nurse call   | nursing.call.handle | Y                                                                                                                                   | –   |
+| POST           | /sync/batch                                                                              | offline batch (vitals/MAR/IO/notes) with client ids | nursing.* (per item)            | Y            | –                   |
+| GET            | /reports/indicators?ward=&from=                                                          | nursing KPIs                                        | nursing.report.read             | –            | –                   |
+| GET/PUT        | /config/admin-times, /config/ews-ladder, /config/high-alert-list, /config/task-templates | configuration                                       | nursing.configure               | Y            | –                   |
+| Consumes       | `order.created                                                                           | updated                                             | cancelled`(OP-002),`ip.admitted | transferred  | discharge.initiated | completed`, `lab.result.critical`, `pharmacy.unit_dose.issued`(IP-014),`device.vitals.received`(EN-042),`roster.published` (NC-030) |     |     |     |     |
 
 ## 7. Domain Events (outbox)
+
 - `nursing.assessment.completed` {type, score} → care plan, IP-002, IP-012, NC-015.
 - `nursing.vitals.recorded` {admission_id, vitals_id, ews} → IP-010, EN-018, IP-009, IP-002 readiness.
 - `nursing.ews.escalated` {type, total, band, tier, to} / `nursing.ews.acknowledged` / `nursing.ews.escalation_breached` → EN-037, IP-010, IP-013 (≥ 7 optional rapid response), NC-015.
@@ -176,6 +192,7 @@ IP-003 is the nurse's operating system for the ward: a live ward dashboard (acui
 - `nursing.consumable.used` {item, qty} → IP-005/NC-006.
 
 ## 8. Screens (UI)
+
 - **Ward Board** (desktop 3-pane; wall TV via EN-018): bed grid/list toggle, tile design as §3.1, filters (my patients/all, acuity, overdue), right rail alerts/tasks; real-time (Socket.IO); shortcuts `1–9` jump to bed n, `/` search, `V` vitals, `M` MAR, `N` note, `H` handover, `T` tasks; empty "No patients in ward"; stale-connection banner.
 - **Patient Nursing Chart** (desktop tabs / tablet): Overview (banner, alerts, care plan summary), Vitals (grid + trends, NEWS2 badge, add), MAR (day grid: rows drugs × columns times; status icons; click cell → administer dialog with scan prompt; PRN panel; infusion panel), I/O (grid + balance), Notes (SBAR composer, timeline), Assessments (due list, forms), Care plan, Lines/tubes/wounds (body map), Orders (read-only from CPOE), Results, Tasks, Handover.
 - **Administer Dialog** (tablet/phone/desktop with scanner): step 1 scan patient (camera/USB scanner; manual override), step 2 scan drug, checks panel (5R + labs/vitals gates), outcome buttons, witness prompt (second nurse PIN/2FA), site/rate fields, save; keyboard `G` given, `H` held, `R` refused; big tap targets.
@@ -188,22 +205,27 @@ IP-003 is the nurse's operating system for the ward: a live ward dashboard (acui
 - Offline: vitals/MAR/I/O/notes/tasks usable on tablet/phone with local queue and clear "pending sync" badges (details in IP-004).
 
 ## 9. Integrations
+
 - OP-002 CPOE (orders → MAR/tasks), IP-014 (unit dose, narcotics register), OP-003 pharmacy, OP-004 (sample labels, results/critical), OP-008, EN-029 CDSS rules, EN-013 barcode (wristband GS1/QR, drug GTIN/internal), EN-005 label printers, EN-042 device gateway (vitals monitors HL7 ORU^R01, spot-check devices, nurse-call systems, smart beds), EN-037 push/escalation, EN-018 TV, NC-030 roster, NC-015 incidents, IP-012, IP-013, IP-007, IP-009 (extends), IP-004/IP-010 mobile, OP-011 diet, OP-015 physio.
 - Fallbacks: scanner failure → camera/manual with reason; device gateway down → manual; push down → in-app + TV + SMS for critical (EN-009).
 
 ## 10. Reports & Analytics
+
 - Nursing indicators (NABH): medication error rate (per 1000 patient-days), MAR compliance (on-time %, scan %), omitted doses, falls rate, hospital-acquired pressure injuries, restraint use, NEWS2 escalation compliance (time to doctor review), initial assessment ≤ 24 h %, handover completion, nurse-call response, catheter/PIV days, sepsis bundle timeliness, verbal-order co-sign compliance, workload per nurse.
 - Read models: `analytics.mv_nursing_indicators_daily`, `analytics.mv_mar_compliance_daily`, `analytics.mv_ews_escalations`, `analytics.mv_nurse_call_sla`.
 
 ## 11. Notifications
+
 - Nurse (push/in-app/phone): task due/overdue, new/changed orders, STAT medication, EWS escalation, nurse call, critical result for own patient, witness request, handover unacknowledged; Doctor: EWS ≥ 5 (tier), held/refused critical dose, sepsis screen positive, verbal order co-sign due, restraint renewal; In-charge/supervisor: escalation breach, overdue vitals > 60 min, ratio breach, fall/pressure injury; Pharmacy: unavailable drug, omitted doses summary; Family: nurse-call acknowledgement (bedside display), education links.
 - TV: ward board, tasks overdue count, EWS alerts (bed only).
 
 ## 12. Permissions (RBAC keys)
+
 `nursing.board.read`, `nursing.assignment.manage`, `nursing.task.read|update`, `nursing.vitals.read|write`, `nursing.ews.acknowledge`, `nursing.mar.read|administer|witness|override`, `nursing.verbal_order.record`, `nursing.io.read|write`, `nursing.note.read|write`, `nursing.assessment.read|write`, `nursing.careplan.write`, `nursing.register.write`, `nursing.restraint.write`, `nursing.handover.write|ack`, `nursing.call.handle`, `nursing.report.read|export`, `nursing.configure`.
 Defaults: Ward nurse (17): all read/write except assignment.manage & configure (ABAC `assigned_ward_only`; `mar.witness` requires different user); ICU nurse (18): same + IP-009; Nurse supervisor (22): assignment.manage, reports, override; Doctors (6–11,14): board.read, vitals.read, mar.read, note.read, assessment.read, ews.acknowledge, cosign; Pharmacist IP (31): mar.read; Ward boy (23): task.read/update (transport only); Quality (54)/ICN (21): reports, registers read; Admin (2/3): configure; Family device: call raise only.
 
 ## 13. Non-functional
+
 - Volumes: 2000 beds → ~12k vitals sets/day, ~40k MAR administrations/day (peak 8k/h at 08:00 & 20:00), 30k tasks/day, 3k notes/day, 5k nurse calls/day; monthly partitions; 10-y retention (vitals raw device 1 y then aggregated).
 - p95: board < 200 ms (read model), MAR grid < 250 ms, scan verify < 150 ms, vitals save + EWS < 200 ms, push dispatch < 3 s.
 - Offline: tablets/phones ≥ 4 h queued operations; conflict rules §3.10.
@@ -212,6 +234,7 @@ Defaults: Ward nurse (17): all read/write except assignment.manage & configure (
 - Security: witness auth is a distinct authentication (PIN/2FA) — no shared logins; audit on every administration/override; PHI-free notifications; device tokens for TVs/call units.
 
 ## 14. Acceptance Criteria
+
 1. Given a patient admitted at 10:00, then a nursing initial assessment task is due by 10:00 next day and appears overdue after that; ICU wards default to 1 h.
 2. Given vitals RR 24, SpO2 93 % on room air, temp 38.6, SBP 105, HR 112, alert, then NEWS2 = 8 (RR 2, SpO2 2, air 0, temp 1, SBP 1, HR 2, ACVPU 0) with band "high", an emergency escalation task and push are created, and if unacknowledged in 10 min it escalates to the next tier.
 3. Given a doctor sets `hypercapnic_copd`, then SpO2 scoring uses NEWS2 scale 2 and the badge shows "Scale 2".
@@ -234,11 +257,13 @@ Defaults: Ward nurse (17): all read/write except assignment.manage & configure (
 20. Given a nurse assigned to Ward A opens a patient in Ward B, then read is allowed only via break-glass with reason (READ_PHI audit) and write is denied.
 
 ## 15. Enhancements / Later phases
+
 - From VIMS sheet row 22: nurse call bell with response-time tracking (here), NEWS2 auto-calc (here), sepsis screening protocol (here), restraint documentation (here), nursing workload balancing algorithm (heat-map here; auto-balancing later with NC-030).
 - From row 14: bedside vitals with auto-trend & abnormal push (here), I/O (here), fall detection IoT (EN-042).
 - (market) second-nurse confirmation, mandatory skip reasons, auto-scheduling BD/TDS/QID, SBAR handover, M/A/N vitals (all here); PCS: TPR/BP charting, diabetic charting, physical examination, SOAP notes (here). Later: smart-pump interoperability (auto-programming), RTLS nurse location, voice-to-text notes (AI-004), predictive deterioration (AI-005), smart-bed integration (weight/exit alarms), family app care-plan view (PE-001), nurse rounding checklists with tablets at bedside (hourly rounding here), acuity-based staffing (NC-030).
 
 ## 16. Open Questions for the Hospital
+
 1. Standard medication administration times per ward; dose window tolerance; grace before "omitted"?
 2. Barcode readiness: do drug packs have GTIN barcodes or will IP-014 print unit-dose labels? Wristband printers per ward?
 3. High-alert drug list and witness policy (all high-alert or only narcotics/insulin/anticoagulants/chemo/paeds)?

@@ -58,12 +58,23 @@ export const TWILIO_STATUS_CALLBACK_URL = 'https://hms.example.org/api/v1/messag
  * `validateConnectorConfig` refuses any other retry policy. EN-017 §5 — a retry
  * is how a patient receives the same message three times.
  */
-const NO_RETRY = { policy: 'R0', maxAttempts: 1, baseDelayMs: 1_000, backoffFactor: 2, maxDelayMs: 60_000, jitterMs: 0 } as const;
+const NO_RETRY = {
+  policy: 'R0',
+  maxAttempts: 1,
+  baseDelayMs: 1_000,
+  backoffFactor: 2,
+  maxDelayMs: 60_000,
+  jitterMs: 0,
+} as const;
 
 export function dryRunSmsConnectorConfig(
   options: {
     readonly key?: string;
-    readonly failures?: readonly { readonly errorClass: string; readonly code?: string; readonly times?: number | 'always' }[];
+    readonly failures?: readonly {
+      readonly errorClass: string;
+      readonly code?: string;
+      readonly times?: number | 'always';
+    }[];
     readonly simulatedDeliveryStatus?: string;
   } = {},
 ): ConnectorConfigInput {
@@ -84,15 +95,28 @@ export function dryRunSmsConnectorConfig(
     health: { kind: 'ping', intervalSec: 60 },
     dpdp: {
       containsPhi: true,
-      purpose: 'Deliver appointment, token and billing notifications to patients by SMS during DLT onboarding.',
+      purpose:
+        'Deliver appointment, token and billing notifications to patients by SMS during DLT onboarding.',
       dataCategories: ['contact', 'appointment'],
       crossBorder: false,
     },
     requiresInternet: false,
     retainPayloadDays: 30,
     operations: [
-      { key: 'sendSms', name: 'Send SMS (dry run)', direction: 'out', idempotency: 'natural_key', timeoutMs: 5_000 },
-      { key: 'deliveryReceipt', name: 'Delivery receipt', direction: 'in', idempotency: 'natural_key', timeoutMs: 5_000 },
+      {
+        key: 'sendSms',
+        name: 'Send SMS (dry run)',
+        direction: 'out',
+        idempotency: 'natural_key',
+        timeoutMs: 5_000,
+      },
+      {
+        key: 'deliveryReceipt',
+        name: 'Delivery receipt',
+        direction: 'in',
+        idempotency: 'natural_key',
+        timeoutMs: 5_000,
+      },
     ],
     options: {
       ...(options.simulatedDeliveryStatus === undefined
@@ -128,8 +152,22 @@ export function msg91ConnectorConfig(options: { readonly key?: string } = {}): C
     requiresInternet: true,
     retainPayloadDays: 30,
     operations: [
-      { key: 'sendSms', name: 'Send SMS', direction: 'out', method: 'POST', idempotency: 'natural_key', timeoutMs: 10_000 },
-      { key: 'deliveryReceipt', name: 'Delivery report', direction: 'in', method: 'POST', idempotency: 'natural_key', timeoutMs: 5_000 },
+      {
+        key: 'sendSms',
+        name: 'Send SMS',
+        direction: 'out',
+        method: 'POST',
+        idempotency: 'natural_key',
+        timeoutMs: 10_000,
+      },
+      {
+        key: 'deliveryReceipt',
+        name: 'Delivery report',
+        direction: 'in',
+        method: 'POST',
+        idempotency: 'natural_key',
+        timeoutMs: 5_000,
+      },
     ],
     options: { webhookTokenRef: 'vault://hms/connectors/msg91/webhook_token' },
   };
@@ -153,15 +191,30 @@ export function twilioConnectorConfig(options: { readonly key?: string } = {}): 
     health: { kind: 'ping', intervalSec: 60 },
     dpdp: {
       containsPhi: true,
-      purpose: 'Deliver appointment and billing notifications to patients by SMS through the secondary gateway.',
+      purpose:
+        'Deliver appointment and billing notifications to patients by SMS through the secondary gateway.',
       dataCategories: ['contact', 'appointment'],
       crossBorder: false,
     },
     requiresInternet: true,
     retainPayloadDays: 30,
     operations: [
-      { key: 'sendSms', name: 'Send SMS', direction: 'out', method: 'POST', idempotency: 'natural_key', timeoutMs: 10_000 },
-      { key: 'deliveryReceipt', name: 'Status callback', direction: 'in', method: 'POST', idempotency: 'natural_key', timeoutMs: 5_000 },
+      {
+        key: 'sendSms',
+        name: 'Send SMS',
+        direction: 'out',
+        method: 'POST',
+        idempotency: 'natural_key',
+        timeoutMs: 10_000,
+      },
+      {
+        key: 'deliveryReceipt',
+        name: 'Status callback',
+        direction: 'in',
+        method: 'POST',
+        idempotency: 'natural_key',
+        timeoutMs: 5_000,
+      },
     ],
     options: {
       accountSid: TWILIO_TEST_ACCOUNT_SID,
@@ -181,7 +234,11 @@ export function whatsAppConnectorConfig(options: { readonly key?: string } = {})
     environment: 'production',
     adapter: WHATSAPP_ADAPTER_REF,
     endpoint: { url: 'https://graph.facebook.test' },
-    auth: { type: 'api_key', header: 'Authorization', secretRef: 'vault://hms/connectors/whatsapp/access_token' },
+    auth: {
+      type: 'api_key',
+      header: 'Authorization',
+      secretRef: 'vault://hms/connectors/whatsapp/access_token',
+    },
     tls: { verify: true },
     retry: NO_RETRY,
     circuit: { failureThreshold: 3, errorRatePct: 50, coolDownSec: 60, halfOpenMaxProbes: 1 },
@@ -191,7 +248,8 @@ export function whatsAppConnectorConfig(options: { readonly key?: string } = {})
       // Meta processes the message outside India, which is precisely the fact
       // EN-017 §5 and DPDP §16 require to be recorded rather than discovered.
       containsPhi: true,
-      purpose: 'Deliver appointment, token and billing notifications to patients over WhatsApp template messages.',
+      purpose:
+        'Deliver appointment, token and billing notifications to patients over WhatsApp template messages.',
       dataCategories: ['contact', 'appointment'],
       crossBorder: true,
       dpaRef: 'DPA/META/2026-04',
@@ -200,8 +258,22 @@ export function whatsAppConnectorConfig(options: { readonly key?: string } = {})
     requiresInternet: true,
     retainPayloadDays: 30,
     operations: [
-      { key: 'sendTemplate', name: 'Send template', direction: 'out', method: 'POST', idempotency: 'natural_key', timeoutMs: 10_000 },
-      { key: 'deliveryReceipt', name: 'Status webhook', direction: 'in', method: 'POST', idempotency: 'natural_key', timeoutMs: 5_000 },
+      {
+        key: 'sendTemplate',
+        name: 'Send template',
+        direction: 'out',
+        method: 'POST',
+        idempotency: 'natural_key',
+        timeoutMs: 10_000,
+      },
+      {
+        key: 'deliveryReceipt',
+        name: 'Status webhook',
+        direction: 'in',
+        method: 'POST',
+        idempotency: 'natural_key',
+        timeoutMs: 5_000,
+      },
     ],
     options: {
       wabaId: '1122334455',
@@ -272,7 +344,10 @@ export function appointmentDltRegistration(
 }
 
 /** The WhatsApp variant of the same template, approved by Meta. */
-export function appointmentWhatsAppTemplate(hospitalId: string, locale: LocaleCode = 'en-IN'): TemplateVersion {
+export function appointmentWhatsAppTemplate(
+  hospitalId: string,
+  locale: LocaleCode = 'en-IN',
+): TemplateVersion {
   return {
     ...appointmentTemplate(hospitalId, locale),
     channel: 'whatsapp',

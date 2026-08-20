@@ -1,27 +1,29 @@
 # EN-027 — Master Data Management (Facility / Department / Service / Tariff / Drug / ICD-10 & ICD-11 / SNOMED CT India / LOINC / Procedure & UoM Masters, Versioning & Effective Dating, Approval Workflow, Code-System Loaders & Value Sets, Cross-Branch Sync, Golden Record & Dedupe, MDM Governance)
 
-| Field | Value |
-|---|---|
-| Domain | Enabler |
-| Module ID | EN-027 |
-| Phase | 0/1 |
-| Priority | P0 |
-| Complexity | Very High |
-| Depends on | EN-007 (settings, roles, numbering series, hospital/branch identity), EN-038 (Workflow & Approval Engine — master-data change approvals), EN-024 (audit — every master change is audited with before/after), EN-036 (Data Import/Migration — bulk load of legacy masters), EN-041 (multi-branch/group hierarchy — what is shared vs branch-local), EN-019 (FHIR terminology endpoints `$expand`/`$translate` are served from here), EN-011 (ABDM/NRCeS code requirements), EN-017 (mapping DSL calls concept maps here), EN-026 (masters exposed to partners), EN-001 (analytics dimension tables) |
-| Consumed by | Every clinical and financial module — OP-001/OP-002 (departments, doctors, diagnoses), OP-003/IP-014 (drug master), OP-004 (test master, LOINC), OP-005/RC-003 (service catalogue & tariffs), OP-008 (radiology procedure master), IP-001 (wards, beds, room classes), IP-006 (surgery/procedure master, implant catalogue TR-003), NC-006/NC-005 (item master, vendors, UoM), NC-009 (chart of accounts, HSN/SAC), EN-002/RC-007 (payer & scheme masters), NC-003 (ICD coding) |
-| Feature flag | `module.mdm.enabled` (always on); sub-flags `mdm.snomed`, `mdm.icd11`, `mdm.loinc`, `mdm.cross_branch_sync`, `mdm.golden_record`, `mdm.fhir_terminology` |
-| Primary roles | Hospital Admin / Group Admin (2), **Master Data Steward** (custom role per domain: clinical, pharmacy, lab, billing, inventory), MRD Officer / Coder (43 — ICD/SNOMED), Pharmacy In-charge (32 — drug master), Lab Quality Manager (35 — test/LOINC master), Billing/Finance (27/46 — service & tariff master) |
-| Secondary roles | HOD (propose department/service changes), Doctor (request a new test/drug/diagnosis code), Purchase (45 — item master), Auditor (58), IT Admin (loaders, sync), Super Admin (global/system masters shipped with the product) |
-| Regulatory | **EHR Standards for India 2016** (SNOMED CT as reference clinical terminology, LOINC for lab observations, ICD-10 for morbidity coding with an ICD-11 adoption path); NRCeS/ABDM profiles requiring standard codings (EN-011/EN-019); **SNOMED CT India national licence** (free for use in India via NRCeS; affiliate obligations apply), LOINC licence acknowledgement, ICD-10/ICD-11 (WHO) usage terms; **CDSCO / Drugs & Cosmetics Rules** (drug schedule classification H/H1/X/NRx, narcotic & psychotropic under NDPS, brand-generic mapping), **NPPA / DPCO** ceiling prices for scheduled formulations, **GST**: HSN/SAC codes and rate slabs for goods and services, UDI for implants/devices (TR-003); NABH (service catalogue, tariff display, rate transparency), NABL (test master with method/units/reference intervals), ROHINI (hospital registry id) & payer package codes (PMJAY/CGHS/ESIC — RC-007), UCUM for units of measure |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain          | Enabler                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Module ID       | EN-027                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Phase           | 0/1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Priority        | P0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Complexity      | Very High                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Depends on      | EN-007 (settings, roles, numbering series, hospital/branch identity), EN-038 (Workflow & Approval Engine — master-data change approvals), EN-024 (audit — every master change is audited with before/after), EN-036 (Data Import/Migration — bulk load of legacy masters), EN-041 (multi-branch/group hierarchy — what is shared vs branch-local), EN-019 (FHIR terminology endpoints `$expand`/`$translate` are served from here), EN-011 (ABDM/NRCeS code requirements), EN-017 (mapping DSL calls concept maps here), EN-026 (masters exposed to partners), EN-001 (analytics dimension tables)                                                                                                                                                                                                                                                                                                                                                |
+| Consumed by     | Every clinical and financial module — OP-001/OP-002 (departments, doctors, diagnoses), OP-003/IP-014 (drug master), OP-004 (test master, LOINC), OP-005/RC-003 (service catalogue & tariffs), OP-008 (radiology procedure master), IP-001 (wards, beds, room classes), IP-006 (surgery/procedure master, implant catalogue TR-003), NC-006/NC-005 (item master, vendors, UoM), NC-009 (chart of accounts, HSN/SAC), EN-002/RC-007 (payer & scheme masters), NC-003 (ICD coding)                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Feature flag    | `module.mdm.enabled` (always on); sub-flags `mdm.snomed`, `mdm.icd11`, `mdm.loinc`, `mdm.cross_branch_sync`, `mdm.golden_record`, `mdm.fhir_terminology`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Primary roles   | Hospital Admin / Group Admin (2), **Master Data Steward** (custom role per domain: clinical, pharmacy, lab, billing, inventory), MRD Officer / Coder (43 — ICD/SNOMED), Pharmacy In-charge (32 — drug master), Lab Quality Manager (35 — test/LOINC master), Billing/Finance (27/46 — service & tariff master)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Secondary roles | HOD (propose department/service changes), Doctor (request a new test/drug/diagnosis code), Purchase (45 — item master), Auditor (58), IT Admin (loaders, sync), Super Admin (global/system masters shipped with the product)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Regulatory      | **EHR Standards for India 2016** (SNOMED CT as reference clinical terminology, LOINC for lab observations, ICD-10 for morbidity coding with an ICD-11 adoption path); NRCeS/ABDM profiles requiring standard codings (EN-011/EN-019); **SNOMED CT India national licence** (free for use in India via NRCeS; affiliate obligations apply), LOINC licence acknowledgement, ICD-10/ICD-11 (WHO) usage terms; **CDSCO / Drugs & Cosmetics Rules** (drug schedule classification H/H1/X/NRx, narcotic & psychotropic under NDPS, brand-generic mapping), **NPPA / DPCO** ceiling prices for scheduled formulations, **GST**: HSN/SAC codes and rate slabs for goods and services, UDI for implants/devices (TR-003); NABH (service catalogue, tariff display, rate transparency), NABL (test master with method/units/reference intervals), ROHINI (hospital registry id) & payer package codes (PMJAY/CGHS/ESIC — RC-007), UCUM for units of measure |
 
 ## 1. Purpose
+
 EN-027 owns the single, versioned, effective-dated source of truth for every master the hospital runs on — organisational (facility, branch, department, unit, ward, bed, room class, location), clinical (diagnosis, procedure, lab test, radiology procedure, drug/formulary, allergy substance, implant), commercial (service catalogue, tariff, package, payer, scheme, HSN/SAC), and operational (item, UoM, vendor class, cost centre) — together with the standard code systems (ICD-10, ICD-11, SNOMED CT India, LOINC, ATC, UCUM, HSN/SAC) and the **value sets and concept maps** that let internal codes talk to national and international standards. It enforces stewardship: proposal → review → approval → effective-dated activation, with full history, cross-branch distribution, duplicate detection and golden records.
 
 ## 2. Users & Jobs-to-be-done
+
 - **Master Data Steward (per domain)** (desktop, daily): add a new lab test with LOINC and reference ranges; retire a discontinued drug; correct a service's GST rate — each through a controlled change with an effective date, never a silent edit.
 - **Pharmacy In-charge**: maintain the formulary — generic ↔ brand, strength/form, schedule (H/H1/X/NDPS), DPCO ceiling, look-alike/sound-alike (LASA) flags, high-alert markers, ATC class, tall-man lettering.
 - **Lab Quality Manager**: test master with method, analyte, LOINC, units (UCUM), reference intervals by age/sex/pregnancy, critical values, TAT targets, sample type and container — the backbone of NABL compliance.
-- **Billing/Finance**: service catalogue with SAC/HSN, GST slab, cost centre, doctor-share rules, and payer-wise tariffs with effective dates (RC-003 owns tariff *pricing rules*; EN-027 owns the catalogue and version governance).
+- **Billing/Finance**: service catalogue with SAC/HSN, GST slab, cost centre, doctor-share rules, and payer-wise tariffs with effective dates (RC-003 owns tariff _pricing rules_; EN-027 owns the catalogue and version governance).
 - **MRD Coder**: ICD-10/ICD-11 browsing, favourites, mapping local diagnosis terms to standard codes, and maintaining the concept maps used for claims and registries.
 - **Group Admin (multi-branch)**: decide which masters are group-wide (drug master, ICD) and which are branch-local (tariffs, beds, counters), then publish a change to 18 branches with a scheduled effective date.
 - **Any clinician**: request a missing code from within the workflow ("this drug isn't in the list") without leaving the consultation.
@@ -29,23 +31,25 @@ EN-027 owns the single, versioned, effective-dated source of truth for every mas
 ## 3. Core Workflows
 
 ### 3.1 Master domains & ownership
-| Domain | Master tables (examples) | Steward | Scope |
-|---|---|---|---|
-| Organisation | `mdm_facilities`, `mdm_departments`, `mdm_units`, `mdm_wards`, `mdm_beds`, `mdm_room_classes`, `mdm_locations`, `mdm_counters` | Hospital/Branch Admin | branch-local, group-defined hierarchy |
-| Clinical terminology | `mdm_code_systems`, `mdm_concepts` (ICD-10, ICD-11, SNOMED CT, LOINC, ATC, UCUM), `mdm_value_sets`, `mdm_concept_maps` | MRD Coder / Clinical Steward | group-wide (system-shipped, versioned) |
-| Diagnosis & procedure | `mdm_diagnoses` (local terms → ICD/SNOMED), `mdm_procedures` (surgery, day-care, OPD procedures; AO/OTA for ortho) | Clinical Steward + MRD | group-wide |
-| Lab | `mdm_lab_tests`, `mdm_lab_panels`, `mdm_specimens`, `mdm_reference_ranges`, `mdm_analyzer_codes` | Lab Quality Manager | group-wide catalogue, branch-enabled subset |
-| Radiology | `mdm_rad_procedures` (modality, body part, laterality, contrast, dose reference) | Radiology Manager | group-wide |
-| Pharmacy | `mdm_drugs` (generic), `mdm_drug_brands`, `mdm_drug_forms`, `mdm_drug_interactions_ref`, `mdm_allergen_substances` | Pharmacy In-charge | group-wide formulary, branch stock list |
-| Services & pricing | `mdm_services` (with SAC/HSN, GST), `mdm_service_groups`, `mdm_packages`, `mdm_tariff_versions` (→ RC-003) | Billing Steward | branch-local prices, group catalogue |
-| Payers & schemes | `mdm_payers` (ROHINI, TPA), `mdm_schemes` (PMJAY/CGHS/ESIC package codes) | Insurance Desk | group-wide |
-| Inventory | `mdm_items`, `mdm_item_categories`, `mdm_uoms`, `mdm_uom_conversions`, `mdm_manufacturers`, `mdm_vendors` (→ NC-021) | Stores/Purchase | group-wide item master, branch stock |
-| Finance | `mdm_cost_centres`, `mdm_chart_of_accounts`, `mdm_hsn_sac`, `mdm_tax_rates` | Accounts | group-wide |
-| People-adjacent | `mdm_specialities`, `mdm_designations`, `mdm_qualifications`, `mdm_shift_types` | HR | group-wide |
+
+| Domain                | Master tables (examples)                                                                                                       | Steward                      | Scope                                       |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- | ------------------------------------------- |
+| Organisation          | `mdm_facilities`, `mdm_departments`, `mdm_units`, `mdm_wards`, `mdm_beds`, `mdm_room_classes`, `mdm_locations`, `mdm_counters` | Hospital/Branch Admin        | branch-local, group-defined hierarchy       |
+| Clinical terminology  | `mdm_code_systems`, `mdm_concepts` (ICD-10, ICD-11, SNOMED CT, LOINC, ATC, UCUM), `mdm_value_sets`, `mdm_concept_maps`         | MRD Coder / Clinical Steward | group-wide (system-shipped, versioned)      |
+| Diagnosis & procedure | `mdm_diagnoses` (local terms → ICD/SNOMED), `mdm_procedures` (surgery, day-care, OPD procedures; AO/OTA for ortho)             | Clinical Steward + MRD       | group-wide                                  |
+| Lab                   | `mdm_lab_tests`, `mdm_lab_panels`, `mdm_specimens`, `mdm_reference_ranges`, `mdm_analyzer_codes`                               | Lab Quality Manager          | group-wide catalogue, branch-enabled subset |
+| Radiology             | `mdm_rad_procedures` (modality, body part, laterality, contrast, dose reference)                                               | Radiology Manager            | group-wide                                  |
+| Pharmacy              | `mdm_drugs` (generic), `mdm_drug_brands`, `mdm_drug_forms`, `mdm_drug_interactions_ref`, `mdm_allergen_substances`             | Pharmacy In-charge           | group-wide formulary, branch stock list     |
+| Services & pricing    | `mdm_services` (with SAC/HSN, GST), `mdm_service_groups`, `mdm_packages`, `mdm_tariff_versions` (→ RC-003)                     | Billing Steward              | branch-local prices, group catalogue        |
+| Payers & schemes      | `mdm_payers` (ROHINI, TPA), `mdm_schemes` (PMJAY/CGHS/ESIC package codes)                                                      | Insurance Desk               | group-wide                                  |
+| Inventory             | `mdm_items`, `mdm_item_categories`, `mdm_uoms`, `mdm_uom_conversions`, `mdm_manufacturers`, `mdm_vendors` (→ NC-021)           | Stores/Purchase              | group-wide item master, branch stock        |
+| Finance               | `mdm_cost_centres`, `mdm_chart_of_accounts`, `mdm_hsn_sac`, `mdm_tax_rates`                                                    | Accounts                     | group-wide                                  |
+| People-adjacent       | `mdm_specialities`, `mdm_designations`, `mdm_qualifications`, `mdm_shift_types`                                                | HR                           | group-wide                                  |
 
 Each master declares in metadata: **owner role**, **scope** (system / group / hospital / branch), **approval requirement**, **effective dating** (yes/no), **standard-code bindings**, **downstream consumers** (for impact analysis) and **retention** (masters are never hard-deleted, only retired).
 
 ### 3.2 Change lifecycle: propose → review → approve → activate
+
 1. **Propose**: a steward (or any user via "request a code") creates a **change set** — one or more create/update/retire operations on one master domain — with a reason, an intended **effective_from** date and optional **effective_to**. Bulk changes arrive by CSV/Excel upload (EN-036) into the same change set.
 2. **Validate**: schema validation, uniqueness (code, name+strength+form for drugs, LOINC+method for tests), referential integrity, code-system membership checks, price sanity (e.g. > 3× or < 0.3× the previous price prompts confirmation), GST/HSN consistency, DPCO ceiling compliance (a price above the notified ceiling is **blocked**, not warned), and **impact analysis**: how many active orders, tariffs, packages, templates and stock rows reference this record.
 3. **Review & approve** (EN-038): approval matrix by domain and risk — e.g. a new lab test = Lab Steward + Quality Manager; a drug schedule change = Pharmacy In-charge + Medical Superintendent; a tariff change = Billing Steward + Finance + Hospital Admin; a code-system version upgrade = MRD + Clinical Steward + IT. Segregation of duties: proposer ≠ approver.
@@ -54,12 +58,14 @@ Each master declares in metadata: **owner role**, **scope** (system / group / ho
 6. **Rollback**: an activated change can be rolled back before its effective date instantly; after it takes effect, a compensating change set is required (with the same approval), preserving history honestly.
 
 ### 3.3 Versioning & effective dating (the core rule)
+
 - Every effective-dated master row carries `record_key` (stable business identity), `version`, `effective_from`, `effective_to` (`null` = current), `status` (draft/pending/active/superseded/retired) and audit columns. **Historical transactions always resolve the version in force at the transaction's date** — a bill raised in March uses March's tariff even if it is reprinted in September; a lab result carries the reference range that applied when it was resulted.
 - Point-in-time resolution is a first-class API (`GET /mdm/services/:key?asOf=2026-03-15`) and a SQL helper view per master (`mdm_services_asof(date)`).
 - Retirement never deletes: a retired drug remains resolvable for historical prescriptions, is hidden from pickers, and blocks new usage with a clear message ("Retired on 12-Mar-2026 — use <replacement>").
 - Replacement chains (`replaced_by_key`) allow guided substitution in the UI and automated mapping in reports.
 
 ### 3.4 Code systems, loaders & value sets
+
 1. **Code-system registry** (`mdm_code_systems`): id (`icd10`, `icd11`, `snomed-ct-in`, `loinc`, `atc`, `ucum`, `hsn`, `sac`, `rohini`, `ndc-in`), version, release date, licence status, source URL, concept count, active flag. Multiple versions coexist; each transaction records the version used.
 2. **Loaders** import official releases: ICD-10 (WHO/ICD-10 India tabular + alphabetical index), **ICD-11 MMS** (linearisation, foundation URIs, post-coordination clusters), **SNOMED CT India edition** (RF2 full/snapshot: concepts, descriptions, relationships, refsets — loaded into `mdm_concepts` + closure tables for subsumption), **LOINC** (with LOINC parts, common lab order/observation panels), ATC/DDD, UCUM, HSN/SAC with GST rates. Loaders are idempotent, run as background jobs with progress, produce a **delta report** (added/changed/inactivated concepts) and never activate automatically — a human confirms the version switch.
 3. **Value sets** (`mdm_value_sets`): named, versioned subsets used by forms and APIs — e.g. "Discharge diagnoses (ICD-10, common 500)", "Allergy substances", "Vitals LOINC panel", "Notifiable diseases", "Blood groups", "Isolation precautions". Defined by explicit enumeration, by hierarchy expression (`descendant-of SNOMED 73211009 |Diabetes mellitus|`), or by filter (LOINC class = CHEM). Exposed via FHIR `ValueSet/$expand` (EN-019).
@@ -67,6 +73,7 @@ Each master declares in metadata: **owner role**, **scope** (system / group / ho
 5. **Subsumption & search**: closure tables for SNOMED/ICD hierarchies enable "is this a descendant of X" queries (needed for CDSS EN-029 and cohort reporting); search combines exact code, trigram fuzzy text and synonym/description matching, with per-user favourites and recently-used lists (the practical difference between a coder using SNOMED and a coder avoiding it).
 
 ### 3.5 Golden record & duplicate management (`mdm.golden_record`)
+
 1. **Duplicate detection** runs on create and on a nightly sweep for high-churn masters (drugs, items, vendors, services, doctors, payers): normalised name (case, punctuation, abbreviations), strength/form/pack for drugs, GTIN/manufacturer for items, GSTIN/PAN for vendors, registration number for practitioners, fuzzy trigram + weighted attribute scoring.
 2. Candidates above threshold enter a **stewardship queue** with side-by-side comparison, usage statistics (which one is actually used, how many transactions each), and a merge decision.
 3. **Merge** creates a golden record: a surviving `record_key`, a `mdm_merge_map` from the losing keys, and **no data loss** — historical transactions keep pointing at their original key and resolve through the merge map; pickers and reports show the golden record.
@@ -74,6 +81,7 @@ Each master declares in metadata: **owner role**, **scope** (system / group / ho
 5. **Patient MPI is a special case**: patient golden records/dedupe are owned by OP-001 with EN-020 biometric assist; EN-027 provides the matching engine and merge-map infrastructure so both use one implementation.
 
 ### 3.6 Cross-branch sync & scope (`mdm.cross_branch_sync`)
+
 1. Each master's **scope policy** declares: `system` (shipped by the vendor, read-only for tenants — e.g. UCUM, HSN base list), `group` (defined centrally, distributed to all branches — drug master, ICD, service catalogue), `hospital`, or `branch` (beds, counters, tariffs, local test menu).
 2. **Distribution**: on activation of a group master, a sync job creates branch-scoped activation records with the same `effective_from`; branches may hold a **local override** only where the master permits it (`allow_local_override`), and overrides are visible centrally (an override register — the antidote to "every branch quietly invented its own price").
 3. **Branch enablement**: a group-wide catalogue item can be enabled/disabled per branch (a test the branch cannot perform, a drug not stocked) without forking the master.
@@ -81,18 +89,21 @@ Each master declares in metadata: **owner role**, **scope** (system / group / ho
 5. New-branch bootstrap: clone masters from a template branch, with a checklist of what must be localised (tariffs, beds, counters, GSTIN, licences).
 
 ### 3.7 Governance, quality & stewardship
+
 - **Data-quality rules** per master with scheduled scoring: completeness (drugs without ATC, tests without LOINC, services without SAC), validity (prices above DPCO ceiling, GST slab mismatch, orphan references), consistency (brand without generic, panel referencing a retired test), uniqueness (duplicate candidates open), timeliness (masters not reviewed in 12 months) → a **master-data health dashboard** with a score per domain and an owner per finding.
 - **Periodic review campaigns**: annual attestation per domain by its steward (analogous to EN-007's access reviews) producing NABH/NABL evidence.
 - **Change calendar**: forthcoming effective-dated changes (tariff revision on 1-Apr, GST change, new ICD version) visible to all stewards so finance, billing and clinical changes are coordinated rather than colliding.
 - **Emergency change** path: a hard-stop error in a live master (e.g. a drug with a wrong strength) can be corrected under a fast-track approval (Medical Superintendent + Steward) with immediate effect and a mandatory post-hoc review.
 
 ### 3.8 Exceptions
+
 - Code-system upgrade with retired concepts still in use → the loader's delta report lists affected transactions; retired concepts remain resolvable, new usage is blocked, and a remediation list is produced for the coder.
 - Price change that would break an in-flight package or a signed estimate → impact analysis flags it; existing estimates/packages honour their captured version.
 - Bulk upload with 200 errors → the change set stays in `draft` with a downloadable error report keyed by row; nothing partially applies.
 - Concurrent edits → optimistic locking on `version`; the second editor sees a diff and must re-base.
 
 ## 4. Data Model (schema `mdm`)
+
 - `mdm_masters_registry` (metadata about masters themselves) — key, name, table_name, scope enum(system/group/hospital/branch), owner_role, effective_dated bool, approval_matrix_ref (EN-038), allow_local_override bool, standard_bindings jsonb, consumers text[], review_frequency_months, retention_policy, active.
 - **Effective-dated pattern** (applied to every versioned master): `record_key uuid` (stable identity), `id uuid` (row/version id), `hospital_id`, `branch_id?`, `version int`, `effective_from date/timestamptz`, `effective_to`, `status enum(draft/pending_approval/active/superseded/retired)`, `change_set_id`, `replaced_by_key uuid?`, `created_by/at`, `approved_by/at`; UNIQUE(record_key, version); EXCLUDE constraint (btree_gist) preventing overlapping effective ranges per `record_key` + scope; index (hospital_id, branch_id, status, effective_from).
 - `mdm_change_sets` — id, hospital_id, domain, title, reason, proposed_by, proposed_at, effective_from, status enum(draft/validated/pending_approval/approved/rejected/activated/rolled_back), approval_id (EN-038), operations_count, impact jsonb (affected transactions/tariffs/templates), validation_report jsonb, activated_at, rolled_back_at, source enum(ui/csv/api/loader/migration).
@@ -122,6 +133,7 @@ Each master declares in metadata: **owner role**, **scope** (system / group / ho
 - `mdm_review_campaigns` / `mdm_review_items` — annual attestation per domain with steward decisions.
 
 ## 5. Business Rules & Validations
+
 - **Nothing is edited in place.** Every change creates a new version with an effective date; historical transactions resolve the version in force at their own date. This is the rule that makes reprinting a two-year-old bill correct.
 - Masters are **never hard-deleted** — only retired, with a replacement pointer where applicable; retired records stay resolvable and blocked for new use.
 - Proposer ≠ approver on every approval-bearing master; sensitive domains (drug schedule, tariff, payer package, code-system version) require two approvers per the EN-038 matrix.
@@ -138,28 +150,30 @@ Each master declares in metadata: **owner role**, **scope** (system / group / ho
 - Masters marked `system` scope are read-only for tenants (shipped and updated by the product) — attempts to edit are rejected with a pointer to the extension mechanism.
 
 ## 6. API Surface (`/api/v1/mdm`)
-| Method | Path | Purpose | Permission | Notes |
-|---|---|---|---|---|
-| GET | /masters | master registry & metadata | `mdm.read` | scope/owner/approval info |
-| GET | /:master?asOf&status&q&branch&cursor | list any master, point-in-time | `mdm.read` (all staff for pickers) | trigram search, cursor |
-| GET | /:master/:recordKey?asOf ; GET /:master/:recordKey/versions | record + version history | `mdm.read` | |
-| POST | /change-sets ; PATCH /change-sets/:id ; POST /:id/operations | build a change set | `mdm.<domain>.propose` | draft state |
-| POST | /change-sets/:id/upload (CSV/XLSX) | bulk operations | `mdm.<domain>.propose` | row-level errors, all-or-nothing |
-| POST | /change-sets/:id/validate | validation + impact analysis | `mdm.<domain>.propose` | returns affected counts |
-| POST | /change-sets/:id/submit ; /approve ; /reject ; /activate ; /rollback | lifecycle | `mdm.<domain>.approve` (EN-038) | proposer ≠ approver |
-| GET | /change-sets?domain&status&effectiveFrom | change calendar | `mdm.read` | upcoming changes |
-| GET/POST | /code-systems ; POST /code-systems/:id/load ; POST /:id/activate ; GET /:id/delta | terminology loaders | `mdm.terminology.manage` (MRD + IT) | background job, delta review |
-| GET | /concepts?system&q&parent&descendantOf | terminology search & subsumption | `mdm.read` | closure-backed |
-| GET/POST/PATCH | /value-sets ; POST /value-sets/:id/expand | value sets | `mdm.valueset.manage` / read | FHIR `$expand` (EN-019) |
-| GET/POST/PATCH | /concept-maps ; POST /concept-maps/translate | mappings | `mdm.map.manage` / read | FHIR `$translate` |
-| GET/PATCH | /mapping-backlog | unmapped-code queue | `mdm.map.manage` | fed by EN-017/EN-019 |
-| GET/POST | /duplicates ; POST /duplicates/:id/merge \| /reject ; POST /merges/:id/unmerge | golden record | `mdm.merge` (domain steward) | 30-day unmerge |
-| GET/POST | /sync/jobs ; POST /sync/publish {changeSetId, branches} ; GET /sync/overrides | cross-branch distribution | `mdm.sync.manage` (Group Admin) | override register |
-| GET | /quality/findings ; POST /quality/run ; GET /quality/scorecard | data-quality dashboard | `mdm.quality.read` | per-domain score |
-| GET/POST | /review-campaigns ; POST /review-items/:id/attest | periodic stewardship review | `mdm.review.manage` | NABH evidence |
-| GET | /reports/change-history ; /reports/price-changes ; /reports/unmapped ; /reports/overrides ; /reports/usage | reports | `mdm.report.read` | |
+
+| Method         | Path                                                                                                       | Purpose                          | Permission                          | Notes                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------- | ----------------------------------- | -------------------------------- |
+| GET            | /masters                                                                                                   | master registry & metadata       | `mdm.read`                          | scope/owner/approval info        |
+| GET            | /:master?asOf&status&q&branch&cursor                                                                       | list any master, point-in-time   | `mdm.read` (all staff for pickers)  | trigram search, cursor           |
+| GET            | /:master/:recordKey?asOf ; GET /:master/:recordKey/versions                                                | record + version history         | `mdm.read`                          |                                  |
+| POST           | /change-sets ; PATCH /change-sets/:id ; POST /:id/operations                                               | build a change set               | `mdm.<domain>.propose`              | draft state                      |
+| POST           | /change-sets/:id/upload (CSV/XLSX)                                                                         | bulk operations                  | `mdm.<domain>.propose`              | row-level errors, all-or-nothing |
+| POST           | /change-sets/:id/validate                                                                                  | validation + impact analysis     | `mdm.<domain>.propose`              | returns affected counts          |
+| POST           | /change-sets/:id/submit ; /approve ; /reject ; /activate ; /rollback                                       | lifecycle                        | `mdm.<domain>.approve` (EN-038)     | proposer ≠ approver              |
+| GET            | /change-sets?domain&status&effectiveFrom                                                                   | change calendar                  | `mdm.read`                          | upcoming changes                 |
+| GET/POST       | /code-systems ; POST /code-systems/:id/load ; POST /:id/activate ; GET /:id/delta                          | terminology loaders              | `mdm.terminology.manage` (MRD + IT) | background job, delta review     |
+| GET            | /concepts?system&q&parent&descendantOf                                                                     | terminology search & subsumption | `mdm.read`                          | closure-backed                   |
+| GET/POST/PATCH | /value-sets ; POST /value-sets/:id/expand                                                                  | value sets                       | `mdm.valueset.manage` / read        | FHIR `$expand` (EN-019)          |
+| GET/POST/PATCH | /concept-maps ; POST /concept-maps/translate                                                               | mappings                         | `mdm.map.manage` / read             | FHIR `$translate`                |
+| GET/PATCH      | /mapping-backlog                                                                                           | unmapped-code queue              | `mdm.map.manage`                    | fed by EN-017/EN-019             |
+| GET/POST       | /duplicates ; POST /duplicates/:id/merge \| /reject ; POST /merges/:id/unmerge                             | golden record                    | `mdm.merge` (domain steward)        | 30-day unmerge                   |
+| GET/POST       | /sync/jobs ; POST /sync/publish {changeSetId, branches} ; GET /sync/overrides                              | cross-branch distribution        | `mdm.sync.manage` (Group Admin)     | override register                |
+| GET            | /quality/findings ; POST /quality/run ; GET /quality/scorecard                                             | data-quality dashboard           | `mdm.quality.read`                  | per-domain score                 |
+| GET/POST       | /review-campaigns ; POST /review-items/:id/attest                                                          | periodic stewardship review      | `mdm.review.manage`                 | NABH evidence                    |
+| GET            | /reports/change-history ; /reports/price-changes ; /reports/unmapped ; /reports/overrides ; /reports/usage | reports                          | `mdm.report.read`                   |                                  |
 
 ## 7. Domain Events (outbox)
+
 - `mdm.change_set.submitted|approved|rejected|activated|rolled_back` → EN-038, stewards, change calendar.
 - `mdm.<entity>.created|updated|retired|activated` (e.g. `mdm.drug.updated`, `mdm.service.activated`, `mdm.tariff.activated`) → **cache invalidation** across API/web, OP-002/OP-003/OP-004/OP-005 pickers, RC-003 tariff engine, EN-001 dimension refresh, EN-018 boards (department/doctor names), EN-039 templates.
 - `mdm.code_system.loaded|activated` → EN-019 capability statement refresh, coder remediation list, EN-011 (ABDM code compliance).
@@ -171,6 +185,7 @@ Each master declares in metadata: **owner role**, **scope** (system / group / ho
 - Consumes: `interop.terminology.gap_detected` (EN-019), `integration.mapping.unmapped_code` (EN-017), `pharmacy.drug.requested` / `lab.test.requested` (clinician requests for missing masters), `hr.department.changed`.
 
 ## 8. Screens (UI)
+
 - **Master Data Home** (desktop): domain tiles (Organisation, Clinical Terminology, Lab, Pharmacy, Radiology, Services & Pricing, Inventory, Payers, Finance) each with record counts, pending change sets, quality score, open duplicates and next review date; a **change calendar** strip showing upcoming effective dates.
 - **Master Browser** (desktop, one component reused per domain): virtualised table with an **"as of" date picker** in the toolbar (the single most important control — see the master as it was/will be), filters (status, branch, standard-code presence), inline status chips (active/retired/pending), and a detail drawer with tabs: Details, Version history (timeline with diffs), Mappings (LOINC/SNOMED/ICD/payer codes), Usage (where referenced, transaction counts), Branch enablement, Audit. Shortcuts: `/` search, `N` new, `E` edit (creates a change operation), `H` history, `Ctrl+D` duplicate check.
 - **Change Set Workbench** (desktop): operations list with per-row validation status, reason and effective date at the top, **impact panel** ("affects 1,240 active tariff lines, 18 packages, 3 order templates, 6 branches"), submit-for-approval, and an approver view with side-by-side before/after diffs and a one-click reject-with-reason.
@@ -184,15 +199,18 @@ Each master declares in metadata: **owner role**, **scope** (system / group / ho
 - Empty/error states: "No LOINC mapping for 43 tests — 12 are used daily", "This drug is retired (12-Mar-2026); use Paracetamol 500 mg tab (new code PARA500)", "Change set blocked: MRP ₹128 exceeds DPCO ceiling ₹96.20 for this formulation".
 
 ## 9. Integrations
+
 - **Terminology sources**: WHO ICD-10 / **ICD-11 MMS API**, **NRCeS SNOMED CT India** RF2 releases, **LOINC** (Regenstrief) releases, WHO ATC/DDD, UCUM, GST HSN/SAC master (CBIC), NPPA/DPCO ceiling price notifications, CDSCO drug listings, ROHINI hospital registry, PMJAY/CGHS/ESIC package masters (RC-007).
 - **EN-019** serves `ValueSet/$expand`, `ConceptMap/$translate` and `CodeSystem/$lookup` from these tables; **EN-017**'s mapping DSL calls `code_translate` here; **EN-011** validates that ABDM-bound records carry the required standard codes.
 - **EN-036** bulk-loads legacy masters during migration with dedupe and mapping to standards; **EN-001** consumes masters as analytics dimensions (slowly-changing dimension type 2, which the effective-dated design supplies naturally).
 - **Vendor/manufacturer** data (GTIN, UDI) from GS1 and CDSCO; drug interaction reference data from a licensed source feeding EN-029.
 
 ## 10. Reports & Analytics
+
 - Change history by domain/steward with approval trails (audit evidence); **price-change report** (what changed, when, by whom, impact on payer tariffs and packages); standards-coverage report (% of tests with LOINC, drugs with ATC/SNOMED, services with SAC, diagnoses with ICD) — a direct ABDM/NABL readiness indicator; unmapped-code backlog with occurrence-weighted priority; duplicate and merge history; branch override register (which branch deviates and why); master usage report (records never used in 12 months — candidates for retirement; records used most — candidates for review); code-system version inventory with licence status and expiry; review-campaign completion; data-quality trend. MV `analytics.mv_mdm_quality_monthly`, `analytics.dim_*` (dimension tables generated from effective-dated masters).
 
 ## 11. Notifications
+
 - Steward: change set awaiting your approval, validation failures on your upload, duplicate candidates queued, quality findings assigned, annual review due, DPCO/GST notification affecting your domain.
 - Clinicians/pharmacy/lab: "new tests added", "drug X retired — use Y", effective-dated price change taking effect tomorrow, terminology version updated with N codes retired.
 - Group/Branch Admin: change published to your branch (effective date), conflict during sync, override expiring.
@@ -200,9 +218,11 @@ Each master declares in metadata: **owner role**, **scope** (system / group / ho
 - Finance/Billing: tariff change activated, GST rate change effective from date, price above ceiling blocked.
 
 ## 12. Permissions (RBAC keys)
+
 `mdm.read` (all staff — pickers and lookups) · `mdm.<domain>.propose` (domain stewards: `mdm.pharmacy.propose`, `mdm.lab.propose`, `mdm.service.propose`, `mdm.org.propose`, `mdm.inventory.propose`, `mdm.payer.propose`, `mdm.finance.propose`) · `mdm.<domain>.approve` (domain approvers per EN-038; proposer ≠ approver) · `mdm.terminology.manage` (MRD Officer + IT Admin) · `mdm.valueset.manage` (Clinical Steward, MRD) · `mdm.map.manage` (MRD Coder, Lab Steward, Integration Engineer) · `mdm.merge` (domain steward; patient merges are OP-001's permission) · `mdm.sync.manage` (Group Admin) · `mdm.quality.read` (stewards, Quality Manager, Admin) · `mdm.review.manage` (Hospital Admin, Quality Manager) · `mdm.report.read` (Admin, Finance, Auditor) · `mdm.emergency_change` (Medical Superintendent + Steward, audited).
 
 ## 13. Non-functional
+
 - Volumes: ICD-10 ~14k codes, ICD-11 MMS ~85k entities, **SNOMED CT India ~350k active concepts / ~1.2 M descriptions / ~1.6 M relationships** (closure table in the tens of millions of rows), LOINC ~100k terms, drug master 8–15k generics × 40k brands, item master ~30k, service catalogue 3–8k, tariffs 8k × payers.
 - Search performance: terminology search p95 **< 200 ms** over 1.2 M descriptions (trigram GIN + prefix index + ranking); subsumption check < 20 ms via closure table; master pickers (drug/test/service) p95 < 100 ms served from Redis with event-based invalidation.
 - Point-in-time resolution must be index-supported: `(record_key, effective_from desc)` plus a partial index on `status='active'`; no full scans on hot lookups.
@@ -214,6 +234,7 @@ Each master declares in metadata: **owner role**, **scope** (system / group / ho
 - On-prem: full functionality offline; only code-system release downloads require internet, and they can be side-loaded from a file.
 
 ## 14. Acceptance Criteria
+
 1. Given a service price change with `effective_from = 1-Apr`, when a bill dated 15-Mar is reprinted on 20-Apr, then it shows the March price, and a bill created on 2-Apr shows the new price.
 2. Given a drug is retired, when a doctor searches for it in e-Rx, then it does not appear in the picker, historical prescriptions still resolve its name, and attempting to use it via API returns a clear "retired, use <replacement>" error.
 3. Given a change set is proposed by the Pharmacy Steward, when the same user attempts to approve it, then the action is blocked by segregation of duties.
@@ -234,6 +255,7 @@ Each master declares in metadata: **owner role**, **scope** (system / group / ho
 18. Given a GST rate change effective 1-Jul, when invoices are generated on 30-Jun and 1-Jul, then each uses the rate in force on its own date.
 
 ## 15. Enhancements / Later phases
+
 - Full **ICD-11 transition tooling**: dual coding (ICD-10 + ICD-11) during the transition, automated ICD-10↔ICD-11 mapping with clinician review, and reporting in either classification from the same data.
 - SNOMED CT **post-coordination** and expression constraint language (ECL) support for precise value-set definitions and cohort queries.
 - **Terminology server** as a standalone service with FHIR R4 terminology capabilities exposed to partners (EN-026), including `$closure` and `$subsumes`.
@@ -246,6 +268,7 @@ Each master declares in metadata: **owner role**, **scope** (system / group / ho
 - Simulation mode: "what if we change this tariff?" projecting revenue and payer impact before approval (with RC-003/RC-008).
 
 ## 16. Open Questions for the Hospital
+
 1. Which existing masters must be migrated (drug, item, service, tariff, test, ICD), in what format, and who owns their accuracy today?
 2. Does the hospital hold (or will it obtain) SNOMED CT India access via NRCeS and acknowledge LOINC usage terms? Who will be the terminology custodian?
 3. Is ICD-10 sufficient at go-live, or is ICD-11 required for any reporting stream? Any dual-coding obligation?

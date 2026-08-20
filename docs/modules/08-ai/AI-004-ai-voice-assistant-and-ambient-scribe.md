@@ -1,20 +1,21 @@
 # AI-004 — AI Voice Assistant & Ambient Scribe (Indian-Language & Code-Mixed Speech-to-Text, Ambient Consultation Capture with Dual Consent, SOAP Note Drafting, Voice Commands with Confirmation, Radiology Dictation, Nursing Voice Notes, On-Prem STT Option)
 
-| Field | Value |
-|---|---|
-| Domain | AI & Advanced Tech |
-| Module ID | AI-004 |
-| Phase | 12 |
-| Priority | P2 |
-| Complexity | Very High |
-| Depends on | **AI-001 §0 (AI Platform Foundation — mandatory)**, OP-002 (consultation note, CPOE), OP-008 (radiology reporting & dictation), IP-003 (nursing notes, SBAR handover), IP-006/IP-024 (op notes, anaesthesia record), EN-039 (note templates & macros), EN-028 (consent — **dual consent for ambient recording**), EN-027 (drug/test/diagnosis vocabulary), EN-029 (all voice-created orders pass full deterministic checks), EN-024 (audit), EN-007 (settings, secrets), AI-002 (structuring assistance), AI-006 (coding from the drafted note) |
-| Consumed by | OP-002, OP-008, IP-003, IP-002 (discharge summary drafting), IP-006, NC-003 (MRD documentation completeness), AI-006 |
-| Feature flag | `module.ai_voice.enabled` (sub: `voice.dictation`, `voice.ambient_scribe`, `voice.commands`, `voice.radiology`, `voice.nursing`, `voice.onprem_stt`, `voice.diarisation`) |
-| Primary roles | Doctor — Consultant/IP/Emergency (6/7/8), Radiologist (12), Surgeon (9), Nurse — Ward/ICU (17/18), Resident (14) |
-| Secondary roles | Pathologist (13), Anaesthetist (10), MRD Officer (43 — transcription QA), Medical Superintendent (4), DPO (57 — recording governance), IT Admin (56) |
-| Regulatory | **DPDP Act 2023 & Rules 2025** (voice is personal data; ambient recording of a consultation requires explicit, informed, separately-recorded consent from **both** patient and clinician, purpose-limited, with withdrawal and erasure); NMC Telemedicine Practice Guidelines 2020 & the NMC Code of Ethics (consultation recording, confidentiality); **NMC/MCI records rules — the signed note, not the transcript, is the medical record**; NABH 6th edn IMS/COP (legible, timely, authenticated documentation); Indian Telegraph/IT Act interception rules (no covert recording — a visible indicator is mandatory); CDSCO — transcription and drafting are documentation aids, explicitly not SaMD (AI-001 §0.8); ABDM/EHR Standards (final note stored as structured FHIR resources) |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Domain          | AI & Advanced Tech                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Module ID       | AI-004                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Phase           | 12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Priority        | P2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Complexity      | Very High                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Depends on      | **AI-001 §0 (AI Platform Foundation — mandatory)**, OP-002 (consultation note, CPOE), OP-008 (radiology reporting & dictation), IP-003 (nursing notes, SBAR handover), IP-006/IP-024 (op notes, anaesthesia record), EN-039 (note templates & macros), EN-028 (consent — **dual consent for ambient recording**), EN-027 (drug/test/diagnosis vocabulary), EN-029 (all voice-created orders pass full deterministic checks), EN-024 (audit), EN-007 (settings, secrets), AI-002 (structuring assistance), AI-006 (coding from the drafted note)                                                                                                                                                                                                                                            |
+| Consumed by     | OP-002, OP-008, IP-003, IP-002 (discharge summary drafting), IP-006, NC-003 (MRD documentation completeness), AI-006                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Feature flag    | `module.ai_voice.enabled` (sub: `voice.dictation`, `voice.ambient_scribe`, `voice.commands`, `voice.radiology`, `voice.nursing`, `voice.onprem_stt`, `voice.diarisation`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Primary roles   | Doctor — Consultant/IP/Emergency (6/7/8), Radiologist (12), Surgeon (9), Nurse — Ward/ICU (17/18), Resident (14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Secondary roles | Pathologist (13), Anaesthetist (10), MRD Officer (43 — transcription QA), Medical Superintendent (4), DPO (57 — recording governance), IT Admin (56)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Regulatory      | **DPDP Act 2023 & Rules 2025** (voice is personal data; ambient recording of a consultation requires explicit, informed, separately-recorded consent from **both** patient and clinician, purpose-limited, with withdrawal and erasure); NMC Telemedicine Practice Guidelines 2020 & the NMC Code of Ethics (consultation recording, confidentiality); **NMC/MCI records rules — the signed note, not the transcript, is the medical record**; NABH 6th edn IMS/COP (legible, timely, authenticated documentation); Indian Telegraph/IT Act interception rules (no covert recording — a visible indicator is mandatory); CDSCO — transcription and drafting are documentation aids, explicitly not SaMD (AI-001 §0.8); ABDM/EHR Standards (final note stored as structured FHIR resources) |
 
 ## 1. Purpose
+
 AI-004 lets clinicians speak instead of type: push-to-talk dictation into any clinical field, ambient capture of the
 whole consultation that is turned into a **draft** SOAP note for the doctor to edit and sign, voice commands for
 navigation and order entry with explicit confirmation, radiology dictation into OP-008 structured reports, and nursing
@@ -23,6 +24,7 @@ real consultations are conducted in. Nothing it produces is a record until a hum
 without both parties consenting.
 
 ## 2. Users & Jobs-to-be-done
+
 - **OPD consultant (6, desktop/tablet, 40–60 patients/day)**: talk to the patient normally; get a structured SOAP
   draft with history, examination, assessment and plan pre-filled when the patient leaves; edit for 30 seconds; sign.
   The job is to reclaim the 3–4 minutes/patient currently spent typing.
@@ -40,6 +42,7 @@ without both parties consenting.
 ## 3. Core Workflows
 
 ### 3.1 Consent (the gate for everything ambient)
+
 1. **Ambient capture is off by default per doctor, per room and per patient.** Enabling it requires three things:
    (a) the hospital has enabled the sub-flag, (b) the clinician has opted in (a signed acceptable-use acknowledgement
    stored in EN-028), and (c) the **patient consents for this encounter**.
@@ -47,7 +50,7 @@ without both parties consenting.
    (on the consultation-room tablet, kiosk or the patient's own phone via PE-001) explaining what is recorded, that
    the recording is deleted after the note is signed (default), that they may decline without any effect on their
    care, and that they may stop it at any moment. Recorded as an EN-028 consent artefact + `ai_consents(purpose=
-   ambient_recording)` → Event `voice.consent.granted`.
+ambient_recording)` → Event `voice.consent.granted`.
 3. **Dual consent**: the clinician also confirms on-screen ("Start ambient note"). Both identities, both timestamps
    and the consent artefact id are written on the session. A session cannot start with only one.
 4. **Visible recording indicator is mandatory and non-dismissible**: a red pulsing bar across the top of the screen,
@@ -61,6 +64,7 @@ without both parties consenting.
    requires an explicit hospital policy decision recorded per department.
 
 ### 3.2 Dictation (push-to-talk, no ambient recording)
+
 1. Clinician focuses any clinical text field and holds the mic hotkey (`F4` hold-to-talk, or a foot pedal / headset
    button) → streaming ASR shows an **interim transcript** within 800 ms and a stabilised transcript within 1.5 s of
    speech end.
@@ -76,6 +80,7 @@ without both parties consenting.
    into a short retention window for QA — which requires the same consent treatment as ambient.
 
 ### 3.3 Ambient consultation capture → SOAP draft
+
 1. Consent (§3.1) → **Start** → session opens with the encounter context (patient age/sex, chief complaint, problem
    list, current meds, recent results) supplied as structured context, not as audio.
 2. **Speaker diarisation** separates clinician / patient / attendant / other; the clinician's channel is preferred for
@@ -102,6 +107,7 @@ without both parties consenting.
    manual documentation (an unsigned AI draft must not linger as a shadow record).
 
 ### 3.4 Voice commands (navigation & order entry)
+
 1. Wake action is explicit (hotkey or "Hey Vim" only where a dedicated room device is configured — never
    always-listening on a shared clinical workstation).
 2. Command grammar is a **closed set** resolved to tools, never free generation: `open patient <UHID/name>`,
@@ -122,6 +128,7 @@ without both parties consenting.
    name, UHID and photo, to prevent wrong-patient documentation.
 
 ### 3.5 Radiology dictation (OP-008)
+
 1. Radiologist opens a study in the OHIF/PACS viewer (EN-008); the dictation panel binds to the OP-008 structured
    report template for that modality/body part.
 2. Foot pedal or headset controls record/pause/rewind; voice navigates fields ("findings", "impression",
@@ -133,6 +140,7 @@ without both parties consenting.
 5. Turnaround (dictation → signed report) is measured as a headline KPI.
 
 ### 3.6 Nursing voice notes (IP-003)
+
 1. Nurse holds the mic button on the phone PWA at the bedside → speaks the observation → transcript becomes a **draft
    nursing note** attached to the patient and shift, with any recognised structured elements (pain score, wound
    appearance, intake/output figures) offered as chips to confirm into the flowsheet.
@@ -142,6 +150,7 @@ without both parties consenting.
    (encrypted) and transcribes on reconnect, with the note remaining a draft until the nurse confirms.
 
 ### 3.7 Exceptions
+
 - **ASR unavailable / low audio quality** → the field falls back to typing with a clear banner; ambient sessions
   refuse to start rather than record audio that cannot be transcribed.
 - **Consent withdrawn mid-session** → immediate stop, audio purged, partial draft retained only if already accepted.
@@ -153,6 +162,7 @@ without both parties consenting.
   the transcript and flagged in the draft; the model never invents content to fill a gap.
 
 ## 4. Data Model (schema `ai`, prefix `voice_`; shared tables per AI-001 §0.10)
+
 - `voice_sessions` — id uuidv7, hospital_id, branch_id, mode enum(dictation/ambient/command/radiology/nursing),
   patient_id?, encounter_id?, study_id?, clinician_user_id, device_ref, room_ref?, language_primary,
   languages_detected[], started_at, ended_at, duration_sec, consent_artefact_id? (mandatory for ambient),
@@ -185,6 +195,7 @@ without both parties consenting.
   indefinitely.
 
 ## 5. Business Rules & Validations
+
 - **No recording without dual consent, and no covert recording ever.** The indicator is non-dismissible; a session
   that cannot render the indicator must not start.
 - **The signed note is the record; the transcript and draft are not.** Transcripts are working material, are labelled
@@ -211,25 +222,27 @@ without both parties consenting.
   per-tenant keys and object-lock disabled (so scheduled deletion actually deletes).
 
 ## 6. API Surface (`/api/v1/voice`)
-| Method | Path | Purpose | Permission | Notes |
-|---|---|---|---|---|
-| POST | /sessions | start a session (mode, context, consent refs) | `voice.session.start` | ambient requires consent artefact; returns WS token |
-| WS | /stream/:sessionId | bidirectional audio in / interim transcript out | session token | Opus 16 kHz mono; backpressure-aware |
-| POST | /sessions/:id/pause \| /resume \| /stop | session control | `voice.session.start` | pause is instant, audio-gated |
-| POST | /sessions/:id/withdraw-consent | patient withdrawal | patient/room device | purges audio immediately |
-| GET | /sessions/:id/transcript | working transcript | `voice.transcript.read` | PHI-audited, watermark "working material" |
-| POST | /sessions/:id/generate-note | produce the SOAP/report draft | `voice.note.generate` | schema-validated, grounded |
-| GET/PATCH | /drafts/:id | review & edit the draft | `voice.note.edit` | records edit distance |
-| POST | /drafts/:id/sign | hand to the owning module to create the signed note | `voice.note.sign` + the module's own note permission | creates OP-002/OP-008/IP-003 version |
-| POST | /drafts/:id/discard | discard with reason | `voice.note.edit` | |
-| POST | /commands/parse ; POST /commands/:id/confirm \| /reject \| /undo | voice command lifecycle | `voice.command.use` | confirm mandatory before execution |
-| GET/POST | /vocabulary ; POST /vocabulary/import | medical vocabulary customisation | `voice.vocabulary.manage` (12, 32, 56) | seeded from EN-027 |
-| POST | /corrections | submit a transcript correction | `voice.note.edit` | feeds vocabulary + golden set |
-| GET | /consent-log?patient&from&to | DPO evidence | `voice.consent.audit` (57, 58, 4) | append-only |
-| GET | /metrics/wer ; /metrics/adoption ; /metrics/time-saved | KPIs | `voice.report.read` | aggregate only for adoption |
-| POST | /quality-samples/:id/audit | manual WER/hallucination audit | `voice.quality.audit` (43, 54) | |
+
+| Method    | Path                                                             | Purpose                                             | Permission                                           | Notes                                               |
+| --------- | ---------------------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------- |
+| POST      | /sessions                                                        | start a session (mode, context, consent refs)       | `voice.session.start`                                | ambient requires consent artefact; returns WS token |
+| WS        | /stream/:sessionId                                               | bidirectional audio in / interim transcript out     | session token                                        | Opus 16 kHz mono; backpressure-aware                |
+| POST      | /sessions/:id/pause \| /resume \| /stop                          | session control                                     | `voice.session.start`                                | pause is instant, audio-gated                       |
+| POST      | /sessions/:id/withdraw-consent                                   | patient withdrawal                                  | patient/room device                                  | purges audio immediately                            |
+| GET       | /sessions/:id/transcript                                         | working transcript                                  | `voice.transcript.read`                              | PHI-audited, watermark "working material"           |
+| POST      | /sessions/:id/generate-note                                      | produce the SOAP/report draft                       | `voice.note.generate`                                | schema-validated, grounded                          |
+| GET/PATCH | /drafts/:id                                                      | review & edit the draft                             | `voice.note.edit`                                    | records edit distance                               |
+| POST      | /drafts/:id/sign                                                 | hand to the owning module to create the signed note | `voice.note.sign` + the module's own note permission | creates OP-002/OP-008/IP-003 version                |
+| POST      | /drafts/:id/discard                                              | discard with reason                                 | `voice.note.edit`                                    |                                                     |
+| POST      | /commands/parse ; POST /commands/:id/confirm \| /reject \| /undo | voice command lifecycle                             | `voice.command.use`                                  | confirm mandatory before execution                  |
+| GET/POST  | /vocabulary ; POST /vocabulary/import                            | medical vocabulary customisation                    | `voice.vocabulary.manage` (12, 32, 56)               | seeded from EN-027                                  |
+| POST      | /corrections                                                     | submit a transcript correction                      | `voice.note.edit`                                    | feeds vocabulary + golden set                       |
+| GET       | /consent-log?patient&from&to                                     | DPO evidence                                        | `voice.consent.audit` (57, 58, 4)                    | append-only                                         |
+| GET       | /metrics/wer ; /metrics/adoption ; /metrics/time-saved           | KPIs                                                | `voice.report.read`                                  | aggregate only for adoption                         |
+| POST      | /quality-samples/:id/audit                                       | manual WER/hallucination audit                      | `voice.quality.audit` (43, 54)                       |                                                     |
 
 ## 7. Domain Events (outbox)
+
 - `voice.consent.granted|withdrawn` → EN-028 ledger, DPO dashboard, audit. **Withdrawal triggers immediate purge.**
 - `voice.session.started|stopped|aborted` → audit, cost metering.
 - `voice.note.drafted` → clinician task ("draft ready"), MRD documentation-timeliness metric.
@@ -243,6 +256,7 @@ without both parties consenting.
   `consent.granted`, `note.signed`.
 
 ## 8. Screens (UI)
+
 - **Dictation affordance** (every clinical text field, desktop/tablet): mic icon with level meter, hold-to-talk
   (`F4`), interim text in grey italic → stabilised in normal weight, "dictated" chip until edited. `Esc` cancels the
   utterance, `Ctrl+Z` reverts. Works with a headset button and a USB foot pedal.
@@ -274,6 +288,7 @@ without both parties consenting.
   audio deleted — please document manually".
 
 ## 9. Integrations
+
 - **ASR engines** behind one adapter: cloud (Deepgram Nova / AssemblyAI / Whisper-large via provider, chosen per
   language and per tenant) and **on-prem** (Whisper-large-v3 or an Indic-tuned model served on the hospital's GPU
   node, plus a lightweight streaming model for interim results). Engine choice is per language and recorded on every
@@ -288,6 +303,7 @@ without both parties consenting.
   audio entirely inside the hospital network.
 
 ## 10. Reports & Analytics
+
 - **Accuracy**: word error rate overall and for **medical terms specifically** (the number that matters), by
   language, accent cluster, department, speaker and engine; hallucination rate from quality samples (target 0);
   diarisation accuracy.
@@ -304,6 +320,7 @@ without both parties consenting.
 - Read models: `analytics.mv_voice_wer_daily`, `mv_voice_adoption_daily`, `mv_voice_note_turnaround`.
 
 ## 11. Notifications
+
 - "Your note draft is ready" → clinician in-app (never SMS — it references a patient encounter).
 - Draft expiring in 4 hours / expired with audio deleted → clinician.
 - Consent withdrawal → clinician (immediate, in-session) + DPO log.
@@ -313,6 +330,7 @@ without both parties consenting.
 - WER regression after an engine/model change → Radiology lead, IT Admin, Governance Committee.
 
 ## 12. Permissions (RBAC keys)
+
 `voice.session.start` (6/7/8/9/10/11/12/13/14/17/18, per sub-flag) · `voice.transcript.read` (session owner; MRD 43
 and Auditor 58 with PHI audit) · `voice.note.generate` / `voice.note.edit` (session owner + covering clinician) ·
 `voice.note.sign` (only roles already permitted to sign that note type — voice adds no signing rights) ·
@@ -321,6 +339,7 @@ and Auditor 58 with PHI audit) · `voice.note.generate` / `voice.note.edit` (ses
 changes) · plus AI-001 §0.13.
 
 ## 13. Non-functional
+
 - **Volumes (2000-bed)**: 5000 OP consultations/day with 20 % ambient adoption ⇒ ~1000 ambient sessions/day averaging
   9 minutes ⇒ ~150 audio-hours/day; plus ~3000 dictation bursts/day, ~800 radiology dictations/day, ~2000 nursing
   voice notes/day. Peak 60 concurrent streams.
@@ -349,6 +368,7 @@ changes) · plus AI-001 §0.13.
   record → draft → edit → sign; a nightly purge-verification job that fails CI if any audio outlives its retention.
 
 ## 14. Acceptance Criteria
+
 1. **Given** ambient capture is requested, **when** either the patient's or the clinician's consent is missing,
    **then** the session cannot start, the microphone is never opened, and the reason is shown.
 2. **Given** an ambient session is running, **when** the screen is rendered, **then** a non-dismissible recording
@@ -390,6 +410,7 @@ changes) · plus AI-001 §0.13.
     excluded from the legal medical record export.
 
 ## 15. Enhancements / Later phases
+
 - **Ambient order extraction**: propose the orders and prescriptions discussed in the consultation as a pre-filled
   basket (still requiring EN-029 checks and a signature) — the biggest remaining time saving after the note itself.
 - **Discharge summary drafting** from the whole admission's notes (IP-002), and **operative note drafting** from the
@@ -402,10 +423,11 @@ changes) · plus AI-001 §0.13.
 - **Voice biometric speaker verification** for clinician identification at shared workstations (replacing the
   clinician-channel assumption in diarisation).
 - **Aosta-style "just speak" full-workflow voice** (market: Aosta BackBone "ava — Doctors just speak, ava handles the
-  rest") — we deliberately implement it as *speak-then-confirm* rather than *speak-and-commit*.
+  rest") — we deliberately implement it as _speak-then-confirm_ rather than _speak-and-commit_.
 - **Sentiment/empathy feedback** for communication-skills training, opt-in per clinician and never management-visible.
 
 ## 16. Open Questions for the Hospital
+
 1. Is ambient recording of consultations acceptable to the medical staff and the ethics committee at all? If yes, in
    which departments, and which are excluded (psychiatry, counselling, MLC, paediatrics, gynaecology)?
 2. Who drafts and approves the patient consent script, in which languages, and is it captured on a room tablet, a

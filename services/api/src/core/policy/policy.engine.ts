@@ -170,29 +170,58 @@ function evaluateConditions(input: EvaluateInput, conditions: AbacConditions): C
   const { context: ctx, resource } = input;
   const obligations: PolicyObligation[] = [];
 
-  if (conditions.branchIds && resource.branchId != null && !conditions.branchIds.includes(resource.branchId)) {
-    return { ok: false, reason: 'branch_not_granted', message: 'This branch is not in your grant.', obligations };
+  if (
+    conditions.branchIds &&
+    resource.branchId != null &&
+    !conditions.branchIds.includes(resource.branchId)
+  ) {
+    return {
+      ok: false,
+      reason: 'branch_not_granted',
+      message: 'This branch is not in your grant.',
+      obligations,
+    };
   }
   if (
     conditions.departmentIds &&
     resource.departmentId != null &&
     !conditions.departmentIds.includes(resource.departmentId)
   ) {
-    return { ok: false, reason: 'department_out_of_scope', message: 'This department is outside your scope.', obligations };
+    return {
+      ok: false,
+      reason: 'department_out_of_scope',
+      message: 'This department is outside your scope.',
+      obligations,
+    };
   }
   if (conditions.wardIds && resource.wardId != null && !conditions.wardIds.includes(resource.wardId)) {
-    return { ok: false, reason: 'ward_out_of_scope', message: 'This ward is outside your scope.', obligations };
+    return {
+      ok: false,
+      reason: 'ward_out_of_scope',
+      message: 'This ward is outside your scope.',
+      obligations,
+    };
   }
   if (conditions.assignedWardOnly && resource.wardId != null) {
     const granted = conditions.wardIds ?? [];
     if (granted.length > 0 && !granted.includes(resource.wardId)) {
-      return { ok: false, reason: 'ward_out_of_scope', message: 'You are not rostered to this ward.', obligations };
+      return {
+        ok: false,
+        reason: 'ward_out_of_scope',
+        message: 'You are not rostered to this ward.',
+        obligations,
+      };
     }
   }
   if (conditions.ownDepartmentOnly && resource.departmentId != null) {
     const granted = conditions.departmentIds ?? [];
     if (granted.length > 0 && !granted.includes(resource.departmentId)) {
-      return { ok: false, reason: 'department_out_of_scope', message: 'Only your own department.', obligations };
+      return {
+        ok: false,
+        reason: 'department_out_of_scope',
+        message: 'Only your own department.',
+        obligations,
+      };
     }
   }
   if (conditions.ownPatientsOnly && resource.patientId != null && resource.isOwnPatient !== true) {
@@ -209,28 +238,48 @@ function evaluateConditions(input: EvaluateInput, conditions: AbacConditions): C
       return {
         ok: false,
         reason: 'not_care_team',
-        message: 'You are not on this patient’s care team. Provide a reason to open the record under break-glass.',
+        message:
+          'You are not on this patient’s care team. Provide a reason to open the record under break-glass.',
         obligations,
       };
     }
   }
-  if (conditions.ownQueueOnly && resource.queueOwnerUserId != null && resource.queueOwnerUserId !== ctx.userId) {
+  if (
+    conditions.ownQueueOnly &&
+    resource.queueOwnerUserId != null &&
+    resource.queueOwnerUserId !== ctx.userId
+  ) {
     return { ok: false, reason: 'not_own_queue', message: 'You may only call your own queue.', obligations };
   }
   if (conditions.amountLimit && !withinAmountLimit(conditions.amountLimit, resource)) {
     return { ok: false, reason: 'amount_limit_exceeded', message: 'Above your approval limit.', obligations };
   }
   if (conditions.timeWindow && !withinTimeWindow(conditions.timeWindow, ctx.nowMs, ctx.timezone)) {
-    return { ok: false, reason: 'outside_time_window', message: 'Outside the permitted hours for this action.', obligations };
+    return {
+      ok: false,
+      reason: 'outside_time_window',
+      message: 'Outside the permitted hours for this action.',
+      obligations,
+    };
   }
   if (conditions.ipAllowlist && conditions.ipAllowlist.length > 0) {
     const ip = input.ip ?? null;
     if (ip === null || !conditions.ipAllowlist.includes(ip)) {
-      return { ok: false, reason: 'ip_not_allowed', message: 'This action is restricted to hospital networks.', obligations };
+      return {
+        ok: false,
+        reason: 'ip_not_allowed',
+        message: 'This action is restricted to hospital networks.',
+        obligations,
+      };
     }
   }
   if (conditions.deviceBound && input.deviceBound !== true) {
-    return { ok: false, reason: 'device_not_bound', message: 'This action requires a registered device.', obligations };
+    return {
+      ok: false,
+      reason: 'device_not_bound',
+      message: 'This action requires a registered device.',
+      obligations,
+    };
   }
   if (conditions.requiresSecondPerson) {
     const second = input.secondPersonUserId ?? null;
@@ -288,7 +337,12 @@ export function evaluate(input: EvaluateInput): PolicyDecision {
     const exempt =
       definition.clinicalSafetyExempt === true || CLINICAL_SAFETY_EXEMPT_PERMISSIONS.includes(permission);
     if (!exempt) {
-      return denial('not_licensed', 'This module is not licensed for your hospital.', [...trace, 'licence:blocked'], permission);
+      return denial(
+        'not_licensed',
+        'This module is not licensed for your hospital.',
+        [...trace, 'licence:blocked'],
+        permission,
+      );
     }
     trace.push('licence:exempt');
   } else if (input.licence) {
@@ -297,13 +351,27 @@ export function evaluate(input: EvaluateInput): PolicyDecision {
 
   // ── RBAC ─────────────────────────────────────────────────────────────────
   if (!ctx.permissions.has(permission)) {
-    return denial('missing_permission', 'You do not have permission to do this.', [...trace, 'rbac:miss'], permission);
+    return denial(
+      'missing_permission',
+      'You do not have permission to do this.',
+      [...trace, 'rbac:miss'],
+      permission,
+    );
   }
   trace.push('rbac:hit');
 
   // ── branch scope ─────────────────────────────────────────────────────────
-  if (resource.branchId != null && ctx.grantedBranchIds.length > 0 && !ctx.grantedBranchIds.includes(resource.branchId)) {
-    return denial('branch_not_granted', 'This branch is not in your grant.', [...trace, 'branch:denied'], permission);
+  if (
+    resource.branchId != null &&
+    ctx.grantedBranchIds.length > 0 &&
+    !ctx.grantedBranchIds.includes(resource.branchId)
+  ) {
+    return denial(
+      'branch_not_granted',
+      'This branch is not in your grant.',
+      [...trace, 'branch:denied'],
+      permission,
+    );
   }
   trace.push('branch:ok');
 
@@ -368,7 +436,12 @@ export function evaluate(input: EvaluateInput): PolicyDecision {
   // ── reason capture ───────────────────────────────────────────────────────
   if (definition.requiresReason === true || REASON_REQUIRED_PERMISSIONS.includes(permission)) {
     if (input.reason == null || input.reason.trim().length === 0) {
-      return denial('reason_required', 'A reason is required for this action.', [...trace, 'reason:missing'], permission);
+      return denial(
+        'reason_required',
+        'A reason is required for this action.',
+        [...trace, 'reason:missing'],
+        permission,
+      );
     }
     obligations.push({ kind: 'capture_reason' });
   }

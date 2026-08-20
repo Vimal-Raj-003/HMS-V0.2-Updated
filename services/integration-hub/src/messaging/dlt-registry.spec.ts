@@ -6,11 +6,7 @@ import {
   normaliseToDltContent,
 } from './dlt-registry.js';
 import { appointmentTemplate } from '../testing/messaging-fixtures.js';
-import {
-  appointmentDltRegistration,
-  clinicalSmsTemplate,
-  dltEntity,
-} from '../testing/messaging-fixtures.js';
+import { appointmentDltRegistration, clinicalSmsTemplate, dltEntity } from '../testing/messaging-fixtures.js';
 
 const HOSPITAL = '11111111-1111-4111-8111-111111111111';
 const clock = { now: (): Date => new Date('2026-08-21T04:30:00.000Z') };

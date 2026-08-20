@@ -132,7 +132,12 @@ function Step({
         {step.branch === undefined || step.branch.length === 0 ? null : (
           <ol className="mt-2 flex flex-col gap-3 border-s border-default ps-4">
             {step.branch.map((child) => (
-              <Step key={child.id} step={child} labels={labels} {...(action === undefined ? {} : { action })} />
+              <Step
+                key={child.id}
+                step={child}
+                labels={labels}
+                {...(action === undefined ? {} : { action })}
+              />
             ))}
           </ol>
         )}
@@ -141,7 +146,12 @@ function Step({
   );
 }
 
-export function ApprovalTimeline({ steps, labels, action, className }: ApprovalTimelineProps): React.JSX.Element {
+export function ApprovalTimeline({
+  steps,
+  labels,
+  action,
+  className,
+}: ApprovalTimelineProps): React.JSX.Element {
   return (
     <ol
       data-slot="approval-timeline"

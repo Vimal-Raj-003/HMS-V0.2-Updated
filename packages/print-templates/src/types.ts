@@ -24,13 +24,7 @@ import type { z } from 'zod';
 export type PrintFormat = 'a4' | 'a5' | 'escpos' | 'zpl';
 
 export type PaperSize =
-  | 'A4'
-  | 'A5'
-  | 'thermal_58mm'
-  | 'thermal_80mm'
-  | 'label_50x25'
-  | 'label_50x30'
-  | 'wristband';
+  'A4' | 'A5' | 'thermal_58mm' | 'thermal_80mm' | 'label_50x25' | 'label_50x30' | 'wristband';
 
 /** The document-type catalogue of `EN-005 §4.1`. Hospitals may add more. */
 export type DocType =
@@ -153,7 +147,8 @@ export interface PayloadIssue {
   readonly message: string;
 }
 
-export type PayloadValidation = { readonly ok: true } | { readonly ok: false; readonly issues: readonly PayloadIssue[] };
+export type PayloadValidation =
+  { readonly ok: true } | { readonly ok: false; readonly issues: readonly PayloadIssue[] };
 
 /** What the registry stores: the same template with its payload type erased. */
 export interface RegisteredTemplate {

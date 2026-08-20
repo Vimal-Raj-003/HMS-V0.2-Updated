@@ -193,11 +193,7 @@ export function hospitalOfRoom(name: string): string | null {
   return parseRoom(name)?.hospitalId ?? null;
 }
 
-export type JoinDenialReason =
-  | 'unparseable_room'
-  | 'cross_tenant'
-  | 'cross_branch'
-  | 'foreign_user_room';
+export type JoinDenialReason = 'unparseable_room' | 'cross_tenant' | 'cross_branch' | 'foreign_user_room';
 
 export type JoinDecision =
   | { readonly allowed: true; readonly room: ParsedRoom }

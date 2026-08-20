@@ -208,7 +208,9 @@ describe('Money rates, percentages and rounding', () => {
 
   it('accepts a rate written without its leading zero', () => {
     // Tariff masters imported from spreadsheets routinely carry ".5" rather than "0.5".
-    expect(Money.parse('100.00', 'INR').multiplyByRate('.5', 'half-up').value.toDecimalString()).toBe('50.00');
+    expect(Money.parse('100.00', 'INR').multiplyByRate('.5', 'half-up').value.toDecimalString()).toBe(
+      '50.00',
+    );
     expect(Money.parse('100.00', 'INR').percentage('.5').value.toDecimalString()).toBe('0.50');
   });
 
@@ -288,9 +290,9 @@ describe('Money splitting and allocation', () => {
     fc.assert(
       fc.property(
         anyMinor,
-        fc.array(fc.integer({ min: 0, max: 1_000 }), { minLength: 1, maxLength: 12 }).filter((w) =>
-          w.some((x) => x > 0),
-        ),
+        fc
+          .array(fc.integer({ min: 0, max: 1_000 }), { minLength: 1, maxLength: 12 })
+          .filter((w) => w.some((x) => x > 0)),
         (minor, weights) => {
           const total = Money.fromMinor(minor, 'INR');
           const shares = total.allocate(weights);

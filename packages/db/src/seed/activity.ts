@@ -98,7 +98,9 @@ async function seedNotifications(ctx: SeedContext, tenancy: SeededTenancy): Prom
       const notificationId = seedId('notif', hospital.code, String(i));
       const isCritical = severity === 'critical';
       const acknowledged = seedPick(10, 'notif-ack', key) < 7;
-      const patientId = isCritical ? syntheticPatientId(hospital.code, seedPick(200, 'notif-patient', key)) : null;
+      const patientId = isCritical
+        ? syntheticPatientId(hospital.code, seedPick(200, 'notif-patient', key))
+        : null;
 
       notifications.push({
         id: notificationId,
@@ -111,7 +113,9 @@ async function seedNotifications(ctx: SeedContext, tenancy: SeededTenancy): Prom
         // EN-037 §5: external channels carry location and urgency only. The
         // in-app body may say more, but the seeded corpus deliberately models
         // the minimised form so a screenshot can never leak a value.
-        body_short: isCritical ? `Ward 4B · Bed ${1 + seedPick(30, 'notif-bed', key)} · tap to view` : 'Tap to view',
+        body_short: isCritical
+          ? `Ward 4B · Bed ${1 + seedPick(30, 'notif-bed', key)} · tap to view`
+          : 'Tap to view',
         body_rich: null,
         payload: jsonb({ location: 'Ward 4B', urgency: severity }),
         contains_phi: isCritical,
@@ -150,9 +154,10 @@ async function seedNotifications(ctx: SeedContext, tenancy: SeededTenancy): Prom
         ack_channel: acknowledged ? 'inapp' : null,
         // EN-037 §3.4.4: "A tap that only dismisses is not an acknowledgement."
         // A critical acknowledgement carries the read-back record.
-        ack_response: acknowledged && isCritical
-          ? jsonb({ readBackConfirmed: true, calledBy: recipient.username, action: 'attending now' })
-          : null,
+        ack_response:
+          acknowledged && isCritical
+            ? jsonb({ readBackConfirmed: true, calledBy: recipient.username, action: 'attending now' })
+            : null,
         dismissed_at: null,
         snoozed_until: null,
         escalation_level: acknowledged ? 1 : isCritical ? 2 : 1,
@@ -358,7 +363,11 @@ async function seedPrintActivity(ctx: SeedContext, tenancy: SeededTenancy): Prom
       for (let i = 0; i < count; i += 1) {
         const key = `${hospital.code}:${b.code}:${i}`;
         const createdAt = seedDate(seedPick(28, 'print-day', key), seedPick(12, 'print-hour', key));
-        const docType = seedChoice(['token', 'op_receipt', 'lab_label', 'gst_invoice'] as const, 'print-doc', key);
+        const docType = seedChoice(
+          ['token', 'op_receipt', 'lab_label', 'gst_invoice'] as const,
+          'print-doc',
+          key,
+        );
         const isPdf = docType === 'gst_invoice';
 
         jobs.push({
@@ -374,7 +383,10 @@ async function seedPrintActivity(ctx: SeedContext, tenancy: SeededTenancy): Prom
           source_module: 'SEED',
           source_ref_type: 'seed_demo',
           source_ref_id: seedId('print-ref', hospital.code, b.code, String(i)),
-          patient_id: docType === 'lab_label' ? syntheticPatientId(hospital.code, seedPick(200, 'print-patient', key)) : null,
+          patient_id:
+            docType === 'lab_label'
+              ? syntheticPatientId(hospital.code, seedPick(200, 'print-patient', key))
+              : null,
           phi: docType === 'lab_label',
           file_id: null,
           render_job_id: isPdf ? seedId('tpl-render', hospital.code, b.code, String(i)) : null,
@@ -446,7 +458,12 @@ async function seedPrintActivity(ctx: SeedContext, tenancy: SeededTenancy): Prom
 
 /** `EN-040 §5`: metering records counts only, never patient identifiers. */
 async function seedUsage(ctx: SeedContext, tenancy: SeededTenancy): Promise<void> {
-  const meters = ['quota.sms.monthly', 'quota.email.monthly', 'quota.storage_gb', 'capacity.seats.clinical'] as const;
+  const meters = [
+    'quota.sms.monthly',
+    'quota.email.monthly',
+    'quota.storage_gb',
+    'capacity.seats.clinical',
+  ] as const;
   const rows: SeedRow[] = [];
 
   for (const hospital of tenancy.hospitals) {

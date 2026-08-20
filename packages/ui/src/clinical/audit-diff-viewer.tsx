@@ -59,9 +59,7 @@ export function AuditDiffViewer({ entry, labels, className }: AuditDiffViewerPro
       className={cn('flex flex-col gap-2 rounded-lg border border-default bg-layer-2 p-3', className)}
     >
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-fg-default">
-          {labels.byline(entry.actorName, entry.actorRole, entry.at)}
-        </p>
+        <p className="text-sm text-fg-default">{labels.byline(entry.actorName, entry.actorRole, entry.at)}</p>
         <span
           data-chain-verified={entry.hashChainVerified ? 'true' : 'false'}
           className={cn(

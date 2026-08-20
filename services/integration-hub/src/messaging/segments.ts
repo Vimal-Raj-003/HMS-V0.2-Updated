@@ -18,7 +18,7 @@
 const GSM7_BASIC = new Set<string>(
   [
     '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ',
-    " !\"#¤%&'()*+,-./0123456789:;<=>?",
+    ' !"#¤%&\'()*+,-./0123456789:;<=>?',
     '¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§',
     '¿abcdefghijklmnopqrstuvwxyzäöñüà',
   ]
@@ -61,12 +61,16 @@ export function countSegments(body: string): SegmentCount {
   }
 
   if (gsm7) {
-    const segments = septets <= GSM7_SINGLE ? Math.max(1, Math.ceil(septets / GSM7_SINGLE)) : Math.ceil(septets / GSM7_CONCATENATED);
+    const segments =
+      septets <= GSM7_SINGLE
+        ? Math.max(1, Math.ceil(septets / GSM7_SINGLE))
+        : Math.ceil(septets / GSM7_CONCATENATED);
     return { encoding: 'gsm7', segments: Math.max(segments, 1), units: septets, characters };
   }
 
   // UCS-2 counts UTF-16 code units, so an emoji outside the BMP costs two.
   const units = body.length;
-  const segments = units <= UCS2_SINGLE ? Math.max(1, Math.ceil(units / UCS2_SINGLE)) : Math.ceil(units / UCS2_CONCATENATED);
+  const segments =
+    units <= UCS2_SINGLE ? Math.max(1, Math.ceil(units / UCS2_SINGLE)) : Math.ceil(units / UCS2_CONCATENATED);
   return { encoding: 'ucs2', segments: Math.max(segments, 1), units, characters };
 }

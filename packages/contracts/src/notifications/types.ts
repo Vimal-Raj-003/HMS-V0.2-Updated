@@ -151,7 +151,11 @@ export const audienceExpressionSchema = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('explicit_users'), userIds: z.array(z.string().uuid()) }),
   z.object({ kind: z.literal('subscribers'), topicKind: z.string(), topicRef: z.string() }),
-  z.object({ kind: z.literal('devices'), deviceKind: z.enum(['tv', 'kiosk']), deviceRef: z.string().optional() }),
+  z.object({
+    kind: z.literal('devices'),
+    deviceKind: z.enum(['tv', 'kiosk']),
+    deviceRef: z.string().optional(),
+  }),
 ]);
 
 export type AudienceExpression = z.infer<typeof audienceExpressionSchema>;

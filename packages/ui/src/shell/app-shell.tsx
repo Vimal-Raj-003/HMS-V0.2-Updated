@@ -43,10 +43,7 @@ export interface AppShellProps {
   readonly className?: string;
 }
 
-function useToggleShortcut(
-  key: string,
-  onToggle: (() => void) | undefined,
-): void {
+function useToggleShortcut(key: string, onToggle: (() => void) | undefined): void {
   useEffect(() => {
     if (onToggle === undefined) return undefined;
     const handler = (event: KeyboardEvent): void => {

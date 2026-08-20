@@ -117,7 +117,9 @@ describe('the clinical-safety exemption', () => {
     const registered = new Set(ENTITLEMENT_KEYS);
     for (const tier of DEGRADATION_LADDER) {
       for (const capability of tier.restrictedCapabilities) {
-        expect(registered.has(capability), `tier ${tier.tier} restricts unknown key "${capability}"`).toBe(true);
+        expect(registered.has(capability), `tier ${tier.tier} restricts unknown key "${capability}"`).toBe(
+          true,
+        );
       }
     }
   });

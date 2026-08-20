@@ -64,7 +64,10 @@ export class SettingsService {
    * a secret key's *definition* is public, only its value is not — so this is
    * not a tenant read and does not write an audit row.
    */
-  definitions(): readonly Omit<EffectiveSetting, 'value' | 'source' | 'updatedAt' | 'updatedBy' | 'masked'>[] {
+  definitions(): readonly Omit<
+    EffectiveSetting,
+    'value' | 'source' | 'updatedAt' | 'updatedBy' | 'masked'
+  >[] {
     return SETTING_DEFINITIONS.map((d) => ({
       key: d.key,
       module: d.module,
@@ -133,7 +136,13 @@ export class SettingsService {
         case 'unknown_key':
         case 'scope_not_allowed':
         case 'invalid_value':
-          throw AppError.validation([{ path: check.code === 'invalid_value' ? 'value' : 'key', code: check.code, message: check.message }]);
+          throw AppError.validation([
+            {
+              path: check.code === 'invalid_value' ? 'value' : 'key',
+              code: check.code,
+              message: check.message,
+            },
+          ]);
         case 'needs_approval':
           throw new AppError(ProblemType.APPROVAL_REQUIRED, check.message, {
             nextAction: 'Raise an access request so a second administrator can approve the change.',

@@ -76,11 +76,7 @@ export interface AttemptDecision {
  * an open circuit whose cool-down has elapsed becomes half-open at the moment
  * someone tries, which is the only event available in a system with no timers.
  */
-export function canAttempt(
-  snapshot: CircuitSnapshot,
-  policy: CircuitConfig,
-  now: Date,
-): AttemptDecision {
+export function canAttempt(snapshot: CircuitSnapshot, policy: CircuitConfig, now: Date): AttemptDecision {
   switch (snapshot.state) {
     case 'closed':
       return { allowed: true, snapshot, reason: 'circuit closed' };

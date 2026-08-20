@@ -58,12 +58,7 @@ export class CircuitStore {
     };
   }
 
-  async save(
-    tx: TransactionClient,
-    key: CircuitKey,
-    snapshot: CircuitSnapshot,
-    now: Date,
-  ): Promise<void> {
+  async save(tx: TransactionClient, key: CircuitKey, snapshot: CircuitSnapshot, now: Date): Promise<void> {
     await tx.query(
       `INSERT INTO integration.ihub_circuit_state
          (id, hospital_id, connector_id, operation_id, state, consecutive_failures,

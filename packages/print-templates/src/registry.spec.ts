@@ -15,7 +15,9 @@ describe('the built-in template registry', () => {
     const keys = BUILT_IN_TEMPLATES.map((template) => template.key);
     expect(new Set(keys).size).toBe(keys.length);
     for (const template of BUILT_IN_TEMPLATES) {
-      expect(template.key, template.key).toBe(`${template.docType}.${templateFormatSuffix(template.format)}.v${template.version}`);
+      expect(template.key, template.key).toBe(
+        `${template.docType}.${templateFormatSuffix(template.format)}.v${template.version}`,
+      );
     }
   });
 

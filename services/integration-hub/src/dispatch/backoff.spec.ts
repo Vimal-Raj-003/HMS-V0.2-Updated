@@ -23,9 +23,7 @@ describe('retry backoff', () => {
   });
 
   it('spreads retries with jitter so the herd does not return in one second', () => {
-    const delays = new Set(
-      Array.from({ length: 50 }, (_, i) => backoffMs(R1, 1, `message-${String(i)}`)),
-    );
+    const delays = new Set(Array.from({ length: 50 }, (_, i) => backoffMs(R1, 1, `message-${String(i)}`)));
     // Distinct values across distinct messages is the property that matters;
     // an exact distribution is not worth asserting.
     expect(delays.size).toBeGreaterThan(20);

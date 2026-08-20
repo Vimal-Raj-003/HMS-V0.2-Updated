@@ -1,17 +1,7 @@
 import { SignJWT } from 'jose';
 import { describe, expect, it } from 'vitest';
-import {
-  claimsFor,
-  IDS,
-  signAccessToken,
-  TEST_ISSUER,
-  TEST_SECRET,
-} from '../__tests__/harness.js';
-import {
-  createAccessTokenVerifier,
-  readHandshakeToken,
-  TokenVerificationError,
-} from './access-token.js';
+import { claimsFor, IDS, signAccessToken, TEST_ISSUER, TEST_SECRET } from '../__tests__/harness.js';
+import { createAccessTokenVerifier, readHandshakeToken, TokenVerificationError } from './access-token.js';
 
 const verifier = createAccessTokenVerifier({ secret: TEST_SECRET, issuer: TEST_ISSUER });
 
@@ -49,9 +39,7 @@ describe('access-token verification (same contract as services/api)', () => {
     const body = Buffer.from(
       JSON.stringify({ ...claimsFor(), iss: TEST_ISSUER, exp: Math.floor(Date.now() / 1000) + 900 }),
     ).toString('base64url');
-    await expect(verifier.verify(`${header}.${body}.`)).rejects.toBeInstanceOf(
-      TokenVerificationError,
-    );
+    await expect(verifier.verify(`${header}.${body}.`)).rejects.toBeInstanceOf(TokenVerificationError);
   });
 
   it('rejects a token signed with a different HMAC algorithm', async () => {

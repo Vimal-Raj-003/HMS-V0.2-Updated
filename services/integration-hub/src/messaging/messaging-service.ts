@@ -47,15 +47,15 @@ import { MessageLog, type MessageHandle } from '../messages/message-log.js';
 import { DeadLetterQueue } from '../dlq/dead-letter-queue.js';
 import type { PayloadStore } from '../payload/payload-store.js';
 import { MESSAGING_DEFAULT_LOCALE as DEFAULT_LOCALE } from './locales.js';
-import type { ConsentLedger} from './consent-ledger.js';
+import type { ConsentLedger } from './consent-ledger.js';
 import { type ConsentRefusal } from './consent-ledger.js';
-import type { CostLedger} from './cost-ledger.js';
+import type { CostLedger } from './cost-ledger.js';
 import { type PricedMessage } from './cost-ledger.js';
-import type { DltTemplateRegistry} from './dlt-registry.js';
+import type { DltTemplateRegistry } from './dlt-registry.js';
 import { hashValues, type DltSendRefusal } from './dlt-registry.js';
 import { countSegments } from './segments.js';
 import { maskPhone, normaliseToE164 } from './phone.js';
-import type { TemplateCatalogue} from './template-catalogue.js';
+import type { TemplateCatalogue } from './template-catalogue.js';
 import { type TemplateVersion } from './template-catalogue.js';
 import type { MessageDirectory, SentMessageRef } from './directory.js';
 import {
@@ -256,7 +256,11 @@ export class MessagingService {
         ? undefined
         : await this.deps.templates.resolve(ctx.hospitalId, request.templateKey, 'whatsapp', locale);
 
-    const anyTemplate = smsTemplate.ok ? smsTemplate.template : waTemplate?.ok === true ? waTemplate.template : undefined;
+    const anyTemplate = smsTemplate.ok
+      ? smsTemplate.template
+      : waTemplate?.ok === true
+        ? waTemplate.template
+        : undefined;
     if (anyTemplate === undefined) {
       return this.refuse(ctx, {
         request,
@@ -300,7 +304,9 @@ export class MessagingService {
         reason: decision.reason,
         detail: decision.detail,
         at: now,
-        ...(outcome.status === 'refused' && outcome.messageId !== null ? { messageId: outcome.messageId } : {}),
+        ...(outcome.status === 'refused' && outcome.messageId !== null
+          ? { messageId: outcome.messageId }
+          : {}),
       });
       return outcome;
     }
@@ -581,7 +587,8 @@ export class MessagingService {
       refType: args.request.refType ?? null,
       refId: args.request.refId ?? null,
       ...(args.fallbackOfMessageId === undefined ? {} : { parentMessageId: args.fallbackOfMessageId }),
-      priority: args.template.messageClass === 'critical' ? 1 : args.template.messageClass === 'promotional' ? 8 : 5,
+      priority:
+        args.template.messageClass === 'critical' ? 1 : args.template.messageClass === 'promotional' ? 8 : 5,
     });
 
     if (outcome.status === 'duplicate') return { status: 'duplicate', messageId: outcome.messageId };
@@ -705,8 +712,7 @@ export class MessagingService {
       return { status: 'refused', reason: args.reason, detail: args.detail, messageId: null };
     }
 
-    const operation =
-      connector.operations.find((op) => op.key === 'sendSms') ?? connector.operations[0];
+    const operation = connector.operations.find((op) => op.key === 'sendSms') ?? connector.operations[0];
     const messageId = this.deps.newId();
 
     await this.deps.db.withTenant(ctx, (tx) =>

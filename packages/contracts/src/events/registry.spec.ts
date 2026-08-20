@@ -31,7 +31,9 @@ describe('event registry', () => {
   });
 
   it('rejects an unregistered type with an actionable message', () => {
-    expect(() => assertRegisteredEvent('bill.finalized')).toThrow(/Unregistered event type "bill\.finalized"/);
+    expect(() => assertRegisteredEvent('bill.finalized')).toThrow(
+      /Unregistered event type "bill\.finalized"/,
+    );
     expect(assertRegisteredEvent('admin.user.created').module).toBe('EN-007');
   });
 
@@ -109,7 +111,12 @@ describe('event envelope', () => {
     aggregateId: '0194f2c0-0000-7000-8000-000000000003',
     eventType: 'admin.user.created',
     aggregateVersion: 1,
-    payload: { userId: '0194f2c0-0000-7000-8000-000000000003', username: 'a.menon', type: 'staff', invitedBy: null },
+    payload: {
+      userId: '0194f2c0-0000-7000-8000-000000000003',
+      username: 'a.menon',
+      type: 'staff',
+      invitedBy: null,
+    },
     occurredAt: '2026-08-17T10:00:00.000Z',
     publishedAt: null,
     attempts: 0,
@@ -138,7 +145,9 @@ describe('event envelope', () => {
 
   it('requires an offset-bearing timestamp, never a naive local time', () => {
     // docs/03 §Table rules: timestamptz only.
-    expect(eventEnvelopeSchema.safeParse({ ...valid, occurredAt: '2026-08-17 10:00:00' }).success).toBe(false);
+    expect(eventEnvelopeSchema.safeParse({ ...valid, occurredAt: '2026-08-17 10:00:00' }).success).toBe(
+      false,
+    );
   });
 
   it('round-trips the payload of every registered event through its own schema', () => {

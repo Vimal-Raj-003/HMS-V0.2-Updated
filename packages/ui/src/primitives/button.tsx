@@ -38,9 +38,7 @@ export const buttonVariants = cva(
   },
 );
 
-export interface ButtonProps
-  extends ComponentProps<'button'>,
-    VariantProps<typeof buttonVariants> {
+export interface ButtonProps extends ComponentProps<'button'>, VariantProps<typeof buttonVariants> {
   /** Render the child element instead of a `<button>` (links, menu items). */
   readonly asChild?: boolean;
 }

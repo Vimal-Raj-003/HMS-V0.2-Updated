@@ -16,12 +16,7 @@ export interface TableProps extends ComponentProps<'table'> {
 
 export function Table({ className, scrollRegionLabel, ...props }: TableProps): React.JSX.Element {
   return (
-    <div
-      className="relative w-full overflow-auto"
-      role="region"
-      aria-label={scrollRegionLabel}
-      tabIndex={0}
-    >
+    <div className="relative w-full overflow-auto" role="region" aria-label={scrollRegionLabel} tabIndex={0}>
       <table
         data-slot="table"
         className={cn('w-full caption-bottom border-collapse text-sm', className)}

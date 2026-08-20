@@ -67,7 +67,9 @@ export class BranchesService {
     const values: unknown[] = [];
     const bind = (value: unknown): string => `$${values.push(value)}`;
     const keyset =
-      after === null ? '' : `AND (b.created_at, b.id) < (${bind(after.k[0])}::timestamptz, ${bind(after.id)}::uuid)`;
+      after === null
+        ? ''
+        : `AND (b.created_at, b.id) < (${bind(after.k[0])}::timestamptz, ${bind(after.id)}::uuid)`;
 
     const sql = `SELECT b.id, b.code, b.name, b.short_name, b.kind::text AS kind, b.status::text AS status,
                         b.parent_branch_id, b.timezone, b.currency, b.bed_count,

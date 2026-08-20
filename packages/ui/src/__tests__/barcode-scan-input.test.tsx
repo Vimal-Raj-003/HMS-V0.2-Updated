@@ -44,7 +44,9 @@ describe('BarcodeScanInput — docs/06 §5.2 #23 and §6.2', () => {
   });
 
   it('treats a fast keystroke burst terminated by Enter as a scan', async () => {
-    const resolve = vi.fn<(payload: string) => Promise<ScanResolution | null>>().mockResolvedValue(resolution);
+    const resolve = vi
+      .fn<(payload: string) => Promise<ScanResolution | null>>()
+      .mockResolvedValue(resolution);
     const onResolved = vi.fn();
     render(<BarcodeScanInput labels={labels} resolve={resolve} onResolved={onResolved} />);
 
@@ -67,7 +69,9 @@ describe('BarcodeScanInput — docs/06 §5.2 #23 and §6.2', () => {
   });
 
   it('ignores human typing speed — a slow burst is not a scan', () => {
-    const resolve = vi.fn<(payload: string) => Promise<ScanResolution | null>>().mockResolvedValue(resolution);
+    const resolve = vi
+      .fn<(payload: string) => Promise<ScanResolution | null>>()
+      .mockResolvedValue(resolution);
     render(<BarcodeScanInput labels={labels} resolve={resolve} onResolved={() => undefined} />);
     act(() => {
       burst('0021458710', 80);
@@ -76,7 +80,9 @@ describe('BarcodeScanInput — docs/06 §5.2 #23 and §6.2', () => {
   });
 
   it('ignores a burst that is too short to be a barcode', () => {
-    const resolve = vi.fn<(payload: string) => Promise<ScanResolution | null>>().mockResolvedValue(resolution);
+    const resolve = vi
+      .fn<(payload: string) => Promise<ScanResolution | null>>()
+      .mockResolvedValue(resolution);
     render(<BarcodeScanInput labels={labels} resolve={resolve} onResolved={() => undefined} />);
     act(() => {
       burst('123', 5);
@@ -85,7 +91,9 @@ describe('BarcodeScanInput — docs/06 §5.2 #23 and §6.2', () => {
   });
 
   it('strips the device-profile prefix before resolving', () => {
-    const resolve = vi.fn<(payload: string) => Promise<ScanResolution | null>>().mockResolvedValue(resolution);
+    const resolve = vi
+      .fn<(payload: string) => Promise<ScanResolution | null>>()
+      .mockResolvedValue(resolution);
     render(<BarcodeScanInput labels={labels} resolve={resolve} onResolved={() => undefined} prefix="~" />);
     act(() => {
       burst('~0021458710', 5);
@@ -106,7 +114,9 @@ describe('BarcodeScanInput — docs/06 §5.2 #23 and §6.2', () => {
   });
 
   it('always offers a keyboard-only manual entry path', async () => {
-    const resolve = vi.fn<(payload: string) => Promise<ScanResolution | null>>().mockResolvedValue(resolution);
+    const resolve = vi
+      .fn<(payload: string) => Promise<ScanResolution | null>>()
+      .mockResolvedValue(resolution);
     render(<BarcodeScanInput labels={labels} resolve={resolve} onResolved={() => undefined} />);
     const field = screen.getByLabelText(labels.fieldLabel);
     field.focus();
@@ -122,7 +132,9 @@ describe('BarcodeScanInput — docs/06 §5.2 #23 and §6.2', () => {
   it('has no axe violations', async () => {
     // axe-core schedules its own work; it needs the real timer queue.
     vi.useRealTimers();
-    const resolve = vi.fn<(payload: string) => Promise<ScanResolution | null>>().mockResolvedValue(resolution);
+    const resolve = vi
+      .fn<(payload: string) => Promise<ScanResolution | null>>()
+      .mockResolvedValue(resolution);
     const { container } = render(
       <BarcodeScanInput labels={labels} resolve={resolve} onResolved={() => undefined} />,
     );

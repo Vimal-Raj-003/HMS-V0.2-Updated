@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  PROBLEM_BASE_URI,
-  PROBLEM_STATUS,
-  PROBLEM_TITLES,
-  ProblemType,
-  buildProblem,
-} from './problem.js';
+import { PROBLEM_BASE_URI, PROBLEM_STATUS, PROBLEM_TITLES, ProblemType, buildProblem } from './problem.js';
 import type { ProblemTypeKey } from './problem.js';
 
 /**
@@ -165,7 +159,12 @@ describe('buildProblem', () => {
   });
 
   it('keeps a falsy-but-present value, so "retry after 0 seconds" is not lost', () => {
-    const problem = buildProblem({ ...base, type: ProblemType.RATE_LIMITED, status: 429, retryAfterSeconds: 0 });
+    const problem = buildProblem({
+      ...base,
+      type: ProblemType.RATE_LIMITED,
+      status: 429,
+      retryAfterSeconds: 0,
+    });
     expect(Object.hasOwn(problem, 'retryAfterSeconds')).toBe(true);
     expect(problem.retryAfterSeconds).toBe(0);
   });

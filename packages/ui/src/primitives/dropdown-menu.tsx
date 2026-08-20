@@ -44,7 +44,11 @@ export function DropdownMenuItem({
   ...props
 }: ComponentProps<typeof DropdownMenuPrimitive.Item>): React.JSX.Element {
   return (
-    <DropdownMenuPrimitive.Item data-slot="dropdown-menu-item" className={cn(itemClassName, className)} {...props} />
+    <DropdownMenuPrimitive.Item
+      data-slot="dropdown-menu-item"
+      className={cn(itemClassName, className)}
+      {...props}
+    />
   );
 }
 

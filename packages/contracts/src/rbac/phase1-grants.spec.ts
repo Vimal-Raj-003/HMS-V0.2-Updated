@@ -136,7 +136,9 @@ describe('Phase 1 role grants', () => {
 
   it('grants every Phase 1 key to at least one role', () => {
     const granted = new Set(ROLE_TEMPLATES.flatMap((t) => t.permissions));
-    const orphans = PERMISSION_CATALOGUE.filter((d) => d.phase === 1 && !granted.has(d.key)).map((d) => d.key);
+    const orphans = PERMISSION_CATALOGUE.filter((d) => d.phase === 1 && !granted.has(d.key)).map(
+      (d) => d.key,
+    );
     // An ungranted key is a route nobody can reach — invisible until somebody
     // reports that a whole screen is empty for every user.
     expect(orphans, 'Phase 1 keys held by no role template').toEqual([]);

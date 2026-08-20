@@ -41,7 +41,9 @@ function statusWebhook(id: string, status: string, errorCode?: number): string {
                   status,
                   timestamp: '1787000000',
                   recipient_id: '919876543210',
-                  ...(errorCode === undefined ? {} : { errors: [{ code: errorCode, title: 'Message undeliverable' }] }),
+                  ...(errorCode === undefined
+                    ? {}
+                    : { errors: [{ code: errorCode, title: 'Message undeliverable' }] }),
                   pricing: { category: 'utility' },
                 },
               ],
@@ -139,7 +141,10 @@ describe('WhatsApp Cloud send', () => {
 
   it('classifies an expired access token as retryable auth, not as a payload defect', async () => {
     const transport = new FakeHttpTransport([
-      { match: '/messages', response: jsonResponse(401, { error: { message: 'Session expired', code: 190 } }) },
+      {
+        match: '/messages',
+        response: jsonResponse(401, { error: { message: 'Session expired', code: 190 } }),
+      },
     ]);
     const adapter = await adapterWith(transport);
     const result = await adapter.send('sendTemplate', outboundMessage('sendTemplate', WHATSAPP_PAYLOAD));
@@ -150,7 +155,10 @@ describe('WhatsApp Cloud send', () => {
 
   it('classifies a paused template so its traffic can move to SMS', async () => {
     const transport = new FakeHttpTransport([
-      { match: '/messages', response: jsonResponse(400, { error: { message: 'Template paused', code: 132015 } }) },
+      {
+        match: '/messages',
+        response: jsonResponse(400, { error: { message: 'Template paused', code: 132015 } }),
+      },
     ]);
     const adapter = await adapterWith(transport);
     const result = await adapter.send('sendTemplate', outboundMessage('sendTemplate', WHATSAPP_PAYLOAD));
@@ -161,7 +169,10 @@ describe('WhatsApp Cloud send', () => {
 
   it('classifies a Meta rate limit as retryable', async () => {
     const transport = new FakeHttpTransport([
-      { match: '/messages', response: jsonResponse(429, { error: { message: 'Rate limit hit', code: 130429 } }) },
+      {
+        match: '/messages',
+        response: jsonResponse(429, { error: { message: 'Rate limit hit', code: 130429 } }),
+      },
     ]);
     const adapter = await adapterWith(transport);
     const result = await adapter.send('sendTemplate', outboundMessage('sendTemplate', WHATSAPP_PAYLOAD));
@@ -275,7 +286,10 @@ describe('WhatsApp Cloud webhooks', () => {
 describe('WhatsApp Cloud health check', () => {
   it('warns below a GREEN quality rating, which is what silently throttles a hospital', async () => {
     const transport = new FakeHttpTransport([
-      { match: 'quality_rating', response: jsonResponse(200, { quality_rating: 'YELLOW', verified_name: 'Vims' }) },
+      {
+        match: 'quality_rating',
+        response: jsonResponse(200, { quality_rating: 'YELLOW', verified_name: 'Vims' }),
+      },
     ]);
     const adapter = await adapterWith(transport);
     const report = await adapter.healthCheck('ping');

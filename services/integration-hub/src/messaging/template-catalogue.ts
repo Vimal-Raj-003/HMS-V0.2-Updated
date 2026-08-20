@@ -142,7 +142,13 @@ export class TemplateCatalogue {
   ): Promise<TemplateResolution> {
     const exact = await this.store.get(hospitalId, key, channel, locale);
     if (exact !== undefined) {
-      return { ok: true, template: exact, requestedLocale: locale, resolvedLocale: locale, fellBackToDefault: false };
+      return {
+        ok: true,
+        template: exact,
+        requestedLocale: locale,
+        resolvedLocale: locale,
+        fellBackToDefault: false,
+      };
     }
 
     if (locale !== DEFAULT_LOCALE) {

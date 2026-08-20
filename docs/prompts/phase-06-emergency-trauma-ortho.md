@@ -4,10 +4,11 @@ Phases 0–5 complete: a patient can be registered, seen, investigated, dispense
 front door at 3 a.m. — where the patient cannot wait, cannot pay first, and sometimes cannot tell you their name.
 
 ## Read first
+
 `CLAUDE.md`, `docs/PROGRESS.md`, then: **OP-006** (ER intake, ER board, day care), **TR-001** (triage & scoring),
 **TR-008** (MLC & forensic), **TR-009** (pre-hospital), **NC-013** (ambulance & fleet), **TR-002** (fracture
 registry), **OP-009** (orthopaedic OPD), **TR-003** (implants & prosthetics), **TR-005** (cast & splint),
-**TR-007** (polytrauma board), **TR-004** §3.1–3.2 (emergency OT request — only the *request and hold* side; the OT
+**TR-007** (polytrauma board), **TR-004** §3.1–3.2 (emergency OT request — only the _request and hold_ side; the OT
 itself is Phase 7), **EN-037** (paging, escalation, on-call routing), plus **EN-013** (tags/wristbands),
 **EN-018** (trauma bay and ER boards), **EN-029** (activation criteria and score rules), **EN-039** (survey forms),
 **NC-030** (on-call roster — read-only consumer here), and `docs/04-security-compliance.md` §7,
@@ -29,6 +30,7 @@ once, the same tablets switch to tag-based triage and keep working with the netw
 ## Deliverables
 
 ### 6.1 ER intake, quick registration and the ER board (OP-006)
+
 Arrival modes (walk-in, ambulance with TR-009 pre-arrival record, police-brought, referred, MCI). **Quick reg
 (`F1`)**: name-or-"Unknown Male ~40", gender, approximate age, complaint, brought-by, MLC suspicion — UHID or
 **`ER-TAG-<seq>` temporary identity** with photo, wristband printed, ER visit on the `ER_NO` series, all in under
@@ -42,6 +44,7 @@ event now). Dispositions: admit (one-click into the IP-001 request, pre-filled �
 with ER summary, refer out, LAMA/DAMA with witnessed consent, absconded, death, observation.
 
 ### 6.2 Triage engines (TR-001)
+
 **ESI 5-level** computed server-side from a shared pure function in `packages/contracts/scores`: decision points
 A (immediate life-saving intervention), B (high risk / new confusion / severe pain), C (resource count),
 D (danger-zone vitals by age band, including the paediatric tables). Nurse confirms or overrides with a
@@ -53,6 +56,7 @@ paediatric (PEWS/JumpSTART), obstetric, poisoning (antidote stock check), psychi
 infectious (isolation flag).
 
 ### 6.3 Trauma team activation and paging (TR-001 §3.3 + EN-037 + NC-030)
+
 Tiered activation criteria as an EN-029 rule set, seeded from ACS-COT defaults and hospital-editable:
 **Level 1** (SBP < 90 age-adjusted, GCS ≤ 8 with mechanism, RR < 10 or > 29, field intubation, penetrating torso/
 neck/head injury, gunshot, flail chest, ≥ 2 long-bone fractures, suspected pelvic fracture, paralysis, proximal
@@ -65,6 +69,7 @@ and ICU (bed hold) through EN-037 using the NC-030 roster, with acknowledgement,
 Under-/over-triage (activation tier vs final ISS, Cribari matrix) is captured now for TR-011 in Phase 11.
 
 ### 6.4 Golden-hour primary survey and score auto-calculation (TR-001 §3.4–3.5)
+
 Tablet ATLS **primary survey** (A/B/C/D/E) where every intervention writes a timestamped row: airway and collar
 time, needle decompression and ICD, **tourniquet on-time with alarms at 90 and 120 minutes**, pelvic binder, IV/IO
 access, fluid and blood volumes, FAST result, MTP activation, pupils, glucose, exposure and log-roll.
@@ -76,10 +81,11 @@ and a head-to-toe **body diagram** (adult and paediatric SVG, front/back/lateral
 Auto-calculated and versioned: **RTS** from coded GCS/SBP/RR bands, **AIS → ISS** (sum of squares of the three
 highest AIS in different regions; any AIS 6 → ISS 75) and **NISS**, shock index, MGAP/GAP, and **TRISS**
 (blunt/penetrating coefficient sets, MTOS default, local coefficient set loadable and versioned). Arrival values
-are frozen for TRISS. Scores are *provisional* until locked by a coder or EM consultant; post-lock edits create a
+are frozen for TRISS. Scores are _provisional_ until locked by a coder or EM consultant; post-lock edits create a
 new version with reason.
 
 ### 6.5 Mass-casualty mode (TR-001 §3.2 + OP-006 §3.2.4)
+
 Declaring an MCI (locally or from the 108 control room) switches ER tablets to a single-screen **START/JumpSTART**
 wizard: scan a pre-printed four-colour tag (`MCI-<incident>-<seq>`, batch-printed via EN-013), answer the walk/
 breathing/RR/perfusion/mental-status ladder, store category with timestamp, triage officer, optional GPS and photo,
@@ -91,6 +97,7 @@ that preserves every TR-001, TR-008 and OP-006 record and re-points billing. Sta
 report (casualties by category, time to triage, over/under-triage against final ISS).
 
 ### 6.6 MLC register, police intimation and chain of custody (TR-008)
+
 Auto-suggest MLC from the structured mechanism (RTA, assault, burns, self-harm, firearm, industrial, fall from
 height, animal attack, unknown patient); the doctor accepts or declines with a reason. **Gapless `MLC` numbering.**
 Police intimation form generated, dispatched and acknowledged with the receiving officer's name, number and time.
@@ -104,6 +111,7 @@ is given; police receive the intimation form only, never the clinical record, un
 MLC visits are excluded from routine WhatsApp report pushes; MLC records are retained permanently.
 
 ### 6.7 Fracture registry and orthopaedic OPD (TR-002 + OP-009)
+
 Fracture entry creatable from any care setting (ER, OPD, ward, OT): bone and segment, side (mandatory),
 **AO/OTA classification** with a guided picker, open vs closed, **Gustilo-Anderson grade for open fractures**
 (which starts the antibiotic-within-an-hour clock), mechanism, associated injuries, neurovascular status.
@@ -115,6 +123,7 @@ seeded ortho order sets, seeded follow-up protocols with offsets from an anchor 
 TR-010 land later — emit the referral), and PROMs.
 
 ### 6.8 Implant and prosthetics traceability (TR-003)
+
 Implant catalogue with **UDI/GTIN**, serial or lot, manufacturer, size/laterality, MRI conditionality and shelf
 life. Receipt from owned stock or **consignment (NC-007 handshake)**. Pre-op planning with availability check and
 size-range hold. **Intra-op scan-to-patient**: each implant scanned, bound to the patient, the surgeon and the
@@ -125,6 +134,7 @@ charge intent to IP-005/OP-005 at the consignment price. Patient implant record 
 their surgeons, and track the response — this is the single most important test in this deliverable.
 
 ### 6.9 Cast, splint, brace and traction (TR-005)
+
 Immobilisation request → application (plaster room, ER, ward or OT) with material, position, limb and applier →
 **complication watch** (compartment syndrome red flags, pressure areas, cast-related pain) with patient-facing
 warning instructions in the patient's language → scheduled checks and changes → removal with follow-through to the
@@ -132,6 +142,7 @@ fracture record. Plaster room operations and consumables, traction and external-
 schedules**, braces and orthoses, and optional patient photo self-report for tele-checks.
 
 ### 6.10 Polytrauma coordination board (TR-007)
+
 One card per polytrauma patient composed from TR-001 scores, TR-002 injuries, orders, imaging, blood and consent
 state. Multi-specialty consult requests with SLA timers and escalation. **Surgical priority queue and sequencing**
 (life-saving before limb-saving before definitive), blood requirement tracking against IP-007 (Phase 7 — model the
@@ -139,6 +150,7 @@ requirement now), consent tracking per planned procedure, team assignment and ta
 a family-communication view, MDT huddle notes, and case closure.
 
 ### 6.11 Pre-hospital, ambulance fleet, observation and day care (TR-009 + NC-013 + OP-006 §3.7–3.8)
+
 Trip intake from 108/112, internal and private requests; dispatch and crew assignment; **GPS tracking with live ETA**;
 the pre-hospital **patient care record** with vitals relay; **ER pre-alert** that creates the pre-arrival record,
 pre-assigns a bay and can pre-fire team activation; digital handover on arrival that carries pre-hospital vitals
@@ -151,6 +163,7 @@ list-restricted procedures mapped to insurer day-care lists, discharge only on a
 signature, midnight-crossing policy flag, package variance approvals via OP-023.
 
 ## Constraints & watch-outs
+
 - **No triage, resuscitation or MCI screen may block on an external service.** ABHA, payment gateway, SMS, the
   fleet GPS provider and even the central API may be down; triage, tags, wristbands, primary survey and orders
   must still work. Registration is never a precondition for care and there is no "pay first" gate anywhere in ER
@@ -159,7 +172,7 @@ signature, midnight-crossing policy flag, package variance approvals via OP-023.
   IndexedDB with idempotency keys, device clock plus monotonic sequence, and sync within 10 seconds of reconnect.
   MCI records de-duplicate by tag number, keeping every version. On-prem edge API node is the recommended
   deployment for trauma centres — document it.
-- **Tablet-first, glove-friendly.** 48 px targets, one-hand reach, colour *plus* numeral *plus* icon for every
+- **Tablet-first, glove-friendly.** 48 px targets, one-hand reach, colour _plus_ numeral _plus_ icon for every
   triage category, high-contrast board, audible alarms mutable per bay, bilingual tags.
 - Performance budgets: ESI suggestion < 50 ms (pure function), triage save < 200 ms p95, START record < 150 ms
   server and < 20 ms offline, score recompute < 100 ms, board load < 150 ms, board socket update < 1 s, activation
@@ -176,6 +189,7 @@ signature, midnight-crossing policy flag, package variance approvals via OP-023.
 - No AI. Activation criteria, triage suggestions and deterioration alerts are EN-029 rules.
 
 ## Exit gate
+
 1. An ambulance pre-alerts, the ER board shows the inbound patient with ETA and pre-hospital vitals, a bay is
    pre-assigned, and on arrival the handover carries the vitals into triage with zero re-keying.
 2. An unknown unconscious patient is tagged, wristbanded and treated in under 30 seconds; two hours later the tag

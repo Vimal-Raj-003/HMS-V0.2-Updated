@@ -45,7 +45,10 @@ export interface MessageDirectory {
   put(ref: SentMessageRef): Promise<void>;
   byProviderMessageId(hospitalId: string, providerMessageId: string): Promise<SentMessageRef | undefined>;
   byMessageId(messageId: string): Promise<SentMessageRef | undefined>;
-  update(messageId: string, patch: Partial<Pick<SentMessageRef, 'status' | 'fallbackMessageId'>>): Promise<void>;
+  update(
+    messageId: string,
+    patch: Partial<Pick<SentMessageRef, 'status' | 'fallbackMessageId'>>,
+  ): Promise<void>;
 }
 
 export class InMemoryMessageDirectory implements MessageDirectory {

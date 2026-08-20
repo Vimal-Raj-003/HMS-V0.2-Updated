@@ -30,12 +30,20 @@ export const envSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().min(60).default(900),
-  JWT_REFRESH_TTL_SECONDS: z.coerce.number().int().min(300).default(60 * 60 * 24 * 30),
+  JWT_REFRESH_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(300)
+    .default(60 * 60 * 24 * 30),
   JWT_ISSUER: z.string().default('vims-hms'),
 
   /** Idle timeout, docs/05: 15 minutes for clinical screens. */
   SESSION_IDLE_TIMEOUT_SECONDS: z.coerce.number().int().min(60).default(900),
-  SESSION_ABSOLUTE_TIMEOUT_SECONDS: z.coerce.number().int().min(600).default(60 * 60 * 12),
+  SESSION_ABSOLUTE_TIMEOUT_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(600)
+    .default(60 * 60 * 12),
   SESSION_MAX_CONCURRENT: z.coerce.number().int().min(1).default(5),
 
   /** docs/05: lockout after 5 failed attempts. */

@@ -8,7 +8,12 @@ export {
   type ZplRotation,
 } from './commands.js';
 
-export { labLabelPayloadSchema, labLabelTemplate, renderLabLabel, type LabLabelPayload } from './lab-label.js';
+export {
+  labLabelPayloadSchema,
+  labLabelTemplate,
+  renderLabLabel,
+  type LabLabelPayload,
+} from './lab-label.js';
 export {
   renderWristband,
   wristbandPayloadSchema,

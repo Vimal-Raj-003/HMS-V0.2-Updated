@@ -69,9 +69,11 @@ export async function seedPatientPopulation(ctx: SeedContext, tenancy: SeededTen
   }
 
   await seedMpiCases(ctx, tenancy);
-  await seedFrontOfficeActivity(ctx, tenancy, new Map(
-    tenancy.hospitals.map((h, i) => [h.code, counts[i] ?? 0]),
-  ));
+  await seedFrontOfficeActivity(
+    ctx,
+    tenancy,
+    new Map(tenancy.hospitals.map((h, i) => [h.code, counts[i] ?? 0])),
+  );
 }
 
 async function ensurePartitions(ctx: SeedContext): Promise<void> {
@@ -134,7 +136,13 @@ async function seedPatientsFor(
         age_days: null,
         blood_group: p.bloodGroup,
         marital_status: p.maritalStatus,
-        allergy_statement: hasAllergy ? 'known' : i % 5 === 1 ? 'none_known' : i % 29 === 3 ? 'unable_to_assess' : 'not_recorded',
+        allergy_statement: hasAllergy
+          ? 'known'
+          : i % 5 === 1
+            ? 'none_known'
+            : i % 29 === 3
+              ? 'unable_to_assess'
+              : 'not_recorded',
         allergy_asserted_by: hasAllergy || i % 5 === 1 || i % 29 === 3 ? allergyAsserterId : null,
         allergy_asserted_at: hasAllergy || i % 5 === 1 || i % 29 === 3 ? SEED_EPOCH : null,
         allergy_unable_reason:
@@ -235,7 +243,14 @@ async function seedPatientsFor(
           id: seedId('patient-identifier', hospital.code, String(i), 'govt'),
           hospital_id: hospital.id,
           patient_id: id,
-          type: p.idTypeCode === 'PAN' ? 'pan' : p.idTypeCode === 'PASSPORT' ? 'passport' : p.idTypeCode === 'VOTER' ? 'voter_id' : 'driving_licence',
+          type:
+            p.idTypeCode === 'PAN'
+              ? 'pan'
+              : p.idTypeCode === 'PASSPORT'
+                ? 'passport'
+                : p.idTypeCode === 'VOTER'
+                  ? 'voter_id'
+                  : 'driving_licence',
           id_type_code: p.idTypeCode,
           value_normalised: value,
           value_masked: `••••${p.idLast4}`,
@@ -285,12 +300,14 @@ async function seedPatientsFor(
       // figure a real MPI shows, and enough that the banner and the (Phase-2)
       // interaction checker have something to fire on.
       if (hasAllergy) {
-        const substance = ['Penicillin', 'Sulfonamides', 'Ibuprofen', 'Iodinated contrast', 'Peanut'][i % 5] ?? 'Penicillin';
+        const substance =
+          ['Penicillin', 'Sulfonamides', 'Ibuprofen', 'Iodinated contrast', 'Peanut'][i % 5] ?? 'Penicillin';
         allergies.push({
           id: seedId('patient-allergy', hospital.code, String(i)),
           hospital_id: hospital.id,
           patient_id: id,
-          category: substance === 'Peanut' ? 'food' : substance === 'Iodinated contrast' ? 'biologic' : 'drug',
+          category:
+            substance === 'Peanut' ? 'food' : substance === 'Iodinated contrast' ? 'biologic' : 'drug',
           code_system_key: null,
           substance_code: null,
           substance_text: substance,
@@ -415,10 +432,26 @@ async function seedMpiCases(ctx: SeedContext, tenancy: SeededTenancy): Promise<v
       survivor_uhid: syntheticUhid(branch.shortName, survivorIndex),
       victim_uhid: syntheticUhid(branch.shortName, victimIndex),
       status: 'completed',
-      reason: 'Same patient registered twice on the same day at two counters; mobile and date of birth identical.',
-      survivor_snapshot: jsonb({ uhid: syntheticUhid(branch.shortName, survivorIndex), fullName: survivor.fullName, dob: survivor.dob, mobile: survivor.mobile }),
-      victim_snapshot: jsonb({ uhid: syntheticUhid(branch.shortName, victimIndex), fullName: victim.fullName, dob: victim.dob, mobile: victim.mobile }),
-      field_choices: jsonb({ fullName: 'survivor', mobile: 'survivor', address: 'victim', bloodGroup: 'victim' }),
+      reason:
+        'Same patient registered twice on the same day at two counters; mobile and date of birth identical.',
+      survivor_snapshot: jsonb({
+        uhid: syntheticUhid(branch.shortName, survivorIndex),
+        fullName: survivor.fullName,
+        dob: survivor.dob,
+        mobile: survivor.mobile,
+      }),
+      victim_snapshot: jsonb({
+        uhid: syntheticUhid(branch.shortName, victimIndex),
+        fullName: victim.fullName,
+        dob: victim.dob,
+        mobile: victim.mobile,
+      }),
+      field_choices: jsonb({
+        fullName: 'survivor',
+        mobile: 'survivor',
+        address: 'victim',
+        bloodGroup: 'victim',
+      }),
       requested_by: null,
       requested_at: seedDate(10),
       approval_id: null,
@@ -467,7 +500,8 @@ async function seedMpiCases(ctx: SeedContext, tenancy: SeededTenancy): Promise<v
       changed_fields: ['address_line1', 'blood_group'],
       before: jsonb({ addressLine1: survivor.addressLine1, bloodGroup: survivor.bloodGroup }),
       after: jsonb({ addressLine1: victim.addressLine1, bloodGroup: victim.bloodGroup }),
-      reason: 'Field-level choices applied during MPI merge; the surviving record keeps the more recent address.',
+      reason:
+        'Field-level choices applied during MPI merge; the surviving record keeps the more recent address.',
       channel: 'merge',
       changed_by: null,
       changed_at: seedDate(10, 1),
@@ -504,8 +538,16 @@ async function seedMpiCases(ctx: SeedContext, tenancy: SeededTenancy): Promise<v
 // ── one day of front-office activity ────────────────────────────────────────
 
 const PRACTITIONER_CODES = [
-  'DR001', 'DR002', 'DR003', 'DR004', 'DR005',
-  'DR006', 'DR007', 'DR008', 'DR009', 'DR010',
+  'DR001',
+  'DR002',
+  'DR003',
+  'DR004',
+  'DR005',
+  'DR006',
+  'DR007',
+  'DR008',
+  'DR009',
+  'DR010',
 ] as const;
 
 /**
@@ -618,7 +660,9 @@ async function seedFrontOfficeActivity(
         const patientIndex = (drIndex * 500 + n + 10) % population;
         const patientId = patientSeedId(h.code, patientIndex);
         const startMinutes = 9 * 60 + n * 15;
-        const slotStart = new Date(Date.UTC(2026, 0, 5, Math.floor(startMinutes / 60) - 5, (startMinutes % 60) - 30));
+        const slotStart = new Date(
+          Date.UTC(2026, 0, 5, Math.floor(startMinutes / 60) - 5, (startMinutes % 60) - 30),
+        );
         const slotEnd = new Date(slotStart.getTime() + 15 * 60_000);
         const slotId = seedId('schedule-slot', h.code, drCode, businessDate, String(n));
 
@@ -901,12 +945,42 @@ async function seedFrontOfficeActivity(
         // is exercised rather than assumed.
         if (n % 5 === 0) {
           paymentLines.push(
-            paymentLine(h.id, branch.id, seedId('payment-line', h.code, drCode, businessDate, String(n), 'cash'), paymentId, paidAt, 'cash', '100.00', '200.00', '100.00'),
-            paymentLine(h.id, branch.id, seedId('payment-line', h.code, drCode, businessDate, String(n), 'upi'), paymentId, paidAt, 'upi', (Number(amount) - 100).toFixed(2), null, null),
+            paymentLine(
+              h.id,
+              branch.id,
+              seedId('payment-line', h.code, drCode, businessDate, String(n), 'cash'),
+              paymentId,
+              paidAt,
+              'cash',
+              '100.00',
+              '200.00',
+              '100.00',
+            ),
+            paymentLine(
+              h.id,
+              branch.id,
+              seedId('payment-line', h.code, drCode, businessDate, String(n), 'upi'),
+              paymentId,
+              paidAt,
+              'upi',
+              (Number(amount) - 100).toFixed(2),
+              null,
+              null,
+            ),
           );
         } else {
           paymentLines.push(
-            paymentLine(h.id, branch.id, seedId('payment-line', h.code, drCode, businessDate, String(n), 'only'), paymentId, paidAt, n % 2 === 0 ? 'cash' : 'upi', amount, n % 2 === 0 ? '1000.00' : null, n % 2 === 0 ? (1000 - Number(amount)).toFixed(2) : null),
+            paymentLine(
+              h.id,
+              branch.id,
+              seedId('payment-line', h.code, drCode, businessDate, String(n), 'only'),
+              paymentId,
+              paidAt,
+              n % 2 === 0 ? 'cash' : 'upi',
+              amount,
+              n % 2 === 0 ? '1000.00' : null,
+              n % 2 === 0 ? (1000 - Number(amount)).toFixed(2) : null,
+            ),
           );
         }
 
@@ -962,7 +1036,11 @@ async function seedFrontOfficeActivity(
           version: 0,
         });
 
-        for (const [suffix, event] of [['notice', 'notice_shown'], ['explained', 'explained'], ['granted', 'granted']] as const) {
+        for (const [suffix, event] of [
+          ['notice', 'notice_shown'],
+          ['explained', 'explained'],
+          ['granted', 'granted'],
+        ] as const) {
           ledger.push({
             id: seedId('consent-ledger', h.code, drCode, businessDate, String(n), suffix),
             hospital_id: h.id,
@@ -971,7 +1049,7 @@ async function seedFrontOfficeActivity(
             event,
             purpose_code: 'treatment',
             actor_type: event === 'granted' ? 'patient' : 'user',
-            actor_id: event === 'granted' ? null : receptionist?.id ?? null,
+            actor_id: event === 'granted' ? null : (receptionist?.id ?? null),
             channel: 'desk',
             language: 'en-IN',
             evidence: jsonb({ device: 'registration-desk', scrollCompleted: true, noticeVersion: 1 }),
@@ -1101,7 +1179,10 @@ async function seedFrontOfficeActivity(
       version: 0,
     });
 
-    for (const [mode, collections] of [['cash', cashCollected], ['upi', upiCollected]] as const) {
+    for (const [mode, collections] of [
+      ['cash', cashCollected],
+      ['upi', upiCollected],
+    ] as const) {
       shiftTotals.push({
         id: seedId('cash-shift-total', h.code, businessDate, mode),
         hospital_id: h.id,
@@ -1120,8 +1201,24 @@ async function seedFrontOfficeActivity(
     }
 
     denominations.push(
-      denominationSheet(h.id, branch.id, seedId('denomination', h.code, businessDate, 'opening'), shiftId, 'opening', openingFloat, cashier?.id ?? h.id),
-      denominationSheet(h.id, branch.id, seedId('denomination', h.code, businessDate, 'closing'), shiftId, 'closing', expectedCash, cashier?.id ?? h.id),
+      denominationSheet(
+        h.id,
+        branch.id,
+        seedId('denomination', h.code, businessDate, 'opening'),
+        shiftId,
+        'opening',
+        openingFloat,
+        cashier?.id ?? h.id,
+      ),
+      denominationSheet(
+        h.id,
+        branch.id,
+        seedId('denomination', h.code, businessDate, 'closing'),
+        shiftId,
+        'closing',
+        expectedCash,
+        cashier?.id ?? h.id,
+      ),
     );
 
     await ctx.write({ table: 'clinical.schedule_slots', conflict: ['id'] }, slots);

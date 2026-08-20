@@ -177,61 +177,62 @@ export class Dispatcher {
       | { readonly kind: 'duplicate'; readonly messageId: string }
       | { readonly kind: 'blocked'; readonly handle: MessageHandle; readonly reason: string }
       | { readonly kind: 'attempt'; readonly handle: MessageHandle }
-    > => this.deps.db.withTenant(ctx, async (tx) => {
-      if (idempotencyKey !== null) {
-        const existing = await this.messages.findByIdempotencyKey(tx, record.id, idempotencyKey);
-        if (existing !== undefined) {
-          return { kind: 'duplicate' as const, messageId: existing.id };
+    > =>
+      this.deps.db.withTenant(ctx, async (tx) => {
+        if (idempotencyKey !== null) {
+          const existing = await this.messages.findByIdempotencyKey(tx, record.id, idempotencyKey);
+          if (existing !== undefined) {
+            return { kind: 'duplicate' as const, messageId: existing.id };
+          }
         }
-      }
 
-      // A paused connector parks its traffic rather than losing it: the message
-      // is logged as `blocked` and drains when someone resumes the connector.
-      if (record.status !== 'active') {
+        // A paused connector parks its traffic rather than losing it: the message
+        // is logged as `blocked` and drains when someone resumes the connector.
+        if (record.status !== 'active') {
+          const handle = await this.record(tx, ctx, record, operation, {
+            input,
+            messageId,
+            correlationId,
+            idempotencyKey,
+            payloadRef,
+            status: 'blocked',
+            attempts: 0,
+            now,
+          });
+          return { kind: 'blocked' as const, handle, reason: `connector status is '${record.status}'` };
+        }
+
+        const key = { hospitalId: ctx.hospitalId, connectorId: record.id, operationId: operation.id };
+        const snapshot = await this.circuits.load(tx, key);
+        const decision = canAttempt(snapshot, record.config.circuit, now);
+        await this.circuits.save(tx, key, decision.snapshot, now);
+
+        if (!decision.allowed) {
+          const handle = await this.record(tx, ctx, record, operation, {
+            input,
+            messageId,
+            correlationId,
+            idempotencyKey,
+            payloadRef,
+            status: 'blocked',
+            attempts: 0,
+            now,
+          });
+          return { kind: 'blocked' as const, handle, reason: decision.reason };
+        }
+
         const handle = await this.record(tx, ctx, record, operation, {
           input,
           messageId,
           correlationId,
           idempotencyKey,
           payloadRef,
-          status: 'blocked',
-          attempts: 0,
+          status: 'in_flight',
+          attempts: 1,
           now,
         });
-        return { kind: 'blocked' as const, handle, reason: `connector status is '${record.status}'` };
-      }
-
-      const key = { hospitalId: ctx.hospitalId, connectorId: record.id, operationId: operation.id };
-      const snapshot = await this.circuits.load(tx, key);
-      const decision = canAttempt(snapshot, record.config.circuit, now);
-      await this.circuits.save(tx, key, decision.snapshot, now);
-
-      if (!decision.allowed) {
-        const handle = await this.record(tx, ctx, record, operation, {
-          input,
-          messageId,
-          correlationId,
-          idempotencyKey,
-          payloadRef,
-          status: 'blocked',
-          attempts: 0,
-          now,
-        });
-        return { kind: 'blocked' as const, handle, reason: decision.reason };
-      }
-
-      const handle = await this.record(tx, ctx, record, operation, {
-        input,
-        messageId,
-        correlationId,
-        idempotencyKey,
-        payloadRef,
-        status: 'in_flight',
-        attempts: 1,
-        now,
+        return { kind: 'attempt' as const, handle };
       });
-      return { kind: 'attempt' as const, handle };
-    });
 
     let claim: Awaited<ReturnType<typeof claimTransaction>>;
     try {
@@ -347,7 +348,8 @@ export class Dispatcher {
     // The redacted copy is unusable as a payload — sending `«phone:9876»` to a
     // partner is worse than not sending at all — so a replay is only possible
     // while the full payload is still within its retention window (EN-017 §4).
-    const stored = previous.payload_ref === null ? undefined : await this.deps.payloads.get(previous.payload_ref);
+    const stored =
+      previous.payload_ref === null ? undefined : await this.deps.payloads.get(previous.payload_ref);
     if (stored === undefined) {
       const now = this.deps.clock.now();
       const handle: MessageHandle = { id: previous.id, createdAt: previous.created_at_text };
@@ -388,9 +390,7 @@ export class Dispatcher {
     // the ordering *means*: a replay happens after the thing it replays.
     const parentCreatedAt = new Date(previous.created_at_text);
     const createdAt =
-      isReplay && now.getTime() <= parentCreatedAt.getTime()
-        ? new Date(parentCreatedAt.getTime() + 1)
-        : now;
+      isReplay && now.getTime() <= parentCreatedAt.getTime() ? new Date(parentCreatedAt.getTime() + 1) : now;
     const idempotencyKey =
       isReplay && replay.forceNewIdempotencyKey
         ? `${previous.idempotency_key ?? previous.id}:replay:${messageId}`
@@ -406,11 +406,7 @@ export class Dispatcher {
       if (isReplay) {
         // Mark first: `findByIdempotencyKey` skips `replayed`, so the new row
         // may legitimately carry the original key.
-        await this.messages.markReplayed(
-          tx,
-          { id: previous.id, createdAt: previous.created_at_text },
-          now,
-        );
+        await this.messages.markReplayed(tx, { id: previous.id, createdAt: previous.created_at_text }, now);
         const created = await this.messages.record(tx, {
           id: messageId,
           hospitalId: ctx.hospitalId,
@@ -563,7 +559,12 @@ export class Dispatcher {
 
     return this.deps.db.withTenant(ctx, async (tx) => {
       const snapshot = await this.circuits.load(tx, key);
-      await this.circuits.save(tx, key, onFailure(snapshot, record.config.circuit, now, result.errorClass), now);
+      await this.circuits.save(
+        tx,
+        key,
+        onFailure(snapshot, record.config.circuit, now, result.errorClass),
+        now,
+      );
 
       if (retryable) {
         const delay = result.retryAfterMs ?? backoffMs(retry, attempts, handle.id);

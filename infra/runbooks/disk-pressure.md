@@ -5,10 +5,12 @@
 A data or WAL volume is above 85 % full, or is predicted to fill within four hours.
 
 ## Impact
+
 A full WAL volume **stops the database**. This is the alert with the shortest fuse and
 the most predictable outcome.
 
 ## First five minutes
+
 1. Which volume — data or WAL? They fail differently.
 2. **WAL filling**: usually archiving has stopped. `pgbackrest --stanza=vimshms check`.
    If the archive command is failing, WAL accumulates until the disk dies. Fix archiving;
@@ -20,9 +22,11 @@ the most predictable outcome.
    its 7-day retention means the relay has stopped.
 
 ## Do not
+
 Do not drop an audit partition to reclaim space. Audit retention has statutory floors
 (`docs/04` §5) and medico-legal rows are exempt from compaction entirely. Archive first.
 
 ## Escalation
+
 Platform on-call → DBA. If less than one hour of headroom remains, extend the volume
 rather than deleting anything.

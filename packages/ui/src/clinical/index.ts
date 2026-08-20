@@ -102,16 +102,8 @@ export {
   type ErrorBoundaryCardProps,
   type ErrorDiagnostics,
 } from './error-boundary-card.js';
-export {
-  KeyboardHintBar,
-  type KeyboardHint,
-  type KeyboardHintBarProps,
-} from './keyboard-hint-bar.js';
-export {
-  MoneyInput,
-  type MoneyInputLabels,
-  type MoneyInputProps,
-} from './money-input.js';
+export { KeyboardHintBar, type KeyboardHint, type KeyboardHintBarProps } from './keyboard-hint-bar.js';
+export { MoneyInput, type MoneyInputLabels, type MoneyInputProps } from './money-input.js';
 export {
   OfflineBadge,
   type ConnectivityState,

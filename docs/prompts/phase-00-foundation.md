@@ -23,6 +23,7 @@ after this inherits these rails.
 ## Deliverables
 
 ### 0.1 Monorepo & tooling
+
 - pnpm workspaces + Turborepo; TypeScript 5 strict (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`).
 - Layout exactly as `docs/01-architecture.md` §11: `apps/web`, `apps/tv-kiosk`, `services/api`, `services/realtime`,
   `services/worker`, `services/integration-hub`, `packages/{contracts,ui,db,print-templates,i18n,flags,testing}`,
@@ -33,7 +34,9 @@ after this inherits these rails.
 - Root scripts: `dev`, `build`, `lint`, `typecheck`, `test`, `test:e2e`, `db:migrate`, `db:seed`, `seed:hospital`.
 
 ### 0.2 Database foundation (`packages/db`)
+
 Implement `docs/03-database-conventions.md` literally:
+
 - Schemas `core`, `mdm`; extensions `pgcrypto`, `citext`, `pg_trgm`, `btree_gist`, `pg_stat_statements`, `pg_cron`,
   `pg_partman` (`pgvector` created but unused until Phase 12).
 - Tables: `core.hospitals`, `core.branches`, `core.users`, `core.roles`, `core.permissions`, `core.role_permissions`,
@@ -51,6 +54,7 @@ Implement `docs/03-database-conventions.md` literally:
   with a known dev password.
 
 ### 0.3 API foundation (`services/api`)
+
 - NestJS 11 on Fastify, `/api/v1`, OpenAPI 3.1 at `/api/docs` (auth-gated in prod).
 - Global cross-cutting layer, in this exact order (see `docs/01-architecture.md` §3): request context + traceId →
   auth guard → tenant guard → rate limit → Zod validation pipe → policy guard → idempotency interceptor →
@@ -74,6 +78,7 @@ Implement `docs/03-database-conventions.md` literally:
 - Health endpoints `/healthz`, `/readyz`, `/metrics` (Prometheus), OTel tracing.
 
 ### 0.4 Realtime & worker
+
 - `services/realtime`: Socket.IO + Redis adapter, room naming per `docs/01-architecture.md` §6, auth handshake with
   the same JWT, presence, diff-push helper with 1 push/sec coalescing.
 - `services/worker`: BullMQ queues with the five priority classes from `docs/07` §4, outbox relay processor,
@@ -81,6 +86,7 @@ Implement `docs/03-database-conventions.md` literally:
   print dispatcher to `print-agent` (EN-005) with ZPL/ESC-POS support.
 
 ### 0.5 Design system & web shell
+
 - `packages/ui`: implement **all tokens** from `docs/06-ui-ux-design-system.md` (both themes + high-contrast) as CSS
   variables + Tailwind v4 theme; install shadcn base components; build the first-wave clinical components:
   `AppShell`, `RoleNav`, `PatientBanner` (placeholder data), `EmptyState`, `SkeletonList`, `ErrorBoundaryCard`,
@@ -95,11 +101,12 @@ Implement `docs/03-database-conventions.md` literally:
   feature flags, licence, printers, audit log viewer, notification templates, approval matrices.
 
 ### 0.6 Quality, CI/CD, ops
+
 - Vitest + Testcontainers harness; Playwright with a logged-in fixture per role; axe accessibility test helper;
   k6 skeleton; factories in `packages/testing` incl. the synthetic Indian patient generator (names, mobiles, ABHA-
   shaped ids — never real data).
 - **Mandatory tests for this phase:** tenant isolation (user of hospital A cannot read hospital B by direct id —
-  test at API *and* SQL level), permission matrix (every route × every role), auth flows incl. refresh-reuse
+  test at API _and_ SQL level), permission matrix (every route × every role), auth flows incl. refresh-reuse
   detection and lockout, RLS bypass attempt, idempotency replay, audit chain integrity, outbox at-least-once
   delivery, numbering-series gaplessness under concurrency (run 50 parallel invoice number requests).
 - GitHub Actions per `docs/10` §5: install → lint → typecheck → unit → integration (Testcontainers) → build →
@@ -109,11 +116,13 @@ Implement `docs/03-database-conventions.md` literally:
 - `docs/PROGRESS.md` and `docs/DECISIONS.md` created and filled in.
 
 ## Constraints
+
 - No business/clinical module in this phase. If you feel the urge to build patient registration, stop — that is Phase 1.
 - No `any`. No route without a permission key. No table without RLS. No mutation without audit.
 - Every dependency you add beyond `docs/02-tech-stack-decision.md` needs an ADR and my approval.
 
 ## Exit gate (all must pass before Phase 1)
+
 1. `pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e && pnpm build` green in CI.
 2. `docker compose up` from a clean clone gives a working login in under 10 minutes on a fresh machine.
 3. I can log in as **each** of: hospital admin, doctor, nurse, receptionist, cashier, pharmacist, lab tech, patient —

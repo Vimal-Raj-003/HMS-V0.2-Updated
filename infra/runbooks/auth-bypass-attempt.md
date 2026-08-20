@@ -5,11 +5,13 @@
 More than 20 cross-tenant or unregistered-permission denials in five minutes.
 
 ## Impact
+
 None directly — these requests were **refused**. Row-level security and the policy engine
 did their job, and a cross-tenant read returns 404 rather than 403 so it does not even
-confirm the record exists. The alert exists because the *pattern* matters.
+confirm the record exists. The alert exists because the _pattern_ matters.
 
 ## First five minutes
+
 1. Group the denials by actor, source IP and reason.
    - `tenant_mismatch` in bulk from one session → enumeration attempt.
    - `unregistered_permission` in bulk → far more likely a deploy that shipped a route
@@ -21,9 +23,11 @@ confirm the record exists. The alert exists because the *pattern* matters.
    the thing to worry about.
 
 ## Then
+
 If it is a code defect, the fix is a deploy. If it is genuine probing, preserve the audit
 window (it is append-only and hash-chained, so it cannot be tampered with, but export it
 for the incident record) and follow `docs/04`'s security-incident path.
 
 ## Escalation
+
 Security on-call and the DPO.

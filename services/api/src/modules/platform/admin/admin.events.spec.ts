@@ -13,9 +13,9 @@ describe('adminEvent', () => {
 
   it('refuses a payload that does not satisfy the registered schema', () => {
     // `admin.user.deactivated` requires `reason` and `sessionsRevoked`.
-    expect(() => adminEvent('admin.user.deactivated', USER_ID, { userId: USER_ID, username: 'alpha' })).toThrow(
-      /does not match its registered schema/,
-    );
+    expect(() =>
+      adminEvent('admin.user.deactivated', USER_ID, { userId: USER_ID, username: 'alpha' }),
+    ).toThrow(/does not match its registered schema/);
   });
 
   it('copies aggregate, PHI flag and retention from the registry, never from the call site', () => {
@@ -50,16 +50,33 @@ describe('adminEvent', () => {
 
   it('accepts every admin event this module publishes', () => {
     const built = [
-      adminEvent('admin.user.created', USER_ID, { userId: USER_ID, username: 'alpha', type: 'staff', invitedBy: null }),
-      adminEvent('admin.user.updated', USER_ID, { userId: USER_ID, username: 'alpha', changedFields: ['mobile'] }),
-      adminEvent('admin.user.password_reset', USER_ID, { userId: USER_ID, username: 'alpha', initiatedBy: 'admin' }),
+      adminEvent('admin.user.created', USER_ID, {
+        userId: USER_ID,
+        username: 'alpha',
+        type: 'staff',
+        invitedBy: null,
+      }),
+      adminEvent('admin.user.updated', USER_ID, {
+        userId: USER_ID,
+        username: 'alpha',
+        changedFields: ['mobile'],
+      }),
+      adminEvent('admin.user.password_reset', USER_ID, {
+        userId: USER_ID,
+        username: 'alpha',
+        initiatedBy: 'admin',
+      }),
       adminEvent('admin.role.revoked', USER_ROLE_ID, {
         userRoleId: USER_ROLE_ID,
         userId: USER_ID,
         roleId: ROLE_ID,
         reason: 'Transferred',
       }),
-      adminEvent('admin.role.created', ROLE_ID, { roleId: ROLE_ID, key: 'ward_clerk', clonedFromTemplate: null }),
+      adminEvent('admin.role.created', ROLE_ID, {
+        roleId: ROLE_ID,
+        key: 'ward_clerk',
+        clonedFromTemplate: null,
+      }),
       adminEvent('admin.role.updated', ROLE_ID, {
         roleId: ROLE_ID,
         key: 'ward_clerk',
@@ -73,7 +90,11 @@ describe('adminEvent', () => {
         scopeId: null,
         sensitive: false,
       }),
-      adminEvent('admin.flag.changed', USER_ID, { key: 'module.email.enabled', enabled: true, scope: 'hospital' }),
+      adminEvent('admin.flag.changed', USER_ID, {
+        key: 'module.email.enabled',
+        enabled: true,
+        scope: 'hospital',
+      }),
     ];
 
     expect(built.map((e) => e.eventType)).toHaveLength(8);

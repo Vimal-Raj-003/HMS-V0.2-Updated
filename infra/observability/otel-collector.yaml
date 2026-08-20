@@ -35,9 +35,9 @@ processors:
       - key: patient.address
         action: delete
       - key: db.statement
-        action: delete   # bind parameters can carry identifiers
+        action: delete # bind parameters can carry identifiers
       - key: http.url
-        action: delete   # docs/04 §7: no PHI in URLs; deleted rather than trusted
+        action: delete # docs/04 §7: no PHI in URLs; deleted rather than trusted
       - key: user.email
         action: delete
 

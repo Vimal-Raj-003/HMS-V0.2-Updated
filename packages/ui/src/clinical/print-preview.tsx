@@ -6,13 +6,7 @@ import { cn } from '../lib/cn.js';
 import { Button } from '../primitives/button.js';
 import { Input, inputClassName } from '../primitives/input.js';
 import { Label } from '../primitives/label.js';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../primitives/select.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../primitives/select.js';
 
 /**
  * `PrintPreview` — docs/06 §5.2 #35, and the Phase-1 exit gate ("UHID card and

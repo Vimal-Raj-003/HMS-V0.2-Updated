@@ -1,20 +1,21 @@
 # AI-008 — Conversational BI (Natural-Language Questions over the Analytics Schema, Governed Semantic Layer & Metric Definitions, RLS-Safe SQL Generation, Result Explanation & Chart Selection, Saved Questions, k-Anonymity Guardrails, Scheduled NL Digests)
 
-| Field | Value |
-|---|---|
-| Domain | AI & Advanced Tech |
-| Module ID | AI-008 |
-| Phase | 12 |
-| Priority | P2 |
-| Complexity | High |
-| Depends on | **AI-001 §0 (AI Platform Foundation — mandatory)**, **EN-001 (Data Analytics & BI — the semantic layer, KPI library, datasets and read models this module queries)**, NC-011 (Reports & Analytics Engine — dataset registry, export, scheduling), EN-007 (roles, ABAC scope), EN-041 (multi-branch/group scope), EN-024 (audit of PHI-level access), EN-032/EN-009 (digest delivery), EN-037 (alerts), NC-015 (NABH indicator definitions), EN-040 (licence gating) |
-| Consumed by | EN-001 dashboards (ask-a-question tile), NC-011 (saved questions become report definitions), PE-006 (corporate client portal enquiries — later), management mobile (NC-014) |
-| Feature flag | `module.ai_bi.enabled` (sub: `bi_nl.ask`, `bi_nl.charts`, `bi_nl.saved_questions`, `bi_nl.digests`, `bi_nl.followup`, `bi_nl.export`) |
-| Primary roles | Hospital Admin / Group Admin (2), Branch Admin (3), Medical Superintendent (4), HOD (5), Finance Manager (46), Quality Manager (54) |
-| Secondary roles | Nursing Superintendent (22), Pharmacy In-charge (32), Lab Quality Manager (35), Stores In-charge (44), HR Manager (47), Marketing (55), Doctor (6 — own metrics only), Auditor (58), DPO (57) |
-| Regulatory | DPDP Act 2023 & Rules 2025 (purpose limitation and data minimisation for analytics; PHI-level drill-down is a separate, audited purpose), NABH 6th edn (quality-indicator definitions must be the governed ones, not model-invented), GST/Companies Act (financial figures quoted from the books of account must be traceable), IRDAI/payer contracts (no payer-identifiable aggregate shared externally), DPDP §9 (no child-level profiling), CDSCO — not a clinical device; outputs are management information (AI-001 §0.8) |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Domain          | AI & Advanced Tech                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Module ID       | AI-008                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Phase           | 12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Priority        | P2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Complexity      | High                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Depends on      | **AI-001 §0 (AI Platform Foundation — mandatory)**, **EN-001 (Data Analytics & BI — the semantic layer, KPI library, datasets and read models this module queries)**, NC-011 (Reports & Analytics Engine — dataset registry, export, scheduling), EN-007 (roles, ABAC scope), EN-041 (multi-branch/group scope), EN-024 (audit of PHI-level access), EN-032/EN-009 (digest delivery), EN-037 (alerts), NC-015 (NABH indicator definitions), EN-040 (licence gating)                                                            |
+| Consumed by     | EN-001 dashboards (ask-a-question tile), NC-011 (saved questions become report definitions), PE-006 (corporate client portal enquiries — later), management mobile (NC-014)                                                                                                                                                                                                                                                                                                                                                    |
+| Feature flag    | `module.ai_bi.enabled` (sub: `bi_nl.ask`, `bi_nl.charts`, `bi_nl.saved_questions`, `bi_nl.digests`, `bi_nl.followup`, `bi_nl.export`)                                                                                                                                                                                                                                                                                                                                                                                          |
+| Primary roles   | Hospital Admin / Group Admin (2), Branch Admin (3), Medical Superintendent (4), HOD (5), Finance Manager (46), Quality Manager (54)                                                                                                                                                                                                                                                                                                                                                                                            |
+| Secondary roles | Nursing Superintendent (22), Pharmacy In-charge (32), Lab Quality Manager (35), Stores In-charge (44), HR Manager (47), Marketing (55), Doctor (6 — own metrics only), Auditor (58), DPO (57)                                                                                                                                                                                                                                                                                                                                  |
+| Regulatory      | DPDP Act 2023 & Rules 2025 (purpose limitation and data minimisation for analytics; PHI-level drill-down is a separate, audited purpose), NABH 6th edn (quality-indicator definitions must be the governed ones, not model-invented), GST/Companies Act (financial figures quoted from the books of account must be traceable), IRDAI/payer contracts (no payer-identifiable aggregate shared externally), DPDP §9 (no child-level profiling), CDSCO — not a clinical device; outputs are management information (AI-001 §0.8) |
 
 ## 1. Purpose
+
 AI-008 lets an administrator, HOD or finance manager ask the hospital a question in plain language — "what was ICU
 occupancy last month by branch?", "which payer's claims are ageing beyond 60 days?", "show OPD no-show trend for
 orthopaedics this quarter" — and get a governed answer: SQL generated **only** against EN-001's semantic layer, with
@@ -23,6 +24,7 @@ explanation, the metric's official definition, and a link to the underlying repo
 end to a governed warehouse, not a general-purpose SQL agent.
 
 ## 2. Users & Jobs-to-be-done
+
 - **Hospital / Group Admin (2, desktop + phone, several times a day)**: ask the question that is not on any dashboard,
   compare branches, and get a defensible number they can quote in a management meeting.
 - **HOD (5)**: departmental throughput, doctor-wise OPD counts, OT utilisation, cancellations — without asking IT for
@@ -38,6 +40,7 @@ end to a governed warehouse, not a general-purpose SQL agent.
 ## 3. Core Workflows
 
 ### 3.1 Question → governed SQL → answer
+
 1. **User asks** in natural language (typed or dictated via AI-004), optionally with the current dashboard's filters
    as implicit context (branch, date range) → Event `bi_nl.question.asked`.
 2. **Scope resolution happens first, outside the model**: the user's tenant, branch set, department set, doctor
@@ -55,8 +58,8 @@ end to a governed warehouse, not a general-purpose SQL agent.
    text, so SQL injection and schema escape are structurally impossible.
 5. **Deterministic compiler** turns the spec into SQL/Kysely against `analytics.*` read models, injecting the RLS
    predicates and role scope, applying the k-anonymity rules (§3.4), a `LIMIT`, and a `statement_timeout` of 8 s.
-6. **Execute** → result set → **chart selection** (§3.3) → **explanation** generated from the *result data plus the
-   governed metric definition*, never from the model's own idea of what the metric means.
+6. **Execute** → result set → **chart selection** (§3.3) → **explanation** generated from the _result data plus the
+   governed metric definition_, never from the model's own idea of what the metric means.
 7. **Answer card** returns: the number/table/chart, the metric's official definition and formula, the exact filters
    applied (including the scope the user did not ask for but which was enforced), freshness stamp ("as of 09:42"),
    row count, and links to "open in EN-001 dashboard" / "open as NC-011 report" / "show the query spec".
@@ -70,15 +73,17 @@ end to a governed warehouse, not a general-purpose SQL agent.
     grows.
 
 ### 3.2 What the module refuses to do
+
 - It never queries transactional schemas (`patient`, `clinical`, `billing`, …) — the compiler's allow-list is
   `analytics.*` only, enforced in code and by a database role that has no privileges elsewhere.
 - It never returns patient-identifiable rows. Patient-level drill-down remains an EN-001 feature with its own
-  permission and PHI audit; AI-008 can *link* to it but cannot produce it.
+  permission and PHI audit; AI-008 can _link_ to it but cannot produce it.
 - It never writes: the database role is read-only; DDL/DML in a generated spec is impossible by construction.
 - It never invents a metric definition. If a metric is not in the governed library, the answer is "not defined".
 - It never answers clinical questions about an individual patient (that is AI-002's territory, with different rules).
 
 ### 3.3 Chart selection & explanation
+
 1. Chart type is chosen **deterministically from the shape of the result**, not by the model: single scalar → stat
    tile with delta vs comparison period; time series (1 metric, 1 date dimension) → line; time series with a
    categorical dimension ≤ 6 → multi-series line; categorical comparison ≤ 12 → horizontal bar; part-to-whole with
@@ -95,6 +100,7 @@ end to a governed warehouse, not a general-purpose SQL agent.
    (AI-001 §0.5 guardrail 7).
 
 ### 3.4 Privacy guardrails on aggregates (k-anonymity)
+
 1. **Minimum cell size**: any aggregate whose denominator (patient/encounter count) is below `k` (default 5, per
    tenant, higher for sensitive categories) is suppressed and shown as "n < 5 — suppressed" rather than a number.
 2. **Sensitive-category rules**: metrics sliced by HIV/STI, psychiatry, termination of pregnancy, substance use,
@@ -109,16 +115,18 @@ end to a governed warehouse, not a general-purpose SQL agent.
 6. Every answer records the k-anonymity decisions applied, so the DPO can evidence them.
 
 ### 3.5 Saved questions, verification & sharing
+
 1. A useful answer can be **saved** (name, description, owner, default filters, schedule) → it becomes a first-class
    object that can be pinned to an EN-001 dashboard or promoted to an NC-011 report definition.
 2. **Verified questions**: the BI owner can mark a saved question **verified**, which freezes its compiled spec (not
    the natural-language text) so the number cannot drift when a prompt or model changes. Verified questions are what
    management packs should use; unverified ones carry an "ad-hoc" badge.
-3. Sharing respects the recipient's scope: the same saved question run by a branch admin returns *their* branch's
+3. Sharing respects the recipient's scope: the same saved question run by a branch admin returns _their_ branch's
    numbers, because scope is applied at execution, not baked into the spec.
 4. Version history on saved questions, with the spec diff, so a changed number can be explained.
 
 ### 3.6 Scheduled natural-language digests
+
 1. A schedule (cron + timezone, reusing NC-011/`bi_schedules`) runs a set of saved/verified questions and composes a
    **narrative digest**: "Yesterday: 4,812 OPD visits (+6 % WoW), ICU occupancy 91 % (above the 85 % threshold),
    collections ₹1.42 Cr (94 % of billing), 3 NABH indicators outside target — lab TAT p90, ER door-to-doctor,
@@ -132,6 +140,7 @@ end to a governed warehouse, not a general-purpose SQL agent.
    a stated failure).
 
 ### 3.7 Exceptions
+
 - **Model unavailable / budget cap** → the ask box is replaced by EN-001's normal dashboard and NC-011's report
   builder with a badge; saved and verified questions continue to run (their specs are compiled and stored, so they do
   not need the model at all).
@@ -142,6 +151,7 @@ end to a governed warehouse, not a general-purpose SQL agent.
 - **Ambiguous entity names** (two doctors with the same surname, two wards named "ICU") → disambiguation chips.
 
 ## 4. Data Model (schema `ai`, prefix `binl_`; the semantic layer itself lives in EN-001)
+
 - `binl_semantic_synonyms` — id, hospital_id?, term, canonical_key (kpi/dataset/dimension), entity_type, language,
   source enum(seeded/learned/manual), confidence, approved_by, active; the glossary that makes local vocabulary work
   ("footfall", "vasooli", "bed days", "ALOS").
@@ -170,6 +180,7 @@ end to a governed warehouse, not a general-purpose SQL agent.
   privacy events 3 years, digests runs 2 years.
 
 ## 5. Business Rules & Validations
+
 - **The model never emits SQL.** It emits a semantic query spec; a deterministic compiler produces SQL. Any code path
   that would execute model-authored SQL text is a blocking defect.
 - **RLS and role scope are applied by the database and the compiler, never by the prompt.** The AI-008 database role
@@ -196,24 +207,26 @@ end to a governed warehouse, not a general-purpose SQL agent.
   publishing it through NC-011's normal export path with its watermark and audit.
 
 ## 6. API Surface (`/api/v1/bi-nl`)
-| Method | Path | Purpose | Permission | Notes |
-|---|---|---|---|---|
-| POST | /ask | ask a question (streams spec → data → explanation) | `binl.ask` | scope from session; never accepts a scope parameter |
-| POST | /ask/:id/followup | follow-up turn on a resolved spec | `binl.ask` | re-validates scope every turn |
-| POST | /ask/:id/clarify | answer a clarification chip | `binl.ask` | |
-| GET | /questions?user&from&to | question history (own; all for auditor) | `binl.question.read` | no result rows stored |
-| GET | /questions/:id/spec ; /questions/:id/sql-digest | transparency: what was actually run | `binl.question.read` | digest, not raw PHI |
-| POST | /questions/:id/feedback | correctness feedback | `binl.ask` | eval signal |
-| GET/POST/PATCH | /saved ; /saved/:id | saved questions | `binl.saved.manage` (owner) | version on change |
-| POST | /saved/:id/verify \| /unverify | freeze/unfreeze the spec | `binl.saved.verify` (BI owner, 2, 46, 54) | audited |
-| POST | /saved/:id/pin ; POST /saved/:id/promote | pin to EN-001 dashboard / promote to NC-011 report | `binl.saved.manage` + target permission | |
-| GET/POST/PATCH | /digests ; POST /digests/:id/run-now | scheduled NL digests | `binl.digest.manage` (2, 4, 46) | preview before activating |
-| GET/POST | /synonyms ; POST /synonyms/:id/approve | glossary management | `binl.synonym.manage` (BI owner) | learned terms need approval |
-| GET/POST | /metric-requests ; PATCH /metric-requests/:id | semantic-layer backlog | `binl.metric_request.*` | |
-| GET | /privacy-events | k-suppressions, denials, differencing | `binl.privacy.read` (57, 58, 2) | DPO dashboard |
-| GET | /metrics/quality ; /metrics/usage | answer accuracy & adoption | `binl.report.read` | |
+
+| Method         | Path                                            | Purpose                                            | Permission                                | Notes                                               |
+| -------------- | ----------------------------------------------- | -------------------------------------------------- | ----------------------------------------- | --------------------------------------------------- |
+| POST           | /ask                                            | ask a question (streams spec → data → explanation) | `binl.ask`                                | scope from session; never accepts a scope parameter |
+| POST           | /ask/:id/followup                               | follow-up turn on a resolved spec                  | `binl.ask`                                | re-validates scope every turn                       |
+| POST           | /ask/:id/clarify                                | answer a clarification chip                        | `binl.ask`                                |                                                     |
+| GET            | /questions?user&from&to                         | question history (own; all for auditor)            | `binl.question.read`                      | no result rows stored                               |
+| GET            | /questions/:id/spec ; /questions/:id/sql-digest | transparency: what was actually run                | `binl.question.read`                      | digest, not raw PHI                                 |
+| POST           | /questions/:id/feedback                         | correctness feedback                               | `binl.ask`                                | eval signal                                         |
+| GET/POST/PATCH | /saved ; /saved/:id                             | saved questions                                    | `binl.saved.manage` (owner)               | version on change                                   |
+| POST           | /saved/:id/verify \| /unverify                  | freeze/unfreeze the spec                           | `binl.saved.verify` (BI owner, 2, 46, 54) | audited                                             |
+| POST           | /saved/:id/pin ; POST /saved/:id/promote        | pin to EN-001 dashboard / promote to NC-011 report | `binl.saved.manage` + target permission   |                                                     |
+| GET/POST/PATCH | /digests ; POST /digests/:id/run-now            | scheduled NL digests                               | `binl.digest.manage` (2, 4, 46)           | preview before activating                           |
+| GET/POST       | /synonyms ; POST /synonyms/:id/approve          | glossary management                                | `binl.synonym.manage` (BI owner)          | learned terms need approval                         |
+| GET/POST       | /metric-requests ; PATCH /metric-requests/:id   | semantic-layer backlog                             | `binl.metric_request.*`                   |                                                     |
+| GET            | /privacy-events                                 | k-suppressions, denials, differencing              | `binl.privacy.read` (57, 58, 2)           | DPO dashboard                                       |
+| GET            | /metrics/quality ; /metrics/usage               | answer accuracy & adoption                         | `binl.report.read`                        |                                                     |
 
 ## 7. Domain Events (outbox)
+
 - `bi_nl.question.asked|answered|refused|unanswerable` → usage analytics, eval sampling.
 - `bi_nl.clarification.requested` → ambiguity analytics (drives synonym and metric improvements).
 - `bi_nl.metric.requested` → BI owner backlog (the semantic layer's growth signal).
@@ -227,6 +240,7 @@ end to a governed warehouse, not a general-purpose SQL agent.
   (invalidates cached specs and flags affected saved questions), `user.role_changed` (scope re-resolution).
 
 ## 8. Screens (UI)
+
 - **Ask bar** (EN-001 dashboards + global command palette `Ctrl/⌘+K` → "Ask", desktop and phone): input with example
   prompts seeded from the user's role, live scope chip ("Branch: Coimbatore · FY 25-26" — showing what will be
   applied), dictation button (AI-004), and recent/saved question shortcuts.
@@ -254,6 +268,7 @@ end to a governed warehouse, not a general-purpose SQL agent.
   identify fewer than 5 patients, so it is suppressed", "Ask unavailable — dashboards and reports work normally".
 
 ## 9. Integrations
+
 - **EN-001** is the semantic layer, KPI library, dataset registry and drill-down target; AI-008 adds no new data
   source and no new number — if it cannot be answered from EN-001's governed metrics, it is not answered.
 - **NC-011** for export, scheduling infrastructure and promotion of a saved question to a formal report definition
@@ -264,6 +279,7 @@ end to a governed warehouse, not a general-purpose SQL agent.
   `statement_timeout = 8s`, `idle_in_transaction_session_timeout` set — defence in depth behind the compiler.
 
 ## 10. Reports & Analytics
+
 - **Answer quality**: correctness verdicts, clarification rate, refusal rate, unanswerable-by-topic (the roadmap for
   the semantic layer), disputed-number rate and its resolution.
 - **Eval-set performance**: on a golden set of 300 question→spec pairs — spec exact-match ≥ 0.85, spec
@@ -277,6 +293,7 @@ end to a governed warehouse, not a general-purpose SQL agent.
 - Read models: `analytics.mv_binl_usage_daily`, `mv_binl_quality_weekly`, `mv_binl_privacy_monthly`.
 
 ## 11. Notifications
+
 - Scheduled digests (email/in-app/WhatsApp per recipient preference), with failures reported in-line rather than
   silently omitted.
 - KPI threshold breaches surfaced inside digests (EN-001 owns the alerting itself; AI-008 narrates it).
@@ -285,6 +302,7 @@ end to a governed warehouse, not a general-purpose SQL agent.
 - Admin/IT: model budget threshold, elevated timeout rate (usually a stale or missing read model).
 
 ## 12. Permissions (RBAC keys)
+
 `binl.ask` (2, 3, 4, 5, 22, 32, 35, 44, 46, 47, 54, 55, and 6 restricted to own metrics) ·
 `binl.question.read` (own; 57/58 all) · `binl.saved.manage` (owner + 2) · `binl.saved.verify` (BI owner, 2, 46, 54) ·
 `binl.digest.manage` (2, 4, 46) · `binl.synonym.manage` (BI owner) · `binl.metric_request.create` (all askers) /
@@ -292,6 +310,7 @@ end to a governed warehouse, not a general-purpose SQL agent.
 Note: AI-008 grants **no** PHI entitlement of any kind; patient-level drill-down remains an EN-001 permission.
 
 ## 13. Non-functional
+
 - **Volumes**: ~60 active management users, ~400 questions/day, ~40 saved questions, ~15 scheduled digests; peak at
   08:00–10:00 (morning review) and month-end.
 - **Latency**: spec resolution p95 < 2 s; compiled query execution p95 < 3 s (read models are pre-aggregated);
@@ -316,6 +335,7 @@ Note: AI-008 grants **no** PHI entitlement of any kind; patient-level drill-down
   asserting the numbers match EN-001's dashboard values exactly.
 
 ## 14. Acceptance Criteria
+
 1. **Given** any question, **when** processed, **then** the model produces a validated semantic query spec and the
    SQL is generated by the deterministic compiler — a code path executing model-authored SQL text does not exist
    (asserted by a static test).
@@ -353,6 +373,7 @@ Note: AI-008 grants **no** PHI entitlement of any kind; patient-level drill-down
     row count, suppressions applied, latency and cost — and never stores result rows containing PHI.
 
 ## 15. Enhancements / Later phases
+
 - **Anomaly narration**: proactively tell the admin what changed materially since yesterday, rather than waiting to be
   asked (built on EN-001's `bi_alert_rules`).
 - **Root-cause drill chains**: an answer that automatically offers the two or three most explanatory splits
@@ -368,6 +389,7 @@ Note: AI-008 grants **no** PHI entitlement of any kind; patient-level drill-down
 - **Regulatory pack drafting**: narrate the NABH indicator pack from governed indicators, for Quality to review.
 
 ## 16. Open Questions for the Hospital
+
 1. Who is the **BI owner** — the person who governs metric definitions, verifies saved questions and resolves metric
    requests? Without this role the module degrades into plausible numbers nobody trusts.
 2. Which metrics are already agreed and documented (NABH indicators, finance MIS definitions), and where do the

@@ -4,6 +4,7 @@ Phases 0–10 complete: the hospital runs on the system and every module has bee
 events. This phase turns that into answers the management trusts and data the rest of the health system can read.
 
 ## Read first
+
 `CLAUDE.md`, `docs/PROGRESS.md`, then: **NC-011** (reports & analytics engine — build its schema and dataset
 registry FIRST), **EN-001** (BI, KPIs, dashboards, benchmarking), **EN-019** (HL7/FHIR API layer),
 **EN-011** (ABDM M2 HIP and M3 HIU), **RC-001** (claims management incl. NHCX/M4), **RC-004** (denial management),
@@ -26,6 +27,7 @@ and submit an insurance claim over NHCX — with certification evidence produced
 ## Deliverables
 
 ### 11.1 Analytics schema and the semantic layer (NC-011 §3.1, §3.9)
+
 - Schema `analytics` with **conformed dimensions** — `dim_date` (with FY, quarter, week, holiday), `dim_branch`,
   `dim_department`, `dim_doctor`, `dim_payer`, `dim_service`, `dim_item`, `dim_ward_bed`, `dim_employee` — modelled
   **SCD2** where mappings change, so last year's numbers do not silently move when a doctor changes department.
@@ -45,6 +47,7 @@ and submit an insurance claim over NHCX — with certification evidence produced
   row cap, cost estimate) so no report can hurt the transactional system.
 
 ### 11.2 Dashboards and KPI operations (EN-001 + NC-011 §3.2–3.3)
+
 Role-resolved dashboards (MD/CEO, medical superintendent, department head, finance, nursing, quality, branch admin,
 doctor), the real-time MIS tile set (OPD footfall, IP census, ER mix, revenue and collection, outstanding, OT
 cases, lab tests and TAT, radiology, pharmacy sales, no-show %, average wait, pending critical alerts) refreshed
@@ -53,6 +56,7 @@ with permission-scoped PHI**, comparison chips (yesterday, same day last week, M
 and ranking normalised per bed (EN-041), the canned report catalogue, KPI targets, alerts and anomaly detection.
 
 ### 11.3 Report builder with RLS enforcement (NC-011 §3.4)
+
 A drag-and-drop builder over the registered datasets: fields, filters, groupings, calculated columns from the
 semantic layer, sorting, formatting, charts, saved reports, sharing with role scoping, and versioning.
 **Row-level security is enforced at the database session for every builder query — the builder generates SQL that
@@ -62,6 +66,7 @@ wider audience re-evaluates RLS per viewer rather than caching the author's resu
 a specific permission and log a PHI read on execution.
 
 ### 11.4 Scheduling, exports and government formats (NC-011 §3.5–3.7)
+
 Scheduled reports (cron per report, recipients by role or address, format PDF/XLSX/CSV, delivery by email, portal
 or WhatsApp link, skip-if-empty, failure alerting, and a run log), export size caps and async generation for large
 extracts, embeddable charts with signed short-lived tokens, and the **government/statutory formats**: NRHM/HMIS
@@ -70,6 +75,7 @@ state health-department formats, NABH indicator returns, and the trauma and canc
 a mapped, versioned format definition so a format change is configuration, not a release.
 
 ### 11.5 FHIR R4 façade and HL7 v2 breadth (EN-019)
+
 - **FHIR R4 read path** across the resource set the spec lists (Patient, Encounter, Condition, AllergyIntolerance,
   MedicationRequest, Observation, DiagnosticReport, ServiceRequest, Procedure, Immunization, DocumentReference,
   Composition, Coverage, Claim, Organization, Practitioner, PractitionerRole, Location, Appointment, Specimen,
@@ -82,6 +88,7 @@ a mapped, versioned format definition so a format change is configuration, not a
   (ADT A01/A02/A03/A08, ORM, ORU, SIU, DFT), and a conformance/sandbox mode with bulk export.
 
 ### 11.6 ABDM M2 (HIP) — care contexts, consent, encrypted transfer (EN-011 §3.4–3.5, §3.7)
+
 - **Care-context creation and linking correctness is the heart of this deliverable.** Every OPD visit, IP admission,
   diagnostic order and discharge creates a care context with a stable reference number and a human-readable
   display; HIP-initiated linking uses the V3 link-token per patient (persisted from Phase 1); manual OTP linking is
@@ -100,6 +107,7 @@ a mapped, versioned format definition so a format change is configuration, not a
   on amendment.
 
 ### 11.7 ABDM M3 (HIU) — fetch, decrypt, render, import (EN-011 §3.6)
+
 Doctor-initiated consent request from the chart with purpose code, HI types, date range and expiry, requester
 mapped to the HPR id; consent status tracking; per-request key pair; fetch, **decrypt, validate FHIR and store**;
 an "ABDM Records" tab that renders bundles as readable cards (diagnoses, medications, reports, attachments);
@@ -107,6 +115,7 @@ selective **import into the local record with explicit provenance** ("imported f
 revocation, auto-expiry and a **purge job honouring `dataEraseAt`**.
 
 ### 11.8 NHCX / M4 claims and denials (RC-001 §3.5 + RC-004)
+
 Complete the Phase 5 claim-pack assembly into full claim lifecycle: coding and completeness checks, the **claim
 scrubber** with payer-specific rules, pack assembly, and channel routing (portal, email, courier, payer API,
 **NHCX**). NHCX as a provider participant with keys in the vault and signed JWS/JWE payloads:
@@ -119,6 +128,7 @@ wording mapping, denial capture, decision and action, appeals with deadlines, ro
 **preventive-rules loop that feeds denial patterns back into the scrubber and into pre-auth**.
 
 ### 11.9 Trauma registry and quality (TR-011)
+
 Registry inclusion rules and automatic record assembly from Phase 6 data (mechanism, pre-hospital, triage, scores,
 interventions with times, operations, ICU, outcome), NTDS/ICMR-NTR aligned dataset, **TQIP-style risk-adjusted
 indicators**, the Cribari under/over-triage matrix, mortality and morbidity review workflow with case selection
@@ -126,6 +136,7 @@ indicators**, the Cribari under/over-triage matrix, mortality and morbidity revi
 and registry data governance.
 
 ### 11.10 Migration and the API gateway (EN-036 + EN-026)
+
 EN-036 as a full migration toolkit now: source profiling, mapping configuration for non-template sources,
 staging → validate → error report → commit, deterministic and fuzzy de-duplication, batch tracking and rollback,
 scheduled imports/exports, data-quality scoring, and the legacy-system migration playbook from
@@ -134,6 +145,7 @@ onboarding and credentials, the request pipeline, rate limits and quotas by tier
 policy, developer portal, and webhook subscriptions with signature verification and replay protection.
 
 ### 11.11 Certification and audit preparation
+
 Assemble, as artefacts in the repo rather than a scramble later: the **ABDM sandbox test-run evidence** (M1–M4
 scenarios executed against the NHA sandbox with request/response logs, PHI redacted), the FHIR conformance report,
 the **STQC/ABDM milestone checklist** with the code or config that satisfies each item, the **CERT-In requirements**
@@ -142,6 +154,7 @@ a data-flow and data-residency map, and the DPDP records of processing. Anything
 generatable by a command.
 
 ## Constraints & watch-outs
+
 - **One definition per metric, in one place.** If a number appears on a dashboard, in a scheduled report and in an
   export, it comes from the same semantic-layer definition. A test asserts that revenue, occupancy and LOS computed
   three ways agree for a seeded month; a changed definition bumps its version and is recorded in `docs/DECISIONS.md`.
@@ -161,6 +174,7 @@ generatable by a command.
   precisely why the semantic layer has to be right now.
 
 ## Exit gate
+
 1. The metric-consistency test passes: revenue, occupancy and LOS for a seeded month agree across dashboard,
    scheduled report and export, and each metric's definition is versioned in code.
 2. A management dashboard loads in < 2 s p95 against a year of seeded data, drills down to an invoice, and shows a
@@ -182,7 +196,7 @@ generatable by a command.
    submission is idempotent on the correlation id; a denial is captured, mapped to a reason code, appealed, and
    feeds a preventive rule into the scrubber.
 9. The trauma registry assembles cases automatically, computes risk-adjusted indicators and the Cribari matrix,
-    and exports the external registry format.
+   and exports the external registry format.
 10. A legacy migration dry-run loads patients, visits and balances into staging, reports errors, commits, and rolls
     back cleanly; de-duplication statistics are reported.
 11. The certification pack (ABDM sandbox evidence, FHIR conformance, STQC checklist, CERT-In runbook, data-flow and

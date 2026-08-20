@@ -198,9 +198,7 @@ export function PatientSearchCombobox({
           // the two-character query resolves after the five-character one often enough.
           if (request !== requestRef.current) return;
           setStatus(
-            results.length === 0
-              ? { kind: 'no-results', query: trimmed }
-              : { kind: 'results', results },
+            results.length === 0 ? { kind: 'no-results', query: trimmed } : { kind: 'results', results },
           );
           setActiveIndex(results.length === 0 ? -1 : 0);
         })
@@ -398,7 +396,10 @@ export function PatientSearchCombobox({
         )}
       >
         {visible.length === 0 ? null : (
-          <li role="presentation" className="px-2 py-1 text-2xs font-medium uppercase tracking-[0.08em] text-fg-muted">
+          <li
+            role="presentation"
+            className="px-2 py-1 text-2xs font-medium uppercase tracking-[0.08em] text-fg-muted"
+          >
             {showingRecent ? labels.recentHeading : labels.resultsHeading}
           </li>
         )}

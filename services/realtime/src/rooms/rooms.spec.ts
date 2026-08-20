@@ -17,13 +17,9 @@ describe('room names match docs/01 §6 exactly', () => {
     expect(rooms.queue(hospitalA, branchA1, doctorOrtho)).toBe(
       `h:${hospitalA}:b:${branchA1}:queue:${doctorOrtho}`,
     );
-    expect(rooms.ward(hospitalA, branchA1, 'ward-3b')).toBe(
-      `h:${hospitalA}:b:${branchA1}:ward:ward-3b`,
-    );
+    expect(rooms.ward(hospitalA, branchA1, 'ward-3b')).toBe(`h:${hospitalA}:b:${branchA1}:ward:ward-3b`);
     expect(rooms.bedboard(hospitalA, branchA1)).toBe(`h:${hospitalA}:b:${branchA1}:bedboard`);
-    expect(rooms.user(hospitalA, branchA1, userAlice)).toBe(
-      `h:${hospitalA}:b:${branchA1}:user:${userAlice}`,
-    );
+    expect(rooms.user(hospitalA, branchA1, userAlice)).toBe(`h:${hospitalA}:b:${branchA1}:user:${userAlice}`);
     expect(rooms.ot(hospitalA, branchA1)).toBe(`h:${hospitalA}:b:${branchA1}:ot`);
     expect(rooms.er(hospitalA, branchA1)).toBe(`h:${hospitalA}:b:${branchA1}:er`);
     expect(rooms.display(hospitalA, branchA1, 'opd-lobby-1')).toBe(
@@ -67,12 +63,10 @@ describe('segment validation', () => {
 
   it('the descriptor schema requires UUIDs for tenant-bearing fields', () => {
     expect(
-      roomDescriptorSchema.safeParse({ kind: 'bedboard', hospitalId: 'not-a-uuid', branchId: null })
-        .success,
+      roomDescriptorSchema.safeParse({ kind: 'bedboard', hospitalId: 'not-a-uuid', branchId: null }).success,
     ).toBe(false);
     expect(
-      roomDescriptorSchema.safeParse({ kind: 'bedboard', hospitalId: hospitalA, branchId: null })
-        .success,
+      roomDescriptorSchema.safeParse({ kind: 'bedboard', hospitalId: hospitalA, branchId: null }).success,
     ).toBe(true);
   });
 });

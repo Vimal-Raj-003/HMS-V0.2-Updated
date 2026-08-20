@@ -18,11 +18,7 @@ const payload: A4DocumentPayload = {
     {
       heading: 'Charges',
       table: {
-        columns: [
-          { label: 'Service' },
-          { label: 'Qty', align: 'end' },
-          { label: 'Amount', align: 'end' },
-        ],
+        columns: [{ label: 'Service' }, { label: 'Qty', align: 'end' }, { label: 'Amount', align: 'end' }],
         rows: [
           ['Consultation — Orthopaedics', '1', '₹800.00'],
           ['X-ray, knee AP/Lat', '1', '₹1,200.00'],
@@ -51,7 +47,7 @@ describe('escaping', () => {
 describe('the letterhead primitive', () => {
   it('prints the hospital, branch, address, contact, GSTIN and accreditation', () => {
     const html = renderLetterhead(sampleContext());
-    expect(html).toContain("Vim&#39;s Trauma &amp; Multispeciality Hospital");
+    expect(html).toContain('Vim&#39;s Trauma &amp; Multispeciality Hospital');
     expect(html).toContain('VIMS Healthcare Private Limited');
     expect(html).toContain('Main Campus');
     expect(html).toContain('Block A, Ground Floor');

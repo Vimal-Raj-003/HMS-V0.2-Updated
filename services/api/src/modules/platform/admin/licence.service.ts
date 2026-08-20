@@ -2,7 +2,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import { CLINICAL_SAFETY_EXEMPT_KEYS, type DegradationTierSpec } from '@vims/contracts';
 import { DatabaseService } from '../../../core/db/database.service.js';
 import { currentTenantContext } from '../../../core/tenancy/tenant-context.js';
-import { resolveEntitlements, tierSpec, type EntitlementRow, type ResolvedEntitlement } from './entitlements.logic.js';
+import {
+  resolveEntitlements,
+  tierSpec,
+  type EntitlementRow,
+  type ResolvedEntitlement,
+} from './entitlements.logic.js';
 
 export interface SubscriptionSummary {
   readonly id: string;

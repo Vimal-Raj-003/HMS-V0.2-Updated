@@ -83,7 +83,12 @@ describe('ConfirmWithReasonDialog — docs/06 §6.9 levels 4 and 5', () => {
   it('is a hard stop: Escape does not close it (docs/06 §6.8)', () => {
     const onOpenChange = vi.fn();
     render(
-      <ConfirmWithReasonDialog open onOpenChange={onOpenChange} labels={labels} onConfirm={() => undefined} />,
+      <ConfirmWithReasonDialog
+        open
+        onOpenChange={onOpenChange}
+        labels={labels}
+        onConfirm={() => undefined}
+      />,
     );
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape', code: 'Escape' });
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
@@ -92,7 +97,12 @@ describe('ConfirmWithReasonDialog — docs/06 §6.9 levels 4 and 5', () => {
 
   it('is fully operable from the keyboard and traps focus in the hard stop', () => {
     render(
-      <ConfirmWithReasonDialog open onOpenChange={() => undefined} labels={labels} onConfirm={() => undefined} />,
+      <ConfirmWithReasonDialog
+        open
+        onOpenChange={() => undefined}
+        labels={labels}
+        onConfirm={() => undefined}
+      />,
     );
     const dialog = screen.getByRole('alertdialog');
     // Radix moves focus into the dialog on open; every control must be inside it.
@@ -107,7 +117,12 @@ describe('ConfirmWithReasonDialog — docs/06 §6.9 levels 4 and 5', () => {
 
   it('has no axe violations', async () => {
     render(
-      <ConfirmWithReasonDialog open onOpenChange={() => undefined} labels={labels} onConfirm={() => undefined} />,
+      <ConfirmWithReasonDialog
+        open
+        onOpenChange={() => undefined}
+        labels={labels}
+        onConfirm={() => undefined}
+      />,
     );
     await expect(findAccessibilityViolations(screen.getByRole('alertdialog'))).resolves.toEqual([]);
   });

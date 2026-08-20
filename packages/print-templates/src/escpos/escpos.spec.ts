@@ -154,7 +154,8 @@ describe('the token slip template', () => {
 
   it('marks a reprint as a duplicate (EN-005 §5)', () => {
     const text = toPrintableText(
-      renderTokenSlip(payload, sampleContext({ duplicate: true, duplicateReason: 'Patient lost slip' })).bytes,
+      renderTokenSlip(payload, sampleContext({ duplicate: true, duplicateReason: 'Patient lost slip' }))
+        .bytes,
     );
     expect(text).toContain('** DUPLICATE **');
   });

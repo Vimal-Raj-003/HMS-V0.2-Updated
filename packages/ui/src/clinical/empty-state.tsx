@@ -20,7 +20,13 @@ export interface EmptyStateProps {
   readonly className?: string;
 }
 
-export function EmptyState({ icon, cause, nextAction, action, className }: EmptyStateProps): React.JSX.Element {
+export function EmptyState({
+  icon,
+  cause,
+  nextAction,
+  action,
+  className,
+}: EmptyStateProps): React.JSX.Element {
   return (
     <div
       data-slot="empty-state"

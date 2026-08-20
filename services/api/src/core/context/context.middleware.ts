@@ -23,7 +23,8 @@ export function pathOf(url: string | undefined): string {
 export class ContextMiddleware implements NestMiddleware {
   use(req: FastifyRequest['raw'], res: FastifyReply['raw'], next: () => void): void {
     const inbound = req.headers['x-trace-id'];
-    const traceId = typeof inbound === 'string' && inbound.length > 0 && inbound.length <= 64 ? inbound : newId();
+    const traceId =
+      typeof inbound === 'string' && inbound.length > 0 && inbound.length <= 64 ? inbound : newId();
 
     const forwardedFor = req.headers['x-forwarded-for'];
     const ip =

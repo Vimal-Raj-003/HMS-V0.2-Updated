@@ -9,7 +9,8 @@
  * — which is the failure mode that reaches TRAI as a complaint.
  */
 
-export type PhoneRejection = 'empty' | 'not_numeric' | 'too_short' | 'too_long' | 'landline' | 'unknown_country';
+export type PhoneRejection =
+  'empty' | 'not_numeric' | 'too_short' | 'too_long' | 'landline' | 'unknown_country';
 
 export type PhoneNormalisation =
   | { readonly ok: true; readonly e164: string; readonly countryCode: string; readonly national: string }
@@ -23,16 +24,17 @@ const INDIA_MOBILE_FIRST_DIGIT = /^[6-9]/;
  * country is *rejected* rather than guessed: guessing produces a well-formed
  * number that belongs to somebody else.
  */
-const KNOWN_COUNTRIES: Readonly<Record<string, { readonly nationalLength: number; readonly mobileFirst?: RegExp }>> =
-  Object.freeze({
-    '91': { nationalLength: 10, mobileFirst: INDIA_MOBILE_FIRST_DIGIT },
-    '971': { nationalLength: 9 },
-    '974': { nationalLength: 8 },
-    '966': { nationalLength: 9 },
-    '65': { nationalLength: 8 },
-    '44': { nationalLength: 10 },
-    '1': { nationalLength: 10 },
-  });
+const KNOWN_COUNTRIES: Readonly<
+  Record<string, { readonly nationalLength: number; readonly mobileFirst?: RegExp }>
+> = Object.freeze({
+  '91': { nationalLength: 10, mobileFirst: INDIA_MOBILE_FIRST_DIGIT },
+  '971': { nationalLength: 9 },
+  '974': { nationalLength: 8 },
+  '966': { nationalLength: 9 },
+  '65': { nationalLength: 8 },
+  '44': { nationalLength: 10 },
+  '1': { nationalLength: 10 },
+});
 
 /** Longest-prefix match, so `+1` does not shadow `+91`. */
 function splitCountry(digits: string): { readonly cc: string; readonly national: string } | undefined {
@@ -67,7 +69,11 @@ export function normaliseToE164(input: string, defaultCountryCode = '91'): Phone
 
   const split = splitCountry(digits);
   if (split === undefined) {
-    return { ok: false, reason: 'unknown_country', detail: `no dialling rules for the country in +${digits}` };
+    return {
+      ok: false,
+      reason: 'unknown_country',
+      detail: `no dialling rules for the country in +${digits}`,
+    };
   }
 
   const rules = KNOWN_COUNTRIES[split.cc];
@@ -75,10 +81,18 @@ export function normaliseToE164(input: string, defaultCountryCode = '91'): Phone
     return { ok: false, reason: 'unknown_country', detail: `no dialling rules for +${split.cc}` };
   }
   if (split.national.length < rules.nationalLength) {
-    return { ok: false, reason: 'too_short', detail: `+${split.cc} numbers have ${String(rules.nationalLength)} digits` };
+    return {
+      ok: false,
+      reason: 'too_short',
+      detail: `+${split.cc} numbers have ${String(rules.nationalLength)} digits`,
+    };
   }
   if (split.national.length > rules.nationalLength) {
-    return { ok: false, reason: 'too_long', detail: `+${split.cc} numbers have ${String(rules.nationalLength)} digits` };
+    return {
+      ok: false,
+      reason: 'too_long',
+      detail: `+${split.cc} numbers have ${String(rules.nationalLength)} digits`,
+    };
   }
   if (rules.mobileFirst !== undefined && !rules.mobileFirst.test(split.national)) {
     // EN-009 §5: an SMS to a landline is billed and never arrives.

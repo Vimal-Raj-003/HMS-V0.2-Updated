@@ -17,14 +17,22 @@ import { z } from 'zod';
 /** Money limits are decimal strings, never numbers — see primitives/money.ts. */
 export const amountLimitSchema = z.object({
   /** Absolute ceiling as a decimal string, e.g. "5000.00". */
-  maxAmount: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+  maxAmount: z
+    .string()
+    .regex(/^\d+(\.\d{1,2})?$/)
+    .optional(),
   /** Percentage ceiling as a decimal string, e.g. "10" or "12.5". */
-  maxPercent: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+  maxPercent: z
+    .string()
+    .regex(/^\d+(\.\d{1,2})?$/)
+    .optional(),
   /**
    * `EN-038 §3.2`: "'25 % **or** ₹25 000, whichever is lower, triggers the next
    * tier' — both expressible". When both are set, the *lower* effective ceiling wins.
    */
-  combine: z.enum(['whichever_is_lower', 'whichever_is_higher', 'both_must_pass']).default('whichever_is_lower'),
+  combine: z
+    .enum(['whichever_is_lower', 'whichever_is_higher', 'both_must_pass'])
+    .default('whichever_is_lower'),
 });
 
 export type AmountLimit = z.infer<typeof amountLimitSchema>;
@@ -127,7 +135,11 @@ export interface PolicyResource {
 }
 
 export type PolicyDecision =
-  | { readonly allowed: true; readonly obligations: readonly PolicyObligation[]; readonly trace: readonly string[] }
+  | {
+      readonly allowed: true;
+      readonly obligations: readonly PolicyObligation[];
+      readonly trace: readonly string[];
+    }
   | {
       readonly allowed: false;
       readonly reason: PolicyDenialReason;

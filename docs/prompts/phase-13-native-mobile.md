@@ -4,6 +4,7 @@ Phases 0–12 complete: every role already has an installable PWA. This phase bu
 browser genuinely cannot deliver — and keeps the PWA as the definition of what the product does.
 
 ## Read first
+
 `CLAUDE.md`, `docs/PROGRESS.md`, then: **OP-019** (doctor app — read §3.5 offline and its conflict rules
 carefully), **IP-010** (doctor IP mobile: rounds, orders, discharge initiation), **IP-004** (nurse app — bedside
 identification, barcode MAR, offline), **OP-020** (patient app), **NC-014** (staff utility app), plus
@@ -28,8 +29,9 @@ reliably.
 ## Deliverables
 
 ### 13.1 Shared foundation — build once, use in all four apps
+
 - **Expo (managed workflow with config plugins) + React Native + TypeScript**, in `apps/mobile-*` inside the same
-  monorepo, consuming the *same* `packages/contracts` (Zod schemas, DTOs, event types, score functions) and
+  monorepo, consuming the _same_ `packages/contracts` (Zod schemas, DTOs, event types, score functions) and
   `packages/ui` **design tokens** — colours, spacing, typography, elevation, semantic clinical colours — exported
   in a platform-neutral form so the native theme is generated from the same source as the web theme, not hand-copied.
   A contract change must break the mobile build in CI, not at runtime on a ward.
@@ -55,7 +57,9 @@ reliably.
   and crash/ANR monitoring per build.
 
 ### 13.2 What actually needs to be native — and what does not
+
 Justify each app against this list, and do not build native screens for anything outside it:
+
 - **Background push reliability.** Web Push cannot be trusted for a critical-result alert on a locked phone across
   Android OEM battery managers and iOS. FCM/APNs with high-priority channels, a full-screen critical alert
   category, and a bypass of Do-Not-Disturb for the clinical-critical channel.
@@ -64,9 +68,10 @@ Justify each app against this list, and do not build native screens for anything
 - **Offline durability.** A twelve-hour shift's worth of encrypted local clinical data, surviving app kills, OS
   memory pressure and reboots — beyond what IndexedDB gives reliably.
 - **Biometric keystore.** Hardware-backed key storage for unlock and for signing.
-- Everything else — layout, lists, forms, charts — stays in the PWA and is *linked to* from the app where useful.
+- Everything else — layout, lists, forms, charts — stays in the PWA and is _linked to_ from the app where useful.
 
 ### 13.3 Nurse app (IP-004)
+
 Shift start with device and ward binding; **wristband-first bedside identification** (no patient action without a
 scan); bedside vitals with BLE capture and manual fallback; **barcode medication verification enforcing the
 5 Rights, high-alert second-nurse witness and coded reasons for missed or refused doses — the same server-side
@@ -75,6 +80,7 @@ wound and clinical photo capture with on-device encryption and no camera-roll pe
 escalation; and a full offline shift.
 
 ### 13.4 Doctor app (OP-019 + IP-010)
+
 Live OPD queue and IP rounds lists; patient chart read with the offline cache described in OP-019 §3.5 (today's
 queue, summaries of queued patients, problems/allergies/meds/last vitals, a reference-data subset, own drafts);
 mobile consultation and note dictation; **mobile orders and prescriptions with server-side CDSS on sync**;
@@ -82,11 +88,13 @@ discharge initiation from the phone; critical-result and escalation push with ac
 and the earnings view from NC-034. PHI cache purges 24 hours after last use, on logout and on remote wipe.
 
 ### 13.5 Staff app (NC-014)
+
 Directory, geo-fenced attendance punching (with NC-029/EN-020), leave and approvals, payslips and documents,
 announcements, roster and shift swaps, helpdesk tickets, cafeteria, and the SOS button with location — the app most
 staff will actually install, and therefore the one that carries enterprise enrolment for everyone else.
 
 ### 13.6 Patient app (OP-020)
+
 Login by OTP or ABHA with biometric unlock, appointments and live queue position, records and reports, bills and
 payments, family profiles, reminders and notifications, and in-app services. This app inherits the Phase 10 threat
 model in full — plus mobile-specific items: certificate pinning, jailbreak/root detection with a documented policy,
@@ -94,7 +102,9 @@ screenshot restriction on record screens, deep-link validation, and no PHI in no
 notification says "a report is ready", the app fetches it after authentication).
 
 ### 13.7 Push notification reliability for critical alerts
+
 This is the deliverable that justifies the phase — treat it as an engineering problem with an SLA, not a feature.
+
 - Per-channel setup: FCM and APNs with high-priority/critical categories, Android notification channels per
   severity that the user cannot silence for clinical-critical, iOS critical-alert entitlement where granted, and
   OEM battery-optimisation exemption prompts during onboarding.
@@ -103,12 +113,13 @@ This is the deliverable that justifies the phase — treat it as an engineering 
 - **Escalation fallback ladder**: no device acknowledgement within the alert's timer → re-push → **SMS via EN-009**
   → voice call via EN-033 where configured → escalate to the next person on the NC-030 roster → to the duty
   supervisor. Every hop recorded. **No PHI at any hop.**
-- A **heartbeat**: apps register liveness so the server knows a device is unreachable *before* a critical alert is
+- A **heartbeat**: apps register liveness so the server knows a device is unreachable _before_ a critical alert is
   sent, and routes around it.
 - Token lifecycle: silent re-registration, stale-token cleanup, and one user across multiple devices handled
   deterministically (acknowledge on one clears the others).
 
 ### 13.8 Store compliance, distribution and device management
+
 - **App store compliance**: health-data declarations and privacy nutrition labels for both stores, data-safety
   forms matching what the apps actually collect, permission usage strings that are honest, account-deletion path
   required by both stores (wired to the Phase 10 DSAR flow), age rating, and medical-app review notes explaining
@@ -126,6 +137,7 @@ This is the deliverable that justifies the phase — treat it as an engineering 
   and on employee exit from NC-010.
 
 ### 13.9 Testing, telemetry and the parity contract
+
 Detox or Maestro end-to-end tests on real devices for the golden paths; **an offline test matrix** (airplane mode,
 lift-flapping connectivity, app killed mid-sync, device clock changed, battery saver, OS reinstalled); barcode and
 BLE tests against real hardware in CI where possible and against simulators otherwise; push-delivery tests on
@@ -136,6 +148,7 @@ with the rule that **the PWA is the source of truth for feature parity** — a c
 simultaneously), and a mobile-only capability requires an ADR justifying why it cannot exist on the web.
 
 ## Constraints & watch-outs
+
 - **The PWA remains the source of truth.** These apps are clients of the same API, the same contracts and the same
   server-side rules. No business rule, no safety check and no calculation may exist only in the app.
 - **Never trust the device.** The 5 Rights, high-alert witness, CDSS, tariff resolution and every authorisation are
@@ -153,6 +166,7 @@ simultaneously), and a mobile-only capability requires an ADR justifying why it 
   hospital's languages including patient-facing strings.
 
 ## Exit gate
+
 1. One contract change in `packages/contracts` breaks all four mobile builds in CI, and the design tokens in the
    apps are demonstrably generated from `packages/ui` rather than duplicated.
 2. Nurse app: a full simulated shift offline — 40 bedside identifications, vitals, and 60 medication
@@ -175,8 +189,8 @@ simultaneously), and a mobile-only capability requires an ADR justifying why it 
 8. Remote wipe from the admin console clears local data and revokes sessions; a device with no server contact for
    the configured period self-wipes; an employee exit in NC-010 triggers the same.
 9. Staff and doctor apps install via MDM with managed configuration (tenant, server URL, branch) and no personal
-    store account; the patient app passes store review with correct health-data declarations, data-safety forms,
-    residency statements and a working in-app account-deletion path.
+   store account; the patient app passes store review with correct health-data declarations, data-safety forms,
+   residency statements and a working in-app account-deletion path.
 10. Performance and stability: cold start, scan-to-confirmation, shift sync, crash-free sessions and 12-hour battery
     drain all within budget and reported per build; accessibility passes with TalkBack and VoiceOver.
 11. `docs/mobile-parity.md` exists, is complete, and shows no mobile-only capability without an ADR.

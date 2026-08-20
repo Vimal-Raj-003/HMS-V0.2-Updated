@@ -9,8 +9,7 @@
 /** §3.6 — font stacks. Self-hosted woff2, subset per locale, `font-display: swap`. */
 export const fontFamilies = {
   '--font-ui': '"Inter var", Inter, system-ui, -apple-system, "Segoe UI", sans-serif',
-  '--font-display':
-    '"JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+  '--font-display': '"JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
   '--font-mono': '"JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
   '--font-indic':
     '"Noto Sans Devanagari", "Noto Sans Tamil", "Noto Sans Telugu", "Noto Sans Malayalam", "Noto Sans Kannada", "Noto Sans Bengali", "Noto Sans Gujarati", "Noto Sans Gurmukhi", "Noto Sans Oriya"',

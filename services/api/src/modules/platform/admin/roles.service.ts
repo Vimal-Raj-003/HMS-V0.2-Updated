@@ -104,7 +104,10 @@ export interface SodFinding {
   readonly reason: string;
 }
 
-export function sodFindings(keys: readonly string[], rules: readonly SodRule[] = SEGREGATION_OF_DUTIES_RULES): readonly SodFinding[] {
+export function sodFindings(
+  keys: readonly string[],
+  rules: readonly SodRule[] = SEGREGATION_OF_DUTIES_RULES,
+): readonly SodFinding[] {
   const held = new Set(keys);
   return rules.filter((rule) => held.has(rule.permA) && held.has(rule.permB));
 }
@@ -134,7 +137,9 @@ export class RolesService {
     const values: unknown[] = [];
     const bind = (value: unknown): string => `$${values.push(value)}`;
     const keyset =
-      after === null ? '' : `AND (r.created_at, r.id) < (${bind(after.k[0])}::timestamptz, ${bind(after.id)}::uuid)`;
+      after === null
+        ? ''
+        : `AND (r.created_at, r.id) < (${bind(after.k[0])}::timestamptz, ${bind(after.id)}::uuid)`;
 
     const sql = `SELECT r.id, r.key, r.name, r.description, r.template_key, r.home_workspace,
                         r.category, r.is_system, r.sensitive_grant, r.version, r.active, r.created_at,
@@ -327,7 +332,11 @@ export class RolesService {
         businessKey: before.key,
         dataClass: 'operational',
         before: { name: before.name, description: before.description, permissions: held },
-        after: { name: body.name ?? before.name, description: body.description ?? before.description, permissions: target },
+        after: {
+          name: body.name ?? before.name,
+          description: body.description ?? before.description,
+          permissions: target,
+        },
         reasonText: body.reason,
       });
 

@@ -211,7 +211,8 @@ export function describeContentDrift(expected: string, actual: string): string {
     const slice = text.slice(from, index + 24);
     return `${from > 0 ? '...' : ''}${slice}${index + 24 < text.length ? '...' : ''}`;
   };
-  const charAt = (text: string): string => (index < text.length ? JSON.stringify(text[index]) : '(end of text)');
+  const charAt = (text: string): string =>
+    index < text.length ? JSON.stringify(text[index]) : '(end of text)';
 
   return `differs at offset ${String(index)}: DLT-registered content has ${charAt(expected)}, the template body has ${charAt(
     actual,

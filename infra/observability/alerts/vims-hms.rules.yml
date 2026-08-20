@@ -23,9 +23,9 @@ groups:
         for: 2m
         labels: { severity: P1, pages: platform-oncall }
         annotations:
-          summary: "{{ $labels.job }} is not responding on {{ $labels.instance }}"
-          description: "The /healthz probe has failed for 2 minutes. Clinical screens will be returning errors."
-          runbook_url: "https://runbooks.vimshms.com/service-down"
+          summary: '{{ $labels.job }} is not responding on {{ $labels.instance }}'
+          description: 'The /healthz probe has failed for 2 minutes. Clinical screens will be returning errors.'
+          runbook_url: 'https://runbooks.vimshms.com/service-down'
 
       - alert: ErrorRateHigh
         # docs/10 §7.1 #5 — 5xx > 2 % of requests for 5 minutes.
@@ -35,9 +35,9 @@ groups:
         for: 5m
         labels: { severity: P1, pages: platform-oncall }
         annotations:
-          summary: "5xx rate above 2% for 5 minutes"
-          description: "{{ $value | humanizePercentage }} of requests are failing."
-          runbook_url: "https://runbooks.vimshms.com/error-rate"
+          summary: '5xx rate above 2% for 5 minutes'
+          description: '{{ $value | humanizePercentage }} of requests are failing.'
+          runbook_url: 'https://runbooks.vimshms.com/error-rate'
 
       - alert: LatencyRegression
         # docs/10 §7.1 #13 — class C p95 > 250 ms for 30 minutes.
@@ -45,9 +45,9 @@ groups:
         for: 30m
         labels: { severity: P2, pages: platform-oncall }
         annotations:
-          summary: "Class C p95 above the 250 ms budget"
-          description: "p95 is {{ $value | humanizeDuration }}. docs/07 §7 sets the budget."
-          runbook_url: "https://runbooks.vimshms.com/latency-regression"
+          summary: 'Class C p95 above the 250 ms budget'
+          description: 'p95 is {{ $value | humanizeDuration }}. docs/07 §7 sets the budget.'
+          runbook_url: 'https://runbooks.vimshms.com/latency-regression'
 
   - name: vims-hms.database
     rules:
@@ -55,11 +55,11 @@ groups:
         # docs/10 §7.1 #4 — replica promoted, or 3 failed connections in 60 s.
         expr: pg_up == 0 or increase(vims_db_connection_failures_total[1m]) >= 3
         for: 1m
-        labels: { severity: P1, pages: platform-oncall,dba }
+        labels: { severity: P1, pages: platform-oncall, dba }
         annotations:
-          summary: "PostgreSQL primary unreachable or failing over"
-          description: "Writes are failing loudly rather than being dropped (docs/01 §7), but clinical charting is blocked."
-          runbook_url: "https://runbooks.vimshms.com/database-failover"
+          summary: 'PostgreSQL primary unreachable or failing over'
+          description: 'Writes are failing loudly rather than being dropped (docs/01 §7), but clinical charting is blocked.'
+          runbook_url: 'https://runbooks.vimshms.com/database-failover'
 
       - alert: ReplicaLagHigh
         # docs/10 §7.1 #6 — > 60 s for 5 minutes.
@@ -67,9 +67,9 @@ groups:
         for: 5m
         labels: { severity: P1, pages: dba }
         annotations:
-          summary: "Replica lag above 60s"
-          description: "Reports and analytics read replicas; a lagging replica shows stale clinical data."
-          runbook_url: "https://runbooks.vimshms.com/replica-lag"
+          summary: 'Replica lag above 60s'
+          description: 'Reports and analytics read replicas; a lagging replica shows stale clinical data.'
+          runbook_url: 'https://runbooks.vimshms.com/replica-lag'
 
       - alert: DiskPressure
         # docs/10 §7.1 #8 — data or WAL volume > 85 %, or < 4 h to full.
@@ -80,9 +80,9 @@ groups:
         for: 10m
         labels: { severity: P1, pages: platform-oncall }
         annotations:
-          summary: "{{ $labels.mountpoint }} above 85% or filling within 4h"
-          description: "A full WAL volume stops the database. Partition drops are the fastest recovery (docs/07 §4)."
-          runbook_url: "https://runbooks.vimshms.com/disk-pressure"
+          summary: '{{ $labels.mountpoint }} above 85% or filling within 4h'
+          description: 'A full WAL volume stops the database. Partition drops are the fastest recovery (docs/07 §4).'
+          runbook_url: 'https://runbooks.vimshms.com/disk-pressure'
 
       - alert: BackupFailure
         # docs/10 §7.1 #9 — nightly exit != 0, or newest backup > 26 h old.
@@ -90,9 +90,9 @@ groups:
         for: 15m
         labels: { severity: P1, pages: dba }
         annotations:
-          summary: "No successful pgBackRest backup in 26 hours"
-          description: "PITR coverage is degrading. docs/10 §8 requires >= 30 days of recoverability."
-          runbook_url: "https://runbooks.vimshms.com/backup-failure"
+          summary: 'No successful pgBackRest backup in 26 hours'
+          description: 'PITR coverage is degrading. docs/10 §8 requires >= 30 days of recoverability.'
+          runbook_url: 'https://runbooks.vimshms.com/backup-failure'
 
       - alert: AuditSealBacklog
         # The audit chain is sealed asynchronously (decision D-16). Until a row
@@ -103,9 +103,9 @@ groups:
         for: 15m
         labels: { severity: P2, pages: platform-oncall }
         annotations:
-          summary: "Audit hash-chain sealing is falling behind"
-          description: "{{ $value }} rows are unsealed. core.v_audit_seal_backlog has the per-tenant detail."
-          runbook_url: "https://runbooks.vimshms.com/audit-seal-backlog"
+          summary: 'Audit hash-chain sealing is falling behind'
+          description: '{{ $value }} rows are unsealed. core.v_audit_seal_backlog has the per-tenant detail.'
+          runbook_url: 'https://runbooks.vimshms.com/audit-seal-backlog'
 
   - name: vims-hms.queues
     rules:
@@ -115,9 +115,9 @@ groups:
         for: 2m
         labels: { severity: P1, pages: platform-oncall }
         annotations:
-          summary: "The critical queue is backing up"
-          description: "Critical lab values and code-blue notifications ride this queue (docs/07 §4)."
-          runbook_url: "https://runbooks.vimshms.com/critical-queue-backlog"
+          summary: 'The critical queue is backing up'
+          description: 'Critical lab values and code-blue notifications ride this queue (docs/07 §4).'
+          runbook_url: 'https://runbooks.vimshms.com/critical-queue-backlog'
 
       - alert: RedisMemoryPressure
         # docs/10 §7.1 #14 — > 85 % maxmemory, or ANY eviction.
@@ -127,11 +127,11 @@ groups:
         for: 5m
         labels: { severity: P2, pages: platform-oncall }
         annotations:
-          summary: "Redis is under memory pressure or has evicted keys"
+          summary: 'Redis is under memory pressure or has evicted keys'
           description: >-
             maxmemory-policy is noeviction precisely so that BullMQ jobs and the refresh-token
             denylist are never silently dropped. Any eviction means that setting has been lost.
-          runbook_url: "https://runbooks.vimshms.com/redis-memory"
+          runbook_url: 'https://runbooks.vimshms.com/redis-memory'
 
   - name: vims-hms.security
     rules:
@@ -139,22 +139,22 @@ groups:
         # docs/10 §7.1 #10 — break-glass burst (> 3/h).
         expr: increase(vims_break_glass_total[1h]) > 3
         for: 0m
-        labels: { severity: P1, pages: security-oncall,dpo }
+        labels: { severity: P1, pages: security-oncall, dpo }
         annotations:
-          summary: "More than 3 break-glass record opens in an hour"
+          summary: 'More than 3 break-glass record opens in an hour'
           description: >-
             Break-glass is legitimate in an emergency and is meant to be rare. A burst is either a
             genuine mass-casualty event or someone probing records. The Privacy Officer reviews both.
-          runbook_url: "https://runbooks.vimshms.com/break-glass-burst"
+          runbook_url: 'https://runbooks.vimshms.com/break-glass-burst'
 
       - alert: AuthBypassAttempt
         expr: increase(vims_auth_denied_total{reason=~"tenant_mismatch|unregistered_permission"}[5m]) > 20
         for: 0m
-        labels: { severity: P1, pages: security-oncall,dpo }
+        labels: { severity: P1, pages: security-oncall, dpo }
         annotations:
-          summary: "Repeated cross-tenant or unregistered-permission denials"
-          description: "RLS and the policy engine are refusing these, but the pattern is worth investigating."
-          runbook_url: "https://runbooks.vimshms.com/auth-bypass-attempt"
+          summary: 'Repeated cross-tenant or unregistered-permission denials'
+          description: 'RLS and the policy engine are refusing these, but the pattern is worth investigating.'
+          runbook_url: 'https://runbooks.vimshms.com/auth-bypass-attempt'
 
       - alert: CertificateExpiringSoon
         # docs/10 §7.1 #16 — < 14 days.
@@ -162,8 +162,8 @@ groups:
         for: 1h
         labels: { severity: P2, pages: platform-oncall }
         annotations:
-          summary: "TLS certificate for {{ $labels.instance }} expires in under 14 days"
-          runbook_url: "https://runbooks.vimshms.com/certificate-expiry"
+          summary: 'TLS certificate for {{ $labels.instance }} expires in under 14 days'
+          runbook_url: 'https://runbooks.vimshms.com/certificate-expiry'
 
   - name: vims-hms.integration
     rules:
@@ -173,9 +173,9 @@ groups:
         for: 5m
         labels: { severity: P2, pages: integration-owner }
         annotations:
-          summary: "Connector {{ $labels.connector }} circuit is open"
-          description: "Analyzer, PACS or payer traffic is being refused. Manual entry paths stay available (docs/01 §7)."
-          runbook_url: "https://runbooks.vimshms.com/connector-circuit-open"
+          summary: 'Connector {{ $labels.connector }} circuit is open'
+          description: 'Analyzer, PACS or payer traffic is being refused. Manual entry paths stay available (docs/01 §7).'
+          runbook_url: 'https://runbooks.vimshms.com/connector-circuit-open'
 
       - alert: DeadLetterQueueGrowth
         # docs/10 §7.1 #12 — new fingerprint on a clinical connector is P1.
@@ -183,8 +183,8 @@ groups:
         for: 10m
         labels: { severity: P2, pages: integration-owner }
         annotations:
-          summary: "Integration DLQ above 500 messages"
-          runbook_url: "https://runbooks.vimshms.com/dlq-growth"
+          summary: 'Integration DLQ above 500 messages'
+          runbook_url: 'https://runbooks.vimshms.com/dlq-growth'
 
       - alert: PrintAgentDown
         # docs/10 §7.1 #15 — heartbeat missing > 5 min.
@@ -192,6 +192,6 @@ groups:
         for: 0m
         labels: { severity: P2, pages: hospital-it }
         annotations:
-          summary: "Print agent {{ $labels.agent }} has not sent a heartbeat in 5 minutes"
-          description: "Jobs stay queued with a print-elsewhere option rather than failing (docs/01 §7)."
-          runbook_url: "https://runbooks.vimshms.com/print-agent-down"
+          summary: 'Print agent {{ $labels.agent }} has not sent a heartbeat in 5 minutes'
+          description: 'Jobs stay queued with a print-elsewhere option rather than failing (docs/01 §7).'
+          runbook_url: 'https://runbooks.vimshms.com/print-agent-down'

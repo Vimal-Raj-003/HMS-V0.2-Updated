@@ -1,5 +1,12 @@
 import { newId } from '@vims/contracts';
-import { createTenantFixture, startTestPostgres, startTestRedis, type TenantFixture, type TestPostgres, type TestRedis } from '@vims/testing';
+import {
+  createTenantFixture,
+  startTestPostgres,
+  startTestRedis,
+  type TenantFixture,
+  type TestPostgres,
+  type TestRedis,
+} from '@vims/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { relayOnce } from './relay/outbox-relay.js';
 import { sealAuditChains, verifyAuditChain } from './maintenance/audit-chain-sealer.js';
@@ -42,10 +49,11 @@ describe('outbox relay', () => {
     expect(flat).toContain(eventId);
     expect(flat).toContain('patient.registered');
 
-    const row = await pg.pool('migrator').query<{ published_at: Date | null }>(
-      `SELECT published_at FROM core.outbox_events WHERE id = $1`,
-      [eventId],
-    );
+    const row = await pg
+      .pool('migrator')
+      .query<{ published_at: Date | null }>(`SELECT published_at FROM core.outbox_events WHERE id = $1`, [
+        eventId,
+      ]);
     expect(row.rows[0]?.published_at).not.toBeNull();
   });
 
@@ -93,10 +101,12 @@ describe('audit chain sealer', () => {
     const sealed = await sealAuditChains(pg.pool('migrator'));
     expect(sealed.some((s) => s.hospitalId === tenants.hospitalA)).toBe(true);
 
-    const unsealed = await pg.pool('migrator').query<{ n: string }>(
-      `SELECT count(*) AS n FROM core.audit_log WHERE hospital_id = $1 AND sealed_at IS NULL`,
-      [tenants.hospitalA],
-    );
+    const unsealed = await pg
+      .pool('migrator')
+      .query<{ n: string }>(
+        `SELECT count(*) AS n FROM core.audit_log WHERE hospital_id = $1 AND sealed_at IS NULL`,
+        [tenants.hospitalA],
+      );
     expect(Number(unsealed.rows[0]?.n)).toBe(0);
 
     const findings = await verifyAuditChain(pg.pool('migrator'), tenants.hospitalA);

@@ -57,10 +57,18 @@ const NOT_CONFIGURED = 'Twilio adapter used before configure()';
 
 export const twilioOptionsSchema = z
   .object({
-    accountSid: z.string().regex(/^AC[0-9a-fA-F]{32}$/, 'a Twilio Account SID looks like `AC` + 32 hex characters'),
+    accountSid: z
+      .string()
+      .regex(/^AC[0-9a-fA-F]{32}$/, 'a Twilio Account SID looks like `AC` + 32 hex characters'),
     /** Either a Messaging Service (preferred: it carries the sender pool) or a single from-number. */
-    messagingServiceSid: z.string().regex(/^MG[0-9a-fA-F]{32}$/).optional(),
-    fromNumber: z.string().regex(/^\+[1-9]\d{7,14}$/).optional(),
+    messagingServiceSid: z
+      .string()
+      .regex(/^MG[0-9a-fA-F]{32}$/)
+      .optional(),
+    fromNumber: z
+      .string()
+      .regex(/^\+[1-9]\d{7,14}$/)
+      .optional(),
     /**
      * The public URL Twilio will POST status callbacks to. Required because the
      * signature is computed over it; inferring it from the inbound request would
@@ -80,7 +88,8 @@ const manifest: ConnectorManifest = {
   version: TWILIO_ADAPTER_VERSION,
   name: 'Twilio (SMS)',
   publisher: 'VIMS ENTERPRISE',
-  description: 'EN-009 SMS gateway adapter for Twilio Programmable Messaging, with DLT parameters and signed status callbacks.',
+  description:
+    'EN-009 SMS gateway adapter for Twilio Programmable Messaging, with DLT parameters and signed status callbacks.',
   capabilities: {
     protocols: ['rest'],
     directions: ['in', 'out', 'both'],
@@ -188,7 +197,13 @@ export class TwilioAdapter implements ConnectorAdapter {
     const options = this.options;
     if (ctx === undefined || options === undefined) throw new Error(NOT_CONFIGURED);
     if (this.closed) {
-      return { status: 'failed', errorClass: 'network', message: 'adapter is closed', retryable: true, latencyMs: 0 };
+      return {
+        status: 'failed',
+        errorClass: 'network',
+        message: 'adapter is closed',
+        retryable: true,
+        latencyMs: 0,
+      };
     }
     if (operationKey !== 'sendSms') {
       return {
@@ -219,7 +234,12 @@ export class TwilioAdapter implements ConnectorAdapter {
         { connectorId: ctx.connectorId, templateKey: payload.templateKey },
         'Twilio: sandbox/replay — call recorded, nothing sent',
       );
-      return { status: 'acknowledged', partnerRef: `sandbox:${message.messageId}`, latencyMs: 0, response: { sandbox: true } };
+      return {
+        status: 'acknowledged',
+        partnerRef: `sandbox:${message.messageId}`,
+        latencyMs: 0,
+        response: { sandbox: true },
+      };
     }
 
     const form = new URLSearchParams({
@@ -269,14 +289,14 @@ export class TwilioAdapter implements ConnectorAdapter {
         response,
         latencyMs,
         now: ctx.clock.now(),
-        ...(error.success && error.data.code !== undefined ? { code: `TWILIO_${String(error.data.code)}` } : {}),
+        ...(error.success && error.data.code !== undefined
+          ? { code: `TWILIO_${String(error.data.code)}` }
+          : {}),
         ...(error.success && error.data.message !== undefined ? { message: error.data.message } : {}),
       });
     }
 
-    const created = z
-      .object({ sid: z.string().min(1), status: z.string().optional() })
-      .safeParse(decoded);
+    const created = z.object({ sid: z.string().min(1), status: z.string().optional() }).safeParse(decoded);
     if (!created.success) {
       return {
         status: 'failed',
@@ -413,7 +433,9 @@ function elapsed(ctx: AdapterContext, started: Date): number {
   return Math.max(0, ctx.clock.now().getTime() - started.getTime());
 }
 
-export function createTwilioFactory(transport: HttpTransport = fetchHttpTransport()): ConnectorAdapterFactory {
+export function createTwilioFactory(
+  transport: HttpTransport = fetchHttpTransport(),
+): ConnectorAdapterFactory {
   return Object.freeze({
     manifest: TWILIO_MANIFEST,
     refineConfig(config: ConnectorConfig): readonly string[] {
@@ -424,7 +446,9 @@ export function createTwilioFactory(transport: HttpTransport = fetchHttpTranspor
         );
       }
       if (config.auth.type !== 'basic') {
-        return ["Twilio authenticates with HTTP basic, so auth.type must be 'basic' with a `AccountSid:AuthToken` secret"];
+        return [
+          "Twilio authenticates with HTTP basic, so auth.type must be 'basic' with a `AccountSid:AuthToken` secret",
+        ];
       }
       return [];
     },

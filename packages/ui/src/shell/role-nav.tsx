@@ -121,9 +121,7 @@ function Branch({
   readonly activeKey?: string;
   readonly onNavigate?: (item: RoleNavItem) => void;
 }): React.JSX.Element {
-  const [open, setOpen] = useState(
-    () => item.children?.some((child) => child.key === activeKey) ?? false,
-  );
+  const [open, setOpen] = useState(() => item.children?.some((child) => child.key === activeKey) ?? false);
   const panelId = `role-nav-${item.key}`;
 
   return (

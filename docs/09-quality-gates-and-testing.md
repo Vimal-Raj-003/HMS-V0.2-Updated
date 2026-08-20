@@ -28,6 +28,7 @@
 ```
 
 Deliberate deviations from the classic pyramid:
+
 - **The integration layer is unusually fat.** Almost every real defect in an HMS lives in the seam between
   business rule, RLS policy, permission check and SQL. A service unit-tested with a mocked repository proves
   very little about whether a nurse in Branch B can read Branch A's chart.
@@ -44,6 +45,7 @@ Deliberate deviations from the classic pyramid:
 injected. `services/api/src/modules/<domain>/<module>/__tests__/*.spec.ts`, `packages/*/src/**/*.spec.ts`.
 
 **Rules**
+
 - One behaviour per test; the name states the rule (`refuses to dispense a Schedule X drug without a prescriber DEA-equivalent registration`), not the method.
 - No network, no filesystem, no real DB, no `setTimeout` — time comes from an injected `Clock`, randomness from an injected `IdGen`. A test that needs a DB is an integration test; move it.
 - Money is asserted with the `Money` type, never floats. Doses are asserted with unit + value, never a bare number.
@@ -53,13 +55,13 @@ injected. `services/api/src/modules/<domain>/<module>/__tests__/*.spec.ts`, `pac
 
 **Coverage gates (enforced in CI per package, not globally averaged)**
 
-| Area | Statements | Branches | Notes |
-|---|---|---|---|
-| `services/api/src/modules/**/*.service.ts` | **≥ 80 %** | ≥ 75 % | per-module, not repo-wide — a well-covered OP-001 cannot subsidise an untested IP-005 |
-| **Money, dose and safety calculators** | **100 %** | **100 %** | see the enumerated list below |
-| `packages/contracts` | ≥ 90 % | ≥ 85 % | schemas + refinements |
-| `packages/ui` clinical components | ≥ 70 % | — | behaviour contracts from `06` §5.2 |
-| Controllers, repositories, DTOs | not counted | — | covered by integration tests instead; excluded from the denominator so nobody games the number |
+| Area                                       | Statements  | Branches  | Notes                                                                                          |
+| ------------------------------------------ | ----------- | --------- | ---------------------------------------------------------------------------------------------- |
+| `services/api/src/modules/**/*.service.ts` | **≥ 80 %**  | ≥ 75 %    | per-module, not repo-wide — a well-covered OP-001 cannot subsidise an untested IP-005          |
+| **Money, dose and safety calculators**     | **100 %**   | **100 %** | see the enumerated list below                                                                  |
+| `packages/contracts`                       | ≥ 90 %      | ≥ 85 %    | schemas + refinements                                                                          |
+| `packages/ui` clinical components          | ≥ 70 %      | —         | behaviour contracts from `06` §5.2                                                             |
+| Controllers, repositories, DTOs            | not counted | —         | covered by integration tests instead; excluded from the denominator so nobody games the number |
 
 **The 100 % list** (`packages/*/src/**/critical/**` and files tagged `@critical`): tariff resolution and bill-total
 computation (OP-005, IP-005, RC-003), GST/CGST/SGST/IGST splitting and rounding, discount and approval ceilings,
@@ -74,7 +76,7 @@ FEFO selection (NC-006), and numbering-series allocation (`core`).
 
 ## 3. Integration tests (Testcontainers)
 
-**Harness.** `packages/testing` starts PostgreSQL 17 (with our extensions and the *real* migration set applied,
+**Harness.** `packages/testing` starts PostgreSQL 17 (with our extensions and the _real_ migration set applied,
 never a hand-rolled schema), Redis, MinIO and a WireMock for outbound partners. Each test file gets a fresh
 database from a cached template (`CREATE DATABASE ... TEMPLATE hms_test_tpl`) so setup is ~200 ms, not 30 s.
 Requests go through the real Nest pipeline: guards, interceptors, Zod validation, policy check, `SET LOCAL
@@ -85,17 +87,20 @@ test is a CI failure.
 403, cross-tenant 404/403, idempotent replay (for money/order endpoints), and the audit + outbox rows it must write.
 
 ### 3.1 Tenant-isolation negative tests (non-negotiable)
+
 Generated for **every table with `hospital_id`** by a suite that reads the Prisma schema, so a new table cannot be
 added without one:
+
 1. Seed hospital A and hospital B with identical-looking data.
 2. As a user of B, attempt `GET/PATCH/DELETE` on every A resource id → must be 404 (not 403 — do not leak existence).
 3. Attempt list endpoints as B → A's rows must never appear, including via search, export, report, FHIR read and analytics endpoints.
-4. Attempt to *create* a child row referencing an A parent → rejected.
+4. Attempt to _create_ a child row referencing an A parent → rejected.
 5. Run a raw repository query without `SET LOCAL app.hospital_id` → RLS must return zero rows (proves the policy, not the app guard, is doing the work).
 6. Branch scoping: a Branch-1 user must not see Branch-2 billing, inventory, cash, queue or roster rows; a group-admin must, and only through the explicit group role (EN-041).
 7. `patient.merged` fan-out must not re-point a row across tenants.
 
 ### 3.2 Permission-matrix tests
+
 `packages/contracts` publishes the permission catalogue (`05-rbac-roles-and-logins.md`). CI generates a matrix of
 **every route × every system role template** and asserts the expected allow/deny from a checked-in fixture
 (`permission-matrix.json`). Adding a route or changing a default role therefore forces a reviewed diff of who can
@@ -105,6 +110,7 @@ on discounts, refunds, POs, payroll, result validation, blood issue, narcotics),
 writes a `READ_PHI` audit row with a mandatory reason).
 
 ### 3.3 Other integration coverage
+
 Numbering series under concurrency (100 parallel invoice allocations → gapless, no duplicates); optimistic-locking
 conflicts; outbox-to-Redis relay with consumer idempotency (same event twice → one effect); scheduled jobs
 (room-charge posting, expiry sweep, retention purge) run against a frozen clock; file upload (magic-byte rejection,
@@ -116,6 +122,7 @@ applied to a database seeded with the previous release's data.
 ## 4. Contract tests (`packages/contracts`)
 
 The Zod schemas are the single source of truth shared by the web app, the API, the workers and the mobile app.
+
 - **Schema ↔ API**: OpenAPI 3.1 is generated from the DTOs; a test asserts the generated document matches the committed snapshot. Any change produces a reviewable diff, and a **breaking** change (removed field, narrowed type, new required input) fails CI unless the PR adds a new API version or a documented deprecation window.
 - **API ↔ UI**: TanStack Query hooks are typed from the same schemas; `tsc` failure is the test. A generated MSW handler set is validated against the schemas so UI tests cannot mock a shape the server would never send.
 - **Events**: every event type in `01` §5 has a schema; producers validate before writing to the outbox, consumers validate on read, and a round-trip test covers every registered event.
@@ -130,40 +137,40 @@ Run against a full stack in Docker seeded with **"Vim's Demo Hospital"** (2 bran
 role templates, 3 years of synthetic history). Each journey runs on desktop Chrome and one tablet viewport;
 **one journey per module is additionally run keyboard-only** (`06` §11).
 
-| # | Journey | Modules | Key assertions |
-|---|---|---|---|
-| 1 | Register → consult → e-Rx → dispense → bill → receipt | OP-001, OP-002, OP-003, OP-005 | UHID issued, Rx signed, stock decremented by batch, bill totals, GST lines, receipt printed |
-| 2 | Returning patient, ABHA scan-&-share → token → vitals → consult | OP-001, EN-011, EN-006, OP-007 | ABHA linked, token priority order, vitals routed before doctor |
-| 3 | Appointment booked online → reminder → check-in → no-show handling | OP-001, EN-009, PE-002 | slot capacity, refund policy, no-show status |
-| 4 | Lab order → sample collect (barcode) → analyzer result → validate → report → critical alert → acknowledge | OP-004, EN-004, EN-029, EN-037 | accession match, delta check, critical value hard-stop, documented call-back with read-back |
-| 5 | Radiology order → MWL → study → structured report → critical finding alert | OP-008, EN-008, EN-037 | worklist entry, prior comparison, dose recorded, alert acknowledged |
-| 6 | Admit → bed assign → deposit → MAR round → transfer ward → discharge → final bill | IP-001, IP-003, IP-005, IP-002 | room charges auto-posted per night, transfer keeps orders, final bill reconciles interim |
-| 7 | MAR 5-Rights with wristband scan, incl. wrong-patient attempt | IP-003, EN-013 | scan mismatch blocks administration; override requires reason + second nurse |
-| 8 | OT scheduling → WHO surgical safety checklist → implant scan → recovery → OT notes | IP-006, TR-003, EN-003 | checklist cannot be bypassed, implant UDI captured, CSSD tray linkage |
-| 9 | Blood request → cross-match → issue with two-person verify → transfusion → reaction report | IP-007 | incompatible unit blocked, dual sign-off, reaction workflow |
-| 10 | Trauma activation → START triage → polytrauma board → emergency OT override → ICU | TR-001, TR-007, TR-004, TR-006 | activation pages the team, priority queue order, OT override audited |
-| 11 | MLC registration → police intimation → body map → chain of custody → court report | TR-008 | MLC number series, immutable evidence log |
-| 12 | Fracture registry entry → AO/OTA classification → cast application → follow-up X-ray | TR-002, TR-005, OP-009 | registry linkage, removal schedule, comparison view |
-| 13 | Pre-auth → approval → claim submission → query → settlement → short-payment posting | RC-002, RC-001, EN-002, RC-004 | document pack completeness, denial reason captured, AR aging updated |
-| 14 | PMJAY package selection → blocking → claim → TMS status | RC-007 | package rules, scheme tariff overrides hospital tariff |
-| 15 | Cost estimate → admission against estimate → variance alert at 80 % of estimate | RC-008, IP-005 | estimate versioning, patient-facing variance notice |
-| 16 | Cash counter: shift open → collections → refunds → denomination sheet → shift close | NC-001 | reconciliation to the rupee, §269ST cash cap enforced |
-| 17 | Indent → PO → GRN → 3-way match → consumption → stock ledger reconciliation | NC-005, NC-006, NC-008 | quantity/valuation invariants, rate-contract price check |
-| 18 | Consignment implant used in OT → auto-billing → auto-PO → vendor reconciliation | NC-007, TR-003 | no unbilled implant possible |
-| 19 | Narcotic issue with dual authorisation → register → physical reconciliation | OP-003, IP-014 | second authoriser mandatory, register printable |
-| 20 | Duplicate-patient prevention at registration → dedupe queue → merge → unmerge | OP-001, EN-036 | ≥0.85 score blocks, merge re-points records, unmerge restores |
-| 21 | Discharge summary drafting → clinical sign → amendment with reason → version history | IP-002, NC-003 | finalised version immutable, hash chain intact |
-| 22 | Nurse tablet goes offline mid-round → queued vitals/MAR → reconnect → sync + conflict | IP-004 | no duplicate administration, conflicts surfaced not auto-merged |
-| 23 | Code blue activation → team page → crash-cart usage → event documentation | IP-013, EN-037 | escalation timers, cart replenishment task |
-| 24 | Dialysis session: scheduling → machine assign → intra-session vitals → consumables → billing | OP-012, IP-022 | machine double-booking blocked |
-| 25 | Health check-up package: booking → multi-department routing → consolidated report | OP-014 | status board, all components complete before report release |
-| 26 | Patient portal: login → view report → pay bill → download invoice → withdraw consent | PE-001, EN-010, EN-028 | consent withdrawal propagates to ABDM sharing |
-| 27 | Corporate/TPA credit billing → SOA → TDS certificate → payment posting | NC-012, RC-005 | aging buckets, credit-limit block |
-| 28 | Queue + TV board + kiosk self check-in end-to-end | EN-006, EN-018, EN-034 | board updates < 500 ms, no PHI beyond name/token on the board |
-| 29 | Break-glass chart access by a non-care-team doctor | EN-024, `04` §5 | reason mandatory, `READ_PHI` audit row, privacy-officer alert |
-| 30 | Bio-medical waste: segregation log → bag barcode → manifest → SPCB Form IV | NC-016 | 48-hour storage rule, weights reconcile |
-| 31 | Mass-casualty surge: 40 trauma activations in 15 min | TR-001, OP-006 | triage queue ordering holds, no lost registrations |
-| 32 | Multi-branch: patient registered at Branch A, treated at Branch B | EN-041 | shared MPI, branch-scoped billing, consent-gated cross-branch clinical view |
+| #   | Journey                                                                                                   | Modules                        | Key assertions                                                                              |
+| --- | --------------------------------------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
+| 1   | Register → consult → e-Rx → dispense → bill → receipt                                                     | OP-001, OP-002, OP-003, OP-005 | UHID issued, Rx signed, stock decremented by batch, bill totals, GST lines, receipt printed |
+| 2   | Returning patient, ABHA scan-&-share → token → vitals → consult                                           | OP-001, EN-011, EN-006, OP-007 | ABHA linked, token priority order, vitals routed before doctor                              |
+| 3   | Appointment booked online → reminder → check-in → no-show handling                                        | OP-001, EN-009, PE-002         | slot capacity, refund policy, no-show status                                                |
+| 4   | Lab order → sample collect (barcode) → analyzer result → validate → report → critical alert → acknowledge | OP-004, EN-004, EN-029, EN-037 | accession match, delta check, critical value hard-stop, documented call-back with read-back |
+| 5   | Radiology order → MWL → study → structured report → critical finding alert                                | OP-008, EN-008, EN-037         | worklist entry, prior comparison, dose recorded, alert acknowledged                         |
+| 6   | Admit → bed assign → deposit → MAR round → transfer ward → discharge → final bill                         | IP-001, IP-003, IP-005, IP-002 | room charges auto-posted per night, transfer keeps orders, final bill reconciles interim    |
+| 7   | MAR 5-Rights with wristband scan, incl. wrong-patient attempt                                             | IP-003, EN-013                 | scan mismatch blocks administration; override requires reason + second nurse                |
+| 8   | OT scheduling → WHO surgical safety checklist → implant scan → recovery → OT notes                        | IP-006, TR-003, EN-003         | checklist cannot be bypassed, implant UDI captured, CSSD tray linkage                       |
+| 9   | Blood request → cross-match → issue with two-person verify → transfusion → reaction report                | IP-007                         | incompatible unit blocked, dual sign-off, reaction workflow                                 |
+| 10  | Trauma activation → START triage → polytrauma board → emergency OT override → ICU                         | TR-001, TR-007, TR-004, TR-006 | activation pages the team, priority queue order, OT override audited                        |
+| 11  | MLC registration → police intimation → body map → chain of custody → court report                         | TR-008                         | MLC number series, immutable evidence log                                                   |
+| 12  | Fracture registry entry → AO/OTA classification → cast application → follow-up X-ray                      | TR-002, TR-005, OP-009         | registry linkage, removal schedule, comparison view                                         |
+| 13  | Pre-auth → approval → claim submission → query → settlement → short-payment posting                       | RC-002, RC-001, EN-002, RC-004 | document pack completeness, denial reason captured, AR aging updated                        |
+| 14  | PMJAY package selection → blocking → claim → TMS status                                                   | RC-007                         | package rules, scheme tariff overrides hospital tariff                                      |
+| 15  | Cost estimate → admission against estimate → variance alert at 80 % of estimate                           | RC-008, IP-005                 | estimate versioning, patient-facing variance notice                                         |
+| 16  | Cash counter: shift open → collections → refunds → denomination sheet → shift close                       | NC-001                         | reconciliation to the rupee, §269ST cash cap enforced                                       |
+| 17  | Indent → PO → GRN → 3-way match → consumption → stock ledger reconciliation                               | NC-005, NC-006, NC-008         | quantity/valuation invariants, rate-contract price check                                    |
+| 18  | Consignment implant used in OT → auto-billing → auto-PO → vendor reconciliation                           | NC-007, TR-003                 | no unbilled implant possible                                                                |
+| 19  | Narcotic issue with dual authorisation → register → physical reconciliation                               | OP-003, IP-014                 | second authoriser mandatory, register printable                                             |
+| 20  | Duplicate-patient prevention at registration → dedupe queue → merge → unmerge                             | OP-001, EN-036                 | ≥0.85 score blocks, merge re-points records, unmerge restores                               |
+| 21  | Discharge summary drafting → clinical sign → amendment with reason → version history                      | IP-002, NC-003                 | finalised version immutable, hash chain intact                                              |
+| 22  | Nurse tablet goes offline mid-round → queued vitals/MAR → reconnect → sync + conflict                     | IP-004                         | no duplicate administration, conflicts surfaced not auto-merged                             |
+| 23  | Code blue activation → team page → crash-cart usage → event documentation                                 | IP-013, EN-037                 | escalation timers, cart replenishment task                                                  |
+| 24  | Dialysis session: scheduling → machine assign → intra-session vitals → consumables → billing              | OP-012, IP-022                 | machine double-booking blocked                                                              |
+| 25  | Health check-up package: booking → multi-department routing → consolidated report                         | OP-014                         | status board, all components complete before report release                                 |
+| 26  | Patient portal: login → view report → pay bill → download invoice → withdraw consent                      | PE-001, EN-010, EN-028         | consent withdrawal propagates to ABDM sharing                                               |
+| 27  | Corporate/TPA credit billing → SOA → TDS certificate → payment posting                                    | NC-012, RC-005                 | aging buckets, credit-limit block                                                           |
+| 28  | Queue + TV board + kiosk self check-in end-to-end                                                         | EN-006, EN-018, EN-034         | board updates < 500 ms, no PHI beyond name/token on the board                               |
+| 29  | Break-glass chart access by a non-care-team doctor                                                        | EN-024, `04` §5                | reason mandatory, `READ_PHI` audit row, privacy-officer alert                               |
+| 30  | Bio-medical waste: segregation log → bag barcode → manifest → SPCB Form IV                                | NC-016                         | 48-hour storage rule, weights reconcile                                                     |
+| 31  | Mass-casualty surge: 40 trauma activations in 15 min                                                      | TR-001, OP-006                 | triage queue ordering holds, no lost registrations                                          |
+| 32  | Multi-branch: patient registered at Branch A, treated at Branch B                                         | EN-041                         | shared MPI, branch-scoped billing, consent-gated cross-branch clinical view                 |
 
 Rules: journeys assert **user-visible outcomes plus the database and audit consequences**; no `sleep`, only
 web-first assertions; each journey is tagged `@p0` / `@p1` and `@safety`; `@p0` runs on every PR that touches its
@@ -193,18 +200,18 @@ against an empty database**, which is the classic way to ship a missing index.
 
 ## 8. Security testing
 
-| Gate | Tool / method | Fails the build when |
-|---|---|---|
-| Secret scanning | gitleaks (pre-commit + CI, full history on `main`) | any credential-shaped string outside the fixtures allow-list |
-| SAST | Semgrep (OWASP + custom rules) | raw SQL string concatenation, `any`, missing permission decorator, PHI in a log call, `dangerouslySetInnerHTML`, unbounded query without pagination |
-| Dependency audit | `pnpm audit`, Renovate, Trivy on the image | new high/critical with a fix available; any critical regardless of fix after a 7-day grace |
-| Container/IaC scan | Trivy + Checkov | privileged container, root user, missing resource limits, public bucket, open security group |
-| IDOR / authz | generated suite (§3.1, §3.2) | any cross-tenant or cross-role leak |
-| Injection | integration tests with SQLi/XSS/XXE/SSRF/path-traversal payload corpora on every text input, upload and URL-fetch field | any payload reaching the database or reflected unescaped |
-| Auth hardening | tests for lockout, OTP rate limits, refresh-token reuse detection, session fixation, JWT `alg=none`/tampering, idle & absolute timeout | any bypass |
-| Headers & CSP | ZAP baseline against staging | missing CSP nonce, HSTS, frame-ancestors, or a permissive CORS origin |
-| PHI leakage | log/metric/trace scrubber test: run a journey, grep the emitted telemetry for seeded PHI markers | any UHID, name, phone, Aadhaar fragment or diagnosis in logs, URLs, metric labels, Sentry payloads or AI prompts |
-| Penetration test | external, annually and before any major release | open findings above medium unremediated past their SLA |
+| Gate               | Tool / method                                                                                                                          | Fails the build when                                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Secret scanning    | gitleaks (pre-commit + CI, full history on `main`)                                                                                     | any credential-shaped string outside the fixtures allow-list                                                                                        |
+| SAST               | Semgrep (OWASP + custom rules)                                                                                                         | raw SQL string concatenation, `any`, missing permission decorator, PHI in a log call, `dangerouslySetInnerHTML`, unbounded query without pagination |
+| Dependency audit   | `pnpm audit`, Renovate, Trivy on the image                                                                                             | new high/critical with a fix available; any critical regardless of fix after a 7-day grace                                                          |
+| Container/IaC scan | Trivy + Checkov                                                                                                                        | privileged container, root user, missing resource limits, public bucket, open security group                                                        |
+| IDOR / authz       | generated suite (§3.1, §3.2)                                                                                                           | any cross-tenant or cross-role leak                                                                                                                 |
+| Injection          | integration tests with SQLi/XSS/XXE/SSRF/path-traversal payload corpora on every text input, upload and URL-fetch field                | any payload reaching the database or reflected unescaped                                                                                            |
+| Auth hardening     | tests for lockout, OTP rate limits, refresh-token reuse detection, session fixation, JWT `alg=none`/tampering, idle & absolute timeout | any bypass                                                                                                                                          |
+| Headers & CSP      | ZAP baseline against staging                                                                                                           | missing CSP nonce, HSTS, frame-ancestors, or a permissive CORS origin                                                                               |
+| PHI leakage        | log/metric/trace scrubber test: run a journey, grep the emitted telemetry for seeded PHI markers                                       | any UHID, name, phone, Aadhaar fragment or diagnosis in logs, URLs, metric labels, Sentry payloads or AI prompts                                    |
+| Penetration test   | external, annually and before any major release                                                                                        | open findings above medium unremediated past their SLA                                                                                              |
 
 ---
 
@@ -284,36 +291,43 @@ single best predictor of whether a go-live succeeds.
 A module is **done** when every box is ticked. "Mostly done" is not a state; report honestly what is missing.
 
 **Specification & design**
+
 - [ ] `docs/modules/**` spec satisfied section by section; every deviation recorded in the spec and in `docs/DECISIONS.md`.
 - [ ] Open questions from spec §16 either answered by the hospital or carrying an explicit, recorded default.
 - [ ] ADR written for any non-obvious technical choice.
 
 **Data**
+
 - [ ] Prisma migration + hand-written SQL (RLS, partitions, indexes, triggers, MVs) + idempotent seed + `-- ROLLBACK:` block.
 - [ ] RLS policy on every new table; every FK indexed; `EXPLAIN` checked for each hot query and registered in the EXPLAIN gate.
 - [ ] Retention/partition/archival behaviour defined and scheduled; legal hold respected.
 
 **API & contracts**
+
 - [ ] Every endpoint: Zod DTO → permission key → policy check → service → repository; RFC 9457 errors; rate limit; `Idempotency-Key` on money/order endpoints.
 - [ ] OpenAPI regenerated; contracts published in `packages/contracts`; permissions registered in the RBAC catalogue and reflected in `permission-matrix.json`.
 - [ ] Domain events emitted via the outbox, documented in the spec §7, schema-validated, consumers idempotent.
 
 **UI**
+
 - [ ] Screens responsive on desktop / tablet / phone (and TV/kiosk where applicable); empty, loading, error and offline states; skeletons not spinners.
 - [ ] Keyboard shortcuts implemented and documented; axe clean; contrast verified in light, dark and high-contrast; i18n keys for every string with `en-IN` + `hi` populated.
 - [ ] Patient banner, hard-stops and confirmation friction match `06` §5.2 behaviour contracts.
 
 **Operations**
+
 - [ ] Audit rows on every mutation; `READ_PHI` where applicable; no PHI in logs/metrics/traces.
 - [ ] Notifications wired (in-app, push, SMS/WhatsApp templates registered where needed); escalation paths set.
 - [ ] Feature flag + licence entitlement gate; default state documented.
 - [ ] Metrics, SLO and dashboard panel added; alert rules with a runbook link (an alert without a runbook fails CI).
 
 **Tests**
+
 - [ ] Unit ≥ 80 % on services (100 % on the money/dose/safety list); integration test for every endpoint incl. tenant and permission negatives; contract tests; ≥ 1 e2e golden path; k6 smoke for list/write endpoints; safety-suite entries for any new hard-stop; data-integrity invariants extended if the module owns money or stock.
 - [ ] Every acceptance criterion in spec §14 mapped to a named test (traceability table in the module README).
 
 **Compliance & docs**
+
 - [ ] `04` §10 per-module security checklist ticked; consent checked where data leaves the system; DPDP metadata recorded for any new external flow.
 - [ ] `docs/PROGRESS.md`, `docs/DECISIONS.md`, module README updated; demo data in `seed:demo`; walkthrough notes recorded.
 - [ ] Clinical change control: if the module changes CDSS rules, order sets, dose logic or a safety signal, a named clinician has signed off and the sign-off is attached to the release.
@@ -324,20 +338,20 @@ A module is **done** when every box is ticked. "Mostly done" is not a state; rep
 
 `.github/workflows/ci.yml` — stages run in order; a stage's failure stops the pipeline.
 
-| # | Stage | Runs | Fails when |
-|---|---|---|---|
-| 0 | **Pre-commit** (local, husky) | format, lint-staged, gitleaks, typecheck on changed packages, affected unit tests | any of the above |
-| 1 | **Setup & affected graph** | pnpm install (frozen lockfile), Turborepo affected-project detection, cache restore | lockfile drift, cycle in the dependency graph |
-| 2 | **Static** | ESLint (incl. module-boundary `no-restricted-imports`), `tsc --noEmit` strict, Prettier check, module-contract boundary test, permission-key presence check, hex-literal check (`06` §11) | any error; any `any`, `console.log`, TODO-without-issue in changed files |
-| 3 | **Unit** | Vitest with coverage per package | test failure or coverage below the §2 gates |
-| 4 | **Contracts** | OpenAPI snapshot diff, event-schema round-trip, MSW handler validation, print golden files | breaking API change without a version bump; snapshot drift without review |
-| 5 | **Integration** | Testcontainers: migrations forward+rollback, endpoint suite, tenant-isolation matrix, permission matrix, jobs, data-integrity invariants | any failure; a new table without an RLS test; a new route without a matrix entry |
-| 6 | **Build** | Next.js build, Nest build, Docker images (multi-arch), SBOM (Syft), image signing (cosign) | build error; bundle budget exceeded |
-| 7 | **Security** | Semgrep, Trivy (image + IaC), `pnpm audit`, PHI-leakage scrubber test, ZAP baseline (staging only) | new high/critical; any PHI leak; any authz finding |
-| 8 | **E2E** | Playwright `@p0` for affected modules (full catalogue nightly + on RC), axe scans, visual regression | journey failure; serious a11y violation; visual diff > 0.1 % unapproved |
-| 9 | **Safety** | `pnpm test:safety` — always, every PR | any hard-stop bypassable; any safety assertion failing |
-| 10 | **Performance** | k6 smoke on the volume seed; EXPLAIN gate | budget breach or > 15 % p95 regression (`07` §7) |
-| 11 | **Publish** | push signed images to the registry, attach SBOM + test-evidence pack to the build | signing or provenance failure |
+| #   | Stage                         | Runs                                                                                                                                                                                      | Fails when                                                                       |
+| --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| 0   | **Pre-commit** (local, husky) | format, lint-staged, gitleaks, typecheck on changed packages, affected unit tests                                                                                                         | any of the above                                                                 |
+| 1   | **Setup & affected graph**    | pnpm install (frozen lockfile), Turborepo affected-project detection, cache restore                                                                                                       | lockfile drift, cycle in the dependency graph                                    |
+| 2   | **Static**                    | ESLint (incl. module-boundary `no-restricted-imports`), `tsc --noEmit` strict, Prettier check, module-contract boundary test, permission-key presence check, hex-literal check (`06` §11) | any error; any `any`, `console.log`, TODO-without-issue in changed files         |
+| 3   | **Unit**                      | Vitest with coverage per package                                                                                                                                                          | test failure or coverage below the §2 gates                                      |
+| 4   | **Contracts**                 | OpenAPI snapshot diff, event-schema round-trip, MSW handler validation, print golden files                                                                                                | breaking API change without a version bump; snapshot drift without review        |
+| 5   | **Integration**               | Testcontainers: migrations forward+rollback, endpoint suite, tenant-isolation matrix, permission matrix, jobs, data-integrity invariants                                                  | any failure; a new table without an RLS test; a new route without a matrix entry |
+| 6   | **Build**                     | Next.js build, Nest build, Docker images (multi-arch), SBOM (Syft), image signing (cosign)                                                                                                | build error; bundle budget exceeded                                              |
+| 7   | **Security**                  | Semgrep, Trivy (image + IaC), `pnpm audit`, PHI-leakage scrubber test, ZAP baseline (staging only)                                                                                        | new high/critical; any PHI leak; any authz finding                               |
+| 8   | **E2E**                       | Playwright `@p0` for affected modules (full catalogue nightly + on RC), axe scans, visual regression                                                                                      | journey failure; serious a11y violation; visual diff > 0.1 % unapproved          |
+| 9   | **Safety**                    | `pnpm test:safety` — always, every PR                                                                                                                                                     | any hard-stop bypassable; any safety assertion failing                           |
+| 10  | **Performance**               | k6 smoke on the volume seed; EXPLAIN gate                                                                                                                                                 | budget breach or > 15 % p95 regression (`07` §7)                                 |
+| 11  | **Publish**                   | push signed images to the registry, attach SBOM + test-evidence pack to the build                                                                                                         | signing or provenance failure                                                    |
 
 Nightly (on `main`): full e2e catalogue, `soak` 1 h, `opd-morning-rush`, partner-sandbox contract tests, dependency
 audit, data-integrity invariants against staging, backup-restore verification (`10` §8), full-history secret scan.
@@ -355,8 +369,8 @@ conventional-commit title, linked issue, and — for clinical-logic changes — 
 or capability behind a flag; PATCH = fixes. Every deployable image is tagged with the version, the git SHA and the
 build date; the running version is visible in the UI footer and in `/healthz`.
 
-**Changelog.** Generated from conventional commits into three audiences: *engineering* (full), *hospital IT*
-(operational impact, config changes, downtime), *clinical & billing users* (what changes on your screen, in plain
+**Changelog.** Generated from conventional commits into three audiences: _engineering_ (full), _hospital IT_
+(operational impact, config changes, downtime), _clinical & billing users_ (what changes on your screen, in plain
 language, with screenshots). The clinical changelog is mandatory for any release touching a clinical module.
 
 **Release train.** Fortnightly minor releases; patches any time; emergency fixes via a hotfix branch cut from the

@@ -133,9 +133,7 @@ async function seedSettings(ctx: SeedContext, tenancy: SeededTenancy): Promise<v
  * a `clinical_safety_exempt` module is enabled unconditionally.
  */
 async function seedFeatureFlags(ctx: SeedContext, tenancy: SeededTenancy): Promise<void> {
-  const moduleKeys = ENFORCEMENT_POINTS.filter(
-    (e) => e.family === 'feature' && e.key.startsWith('module.'),
-  );
+  const moduleKeys = ENFORCEMENT_POINTS.filter((e) => e.family === 'feature' && e.key.startsWith('module.'));
 
   const rows: SeedRow[] = [];
   for (const h of tenancy.hospitals) {

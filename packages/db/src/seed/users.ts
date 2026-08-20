@@ -88,7 +88,8 @@ export async function seedUsers(ctx: SeedContext, tenancy: SeededTenancy): Promi
       name: { family: 'Demo', given: template.name },
       display_name: displayName.slice(0, 200),
       employee_id: `EMP-${hospital.code}-${String(template.docsRow).padStart(3, '0')}`,
-      type: template.category === 'external' ? 'external' : template.category === 'device' ? 'device' : 'staff',
+      type:
+        template.category === 'external' ? 'external' : template.category === 'device' ? 'device' : 'staff',
       status: 'active',
       password_hash: passwordHash,
       password_changed_at: SEED_EPOCH,
@@ -168,7 +169,10 @@ export async function seedUsers(ctx: SeedContext, tenancy: SeededTenancy): Promi
     }
   }
 
-  await ctx.write({ table: 'core.users', conflict: ['id'], immutable: ['password_hash', 'password_changed_at'] }, users);
+  await ctx.write(
+    { table: 'core.users', conflict: ['id'], immutable: ['password_hash', 'password_changed_at'] },
+    users,
+  );
   await ctx.write({ table: 'core.user_roles', conflict: ['id'] }, assignments);
   await ctx.write({ table: 'core.org_user_branch_access', conflict: ['id'] }, access);
 }

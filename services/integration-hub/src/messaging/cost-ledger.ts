@@ -79,7 +79,11 @@ export interface CostStore {
   put(entry: CostEntry): Promise<void>;
   list(hospitalId: string): Promise<readonly CostEntry[]>;
   /** The open WhatsApp conversation for a number+category, if any. */
-  getConversationOpenedAt(hospitalId: string, phoneE164: string, category: WhatsAppCategory): Promise<Date | undefined>;
+  getConversationOpenedAt(
+    hospitalId: string,
+    phoneE164: string,
+    category: WhatsAppCategory,
+  ): Promise<Date | undefined>;
   setConversationOpenedAt(
     hospitalId: string,
     phoneE164: string,
@@ -158,12 +162,17 @@ export class CostLedger {
       // No rate card is not free: it is unknown, and reporting it as zero would
       // make a budget alert impossible. Zero with an explicit currency of the
       // card (or INR) is recorded and the reconciliation report shows the gap.
-      return { amount: 0, currency: card?.currency ?? 'INR', segments: input.segments, freeInsideConversation: false };
+      return {
+        amount: 0,
+        currency: card?.currency ?? 'INR',
+        segments: input.segments,
+        freeInsideConversation: false,
+      };
     }
     const perSegment =
       input.destinationCountryCode === card.homeCountryCode
         ? rates.perSegment
-        : rates.internationalPerSegment ?? rates.perSegment;
+        : (rates.internationalPerSegment ?? rates.perSegment);
     return {
       amount: perSegment * input.segments + rates.dltCharge,
       currency: card.currency,
@@ -188,7 +197,11 @@ export class CostLedger {
       return { amount: 0, currency: card?.currency ?? 'INR', segments: 1, freeInsideConversation: false };
     }
 
-    const openedAt = await this.store.getConversationOpenedAt(input.hospitalId, input.phoneE164, input.category);
+    const openedAt = await this.store.getConversationOpenedAt(
+      input.hospitalId,
+      input.phoneE164,
+      input.category,
+    );
     const windowMs = rates.conversationWindowMs;
     const inside = openedAt !== undefined && input.at.getTime() - openedAt.getTime() < windowMs;
 
@@ -247,7 +260,10 @@ export class CostLedger {
   }
 }
 
-function groupKeyOf(entry: CostEntry, groupBy: 'module' | 'branch' | 'campaign' | 'channel' | 'template'): string {
+function groupKeyOf(
+  entry: CostEntry,
+  groupBy: 'module' | 'branch' | 'campaign' | 'channel' | 'template',
+): string {
   switch (groupBy) {
     case 'module':
       return entry.module;

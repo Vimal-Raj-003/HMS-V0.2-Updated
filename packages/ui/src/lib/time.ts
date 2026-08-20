@@ -29,9 +29,10 @@ export function formatClinicalTimestamp(at: Date, options: ClinicalTimestampOpti
   const get = (type: Intl.DateTimeFormatPartTypes): string =>
     parts.find((part) => part.type === type)?.value ?? '00';
 
-  const date = options.withYear === true
-    ? `${get('day')}-${get('month')}-${get('year')}`
-    : `${get('day')}-${get('month')}`;
+  const date =
+    options.withYear === true
+      ? `${get('day')}-${get('month')}-${get('year')}`
+      : `${get('day')}-${get('month')}`;
   return `${date} ${get('hour')}:${get('minute')}`;
 }
 

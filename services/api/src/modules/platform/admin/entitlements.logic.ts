@@ -91,13 +91,13 @@ export function tierSpec(tier: number): DegradationTierSpec {
   const found = DEGRADATION_LADDER.find((spec) => spec.tier === (tier as DegradationTier));
   if (found !== undefined) return found;
   const active = DEGRADATION_LADDER.find((spec) => spec.tier === 0);
-  if (active === undefined) throw new Error('DEGRADATION_LADDER has no active tier; the ladder is malformed.');
+  if (active === undefined)
+    throw new Error('DEGRADATION_LADDER has no active tier; the ladder is malformed.');
   return active;
 }
 
 export type FlagToggleCheck =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly reason: string; readonly upgradeCta: string | null };
+  { readonly ok: true } | { readonly ok: false; readonly reason: string; readonly upgradeCta: string | null };
 
 /**
  * `EN-007 §3.7` / `§5`: "Feature flags cannot enable modules outside licence;"

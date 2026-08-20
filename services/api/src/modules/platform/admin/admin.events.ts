@@ -28,7 +28,9 @@ export function adminEvent(
   if (!parsed.success) {
     throw new Error(
       `Event "${type}" payload does not match its registered schema (docs/09 §4): ` +
-        parsed.error.issues.map((i) => `${i.path.map(String).join('.') || '(root)'}: ${i.message}`).join('; '),
+        parsed.error.issues
+          .map((i) => `${i.path.map(String).join('.') || '(root)'}: ${i.message}`)
+          .join('; '),
     );
   }
 

@@ -15,12 +15,7 @@ import { SerwistProvider } from '@serwist/next/react';
  */
 export function ServiceWorkerProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
-    <SerwistProvider
-      swUrl="/sw.js"
-      disable={process.env.NODE_ENV === 'development'}
-      register
-      reloadOnOnline
-    >
+    <SerwistProvider swUrl="/sw.js" disable={process.env.NODE_ENV === 'development'} register reloadOnOnline>
       {children}
     </SerwistProvider>
   );

@@ -141,8 +141,7 @@ describe('cursor payload', () => {
  * or carry an attacker-chosen predicate into a WHERE clause.
  */
 function referenceCodec(secret: string): CursorCodec {
-  const sign = (body: string): string =>
-    createHmac('sha256', secret).update(body).digest('base64url');
+  const sign = (body: string): string => createHmac('sha256', secret).update(body).digest('base64url');
 
   return {
     encode(payload: CursorPayload): string {
@@ -167,7 +166,13 @@ function referenceCodec(secret: string): CursorCodec {
 
 describe('cursor codec contract', () => {
   const codec = referenceCodec('service-hmac-key');
-  const payload: CursorPayload = { h: HOSPITAL_A, r: 'users', k: ['2026-08-17T10:00:00.000Z'], id: ROW_ID, d: 'desc' };
+  const payload: CursorPayload = {
+    h: HOSPITAL_A,
+    r: 'users',
+    k: ['2026-08-17T10:00:00.000Z'],
+    id: ROW_ID,
+    d: 'desc',
+  };
   const cursor = codec.encode(payload);
   const forA = { hospitalId: HOSPITAL_A, resource: 'users' };
 
@@ -183,18 +188,20 @@ describe('cursor codec contract', () => {
   it('refuses a cursor minted for another hospital', () => {
     // docs/09 §3.1: a cursor lifted from hospital A's session must not page
     // hospital B's list endpoint — and vice versa.
-    expect(() => codec.decode(cursor, { hospitalId: HOSPITAL_B, resource: 'users' })).toThrow(/another tenant/);
+    expect(() => codec.decode(cursor, { hospitalId: HOSPITAL_B, resource: 'users' })).toThrow(
+      /another tenant/,
+    );
   });
 
   it('refuses a cursor minted for another resource', () => {
-    expect(() => codec.decode(cursor, { hospitalId: HOSPITAL_A, resource: 'audit' })).toThrow(/another resource/);
+    expect(() => codec.decode(cursor, { hospitalId: HOSPITAL_A, resource: 'audit' })).toThrow(
+      /another resource/,
+    );
   });
 
   it('refuses a cursor whose payload was edited, even by one character', () => {
     const [body, mac] = cursor.split('.');
-    const tampered = Buffer.from(
-      JSON.stringify({ ...payload, h: HOSPITAL_B }),
-    ).toString('base64url');
+    const tampered = Buffer.from(JSON.stringify({ ...payload, h: HOSPITAL_B })).toString('base64url');
     expect(tampered).not.toBe(body);
     expect(() => codec.decode(`${tampered}.${mac ?? ''}`, forA)).toThrow(/signature/);
   });

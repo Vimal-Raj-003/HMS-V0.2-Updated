@@ -10,7 +10,7 @@ detach-and-archive rather than `DELETE`".
 
 But `docs/02 §1` makes a load-bearing commercial promise:
 
-> "because we depend only on *standard PostgreSQL* + RLS, a pure-cloud tenant can
+> "because we depend only on _standard PostgreSQL_ + RLS, a pure-cloud tenant can
 > be hosted on **Supabase, Neon, RDS, Azure Flexible Server or Cloud SQL** by
 > changing `DATABASE_URL`."
 

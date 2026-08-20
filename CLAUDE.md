@@ -63,36 +63,36 @@ CDSS first), blockchain, 3D imaging reconstruction.
 
 ## 2. TECH STACK (LOCKED — change only via ADR + user approval)
 
-| Layer | Choice | Notes |
-|---|---|---|
-| Monorepo | **pnpm workspaces + Turborepo** | `apps/*`, `packages/*`, `services/*` |
-| Language | **TypeScript 5.x strict everywhere** | `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` |
-| Web app | **Next.js 15+ (App Router, RSC), React 19** | one app `apps/web` with role-based route groups; PWA via `@serwist/next` |
-| UI | **Tailwind CSS v4 + shadcn/ui (Radix) + lucide icons + Recharts/ECharts** | design tokens in `packages/ui`; dark/light; RTL-ready |
-| Forms/validation | **react-hook-form + Zod** (schemas shared in `packages/contracts`) | same Zod schema validates client & server |
-| Data fetching | **TanStack Query v5** + Server Actions for simple mutations | optimistic updates, cache keys per tenant |
-| Tables | **TanStack Table** with virtualisation | server-side pagination/sort/filter |
-| API | **NestJS 11 (Fastify adapter)** in `services/api` (modular monolith) | OpenAPI 3.1 auto-generated; versioned `/api/v1` |
-| Realtime | **Socket.IO** on `services/realtime` backed by **Redis Streams / pub-sub** | queues, dashboards, critical alerts, TV boards |
-| Background jobs | **BullMQ** (Redis) in `services/worker` | SMS/WhatsApp, PDF, HL7 parsing, billing posting, reports |
-| Database | **PostgreSQL 17** (min 16) — see `docs/02-tech-stack-decision.md` | Prisma 6 (schema, migrations) + **Kysely** for complex/typed SQL & reports |
-| Extensions | `pgcrypto`, `pg_trgm`, `btree_gist`, `pgvector`, `pg_partman`, `pg_stat_statements`, `pg_cron` | RLS for tenancy |
-| Cache | **Redis 7 (Valkey compatible)** | sessions, rate limits, queues, hot lookups |
-| Search | Postgres FTS + `pg_trgm` first; **Meilisearch/OpenSearch** optional adapter | drug/ICD/patient search |
-| Object storage | **S3-compatible (AWS S3 / MinIO on-prem)** | reports, DICOM (via PACS), scans, recordings — presigned URLs |
-| Auth | **Own auth service** (Argon2id, TOTP 2FA, WebAuthn optional, OTP for patients) + **OIDC/SAML SSO adapter** | JWT access (15 min) + rotating refresh (httpOnly), device sessions |
-| PDF/print | **Playwright (Chromium) HTML→PDF** in worker + **ESC/POS & ZPL** for thermal/label | templates in `packages/print-templates` |
-| Integrations | HL7 v2 (MLLP) & ASTM listener service, FHIR R4 (`@medplum/core` types / HAPI-compatible), DICOM MWL/PACS via **Orthanc** + OHIF viewer, ABDM V3 SDK (own), Razorpay, MSG91/Twilio, WhatsApp Cloud API, SMTP | all through `services/integration-hub` with dead-letter queues |
-| Observability | **OpenTelemetry** → Grafana Tempo/Loki/Prometheus (or Datadog); **Sentry** for errors; **Better Stack** uptime | structured JSON logs (pino), no PHI |
-| Edge / security | **Cloudflare** (DNS, WAF, DDoS, bot) in cloud; Nginx/Traefik on-prem | Upstash Redis acceptable for pure-cloud, self-hosted Redis on-prem |
-| Testing | Vitest, Supertest, Testcontainers, Playwright, k6 | coverage gates in CI |
-| CI/CD | **GitHub Actions** → Docker images → **Vercel** (web, cloud) or **Kubernetes/Docker Compose** (all-in-one on-prem) | typecheck, lint, tests, security audit (`pnpm audit`, Trivy, Semgrep) on every push |
-| Infra as code | Docker Compose (dev/on-prem), Helm charts (K8s), Terraform (AWS/Azure) | secrets via Vault/SSM/`.env` (never committed) |
-| AI (Phase 3+) | `services/ai` — Claude API via Anthropic SDK, `pgvector` embeddings, Whisper/Deepgram for voice | every AI output is a *suggestion* requiring human confirmation |
+| Layer            | Choice                                                                                                                                                                                                      | Notes                                                                               |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Monorepo         | **pnpm workspaces + Turborepo**                                                                                                                                                                             | `apps/*`, `packages/*`, `services/*`                                                |
+| Language         | **TypeScript 5.x strict everywhere**                                                                                                                                                                        | `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`                            |
+| Web app          | **Next.js 15+ (App Router, RSC), React 19**                                                                                                                                                                 | one app `apps/web` with role-based route groups; PWA via `@serwist/next`            |
+| UI               | **Tailwind CSS v4 + shadcn/ui (Radix) + lucide icons + Recharts/ECharts**                                                                                                                                   | design tokens in `packages/ui`; dark/light; RTL-ready                               |
+| Forms/validation | **react-hook-form + Zod** (schemas shared in `packages/contracts`)                                                                                                                                          | same Zod schema validates client & server                                           |
+| Data fetching    | **TanStack Query v5** + Server Actions for simple mutations                                                                                                                                                 | optimistic updates, cache keys per tenant                                           |
+| Tables           | **TanStack Table** with virtualisation                                                                                                                                                                      | server-side pagination/sort/filter                                                  |
+| API              | **NestJS 11 (Fastify adapter)** in `services/api` (modular monolith)                                                                                                                                        | OpenAPI 3.1 auto-generated; versioned `/api/v1`                                     |
+| Realtime         | **Socket.IO** on `services/realtime` backed by **Redis Streams / pub-sub**                                                                                                                                  | queues, dashboards, critical alerts, TV boards                                      |
+| Background jobs  | **BullMQ** (Redis) in `services/worker`                                                                                                                                                                     | SMS/WhatsApp, PDF, HL7 parsing, billing posting, reports                            |
+| Database         | **PostgreSQL 17** (min 16) — see `docs/02-tech-stack-decision.md`                                                                                                                                           | Prisma 6 (schema, migrations) + **Kysely** for complex/typed SQL & reports          |
+| Extensions       | `pgcrypto`, `pg_trgm`, `btree_gist`, `pgvector`, `pg_partman`, `pg_stat_statements`, `pg_cron`                                                                                                              | RLS for tenancy                                                                     |
+| Cache            | **Redis 7 (Valkey compatible)**                                                                                                                                                                             | sessions, rate limits, queues, hot lookups                                          |
+| Search           | Postgres FTS + `pg_trgm` first; **Meilisearch/OpenSearch** optional adapter                                                                                                                                 | drug/ICD/patient search                                                             |
+| Object storage   | **S3-compatible (AWS S3 / MinIO on-prem)**                                                                                                                                                                  | reports, DICOM (via PACS), scans, recordings — presigned URLs                       |
+| Auth             | **Own auth service** (Argon2id, TOTP 2FA, WebAuthn optional, OTP for patients) + **OIDC/SAML SSO adapter**                                                                                                  | JWT access (15 min) + rotating refresh (httpOnly), device sessions                  |
+| PDF/print        | **Playwright (Chromium) HTML→PDF** in worker + **ESC/POS & ZPL** for thermal/label                                                                                                                          | templates in `packages/print-templates`                                             |
+| Integrations     | HL7 v2 (MLLP) & ASTM listener service, FHIR R4 (`@medplum/core` types / HAPI-compatible), DICOM MWL/PACS via **Orthanc** + OHIF viewer, ABDM V3 SDK (own), Razorpay, MSG91/Twilio, WhatsApp Cloud API, SMTP | all through `services/integration-hub` with dead-letter queues                      |
+| Observability    | **OpenTelemetry** → Grafana Tempo/Loki/Prometheus (or Datadog); **Sentry** for errors; **Better Stack** uptime                                                                                              | structured JSON logs (pino), no PHI                                                 |
+| Edge / security  | **Cloudflare** (DNS, WAF, DDoS, bot) in cloud; Nginx/Traefik on-prem                                                                                                                                        | Upstash Redis acceptable for pure-cloud, self-hosted Redis on-prem                  |
+| Testing          | Vitest, Supertest, Testcontainers, Playwright, k6                                                                                                                                                           | coverage gates in CI                                                                |
+| CI/CD            | **GitHub Actions** → Docker images → **Vercel** (web, cloud) or **Kubernetes/Docker Compose** (all-in-one on-prem)                                                                                          | typecheck, lint, tests, security audit (`pnpm audit`, Trivy, Semgrep) on every push |
+| Infra as code    | Docker Compose (dev/on-prem), Helm charts (K8s), Terraform (AWS/Azure)                                                                                                                                      | secrets via Vault/SSM/`.env` (never committed)                                      |
+| AI (Phase 3+)    | `services/ai` — Claude API via Anthropic SDK, `pgvector` embeddings, Whisper/Deepgram for voice                                                                                                             | every AI output is a _suggestion_ requiring human confirmation                      |
 
 **Why not Supabase as the core:** Supabase is excellent for cloud-only products, but Vim's HMS must run on-prem/hybrid,
 needs HL7/MLLP TCP listeners, long-lived WebSockets, heavy background workers, PACS, and enterprise HA. So the core is
-**plain PostgreSQL 17 + our own services**; Supabase (or Neon/RDS) can still be the *managed Postgres provider* for a
+**plain PostgreSQL 17 + our own services**; Supabase (or Neon/RDS) can still be the _managed Postgres provider_ for a
 cloud tenant because we only depend on standard Postgres. Full reasoning in `docs/02-tech-stack-decision.md`.
 
 ---
@@ -124,7 +124,7 @@ cloud tenant because we only depend on standard Postgres. Full reasoning in `doc
 ## 4. CODING STANDARDS (enforced by ESLint/Prettier/CI)
 
 - Folder per module: `services/api/src/modules/<domain>/<module>/{<module>.controller.ts, .service.ts, .repository.ts,
-  dto/, events/, policies/, __tests__/}`; frontend: `apps/web/src/features/<module>/{components,hooks,api,pages}`.
+dto/, events/, policies/, __tests__/}`; frontend: `apps/web/src/features/<module>/{components,hooks,api,pages}`.
 - Every API: Zod/DTO validation → policy check (`can(user, action, resource)`) → service → repo. Return typed
   `Result` objects; map errors to RFC 9457 problem+json.
 - Naming: DB `snake_case`, TS `camelCase`, tables plural (`patients`), PK `id uuid v7`, FKs `<entity>_id`,
@@ -161,22 +161,22 @@ cloud tenant because we only depend on standard Postgres. Full reasoning in `doc
 
 ## 6. BUILD ORDER (summary — full prompts in `docs/prompts/`)
 
-| Phase | Name | Outcome |
-|---|---|---|
-| 0 | Foundation | monorepo, CI, Docker, Postgres+RLS, auth, RBAC, tenancy, numbering, audit, outbox, design system, shell, PWA, observability |
-| 1 | Patient & Front Office core | Patient master (MPI, dedupe), ABHA (M1), appointments, queue/token, TV display, SMS/WhatsApp, cash counter |
-| 2 | OPD clinical core | Vitals room, doctor dashboard/CPOE, e-Rx (rules CDSS), orders, templates, patient timeline, MRD basics |
-| 3 | Diagnostics | LIS (orders→sample→result→validate→report, QC, HL7/ASTM), RIS + PACS (Orthanc/OHIF, MWL) |
-| 4 | Pharmacy & Stores | drug master, dispensing, inventory, batches/FEFO, purchase, GRN, consumption, consignment |
-| 5 | Billing & RCM foundation | tariff engine, OP billing, receipts, GST, discounts/approvals, refunds, packages, insurance/TPA pre-auth |
-| 6 | Emergency, Trauma & Ortho | ER quick reg, ESI/START triage, trauma scores, MLC/forensic, fracture registry, implants, cast/splint, polytrauma board |
-| 7 | Inpatient | admission, beds, nursing station, MAR, I/O, NEWS2, handover, IP billing (auto room charges), discharge, OT (WHO checklist), ICU, blood bank, CSSD, crash cart, infection control |
-| 8 | Specialty consoles | dialysis, dietician, physio/rehab/pain/wound, vaccination, health check-up, labour room, ophthalmology, dental, ENT, cardio, pulmo, oncology, psychiatry, paediatrics, geriatrics, fertility, AYUSH, telemedicine |
-| 9 | ERP & Non-clinical | accounts/GL, HR/payroll/roster, assets/biomedical, ambulance, housekeeping, laundry, canteen, gate/visitor, complaints, documents, quality/NABH, BMW, legal, budget, marketing/CRM |
-| 10 | Engagement & Portals | patient portal, family, corporate portal, TPA portal, referral portal, feedback/NPS, follow-ups, website widgets, kiosk |
-| 11 | Analytics & Interop | BI/MIS, report builder, scheduled reports, FHIR APIs, ABDM M2/M3, NHCX/M4, e-Hospital push, DIU/migration |
-| 12 | AI & Advanced | CDSS+, voice notes, chatbot, ICD/DRG coding assist, doc extraction, predictive (LOS, no-show, demand), radiology assist |
-| 13 | Native mobile | React Native (Expo) doctor/nurse/patient/staff apps sharing contracts + design tokens |
+| Phase | Name                        | Outcome                                                                                                                                                                                                           |
+| ----- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Foundation                  | monorepo, CI, Docker, Postgres+RLS, auth, RBAC, tenancy, numbering, audit, outbox, design system, shell, PWA, observability                                                                                       |
+| 1     | Patient & Front Office core | Patient master (MPI, dedupe), ABHA (M1), appointments, queue/token, TV display, SMS/WhatsApp, cash counter                                                                                                        |
+| 2     | OPD clinical core           | Vitals room, doctor dashboard/CPOE, e-Rx (rules CDSS), orders, templates, patient timeline, MRD basics                                                                                                            |
+| 3     | Diagnostics                 | LIS (orders→sample→result→validate→report, QC, HL7/ASTM), RIS + PACS (Orthanc/OHIF, MWL)                                                                                                                          |
+| 4     | Pharmacy & Stores           | drug master, dispensing, inventory, batches/FEFO, purchase, GRN, consumption, consignment                                                                                                                         |
+| 5     | Billing & RCM foundation    | tariff engine, OP billing, receipts, GST, discounts/approvals, refunds, packages, insurance/TPA pre-auth                                                                                                          |
+| 6     | Emergency, Trauma & Ortho   | ER quick reg, ESI/START triage, trauma scores, MLC/forensic, fracture registry, implants, cast/splint, polytrauma board                                                                                           |
+| 7     | Inpatient                   | admission, beds, nursing station, MAR, I/O, NEWS2, handover, IP billing (auto room charges), discharge, OT (WHO checklist), ICU, blood bank, CSSD, crash cart, infection control                                  |
+| 8     | Specialty consoles          | dialysis, dietician, physio/rehab/pain/wound, vaccination, health check-up, labour room, ophthalmology, dental, ENT, cardio, pulmo, oncology, psychiatry, paediatrics, geriatrics, fertility, AYUSH, telemedicine |
+| 9     | ERP & Non-clinical          | accounts/GL, HR/payroll/roster, assets/biomedical, ambulance, housekeeping, laundry, canteen, gate/visitor, complaints, documents, quality/NABH, BMW, legal, budget, marketing/CRM                                |
+| 10    | Engagement & Portals        | patient portal, family, corporate portal, TPA portal, referral portal, feedback/NPS, follow-ups, website widgets, kiosk                                                                                           |
+| 11    | Analytics & Interop         | BI/MIS, report builder, scheduled reports, FHIR APIs, ABDM M2/M3, NHCX/M4, e-Hospital push, DIU/migration                                                                                                         |
+| 12    | AI & Advanced               | CDSS+, voice notes, chatbot, ICD/DRG coding assist, doc extraction, predictive (LOS, no-show, demand), radiology assist                                                                                           |
+| 13    | Native mobile               | React Native (Expo) doctor/nurse/patient/staff apps sharing contracts + design tokens                                                                                                                             |
 
 Each phase prompt lists exact modules, entities, endpoints, screens, events, tests and acceptance criteria.
 

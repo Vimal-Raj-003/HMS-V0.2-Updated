@@ -146,7 +146,9 @@ afterAll(async () => {
   await pg?.stop();
 });
 
-async function liveConnector(config: Parameters<typeof hub.connectors.register>[1]['config']): Promise<string> {
+async function liveConnector(
+  config: Parameters<typeof hub.connectors.register>[1]['config'],
+): Promise<string> {
   const owner = newId();
   const record = await hub.connectors.register(ctxA, { config, ownerUserId: owner });
   await hub.connectors.activate(ctxA, record.key, { approvedBy: owner });
@@ -154,15 +156,18 @@ async function liveConnector(config: Parameters<typeof hub.connectors.register>[
 }
 
 /** Read as the schema owner, which is *not* subject to RLS. */
-async function messageRow(id: string): Promise<{
-  status: string;
-  ack_code: string | null;
-  error_class: string | null;
-  payload: string;
-  response: string | null;
-  contains_phi: boolean;
-  parent_message_id: string | null;
-} | undefined> {
+async function messageRow(id: string): Promise<
+  | {
+      status: string;
+      ack_code: string | null;
+      error_class: string | null;
+      payload: string;
+      response: string | null;
+      contains_phi: boolean;
+      parent_message_id: string | null;
+    }
+  | undefined
+> {
   const result = await pg.pool('migrator').query<{
     status: string;
     ack_code: string | null;
@@ -559,7 +564,10 @@ describe('delivery webhooks', () => {
     const providerMessageId = outcome.providerMessageId ?? '';
     const raw = { receivedAt: MIDDAY, encoding: 'json' as const, headers: {} };
 
-    await hub.messaging.handleDeliveryWebhook(ctxA, key, { ...raw, body: { providerMessageId, status: 'delivered' } });
+    await hub.messaging.handleDeliveryWebhook(ctxA, key, {
+      ...raw,
+      body: { providerMessageId, status: 'delivered' },
+    });
     const late = await hub.messaging.handleDeliveryWebhook(ctxA, key, {
       ...raw,
       body: { providerMessageId, status: 'sent' },
@@ -839,7 +847,10 @@ describe('gateway connectors against the real registry', () => {
   it('sends through MSG91 with the DLT template id, against a fake transport', async () => {
     const key = await liveConnector(msg91ConnectorConfig({ key: 'msg91-live' }));
     transport.reset();
-    transport.on({ match: '/api/v2/sendsms', response: jsonResponse(200, { type: 'success', message: 'req-int-1' }) });
+    transport.on({
+      match: '/api/v2/sendsms',
+      response: jsonResponse(200, { type: 'success', message: 'req-int-1' }),
+    });
 
     const outcome = await hub.messaging.send(ctxA, {
       templateKey: 'appointment_confirmed',

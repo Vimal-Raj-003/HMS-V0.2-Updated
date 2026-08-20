@@ -28,8 +28,10 @@ export interface MoneyInputLabels {
   readonly announce: (formatted: string) => string;
 }
 
-export interface MoneyInputProps
-  extends Omit<ComponentProps<'input'>, 'value' | 'onChange' | 'type' | 'defaultValue'> {
+export interface MoneyInputProps extends Omit<
+  ComponentProps<'input'>,
+  'value' | 'onChange' | 'type' | 'defaultValue'
+> {
   readonly value: Money | null;
   readonly currency: CurrencyCode;
   readonly onValueChange: (value: Money | null) => void;

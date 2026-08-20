@@ -184,7 +184,15 @@ export function toHex(bytes: Uint8Array): string {
  */
 export function toPrintableText(bytes: Uint8Array): string {
   /** Argument-byte counts for the `ESC x` / `GS x` commands this builder emits. */
-  const ESC_ARGS: Readonly<Record<number, number>> = { 0x40: 0, 0x61: 1, 0x45: 1, 0x2d: 1, 0x64: 1, 0x74: 1, 0x70: 3 };
+  const ESC_ARGS: Readonly<Record<number, number>> = {
+    0x40: 0,
+    0x61: 1,
+    0x45: 1,
+    0x2d: 1,
+    0x64: 1,
+    0x74: 1,
+    0x70: 3,
+  };
   const GS_ARGS: Readonly<Record<number, number>> = { 0x21: 1, 0x56: 2, 0x68: 1, 0x77: 1, 0x48: 1 };
 
   let out = '';

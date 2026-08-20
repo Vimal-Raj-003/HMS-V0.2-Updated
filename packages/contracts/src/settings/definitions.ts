@@ -130,7 +130,8 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = Object.freeze([
     key: 'password.max_age_days',
     module: 'EN-007',
     label: 'Password maximum age (days)',
-    description: 'docs/04 §2: 90-day rotation for privileged roles. 0 disables expiry (SSO users are exempt).',
+    description:
+      'docs/04 §2: 90-day rotation for privileged roles. 0 disables expiry (SSO users are exempt).',
     scopes: ['hospital'],
     schema: z.number().int().min(0).max(365),
     defaultValue: 90,
@@ -331,7 +332,8 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = Object.freeze([
     key: 'workflow.require_simulation_for_financial_publish',
     module: 'EN-038',
     label: 'Require a simulation before publishing a financial matrix',
-    description: 'EN-038 §3.7: default on. A matrix version cannot be published without an attached simulation run.',
+    description:
+      'EN-038 §3.7: default on. A matrix version cannot be published without an attached simulation run.',
     scopes: ['hospital'],
     schema: z.boolean(),
     defaultValue: true,
@@ -542,7 +544,9 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = Object.freeze([
     label: 'Enabled locales',
     description: 'Which of the 12 supported locales this hospital offers. `en-IN` cannot be removed.',
     scopes: ['hospital'],
-    schema: z.array(z.enum(['en-IN', 'hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn', 'gu', 'or', 'pa', 'ar'])).min(1),
+    schema: z
+      .array(z.enum(['en-IN', 'hi', 'ta', 'te', 'ml', 'kn', 'mr', 'bn', 'gu', 'or', 'pa', 'ar']))
+      .min(1),
     defaultValue: ['en-IN', 'hi'],
   }),
 ]);

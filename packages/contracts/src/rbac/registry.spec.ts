@@ -73,9 +73,22 @@ describe('permission catalogue', () => {
    */
   it('places each key in a build phase that exists, and never moves one backwards', () => {
     const phase0Modules = new Set([
-      'EN-005', 'EN-007', 'EN-013', 'EN-017', 'EN-022', 'EN-023', 'EN-024',
-      'EN-025', 'EN-026', 'EN-027', 'EN-032', 'EN-037', 'EN-038', 'EN-039',
-      'EN-040', 'EN-041',
+      'EN-005',
+      'EN-007',
+      'EN-013',
+      'EN-017',
+      'EN-022',
+      'EN-023',
+      'EN-024',
+      'EN-025',
+      'EN-026',
+      'EN-027',
+      'EN-032',
+      'EN-037',
+      'EN-038',
+      'EN-039',
+      'EN-040',
+      'EN-041',
     ]);
     for (const def of PERMISSION_CATALOGUE) {
       expect(def.phase, `${def.key} has an out-of-range phase`).toBeGreaterThanOrEqual(0);
@@ -266,7 +279,13 @@ describe('system role templates', () => {
   });
 
   it('flags the roles whose grant needs two approvers', () => {
-    for (const key of ['super_admin', 'hospital_admin', 'privacy_officer', 'it_admin', 'blood_bank_officer']) {
+    for (const key of [
+      'super_admin',
+      'hospital_admin',
+      'privacy_officer',
+      'it_admin',
+      'blood_bank_officer',
+    ]) {
       expect(SENSITIVE_ROLE_KEYS, `${key} grant must be sensitive`).toContain(key);
     }
   });
@@ -274,7 +293,16 @@ describe('system role templates', () => {
   it('gives the auditor read-only reach — no create, update or delete anywhere', () => {
     // docs/05 row 58: "read-only, exports audited".
     const auditor = getRoleTemplate('auditor')!;
-    const mutating = new Set(['create', 'update', 'delete', 'cancel', 'dispense', 'issue', 'sign', 'override']);
+    const mutating = new Set([
+      'create',
+      'update',
+      'delete',
+      'cancel',
+      'dispense',
+      'issue',
+      'sign',
+      'override',
+    ]);
     for (const key of auditor.permissions) {
       expect(mutating.has(getPermission(key)!.action), `auditor must not hold ${key}`).toBe(false);
     }

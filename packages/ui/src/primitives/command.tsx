@@ -15,7 +15,10 @@ export function Command({ className, ...props }: ComponentProps<typeof CommandPr
   return (
     <CommandPrimitive
       data-slot="command"
-      className={cn('flex h-full w-full flex-col overflow-hidden rounded-xl bg-layer-2 text-fg-default', className)}
+      className={cn(
+        'flex h-full w-full flex-col overflow-hidden rounded-xl bg-layer-2 text-fg-default',
+        className,
+      )}
       {...props}
     />
   );

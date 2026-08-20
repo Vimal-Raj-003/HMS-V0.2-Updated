@@ -1,22 +1,24 @@
 # OP-003 — Pharmacy Management (OP Dispensing, OTC, Inventory, Expiry, Narcotic Register, Interactions)
 
-| Field | Value |
-|---|---|
-| Domain | OPD Clinical |
-| Module ID | OP-003 |
-| Phase | 4 |
-| Priority | P0 |
-| Complexity | High |
-| Depends on | OP-002 (e-Rx), OP-001 (patient/visit), EN-027 (drug master, HSN, schedule class), NC-006 (stores/stock ledger, batches, FEFO), NC-005 (purchase/GRN, auto-indent), OP-005 (billing/receipts/GST), NC-001 (cash counter), EN-013 (barcode), EN-005 (label printers), EN-029 (interaction/allergy rules), EN-009 (SMS/WhatsApp), EN-002/RC-007 (credit/scheme), EN-038 (approvals), EN-042 (cold-chain sensors, later), IP-014 (IP pharmacy shares masters/ledger) |
-| Feature flag | `module.pharmacy.enabled` (sub: `pharmacy.otc`, `pharmacy.narcotics`, `pharmacy.substitution`, `pharmacy.home_delivery`) |
-| Primary roles | Pharmacist OP (30), Pharmacy In-charge (32), Cashier (26, if pharmacy counter separate) |
-| Secondary roles | Doctor (substitution approval, Rx status), Store keeper (NC-006 transfers), Purchase officer (indents), Accounts (GST reports), Drug inspector/Auditor (registers), Patient (Rx status, refill reminders) |
-| Regulatory | Drugs & Cosmetics Act 1940 / Rules 1945 (Form 20/20B/21/21B retail & wholesale licences, Schedule H, H1 (register: name/address of prescriber & patient, drug, qty; retained 3 yrs), Schedule X (separate licence, prescription retained 2 yrs, secure storage), Schedule G/K), NDPS Act 1985 + state rules (narcotic register Form, dual custody, day-book, quarterly returns), Drugs (Prices Control) Order 2013 (MRP ceiling, sale ≤ MRP), Pharmacy Act 1948 (registered pharmacist for dispensing), GST (medicines 5 %/12 %/18 %/nil by HSN 30xx, e-invoice threshold, B2C invoice rules), CDSCO UDI/barcode on Schedule H/H1 secondary packs (2D DataMatrix GS1: GTIN, batch, expiry, serial), NABH MOM chapter (storage, LASA, high-alert drugs, expiry, recall), BMW 2016 (expired drug disposal), Cold chain 2–8 °C logs |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain          | OPD Clinical                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Module ID       | OP-003                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Phase           | 4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Priority        | P0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Complexity      | High                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Depends on      | OP-002 (e-Rx), OP-001 (patient/visit), EN-027 (drug master, HSN, schedule class), NC-006 (stores/stock ledger, batches, FEFO), NC-005 (purchase/GRN, auto-indent), OP-005 (billing/receipts/GST), NC-001 (cash counter), EN-013 (barcode), EN-005 (label printers), EN-029 (interaction/allergy rules), EN-009 (SMS/WhatsApp), EN-002/RC-007 (credit/scheme), EN-038 (approvals), EN-042 (cold-chain sensors, later), IP-014 (IP pharmacy shares masters/ledger)                                                                                                                                                                                                                                                                                                                                                                 |
+| Feature flag    | `module.pharmacy.enabled` (sub: `pharmacy.otc`, `pharmacy.narcotics`, `pharmacy.substitution`, `pharmacy.home_delivery`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Primary roles   | Pharmacist OP (30), Pharmacy In-charge (32), Cashier (26, if pharmacy counter separate)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Secondary roles | Doctor (substitution approval, Rx status), Store keeper (NC-006 transfers), Purchase officer (indents), Accounts (GST reports), Drug inspector/Auditor (registers), Patient (Rx status, refill reminders)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Regulatory      | Drugs & Cosmetics Act 1940 / Rules 1945 (Form 20/20B/21/21B retail & wholesale licences, Schedule H, H1 (register: name/address of prescriber & patient, drug, qty; retained 3 yrs), Schedule X (separate licence, prescription retained 2 yrs, secure storage), Schedule G/K), NDPS Act 1985 + state rules (narcotic register Form, dual custody, day-book, quarterly returns), Drugs (Prices Control) Order 2013 (MRP ceiling, sale ≤ MRP), Pharmacy Act 1948 (registered pharmacist for dispensing), GST (medicines 5 %/12 %/18 %/nil by HSN 30xx, e-invoice threshold, B2C invoice rules), CDSCO UDI/barcode on Schedule H/H1 secondary packs (2D DataMatrix GS1: GTIN, batch, expiry, serial), NABH MOM chapter (storage, LASA, high-alert drugs, expiry, recall), BMW 2016 (expired drug disposal), Cold chain 2–8 °C logs |
 
 ## 1. Purpose
+
 OP-003 runs the outpatient pharmacy end-to-end: real-time e-Rx queue from OP-002, barcode/2D-DataMatrix guided dispensing with batch/expiry/FEFO validation, substitution and partial fulfilment with doctor approval, medication labels and counselling, integrated GST billing (via OP-005) with multiple payment modes, OTC counter sales, sales returns, store-level inventory (stock, expiry alerts, auto-indent to NC-005/NC-006), Schedule H1/X and narcotic registers with dual authorisation, and cold-chain and recall handling. Target: a 5-line Rx dispensed and billed in under 90 seconds; zero dispensing of expired/recalled batches.
 
 ## 2. Users & Jobs-to-be-done
+
 - **Pharmacist OP** (desktop + handheld scanner + label printer): pick next Rx, verify patient, scan items, resolve stock-outs/substitutions, print labels, bill & collect, counsel; 400–800 Rx/day per counter group; keyboard-first.
 - **Pharmacy In-charge** (desktop): stock control, expiry/near-expiry actions, indents/POs, price/MRP updates, narcotic custody (2-person), returns approval, supplier returns, registers/reports, licence renewals (NC-023).
 - **Cashier** (if separated): collect payment for pharmacy bills at counter (NC-001).
@@ -27,12 +29,14 @@ OP-003 runs the outpatient pharmacy end-to-end: real-time e-Rx queue from OP-002
 ## 3. Core Workflows
 
 ### 3.1 Pending prescription dashboard
+
 1. Rx signed in OP-002 → `rx.created` → appears within 1 s on pharmacy queue of the target store (socket `pharmacy:store:<id>`) with card: patient, UHID, doctor, item count, priority (STAT/ER/normal), age of Rx, payer type, allergy flag, "awaiting co-sign" state.
 2. Patient arrives (scan OP slip/UHID or mobile) → card moves to "Patient at counter" (`F3` scan); pharmacy token displayed on TV (EN-018) with "Ready" state.
 3. Pharmacist `Enter` → **Dispense** workflow; concurrent lock prevents two counters picking same Rx (row lock + UI badge "being dispensed by X").
 4. Un-picked Rx older than 24 h auto-archived as `not_collected` (report to doctor/patient reminder).
 
 ### 3.2 Dispensing workflow
+
 1. **Verify Rx**: banner shows patient identity (name, UHID, age/sex, photo), allergies, doctor, diagnosis; pharmacist confirms identity (2 identifiers) → check schedule class: H/H1/X/narcotic lines require Rx reference (system Rx or scanned external Rx image + prescriber reg no + patient address for H1) — H1/X registers auto-fill.
 2. **Item pick**: for each line, system suggests batch by **FEFO** (earliest expiry with stock ≥ qty, expiry ≥ dispense date + `min_shelf_life_days` default 30) and shows bin/rack location; pharmacist scans item barcode/2D DataMatrix (GS1 GTIN+batch+expiry+serial parsed) → validates GTIN↔drug, batch exists in store, not expired, not quarantined/recalled, qty available; mismatch → error beep + red row; manual batch selection allowed with reason (`pharmacy.batch.override`).
 3. Quantity: Rx qty (from dose×freq×days) vs pack size → dispense units (strips/tabs/ml) with unit-of-issue conversion; loose dispensing per policy; round-up prompt.
@@ -45,10 +49,12 @@ OP-003 runs the outpatient pharmacy end-to-end: real-time e-Rx queue from OP-002
 10. Exceptions: patient refuses some items → lines `declined` (no charge); wrong item scanned after billing → return workflow (3.5); power/network loss → offline mode (§13) queues dispense with local stock cache; billing finalisation only online.
 
 ### 3.3 OTC / walk-in counter sale
+
 1. `F2` new OTC bill → optional patient (search/quick create name+mobile; anonymous allowed for non-scheduled items only) → item search (name/brand/molecule/barcode; shows stock, MRP, expiry) → cart → Schedule H/H1/X items blocked without Rx capture (upload/scan external Rx, prescriber name/reg no; H1 register entry) → bill via OP-005 (B2C invoice) → payment → labels optional.
 2. Bulk sale limits and per-customer quantity caps for controlled molecules (config, e.g. pseudoephedrine, tramadol) → warning/block.
 
 ### 3.4 Inventory management (pharmacy sub-store, on NC-006 ledger)
+
 1. **Stock register**: item-wise SOH by batch, expiry, MRP, cost, location (rack/bin/fridge), reserved (backorders), in-transit; ABC/VED class; movement history drill-down.
 2. **Receipts**: GRN against PO (NC-005) at pharmacy or transfer-in from central store (NC-006 `stock_transfer`) with barcode receiving; price disparity notice when purchase price/MRP differs from last (market: MocDoc).
 3. **Auto-reorder**: rule per item per store (min/max/ROL/ROQ, lead time, consumption-based (avg daily × lead + safety)) → nightly job creates draft **indent** to central store / purchase indent to NC-005 → alert to in-charge (`inventory.reorder.suggested`); manual indent anytime; urgent indent flag.
@@ -60,20 +66,24 @@ OP-003 runs the outpatient pharmacy end-to-end: real-time e-Rx queue from OP-002
 9. Price/MRP updates from GRN batch (MRP per batch, DPCO ceiling check: selling price ≤ MRP always; alert if MRP > ceiling from NPPA list) — RC-003 tariff for non-MRP items (consumables).
 
 ### 3.5 Returns & refunds
+
 1. Patient return (unopened, within N days, not cold-chain, not Schedule X, strips intact) → scan original bill → select lines/qty → reason code (wrong item, doctor stopped, patient expired, duplicate, discharge unused) → in-charge approval above threshold → stock back to batch (`SALE_RETURN`, restock or quarantine) → credit note + refund via OP-005 (`billing.refund`), GST reversal (credit note referencing invoice) → `pharmacy.return.completed`.
 2. Supplier return (expiry/damaged/recall) → debit note via NC-005.
 3. Returns analytics by reason code (enhancement from sheet).
 
 ### 3.6 Narcotic & controlled substance register (NDPS + Schedule X + H1)
+
 1. Narcotic/psychotropic items flagged in master (`control_class` = NDPS/Schedule X/H1) with storage location (double-lock).
 2. Every receipt/issue/dispense/return/destruction of NDPS items requires **dual authorisation**: pharmacist + second authorised user (in-charge/doctor) both authenticate (password/PIN/biometric) on the same transaction (`requires_second_person` ABAC); prescription image/ref, patient identity, prescriber reg no, qty in words → **NDPS register** (bound-book style, gapless serials, no delete; corrections as reversal entries) and daily balance; discrepancy → incident (NC-015) + block further issue until reconciled.
 3. Schedule H1 register auto-generated (drug, qty, patient name/address, prescriber name/reg no, date), retained 3 y; Schedule X: separate register + Rx copy retained 2 y; day-book and monthly/quarterly returns exports (state format templates via EN-039).
 4. Balance check at shift handover: physical count vs system → sign-off by both.
 
 ### 3.7 Shift, counter & cash
+
 - Multi-counter with per-user session; shift open/close with cash denomination via NC-001; end-of-day: sales summary, GST summary, pending Rx, backorders, low stock. Handover notes.
 
 ## 4. Data Model (schema `pharmacy` + shared `inventory`)
+
 - **pharmacy_stores**: id, hospital_id, branch_id, name, type enum(op_retail/ip/emergency/satellite/night), licence_no (Form 20/21…), licence_valid_to, gstin (if separate), registered_pharmacist_ids[], counters[], is_24x7, print_profiles.
 - **rx_queue** (read model): rx_id, store_id, patient_id, status enum(pending/patient_arrived/in_progress/on_hold/awaiting_approval/completed/partial/not_collected/cancelled), assigned_to, priority, arrived_at, started_at, completed_at, sla_due_at.
 - **dispenses**: id, hospital_id, branch_id, store_id, dispense_no (series `DISP`), rx_id?, patient_id?, encounter_id?, type enum(rx/otc/ip_issue/return/sample), bill_id (billing), status enum(draft/billed/dispensed/cancelled/returned/partially_returned), pharmacist_id, second_auth_user_id?, counselling jsonb, payer_type, total_amount, notes.
@@ -91,9 +101,10 @@ OP-003 runs the outpatient pharmacy end-to-end: real-time e-Rx queue from OP-002
 - **counselling_checklists**: drug_class, items jsonb, language variants.
 - **price_lists** (pharmacy discounts by payer/category) → RC-003; MRP lives on `inventory.item_batches.mrp`.
 - Shared (NC-006 `inventory`): `items` (drug master link, hsn, gst_rate, schedule_class, control_class, is_high_alert, is_lasa, storage_condition, uom conversions), `item_batches` (batch_no, expiry, mrp, cost, gtin, qty_on_hand per store), `stock_ledger` (partitioned monthly; movement types include DISPENSE, SALE_RETURN, EXPIRED_WRITEOFF, TRANSFER_IN/OUT, GRN, ADJUSTMENT, RECALL_QUARANTINE).
-Indexes: rx_queue (hospital_id, store_id, status, priority desc, arrived_at); dispenses (hospital_id, store_id, created_at desc), (patient_id, created_at desc); dispense_items (batch_id) for recall trace; controlled_drug_register (store_id, register_type, serial_no) unique. RLS all.
+  Indexes: rx_queue (hospital_id, store_id, status, priority desc, arrived_at); dispenses (hospital_id, store_id, created_at desc), (patient_id, created_at desc); dispense_items (batch_id) for recall trace; controlled_drug_register (store_id, register_type, serial_no) unique. RLS all.
 
 ## 5. Business Rules & Validations
+
 - Only users with `pharmacy.dispense` and a valid registered-pharmacist profile (Pharmacy Council reg no) may complete a Rx dispense; store licence expiry blocks dispensing after grace (warn 60 days before, NC-023).
 - Never dispense: expired batch, quarantined/recalled, cold-chain excursion pending, batch expiring before course end (warn) or < min shelf life (block unless override); selling price > MRP forbidden (DPCO); price below cost needs approval.
 - FEFO default; override with reason; batch scan mandatory for Schedule H1/X/NDPS/high-alert; configurable "scan mandatory for all".
@@ -110,36 +121,38 @@ Indexes: rx_queue (hospital_id, store_id, status, priority desc, arrived_at); di
 - Numbering: `DISP`, `BILL_PH` (gapless), `PHRET`, register serials.
 
 ## 6. API Surface (`/api/v1/pharmacy`)
-| Method | Path | Purpose | Permission | Idem | Pag |
-|---|---|---|---|---|---|
-| GET | /queue?store=&status= | Rx queue (read model + socket) | pharmacy.queue.read | – | cursor |
-| POST | /queue/{rx}/arrive, /assign, /hold | queue ops | pharmacy.queue.manage | Y | – |
-| POST | /dispenses | start dispense (rx or otc) | pharmacy.dispense.create | Y | – |
-| POST | /dispenses/{id}/items | add/scan line (barcode payload) | pharmacy.dispense.create | Y | – |
-| POST | /dispenses/{id}/items/{i}/substitute | request/apply substitution | pharmacy.substitution.request | Y | – |
-| POST | /substitutions/{id}/decide | doctor approve/reject | rx.substitution.approve | Y | – |
-| POST | /dispenses/{id}/cdss-check | run rules | pharmacy.dispense.create | – | – |
-| POST | /dispenses/{id}/bill | create bill via OP-005 | pharmacy.dispense.bill | Y | – |
-| POST | /dispenses/{id}/complete | mark dispensed (stock move) | pharmacy.dispense | Y | – |
-| POST | /dispenses/{id}/labels | print labels | pharmacy.label.print | – | – |
-| POST | /dispenses/{id}/cancel | cancel before completion | pharmacy.dispense.cancel | Y | – |
-| GET | /dispenses?patient=&store=&from= | history | pharmacy.dispense.read | – | cursor |
-| POST | /returns | sale return | pharmacy.return.create | Y | – |
-| POST | /returns/{id}/approve | approve | pharmacy.return.approve | Y | – |
-| GET | /stock?store=&q=&expiring_within= | SOH by batch | pharmacy.stock.read | – | cursor |
-| GET | /stock/{drug}/batches?store= | FEFO batches | pharmacy.stock.read | – | – |
-| POST | /indents | create indent | pharmacy.indent.create | Y | – |
-| GET | /reorder/suggestions | nightly suggestions | pharmacy.indent.create | – | cursor |
-| POST | /expiry-actions | act on batch | pharmacy.expiry.manage | Y | – |
-| POST | /recalls, /recalls/{id}/trace | recall + trace | pharmacy.recall.manage | Y | cursor |
-| POST | /controlled-register | entry (2 auth tokens) | pharmacy.narcotic.dispense (+second) | Y | – |
-| GET | /controlled-register?type=&from= | register view/export | pharmacy.narcotic.read | – | cursor |
-| POST | /custody-checks | shift count | pharmacy.narcotic.custody | Y | – |
-| POST | /cold-chain/logs | temp entry | pharmacy.coldchain.log | Y | – |
-| GET | /reports/* | sales, GST, expiry, consumption | pharmacy.report.read | – | – |
-| GET/PUT | /stores/{id}/config, /reorder-rules | config | pharmacy.configure | Y | – |
+
+| Method  | Path                                 | Purpose                         | Permission                           | Idem | Pag    |
+| ------- | ------------------------------------ | ------------------------------- | ------------------------------------ | ---- | ------ |
+| GET     | /queue?store=&status=                | Rx queue (read model + socket)  | pharmacy.queue.read                  | –    | cursor |
+| POST    | /queue/{rx}/arrive, /assign, /hold   | queue ops                       | pharmacy.queue.manage                | Y    | –      |
+| POST    | /dispenses                           | start dispense (rx or otc)      | pharmacy.dispense.create             | Y    | –      |
+| POST    | /dispenses/{id}/items                | add/scan line (barcode payload) | pharmacy.dispense.create             | Y    | –      |
+| POST    | /dispenses/{id}/items/{i}/substitute | request/apply substitution      | pharmacy.substitution.request        | Y    | –      |
+| POST    | /substitutions/{id}/decide           | doctor approve/reject           | rx.substitution.approve              | Y    | –      |
+| POST    | /dispenses/{id}/cdss-check           | run rules                       | pharmacy.dispense.create             | –    | –      |
+| POST    | /dispenses/{id}/bill                 | create bill via OP-005          | pharmacy.dispense.bill               | Y    | –      |
+| POST    | /dispenses/{id}/complete             | mark dispensed (stock move)     | pharmacy.dispense                    | Y    | –      |
+| POST    | /dispenses/{id}/labels               | print labels                    | pharmacy.label.print                 | –    | –      |
+| POST    | /dispenses/{id}/cancel               | cancel before completion        | pharmacy.dispense.cancel             | Y    | –      |
+| GET     | /dispenses?patient=&store=&from=     | history                         | pharmacy.dispense.read               | –    | cursor |
+| POST    | /returns                             | sale return                     | pharmacy.return.create               | Y    | –      |
+| POST    | /returns/{id}/approve                | approve                         | pharmacy.return.approve              | Y    | –      |
+| GET     | /stock?store=&q=&expiring_within=    | SOH by batch                    | pharmacy.stock.read                  | –    | cursor |
+| GET     | /stock/{drug}/batches?store=         | FEFO batches                    | pharmacy.stock.read                  | –    | –      |
+| POST    | /indents                             | create indent                   | pharmacy.indent.create               | Y    | –      |
+| GET     | /reorder/suggestions                 | nightly suggestions             | pharmacy.indent.create               | –    | cursor |
+| POST    | /expiry-actions                      | act on batch                    | pharmacy.expiry.manage               | Y    | –      |
+| POST    | /recalls, /recalls/{id}/trace        | recall + trace                  | pharmacy.recall.manage               | Y    | cursor |
+| POST    | /controlled-register                 | entry (2 auth tokens)           | pharmacy.narcotic.dispense (+second) | Y    | –      |
+| GET     | /controlled-register?type=&from=     | register view/export            | pharmacy.narcotic.read               | –    | cursor |
+| POST    | /custody-checks                      | shift count                     | pharmacy.narcotic.custody            | Y    | –      |
+| POST    | /cold-chain/logs                     | temp entry                      | pharmacy.coldchain.log               | Y    | –      |
+| GET     | /reports/*                           | sales, GST, expiry, consumption | pharmacy.report.read                 | –    | –      |
+| GET/PUT | /stores/{id}/config, /reorder-rules  | config                          | pharmacy.configure                   | Y    | –      |
 
 ## 7. Domain Events
+
 - `pharmacy.rx.received` (on `rx.created`) → queue read model, TV.
 - `rx.dispensed` / `rx.partially_dispensed` {rx_id, items[{drug, batch, qty, substitution}]} → OP-002 status + medication list, OP-020 patient, EN-011 (dispense record), analytics.
 - `pharmacy.substitution.requested|approved|rejected` → doctor notification, pharmacist UI.
@@ -151,6 +164,7 @@ Indexes: rx_queue (hospital_id, store_id, status, priority desc, arrived_at); di
 - `pharmacy.bill.created` (via OP-005 `bill.finalized` with `source=pharmacy`).
 
 ## 8. Screens
+
 - **Rx queue board** (desktop; TV variant for patient "Ready" tokens): columns Pending / At counter / In progress / Ready / Backorder; filters store, priority; hotkeys `F3` scan slip, `Enter` open, `H` hold, `A` assign to me. Real-time; empty: "No pending prescriptions".
 - **Dispense workspace** (desktop, barcode-first): banner (patient, allergies red), Rx lines grid with FEFO batch suggestion, scan field always focused (audible feedback), CDSS chips, substitution drawer, stock/price columns, running total with GST, payment pane (NC-001), label print button. Hotkeys: `F4` scan item, `F6` substitute, `F7` partial, `F8` labels, `F9` bill, `F10` collect & complete, `Ctrl+Z` remove line, `Esc` back to queue. Offline: scanning & batch validation from local cache; billing disabled with banner.
 - **OTC counter** (desktop/tablet): item search + cart, quick patient, Rx capture drawer for scheduled items, `F2` new bill.
@@ -161,26 +175,31 @@ Indexes: rx_queue (hospital_id, store_id, status, priority desc, arrived_at); di
 - Print: labels 50×25 mm / 70×40 mm (ZPL/TSPL), thermal 80 mm invoice (ESC/POS), A4 registers.
 
 ## 9. Integrations
+
 - Barcode: GS1 DataMatrix parsing (AI 01 GTIN, 10 batch, 17 expiry, 21 serial), EAN-13, internal item barcodes (EN-013); scanners USB-HID/Bluetooth; camera scan on tablet.
 - Label/receipt printers (EN-005) ZPL/TSPL/ESC-POS via print agent; auto-print.
 - NC-006 stock ledger, NC-005 PO/GRN/indent, NC-021 supplier returns, OP-005 billing/GST/credit notes, NC-001 cash, EN-010 UPI/QR at counter, EN-009 SMS/WhatsApp (ready, backorder arrived, refill reminder), EN-029 CDSS, EN-027 drug master (CIMS/own; NPPA ceiling list import), EN-042 temperature sensors (MQTT), NC-016 BMW disposal, NC-023 licence tracker, EN-011 ABDM (dispense record HI type "Prescription/DispenseRecord" optional), Tally export (NC-009).
 - Fallbacks: barcode unreadable → manual batch selection with reason; printer down → queue and reprint; CDSS down → banner + manual.
 
 ## 10. Reports & Analytics
+
 - Sales (daily/shift/counter/pharmacist; cash vs credit vs insurance), GST sales register (HSN-wise, B2C/B2B, credit notes; GSTR-1 export), item movement/consumption (ABC/VED, fast/slow/non-moving), stock valuation (FIFO/weighted), expiry report (30/60/90/180) & write-offs, near-expiry actions log, stock-out & fill-rate (Rx lines fully dispensed %), substitution rate, pharmacist interventions (NABH), TAT (Rx arrival → ready), backorder aging, returns by reason code, NDPS/H1/X registers & returns, cold-chain compliance, margin analysis (MRP vs cost), doctor-wise prescribed vs dispensed (leakage), high-alert drug dispensing, top molecules, antibiotic consumption (DDD, for IP-012), narcotic day-book.
 - Read models: `analytics.mv_pharmacy_sales_daily`, `analytics.mv_stock_expiry`, `analytics.mv_pharmacy_tat`, `analytics.mv_item_consumption_30d`.
 
 ## 11. Notifications
+
 - Patient: "Rx received / medicines ready (token)", backorder available, refill due (chronic, PE-002), recall contact, home delivery (later).
 - Doctor: substitution approval request (in-app + push, 2-min escalate), stock-out of prescribed item, pharmacist intervention needing reply.
 - In-charge: expiry digest (daily email), reorder suggestions, cold-chain excursion (push + SMS), narcotic variance (immediate), licence expiry (60/30/7 d), price disparity on GRN.
 - TV: pharmacy ready tokens.
 
 ## 12. Permissions
+
 `pharmacy.queue.read|manage`, `pharmacy.dispense.create|read|bill|cancel`, `pharmacy.dispense` (complete, requires pharmacist profile), `pharmacy.substitution.request`, `rx.substitution.approve` (doctor), `pharmacy.batch.override`, `pharmacy.label.print`, `pharmacy.otc.sell`, `pharmacy.return.create|approve`, `pharmacy.stock.read|adjust`, `pharmacy.indent.create|approve`, `pharmacy.expiry.manage`, `pharmacy.recall.manage`, `pharmacy.narcotic.dispense|read|custody` (+ABAC requires_second_person, 2FA), `pharmacy.coldchain.log`, `pharmacy.price.update`, `pharmacy.discount.apply` (amount_limit), `pharmacy.report.read|export`, `pharmacy.configure`.
 Defaults: Pharmacist OP: queue, dispense*, otc, label, return.create, stock.read, coldchain.log, narcotic.dispense (as first person); In-charge: all incl. approve/expiry/recall/configure/price; Doctor: rx.substitution.approve; Store keeper: stock.read; Accounts/Auditor: report.read/export, narcotic.read.
 
 ## 13. Non-functional
+
 - Volumes: 4000 Rx/day OP, 2500 OTC bills/day, 25k dispense lines/day, 12 counters per branch, 30k SKUs, 150k batches, ledger 10M rows/yr (partitioned).
 - p95: queue < 150 ms; barcode validate < 80 ms (Redis SOH cache + batch lookup); bill create < 300 ms; label print enqueue < 100 ms; recall trace over 2 yrs < 2 s (index on batch_id).
 - Offline: local cache of store SOH (refresh 5 min) & drug master; scanning/validation offline; completion queued; billing online-only; conflict: server stock authoritative — if insufficient at sync, line becomes backorder and pharmacist alerted.
@@ -189,6 +208,7 @@ Defaults: Pharmacist OP: queue, dispense*, otc, label, return.create, stock.read
 - Security: 2FA for narcotics/in-charge; second-person auth via re-auth token; PHI minimal on labels; audit on every mutation; registers immutable by trigger.
 
 ## 14. Acceptance Criteria
+
 1. Given an Rx signed in OP-002 for store S, then it appears in S's queue within 1 s and nowhere else; when patient's OP slip is scanned, card moves to "At counter".
 2. Given a drug with batches A (exp 2 months) and B (exp 8 months), when line is opened, then A is suggested (FEFO); scanning B without reason is rejected unless `pharmacy.batch.override`.
 3. Given a scanned DataMatrix with expired date, then the line turns red, an audible alert sounds, and completion is blocked.
@@ -209,10 +229,12 @@ Defaults: Pharmacist OP: queue, dispense*, otc, label, return.create, stock.read
 18. Given end-of-shift custody check with variance, then an incident is created and NDPS issues are blocked until reconciled by in-charge.
 
 ## 15. Enhancements / Later phases
+
 - From VIMS sheet: drug–drug interaction severity levels (Phase 4 via EN-029); patient medication counselling checklist (Phase 4); smart dispensing bin location guidance (Phase 4 basic bin; pick-to-light later); returns analytics by reason code (Phase 4); near-expiry auto-discount suggestion (Phase 4 rule); controlled substance dual-authorisation (Phase 4 core).
 - (market) Multi-store management, stock transfer, price disparity notification, supplier & patient credit settlement, short-expiry notification (MocDoc); expiry return manager with credit notes, loyalty points, udhar/credit customers, duplicate SKU analyser (SmartHospital) → NC-006 item dedupe; smart issue option to reduce expiry (Prodoc); home delivery & runner app; WhatsApp refill ordering; e-pharmacy portal; unit-dose/IP (IP-014); vending/automated dispensing cabinet integration (later); AI demand forecast (AI-005).
 
 ## 16. Open Questions for the Hospital
+
 1. Number of pharmacy stores/counters per branch (OP retail, ER 24×7, IP), separate GSTIN/drug licences per store? Licence numbers and expiry dates.
 2. Drug master source (CIMS licence? own list? import from existing system) and whether MRP is batch-wise (default) or item-wise.
 3. Substitution policy: auto generic substitution allowed? doctor approval channel (app/phone)? DNS respected?

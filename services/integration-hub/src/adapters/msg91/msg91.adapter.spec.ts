@@ -25,7 +25,10 @@ describe('MSG91 manifest', () => {
     const factory = createMsg91Factory(new FakeHttpTransport());
     expect(factory.manifest.capabilities.supportsIdempotencyKey).toBe(false);
     expect(factory.manifest.capabilities.requiresInternet).toBe(true);
-    expect(factory.manifest.capabilities.operations.map((op) => op.key)).toEqual(['sendSms', 'deliveryReceipt']);
+    expect(factory.manifest.capabilities.operations.map((op) => op.key)).toEqual([
+      'sendSms',
+      'deliveryReceipt',
+    ]);
   });
 
   it('refuses a configuration with no webhook shared token', () => {
@@ -43,7 +46,10 @@ describe('MSG91 manifest', () => {
   it('refuses an auth block that is not an api_key', () => {
     const factory = createMsg91Factory(new FakeHttpTransport());
     const result = validateConnectorConfig(
-      { ...msg91ConnectorConfig(), auth: { type: 'basic', secretRef: 'vault://hms/connectors/msg91/authkey' } },
+      {
+        ...msg91ConnectorConfig(),
+        auth: { type: 'basic', secretRef: 'vault://hms/connectors/msg91/authkey' },
+      },
       factory,
     );
     expect(result.ok).toBe(false);
@@ -54,7 +60,14 @@ describe('MSG91 manifest', () => {
     const result = validateConnectorConfig(
       {
         ...msg91ConnectorConfig(),
-        retry: { policy: 'R1', maxAttempts: 3, baseDelayMs: 1_000, backoffFactor: 2, maxDelayMs: 60_000, jitterMs: 0 },
+        retry: {
+          policy: 'R1',
+          maxAttempts: 3,
+          baseDelayMs: 1_000,
+          backoffFactor: 2,
+          maxDelayMs: 60_000,
+          jitterMs: 0,
+        },
       },
       factory,
     );
@@ -117,7 +130,10 @@ describe('MSG91 send', () => {
     // as HTTP 200. An adapter that trusts the status code reports every one of
     // them as `sent` and the hospital finds out from a patient.
     const transport = new FakeHttpTransport([
-      { match: '/api/v2/sendsms', response: jsonResponse(200, { type: 'error', message: 'Invalid DLT template id' }) },
+      {
+        match: '/api/v2/sendsms',
+        response: jsonResponse(200, { type: 'error', message: 'Invalid DLT template id' }),
+      },
     ]);
     const adapter = await adapterWith(transport);
 
@@ -130,7 +146,10 @@ describe('MSG91 send', () => {
 
   it('classifies a bad authkey reported at 200 as an auth failure', async () => {
     const transport = new FakeHttpTransport([
-      { match: '/api/v2/sendsms', response: jsonResponse(200, { type: 'error', message: 'authkey is invalid' }) },
+      {
+        match: '/api/v2/sendsms',
+        response: jsonResponse(200, { type: 'error', message: 'authkey is invalid' }),
+      },
     ]);
     const adapter = await adapterWith(transport);
     const result = await adapter.send('sendSms', outboundMessage('sendSms', SMS_PAYLOAD));
@@ -139,7 +158,9 @@ describe('MSG91 send', () => {
   });
 
   it('fails loudly when a 2xx carries no request id, because the DLR could never be matched', async () => {
-    const transport = new FakeHttpTransport([{ match: '/api/v2/sendsms', response: jsonResponse(200, { type: 'success' }) }]);
+    const transport = new FakeHttpTransport([
+      { match: '/api/v2/sendsms', response: jsonResponse(200, { type: 'success' }) },
+    ]);
     const adapter = await adapterWith(transport);
     const result = await adapter.send('sendSms', outboundMessage('sendSms', SMS_PAYLOAD));
     if (result.status !== 'failed') throw new Error('unreachable');
@@ -154,7 +175,9 @@ describe('MSG91 send', () => {
       [503, 'partner_5xx', true],
     ];
     for (const [status, errorClass, retryable] of cases) {
-      const transport = new FakeHttpTransport([{ match: '/api/v2/sendsms', response: jsonResponse(status, {}) }]);
+      const transport = new FakeHttpTransport([
+        { match: '/api/v2/sendsms', response: jsonResponse(status, {}) },
+      ]);
       const adapter = await adapterWith(transport);
       const result = await adapter.send('sendSms', outboundMessage('sendSms', SMS_PAYLOAD));
       if (result.status !== 'failed') throw new Error(`expected ${String(status)} to fail`);
@@ -187,7 +210,10 @@ describe('MSG91 send', () => {
   it('rejects a payload that is not a canonical SMS payload before touching the network', async () => {
     const transport = new FakeHttpTransport();
     const adapter = await adapterWith(transport);
-    const result = await adapter.send('sendSms', outboundMessage('sendSms', { channel: 'sms', mobile: '9876543210' }));
+    const result = await adapter.send(
+      'sendSms',
+      outboundMessage('sendSms', { channel: 'sms', mobile: '9876543210' }),
+    );
     if (result.status !== 'failed') throw new Error('unreachable');
     expect(result.errorClass).toBe('validation');
     expect(transport.requests).toHaveLength(0);
@@ -199,7 +225,10 @@ describe('MSG91 send', () => {
     const adapter = new Msg91Adapter(transport);
     await adapter.configure(adapterContext(msg91ConnectorConfig(), factory, { sandbox: true }));
 
-    const sandboxed = await adapter.send('sendSms', outboundMessage('sendSms', SMS_PAYLOAD, { sandbox: true }));
+    const sandboxed = await adapter.send(
+      'sendSms',
+      outboundMessage('sendSms', SMS_PAYLOAD, { sandbox: true }),
+    );
     expect(sandboxed.status).toBe('acknowledged');
     expect(transport.requests).toHaveLength(0);
 
@@ -301,7 +330,12 @@ describe('webhook token comparison', () => {
     const adapter = await adapterWith(new FakeHttpTransport());
     const long = createHmac('sha256', 'x').update('y').digest('hex');
     await expect(
-      adapter.receive({ receivedAt: new Date(), encoding: 'json', body: '{}', headers: { 'x-vims-webhook-token': long } }),
+      adapter.receive({
+        receivedAt: new Date(),
+        encoding: 'json',
+        body: '{}',
+        headers: { 'x-vims-webhook-token': long },
+      }),
     ).rejects.toBeInstanceOf(WebhookSignatureError);
   });
 });

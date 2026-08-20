@@ -177,7 +177,8 @@ export class MessageLog {
   }
 
   async complete(tx: TransactionClient, handle: MessageHandle, input: CompletionInput): Promise<void> {
-    const response = input.response === undefined ? null : JSON.stringify(redactPayload(input.response).payload);
+    const response =
+      input.response === undefined ? null : JSON.stringify(redactPayload(input.response).payload);
     await tx.query(
       `UPDATE integration.ihub_messages
           SET status = $3::integration."IhubMessageStatus",
@@ -247,10 +248,9 @@ export class MessageLog {
   }
 
   async get(tx: TransactionClient, id: string): Promise<MessageRow | undefined> {
-    return tx.maybeOne<MessageRow>(
-      `SELECT ${SELECT_COLUMNS} FROM integration.ihub_messages WHERE id = $1`,
-      [id],
-    );
+    return tx.maybeOne<MessageRow>(`SELECT ${SELECT_COLUMNS} FROM integration.ihub_messages WHERE id = $1`, [
+      id,
+    ]);
   }
 
   /**

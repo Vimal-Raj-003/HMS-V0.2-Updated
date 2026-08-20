@@ -1,25 +1,27 @@
 # EN-036 — DIU: Data Import & Migration Utility (Bulk Upload Templates, ETL with Staging Schema, Mapping Configuration, Validation & Error Reports, De-duplication, Batch Tracking & Rollback, Legacy Migration Playbook, Scheduled External Imports, Data-Quality Scoring, Anonymisation for Research)
 
-| Field | Value |
-|---|---|
-| Domain | Enabler |
-| Module ID | EN-036 |
-| Phase | 1 / 11 |
-| Priority | P1 |
-| Complexity | Very High |
-| Depends on | EN-027 (MDM — every master this utility loads is governed there; code systems and concept maps drive value translation), EN-007 (roles, numbering series, settings), EN-024 (audit — every import row change is auditable), EN-017 (JDBC/SFTP/API extraction from legacy systems, scheduled pulls), EN-038 (approval before a commit that touches financial or clinical data), EN-041 (branch scoping of imported data), EN-022 (pre-import backup / restore point), EN-023 (secure handling of extracted dumps), EN-040 (row-count entitlement for SaaS tenants), EN-039 (import template definitions rendered as downloadable Excel) |
-| Consumed by | OP-001 (patient master + MPI dedupe), EN-027 (all masters: doctor, item, tariff, service, drug, test, ICD), NC-006/NC-005 (opening stock, suppliers, POs), NC-009 (opening balances, chart of accounts, AR/AP), NC-010 (employee master, leave balances), OP-004/OP-008 (historical visits, labs, reports), RC-003/EN-002 (payer tariffs), NC-003 (historical MRD documents), EN-031 (historical QC/EQA), AI/analytics (anonymised research extracts) |
-| Feature flag | `module.diu.enabled` (sub: `diu.migration`, `diu.scheduled_imports`, `diu.fuzzy_dedupe`, `diu.anonymisation`, `diu.jdbc_extract`) |
-| Primary roles | IT Admin / Implementation Consultant (56), Master Data Steward (per domain — EN-027), Hospital Admin (2) |
-| Secondary roles | MRD Officer (43 — patient dedupe adjudication), Pharmacy In-charge (32 — drug/item master), Stores (44 — opening stock), Accounts (46 — opening balances), HR (47 — employee master), Lab Quality Manager (35 — historical QC), Super Admin (1 — SaaS onboarding), DPO (57 — anonymisation & research exports), Auditor (58) |
-| Regulatory | **DPDP Act 2023 & Rules 2025** — migration is large-scale processing of personal data (purpose limitation, security of the extract, deletion of intermediate copies, processor agreements with the legacy vendor, DPIA for the migration), **anonymisation** must be irreversible to fall outside the Act; **IT Act §43A** reasonable security for the dump files; NABH/NABL & MRD retention rules — migrated clinical records inherit their original retention clock, not the migration date; **CDSCO/DPCO** for drug master price fields; **GST** HSN/SAC correctness on imported service and item masters; **Companies Act/Income Tax** for opening balances and audit trail of financial migration; CERT-In log retention for the migration run |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain          | Enabler                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Module ID       | EN-036                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Phase           | 1 / 11                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Priority        | P1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Complexity      | Very High                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Depends on      | EN-027 (MDM — every master this utility loads is governed there; code systems and concept maps drive value translation), EN-007 (roles, numbering series, settings), EN-024 (audit — every import row change is auditable), EN-017 (JDBC/SFTP/API extraction from legacy systems, scheduled pulls), EN-038 (approval before a commit that touches financial or clinical data), EN-041 (branch scoping of imported data), EN-022 (pre-import backup / restore point), EN-023 (secure handling of extracted dumps), EN-040 (row-count entitlement for SaaS tenants), EN-039 (import template definitions rendered as downloadable Excel)                                                                                                              |
+| Consumed by     | OP-001 (patient master + MPI dedupe), EN-027 (all masters: doctor, item, tariff, service, drug, test, ICD), NC-006/NC-005 (opening stock, suppliers, POs), NC-009 (opening balances, chart of accounts, AR/AP), NC-010 (employee master, leave balances), OP-004/OP-008 (historical visits, labs, reports), RC-003/EN-002 (payer tariffs), NC-003 (historical MRD documents), EN-031 (historical QC/EQA), AI/analytics (anonymised research extracts)                                                                                                                                                                                                                                                                                               |
+| Feature flag    | `module.diu.enabled` (sub: `diu.migration`, `diu.scheduled_imports`, `diu.fuzzy_dedupe`, `diu.anonymisation`, `diu.jdbc_extract`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Primary roles   | IT Admin / Implementation Consultant (56), Master Data Steward (per domain — EN-027), Hospital Admin (2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Secondary roles | MRD Officer (43 — patient dedupe adjudication), Pharmacy In-charge (32 — drug/item master), Stores (44 — opening stock), Accounts (46 — opening balances), HR (47 — employee master), Lab Quality Manager (35 — historical QC), Super Admin (1 — SaaS onboarding), DPO (57 — anonymisation & research exports), Auditor (58)                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Regulatory      | **DPDP Act 2023 & Rules 2025** — migration is large-scale processing of personal data (purpose limitation, security of the extract, deletion of intermediate copies, processor agreements with the legacy vendor, DPIA for the migration), **anonymisation** must be irreversible to fall outside the Act; **IT Act §43A** reasonable security for the dump files; NABH/NABL & MRD retention rules — migrated clinical records inherit their original retention clock, not the migration date; **CDSCO/DPCO** for drug master price fields; **GST** HSN/SAC correctness on imported service and item masters; **Companies Act/Income Tax** for opening balances and audit trail of financial migration; CERT-In log retention for the migration run |
 
 ## 1. Purpose
+
 EN-036 is the controlled doorway through which external data enters Vim's HMS — whether that is a 200-row department master typed into Excel by the implementation team, a ten-year legacy HIS migration with two million patients, or a nightly CSV of results from an outsourced reference lab. It provides versioned upload templates, a staging schema where nothing touches production until it validates, a declarative mapping and transformation layer, deterministic + fuzzy de-duplication, per-batch tracking with true rollback, a repeatable legacy-migration playbook (extract → transform → reconcile → cutover → parallel run), data-quality scoring, and irreversible anonymisation for research exports.
 
 ## 2. Users & Jobs-to-be-done
+
 - **Implementation consultant / IT Admin (56, desktop, intensively for 4–8 weeks per go-live)**: download templates, load masters in dependency order, fix errors from a downloadable error file, run the patient migration, reconcile counts and money, and be able to undo a bad batch without a database restore.
-- **Master Data Steward (EN-027)**: review what a bulk load will change *before* it commits, approve it, and see the impact (how many tariffs, orders, stock rows reference the records being changed).
+- **Master Data Steward (EN-027)**: review what a bulk load will change _before_ it commits, approve it, and see the impact (how many tariffs, orders, stock rows reference the records being changed).
 - **MRD Officer (43)**: adjudicate the duplicate-patient queue — merge, keep separate, or mark "same person, different episode" — with the clinical consequences visible.
 - **Accounts (46)**: import opening balances and prove that debits equal credits and that the AR ageing matches the legacy trial balance to the rupee before go-live.
 - **Stores / Pharmacy (44/32)**: import opening stock with batch numbers and expiry dates so FEFO works from day one, and reconcile against a physical count.
@@ -30,31 +32,33 @@ EN-036 is the controlled doorway through which external data enters Vim's HMS �
 ## 3. Core Workflows
 
 ### 3.1 Bulk upload templates
+
 1. The system ships a **template catalogue**, each template versioned, with an Excel (.xlsx) download containing: a **Data** sheet with typed columns, an **Instructions** sheet, a **Reference** sheet (valid values pulled live from EN-027 — departments, UoMs, ICD codes, GST slabs), inline data validation (dropdowns, date formats, numeric ranges) and a hidden `template_version` cell so an outdated template is rejected on upload.
 2. **Shipped templates** (Phase 1 unless noted):
-   | Domain | Template | Key columns (abridged) |
-   |---|---|---|
-   | Patient | `patient_master` | UHID(legacy), name, gender, DOB/age, mobile, alt mobile, email, address, city, state, PIN, blood group, ABHA, registration date, referring doctor, payer, tags |
-   | Patient | `patient_relationships`, `patient_allergies`, `patient_problems` | UHID, relation/allergen/ICD code, severity, onset |
-   | Provider | `doctor_master` | code, name, qualification, specialty, NMC reg no., department, consultation fee, share %, joining date, schedule template |
-   | Provider | `employee_master` (NC-010) | emp code, name, DOB, DOJ, designation, department, PAN, Aadhaar-ref, UAN/PF, ESI, bank, CTC structure, leave balances |
-   | Org | `department_master`, `ward_bed_master`, `location_master` | code, name, type, parent, branch, capacity, room class |
-   | Clinical | `service_master` | code, name, group, SAC, GST %, cost centre, doctor-share rule |
-   | Clinical | `lab_test_master` | code, name, LOINC, method, specimen, container, units (UCUM), reference ranges by age/sex, critical values, TAT |
-   | Clinical | `rad_procedure_master` | code, name, modality, body part, laterality, contrast, dose reference |
-   | Pharmacy | `drug_master` | generic, brand, strength, form, ATC, schedule (H/H1/X/NDPS), manufacturer, HSN, GST, DPCO ceiling, LASA/high-alert flags |
-   | Inventory | `item_master`, `supplier_master`, `opening_stock` | item code, category, UoM, conversions, reorder level, ABC/VED; supplier GSTIN, terms; stock: store, batch, expiry, qty, rate |
-   | Billing | `tariff_master` | payer/scheme, service code, rate, effective from/to, package linkage |
-   | Billing | `corporate_master`, `payer_master` | name, ROHINI, TPA, credit limit, discount rules |
-   | Finance | `chart_of_accounts`, `opening_balances`, `ar_open_items`, `ap_open_items` | account code, type, Dr/Cr, party, invoice ref, ageing bucket |
-   | History | `historical_visits` | UHID, visit date, type, department, doctor, diagnosis (ICD), disposition |
-   | History | `historical_lab_results` | UHID, accession, test code, value, unit, ref range, result date, verified by |
-   | History | `historical_documents` | UHID, document type, date, file path/URL, MRD number |
-   | Quality | `historical_qc`, `historical_eqa` (EN-031) | analyte, instrument, lot, value, date |
+   | Domain    | Template                                                                  | Key columns (abridged)                                                                                                                                         |
+   | --------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | Patient   | `patient_master`                                                          | UHID(legacy), name, gender, DOB/age, mobile, alt mobile, email, address, city, state, PIN, blood group, ABHA, registration date, referring doctor, payer, tags |
+   | Patient   | `patient_relationships`, `patient_allergies`, `patient_problems`          | UHID, relation/allergen/ICD code, severity, onset                                                                                                              |
+   | Provider  | `doctor_master`                                                           | code, name, qualification, specialty, NMC reg no., department, consultation fee, share %, joining date, schedule template                                      |
+   | Provider  | `employee_master` (NC-010)                                                | emp code, name, DOB, DOJ, designation, department, PAN, Aadhaar-ref, UAN/PF, ESI, bank, CTC structure, leave balances                                          |
+   | Org       | `department_master`, `ward_bed_master`, `location_master`                 | code, name, type, parent, branch, capacity, room class                                                                                                         |
+   | Clinical  | `service_master`                                                          | code, name, group, SAC, GST %, cost centre, doctor-share rule                                                                                                  |
+   | Clinical  | `lab_test_master`                                                         | code, name, LOINC, method, specimen, container, units (UCUM), reference ranges by age/sex, critical values, TAT                                                |
+   | Clinical  | `rad_procedure_master`                                                    | code, name, modality, body part, laterality, contrast, dose reference                                                                                          |
+   | Pharmacy  | `drug_master`                                                             | generic, brand, strength, form, ATC, schedule (H/H1/X/NDPS), manufacturer, HSN, GST, DPCO ceiling, LASA/high-alert flags                                       |
+   | Inventory | `item_master`, `supplier_master`, `opening_stock`                         | item code, category, UoM, conversions, reorder level, ABC/VED; supplier GSTIN, terms; stock: store, batch, expiry, qty, rate                                   |
+   | Billing   | `tariff_master`                                                           | payer/scheme, service code, rate, effective from/to, package linkage                                                                                           |
+   | Billing   | `corporate_master`, `payer_master`                                        | name, ROHINI, TPA, credit limit, discount rules                                                                                                                |
+   | Finance   | `chart_of_accounts`, `opening_balances`, `ar_open_items`, `ap_open_items` | account code, type, Dr/Cr, party, invoice ref, ageing bucket                                                                                                   |
+   | History   | `historical_visits`                                                       | UHID, visit date, type, department, doctor, diagnosis (ICD), disposition                                                                                       |
+   | History   | `historical_lab_results`                                                  | UHID, accession, test code, value, unit, ref range, result date, verified by                                                                                   |
+   | History   | `historical_documents`                                                    | UHID, document type, date, file path/URL, MRD number                                                                                                           |
+   | Quality   | `historical_qc`, `historical_eqa` (EN-031)                                | analyte, instrument, lot, value, date                                                                                                                          |
 3. Templates are **generated from the live schema + MDM**, so a hospital that adds a custom field gets it in the template; a template can be scoped per branch.
 4. **CSV/TSV/JSON/fixed-width** are also accepted with a mapping step (§3.3) for systems that cannot produce the Excel shape.
 
 ### 3.2 Upload → staging → validate → error report → commit
+
 1. **Upload** (drag-drop, SFTP drop folder, or API): file is virus-scanned, size-checked (default 50 MB / 200 000 rows per file; larger files are chunked automatically), stored encrypted, and a **batch** is created (`diu_batches`, status `uploaded`).
 2. **Parse into staging**: every row lands in `diu_staging_rows` with `row_number`, the raw payload as JSONB and a per-row status. Nothing touches production tables. Staging is per-batch and per-tenant, isolated by RLS.
 3. **Validation runs in four layers**, each producing typed errors with row/column coordinates:
@@ -66,18 +70,20 @@ EN-036 is the controlled doorway through which external data enters Vim's HMS �
 4. **Error report**: a downloadable annotated workbook — the original rows with an appended `__status`, `__errors` (human-readable, localised) and `__hint` column, plus a summary sheet (errors by type with counts and the 5 most common examples). The consultant fixes the file and re-uploads; the batch keeps its lineage (`parent_batch_id`) so attempt history is visible.
 5. **Preview & impact**: before commit the operator sees "will create 12 480, update 3 122, skip 88, reject 214" with a sample diff for updates (old value → new value) and an **impact analysis** for masters (how many active transactions reference the records being changed).
 6. **Approval** (EN-038) for batches that touch financial masters, tariffs, opening balances or more than a configured row threshold (default 5000): proposer ≠ approver.
-7. **Commit** runs in **chunked transactions** (default 1000 rows per transaction) with a **restore point** (§3.6): each staged row is inserted/updated through the *owning module's service layer* — never by raw SQL into production tables — so business rules, numbering series, audit and outbox events all fire normally. Progress is streamed to the UI.
+7. **Commit** runs in **chunked transactions** (default 1000 rows per transaction) with a **restore point** (§3.6): each staged row is inserted/updated through the _owning module's service layer_ — never by raw SQL into production tables — so business rules, numbering series, audit and outbox events all fire normally. Progress is streamed to the UI.
 8. **Post-commit**: reconciliation summary (counts in vs created vs updated vs skipped, control totals for money and quantity), a permanent batch report, and Event `diu.batch.committed`.
 
 ### 3.3 Mapping configuration (for non-template sources)
+
 - A **mapping profile** (`diu_mappings`) binds a source (CSV column / JSON path / DB column) to a target field with a transform chain reusing EN-017's DSL vocabulary: `trim`, `upper/lower/title`, `date_parse(format, tz)`, `split/join`, `concat(template)`, `lookup(value_set)`, `code_translate(system_from → system_to)` via EN-027 concept maps (legacy test code → LOINC, legacy dept code → department id, M/F/1/2 → gender enum), `default`, `conditional`, `unit_convert`, `numeric_scale`, `regex_extract`, `mask`, and `custom(js)` in a sandbox (50 ms, no I/O).
 - **Auto-mapping suggestion**: on first upload of an unknown file, columns are matched to target fields by name similarity + sample-value profiling (a column of `9xxxxxxxxx` values is proposed as `mobile`), and the operator confirms or corrects — this alone removes most of the tedium of a migration.
 - Mappings are versioned, testable against a sample of 100 rows with a field-by-field trace, and reusable across batches and branches (a group hospital maps once, loads 18 branches).
 - **Unmapped source columns** are preserved in `diu_staging_rows.extra` and can be dumped into a target `legacy_data` JSONB column so nothing is silently lost.
 
 ### 3.4 De-duplication (deterministic + fuzzy)
+
 1. **Deterministic keys** run first and are exact-match: ABHA number, legacy UHID (if the hospital guarantees uniqueness), Aadhaar reference hash (never the raw number), passport/ID number, mobile+DOB+gender, mobile+exact name.
-2. **Fuzzy matching** (the source requirement: *mobile + name + DOB*) uses a scored model:
+2. **Fuzzy matching** (the source requirement: _mobile + name + DOB_) uses a scored model:
    - `mobile` exact = 40 points; last-8-digits match = 25 (handles `+91`/`0` prefixes and one transcription error).
    - `name` similarity via `pg_trgm` similarity + **Double Metaphone / Soundex on the transliterated form** (essential for Indian names: `Sanjeev`/`Sanjiv`, `Lakshmi`/`Laxmi`, `Mohd`/`Mohammad`), with a token-set comparison so `Kumar Ramesh` matches `Ramesh Kumar` = up to 30 points.
    - `dob` exact = 20; year+month = 12; year only = 6; **year ±1** = 4 (age-derived DOBs in legacy systems are routinely wrong).
@@ -90,28 +96,32 @@ EN-036 is the controlled doorway through which external data enters Vim's HMS �
 7. **Dedupe is also a standing service**, not just a migration step: OP-001 calls the same scorer at registration time to warn "3 similar patients exist".
 
 ### 3.5 Legacy-system migration playbook
+
 A migration is a **project object** (`diu_migration_projects`) with phases, owners, dates and a checklist — because the failure mode is process, not code.
-1. **Discovery**: inventory the legacy system (vendor, version, database engine, schema access, export capability), data volumes per entity, years of history, the *actual* quality (nulls, free-text where codes should be, duplicate rate), custom fields, attachments/scanned documents and their storage, and every downstream consumer of legacy data. Output: a scope document listing what migrates, what is archived read-only, and what is abandoned (with sign-off — abandoning data must be a decision, not an accident).
+
+1. **Discovery**: inventory the legacy system (vendor, version, database engine, schema access, export capability), data volumes per entity, years of history, the _actual_ quality (nulls, free-text where codes should be, duplicate rate), custom fields, attachments/scanned documents and their storage, and every downstream consumer of legacy data. Output: a scope document listing what migrates, what is archived read-only, and what is abandoned (with sign-off — abandoning data must be a decision, not an accident).
 2. **Extract**: read-only JDBC pull (EN-017), vendor-provided export, or database backup restored into a staging instance. Extract files are encrypted, access-logged, and scheduled for deletion at project close (a DPDP obligation that is routinely forgotten).
 3. **Transform**: mapping profiles (§3.3) per entity; code translation to standards (legacy test codes → LOINC, legacy diagnosis text → ICD-10 via a curated map + a manual queue for the tail); unit normalisation; identifier strategy (legacy UHID preserved as an alternate identifier, new UHID issued from the series, or legacy numbers continued — decided once and recorded).
 4. **Dependency-ordered load**: organisation → masters (departments, doctors, services, drugs, items, payers, tariffs) → patients → historical encounters → clinical results/documents → financial opening balances → stock → HR. Each level must reconcile before the next starts.
 5. **Reconcile**: automated control totals per entity — row counts, sum of amounts, sum of quantities, distinct patients, oldest/newest dates — compared to legacy-side counts supplied by the vendor; a variance report itemises every mismatch. Financial migration additionally requires trial-balance agreement and AR/AP ageing agreement **to the rupee**.
 6. **Validate clinically**: a sample of 100–200 patients is checked record-by-record by hospital staff against the legacy screens (a signed checklist per patient, not a vibe); high-risk data (allergies, blood group, implants, chronic diagnoses) is 100 % verified where feasible.
 7. **Parallel run** (2–4 weeks): both systems operate; a nightly delta import brings new legacy transactions into the HMS; a daily reconciliation report shows drift. Users are trained on the HMS while the legacy system remains the fallback.
-8. **Cutover**: freeze the legacy system at a declared instant, run the final delta, reconcile, flip the switch, and keep the legacy system read-only. A **rollback plan** with a decision deadline (e.g. "if reconciliation fails by 06:00, we revert") is written *before* cutover, not during it.
+8. **Cutover**: freeze the legacy system at a declared instant, run the final delta, reconcile, flip the switch, and keep the legacy system read-only. A **rollback plan** with a decision deadline (e.g. "if reconciliation fails by 06:00, we revert") is written _before_ cutover, not during it.
 9. **Post-cutover stabilisation**: daily data-quality reports, a fast lane for correcting migration errors (with a distinct audit reason `migration_correction`), and a 30-day review.
 10. **Legacy decommission checklist** (source enhancement): all data classes verified, statutory retention satisfied (archive with an accessible reader, not just a backup file), licences terminated, extract copies destroyed with a certificate, and a signed decommission record.
 
 ### 3.6 Batch tracking & rollback
+
 - Every batch records: file hash, uploader, template/mapping version, row counts by outcome, start/end time, restore point, and the **complete set of primary keys it created or changed** (`diu_batch_rows` → `entity`, `entity_id`, `action`, `before` snapshot for updates).
 - **Rollback** is a first-class operation:
-  - *Inserts* are deleted (or soft-deleted where the table forbids hard delete) **only if no dependent transaction has since referenced them** — the rollback pre-check lists blockers.
-  - *Updates* are reverted from the stored `before` snapshot, with optimistic-lock checks: a row changed by a user after the import is **not** silently overwritten; it is listed as a conflict for manual decision.
+  - _Inserts_ are deleted (or soft-deleted where the table forbids hard delete) **only if no dependent transaction has since referenced them** — the rollback pre-check lists blockers.
+  - _Updates_ are reverted from the stored `before` snapshot, with optimistic-lock checks: a row changed by a user after the import is **not** silently overwritten; it is listed as a conflict for manual decision.
   - Rollback itself is an audited, approved operation (`diu.batch.rollback`) and produces its own report.
 - For very large migrations, a **restore point** (EN-022 PITR marker plus a logical snapshot of affected tables) is taken before commit; a full restore is the escape hatch when a logical rollback is impossible, and the runbook says explicitly which of the two applies to each entity type.
 - Batches are immutable history: an old batch can never be edited, only rolled back or superseded.
 
 ### 3.7 Scheduled imports & exports
+
 - **Inbound schedules**: outsourced reference-lab results (CSV/HL7 nightly, matched by accession or by UHID+test+date), external radiology reads, corporate employee lists for health check-ups (PE-006), insurance master/tariff updates from a TPA, government scheme master updates, bank statements for reconciliation (NC-009), biometric attendance dumps (NC-010) where a live device link is not available.
 - Each schedule declares source (SFTP/API/email attachment/folder watch — EN-017), cron, mapping profile, dedupe/idempotency key, error policy (`fail_batch` / `skip_row` / `quarantine`), notification list and a watermark for incremental pulls.
 - **Idempotency** is mandatory: re-processing the same file (same hash) is a no-op; a re-sent row with the same natural key updates rather than duplicates.
@@ -119,11 +129,13 @@ A migration is a **project object** (`diu_migration_projects`) with phases, owne
 - Failure of a scheduled import raises an alert with the row-level error file attached, and the batch stays in `quarantine` for the owner to fix and re-run — never silently skipped.
 
 ### 3.8 Data-quality scoring & anonymisation
+
 **Data-quality scoring** (source enhancement): a nightly job scores each domain 0–100 on six dimensions — **completeness** (mandatory + clinically important fields present: mobile, DOB not defaulted to 01-Jan, address PIN, blood group, allergy status recorded), **validity** (formats, code membership), **consistency** (age vs DOB, gender vs procedures, stock vs ledger), **uniqueness** (estimated duplicate rate), **timeliness** (how stale a master is), **accuracy proxies** (bounce rates from EN-009/EN-032, failed insurance claims from bad payer data). The dashboard shows score by domain and branch with trend, the top 10 fixable issues by volume, and one-click **worklists** ("2 431 patients have no PIN code — assign to front office").
 
 **Anonymisation for research** (source enhancement): a research extract is defined as a dataset (entities, columns, filter, date range, purpose, requester, ethics-committee reference) and processed with configurable techniques per column — **suppression** (drop), **pseudonymisation** (stable salted hash of UHID so longitudinal linkage survives, salt held separately and destroyed on request), **generalisation** (DOB → age band, PIN → district, exact date → month), **date shifting** (a consistent per-patient random offset preserving intervals), **k-anonymity check** (default k ≥ 5 on the quasi-identifier set with a warning and a suppression suggestion when violated), **free-text redaction** (NER-based removal of names, phones, IDs — with a manual review sample), and **outlier handling** (ages > 89 collapsed, rare diagnoses generalised). Every extract requires DPO approval, records the re-identification-risk assessment, is watermarked with a recipient-specific fingerprint, and is logged in the disclosure register. Direct identifiers are never included, and the anonymisation is one-way (no re-identification key is shipped with the data).
 
 ### 3.9 Exceptions
+
 - **File too large / timeout** → automatic chunking into sub-batches with a parent batch view; commit resumes from the last committed chunk after a crash (checkpointed).
 - **Partial commit failure** → the failing chunk rolls back, previously committed chunks are retained and clearly reported; the operator chooses `resume`, `rollback all`, or `skip chunk`.
 - **Encoding/locale disasters** (Excel mangling of long numbers into scientific notation, leading zeros stripped from PIN codes, Devanagari text as `????`) → detected by profiling and surfaced as specific, actionable errors with a fix hint rather than a generic parse failure.
@@ -132,6 +144,7 @@ A migration is a **project object** (`diu_migration_projects`) with phases, owne
 - **Concurrent edits during migration** → optimistic locking; rows changed by a user after staging are conflicts, never silent overwrites.
 
 ## 4. Data Model (schema `core`, prefix `diu_`; staging in schema `staging`)
+
 - `diu_templates` — id, key citext, name, domain, version, columns jsonb (name, type, required, enum_ref, regex, help, example), dependencies text[] (templates that must load first), sample_file_ref, active, released_at; UNIQUE(key, version).
 - `diu_mappings` / `diu_mapping_versions` — id, hospital_id, key, source_kind enum(csv/tsv/xlsx/json/xml/fixed/jdbc/hl7), target_template_key, version, spec jsonb (rules[]: source_path, target_field, transforms[], on_error), sample_ref, status enum(draft/tested/active/retired), tested_at, test_report jsonb.
 - `diu_batches` — id uuidv7, hospital_id, branch_id?, project_id?, schedule_id?, template_key, template_version, mapping_version_id?, source enum(ui_upload/sftp/api/scheduled/jdbc/email), file_name, file_hash, file_ref (encrypted), file_size, parent_batch_id?, status enum(uploaded/parsing/validating/validated/awaiting_approval/committing/committed/partially_committed/failed/rolled_back/quarantined/cancelled), rows_total, rows_valid, rows_warning, rows_error, rows_created, rows_updated, rows_skipped, control_totals jsonb (sums of money/qty for reconciliation), restore_point_ref, uploaded_by, approved_by, committed_at, rolled_back_at, duration_ms, error_report_ref; indexes (hospital_id, created_at desc), (status).
@@ -148,6 +161,7 @@ A migration is a **project object** (`diu_migration_projects`) with phases, owne
 - Retention: batches & batch_rows **7 years** (financial migration evidence); staging rows purged 90 days after batch close; uploaded source files purged 30 days after commit (configurable, encrypted meanwhile) with the file hash retained forever; extract files 90 days.
 
 ## 5. Business Rules & Validations
+
 - **Nothing writes directly to production tables.** Commits go through the owning module's service layer so business rules, numbering series, audit rows and outbox events all fire — a migrated patient is indistinguishable from a registered one except for its provenance flag.
 - **Staging is mandatory.** No path exists to commit an unvalidated row; validation errors block the row, not the batch (unless the error policy is `fail_batch`).
 - **Every imported row carries provenance**: `source_system`, `source_batch_id`, `source_row_number`, `legacy_id` — permanently, so any record can be traced to the file and row it came from.
@@ -164,34 +178,36 @@ A migration is a **project object** (`diu_migration_projects`) with phases, owne
 - A migration project cannot be marked complete until every reconciliation line is `matched` or `explained` with a named person.
 
 ## 6. API Surface (`/api/v1/diu`)
-| Method | Path | Purpose | Permission | Notes |
-|---|---|---|---|---|
-| GET | /templates ; GET /templates/:key/download?version&branch | template catalogue & Excel download | `diu.template.read` | live reference sheets |
-| POST | /batches {templateKey, file} | upload & create batch | `diu.batch.create` | multipart or presigned S3 |
-| GET | /batches?status&template&from&to | batch list | `diu.batch.read` | cursor |
-| GET | /batches/:id | batch detail with counts & timeline | `diu.batch.read` | |
-| POST | /batches/:id/validate | run validation | `diu.batch.create` | async with progress |
-| GET | /batches/:id/rows?status&q | staged rows | `diu.batch.read` | virtualised |
-| GET | /batches/:id/error-report | annotated workbook | `diu.batch.read` | xlsx/csv |
-| GET | /batches/:id/preview | create/update/skip counts + sample diffs + impact | `diu.batch.read` | |
-| POST | /batches/:id/request-approval ; /approve | approval workflow | `diu.batch.approve` (EN-038) | proposer ≠ approver |
-| POST | /batches/:id/commit | commit to production | `diu.batch.commit` | chunked, streamed progress, restore point |
-| POST | /batches/:id/rollback | revert a committed batch | `diu.batch.rollback` | pre-check, approval, reason |
-| POST | /batches/:id/cancel | discard a staged batch | `diu.batch.create` | |
-| GET/POST/PATCH | /mappings ; POST /mappings/:id/test | mapping profiles | `diu.mapping.manage` | 100-row trace |
-| POST | /mappings/suggest {sampleFile} | auto-map columns | `diu.mapping.manage` | name + value profiling |
-| GET | /dedupe/candidates?entity&status&score | duplicate review queue | `diu.dedupe.review` | sorted by score |
-| POST | /dedupe/candidates/:id/decide {merge\|not_duplicate\|defer, survivorship} | adjudicate | `diu.dedupe.review` (MRD 43) | merge via OP-001 |
-| GET/PUT | /dedupe/config | thresholds & weights | `diu.dedupe.config` (Admin) | |
-| POST | /dedupe/run {entity, scope} | run dedupe over existing data | `diu.dedupe.run` | background, blocked scan |
-| GET/POST/PATCH | /projects ; /projects/:id/phases | migration projects | `diu.project.manage` | checklist & sign-offs |
-| GET/POST | /projects/:id/reconciliations ; POST /:id/explain | control totals | `diu.project.manage` | variance report |
-| GET/POST/PATCH | /schedules ; POST /schedules/:id/run-now | scheduled imports/exports | `diu.schedule.manage` | idempotent |
-| GET | /quality/scores?domain&branch&from&to ; GET /quality/issues/:code | data-quality dashboard & worklists | `diu.quality.read` | drill-down filters |
-| GET/POST | /research-extracts ; POST /:id/approve \| /generate \| /destroy | anonymised extracts | `diu.research.manage` + `diu.research.approve` (DPO 57) | k-anonymity gate |
-| GET | /reports/batch-history ; /reports/migration-summary | reports | `diu.report.read` | |
+
+| Method         | Path                                                                      | Purpose                                           | Permission                                              | Notes                                     |
+| -------------- | ------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------- |
+| GET            | /templates ; GET /templates/:key/download?version&branch                  | template catalogue & Excel download               | `diu.template.read`                                     | live reference sheets                     |
+| POST           | /batches {templateKey, file}                                              | upload & create batch                             | `diu.batch.create`                                      | multipart or presigned S3                 |
+| GET            | /batches?status&template&from&to                                          | batch list                                        | `diu.batch.read`                                        | cursor                                    |
+| GET            | /batches/:id                                                              | batch detail with counts & timeline               | `diu.batch.read`                                        |                                           |
+| POST           | /batches/:id/validate                                                     | run validation                                    | `diu.batch.create`                                      | async with progress                       |
+| GET            | /batches/:id/rows?status&q                                                | staged rows                                       | `diu.batch.read`                                        | virtualised                               |
+| GET            | /batches/:id/error-report                                                 | annotated workbook                                | `diu.batch.read`                                        | xlsx/csv                                  |
+| GET            | /batches/:id/preview                                                      | create/update/skip counts + sample diffs + impact | `diu.batch.read`                                        |                                           |
+| POST           | /batches/:id/request-approval ; /approve                                  | approval workflow                                 | `diu.batch.approve` (EN-038)                            | proposer ≠ approver                       |
+| POST           | /batches/:id/commit                                                       | commit to production                              | `diu.batch.commit`                                      | chunked, streamed progress, restore point |
+| POST           | /batches/:id/rollback                                                     | revert a committed batch                          | `diu.batch.rollback`                                    | pre-check, approval, reason               |
+| POST           | /batches/:id/cancel                                                       | discard a staged batch                            | `diu.batch.create`                                      |                                           |
+| GET/POST/PATCH | /mappings ; POST /mappings/:id/test                                       | mapping profiles                                  | `diu.mapping.manage`                                    | 100-row trace                             |
+| POST           | /mappings/suggest {sampleFile}                                            | auto-map columns                                  | `diu.mapping.manage`                                    | name + value profiling                    |
+| GET            | /dedupe/candidates?entity&status&score                                    | duplicate review queue                            | `diu.dedupe.review`                                     | sorted by score                           |
+| POST           | /dedupe/candidates/:id/decide {merge\|not_duplicate\|defer, survivorship} | adjudicate                                        | `diu.dedupe.review` (MRD 43)                            | merge via OP-001                          |
+| GET/PUT        | /dedupe/config                                                            | thresholds & weights                              | `diu.dedupe.config` (Admin)                             |                                           |
+| POST           | /dedupe/run {entity, scope}                                               | run dedupe over existing data                     | `diu.dedupe.run`                                        | background, blocked scan                  |
+| GET/POST/PATCH | /projects ; /projects/:id/phases                                          | migration projects                                | `diu.project.manage`                                    | checklist & sign-offs                     |
+| GET/POST       | /projects/:id/reconciliations ; POST /:id/explain                         | control totals                                    | `diu.project.manage`                                    | variance report                           |
+| GET/POST/PATCH | /schedules ; POST /schedules/:id/run-now                                  | scheduled imports/exports                         | `diu.schedule.manage`                                   | idempotent                                |
+| GET            | /quality/scores?domain&branch&from&to ; GET /quality/issues/:code         | data-quality dashboard & worklists                | `diu.quality.read`                                      | drill-down filters                        |
+| GET/POST       | /research-extracts ; POST /:id/approve \| /generate \| /destroy           | anonymised extracts                               | `diu.research.manage` + `diu.research.approve` (DPO 57) | k-anonymity gate                          |
+| GET            | /reports/batch-history ; /reports/migration-summary                       | reports                                           | `diu.report.read`                                       |                                           |
 
 ## 7. Domain Events (outbox)
+
 - `diu.batch.created|validated|approved|committed|partially_committed|failed|rolled_back` → EN-024 audit, EN-001, owning-module cache invalidation.
 - `diu.rows.committed` (entity, count) → EN-027 cache refresh, EN-041 branch sync, analytics dimension rebuild.
 - `diu.dedupe.candidate_found` → MRD worklist; `diu.dedupe.merged` → OP-001, PACS ADT A40, billing re-link.
@@ -202,6 +218,7 @@ A migration is a **project object** (`diu_migration_projects`) with phases, owne
 - Consumes: `mdm.<entity>.changed` (to keep template reference sheets current), `patient.merged` (to close dedupe candidates), `licence.limits.changed` (EN-040 row entitlements).
 
 ## 8. Screens (UI)
+
 - **Import Home** (desktop): template catalogue as cards grouped by domain with a dependency indicator ("requires: department_master ✓, doctor_master ✗"), a "Download template" and "Upload file" action per card, and a recent-batches strip. Empty state guides a first-time consultant through the recommended load order.
 - **Upload & Validate Wizard** (desktop, 5 steps): file → (mapping, only if not a template) → validation results → preview & impact → commit. Step 3 shows a **summary bar** (valid / warning / error) and a virtualised row grid with error chips per cell, a filter for "errors only", inline fix for simple cases (a dropdown to pick the right department), and `Download error report`. Step 4 shows create/update/skip counts, sample before→after diffs and the impact analysis. Shortcuts: `Ctrl+U` upload, `Ctrl+Enter` validate, `E` filter errors, `Ctrl+Shift+C` commit.
 - **Visual Column Mapper** (desktop, wide): left = source columns with sample values and a detected-type badge; right = target fields with required markers; centre = mapping lines with a transform chip; auto-suggest button; bottom = 100-row live trace showing each transform step. `/` search, `T` add transform, `Ctrl+R` run trace.
@@ -214,12 +231,14 @@ A migration is a **project object** (`diu_migration_projects`) with phases, owne
 - Empty/error states: "This template is version 3 — your file was created from version 2. Download the current template.", "214 rows rejected — most common: 'Department not found: CARDIO-2' (88 rows)", "Rollback blocked: 12 of these records now have clinical activity. Roll back the remaining 1 234 rows?".
 
 ## 9. Integrations
+
 - **EN-017** for JDBC read-only extraction from legacy databases (MSSQL, MySQL, Oracle, PostgreSQL, and Access/FoxPro via ODBC where the legacy is that old), SFTP/folder watchers, API pulls and email-attachment ingestion; all with credentials in the vault.
 - **EN-027** for value sets, code systems and concept maps used in translation, and as the governance destination for master loads; **EN-038** for approvals; **EN-022** for restore points before large commits; **EN-024** for the audit trail; **EN-023** for encryption and access logging of dump files.
-- **OP-001** patient-merge service (never bypassed), **NC-009** for opening balances and trial-balance verification, **NC-006** for opening stock and batch/expiry, **EN-008** for the DICOM archive migration (image migration is EN-008's job; EN-036 migrates the *orders and reports*), **NC-004** for scanned historical documents (bulk ingest with OCR and MRD indexing).
+- **OP-001** patient-merge service (never bypassed), **NC-009** for opening balances and trial-balance verification, **NC-006** for opening stock and batch/expiry, **EN-008** for the DICOM archive migration (image migration is EN-008's job; EN-036 migrates the _orders and reports_), **NC-004** for scanned historical documents (bulk ingest with OCR and MRD indexing).
 - **File formats**: xlsx (SheetJS/ExcelJS streaming reader for large files), csv/tsv with encoding detection, fixed-width, JSON/NDJSON, XML, HL7 v2 batch files, and DBF for very old systems.
 
 ## 10. Reports & Analytics
+
 - **Batch reports**: per batch — counts, errors by type with examples, timing, control totals, and the committed-entity list; batch history with success rate by template and by operator.
 - **Validation error taxonomy**: top error codes across all batches (tells the implementation team what to fix in the source extract rather than row by row).
 - **De-duplication report**: candidates by score band, decisions made, merge count, estimated remaining duplicate rate, and time spent per adjudication.
@@ -230,6 +249,7 @@ A migration is a **project object** (`diu_migration_projects`) with phases, owne
 - Read models: `analytics.mv_diu_batch_daily`, `analytics.mv_diu_quality_daily`.
 
 ## 11. Notifications
+
 - **To the uploader**: validation finished (with the error count), approval granted/rejected, commit completed with the summary, commit failed with the failing chunk.
 - **To stewards/approvers**: batch awaiting approval with the impact summary; large-impact batches flagged.
 - **To MRD**: new duplicate candidates above threshold; ageing queue reminder.
@@ -239,9 +259,11 @@ A migration is a **project object** (`diu_migration_projects`) with phases, owne
 - **During cutover**: a project-wide broadcast channel (EN-037 + EN-018 status board) with phase transitions and the rollback deadline.
 
 ## 12. Permissions (RBAC keys)
+
 `diu.template.read` (IT, stewards) · `diu.batch.create` (IT Admin 56, Implementation Consultant, domain stewards for their own templates via ABAC) · `diu.batch.read` · `diu.batch.approve` (Hospital Admin 2, domain owner — never the proposer) · `diu.batch.commit` (IT Admin + steward) · `diu.batch.rollback` (IT Admin + Hospital Admin dual, audited) · `diu.mapping.manage` (IT Admin, Integration Engineer) · `diu.dedupe.review` (MRD Officer 43, Front Office lead 24) · `diu.dedupe.config` / `diu.dedupe.run` (Hospital Admin, IT) · `diu.project.manage` (Implementation lead, Hospital Admin) · `diu.schedule.manage` (IT Admin) · `diu.quality.read` (Admin, stewards, HODs) · `diu.research.manage` (Quality/Research role) · `diu.research.approve` (DPO 57) · `diu.report.read` (Admin, Auditor 58).
 
 ## 13. Non-functional
+
 - **Volumes**: a 2000-bed hospital migration typically means **1.5–3 M patients**, 15–25 M historical visits, 40–80 M lab result lines, 5–15 M documents, plus 50–200 k master rows. Steady-state scheduled imports are 5–50 k rows/night.
 - **Throughput targets**: parse+validate ≥ **20 000 rows/minute** for simple masters and ≥ 5 000 rows/minute for patients with dedupe scoring; commit ≥ 3 000 rows/minute through the service layer (the safety cost of not writing raw SQL — accepted deliberately). A 2 M-patient load is therefore an overnight job, planned as such, run in parallel shards by branch/alphabet where safe.
 - **Memory discipline**: files are streamed, never fully materialised; xlsx read row-by-row; staging writes batched at 1000 rows; a 500 MB file must not exceed 512 MB of worker memory.
@@ -252,6 +274,7 @@ A migration is a **project object** (`diu_migration_projects`) with phases, owne
 - **Accessibility & i18n**: the import UI is a staff tool (English acceptable) but error messages must be plain-language and localisable; templates support Unicode data (Indian-language names in Devanagari/Tamil/Malayalam) end-to-end with correct collation.
 
 ## 14. Acceptance Criteria
+
 1. **Given** a `patient_master` file with 10 000 rows of which 214 have errors, **when** validation runs, **then** all 10 000 rows are staged, the 214 are marked with field-level error codes and hints, an annotated error workbook is downloadable, and **no** production row has been created.
 2. **Given** a validated batch, **when** the operator opens the preview, **then** it states exactly how many records will be created, updated and skipped, shows sample before→after diffs for updates, and lists the transactional impact of any master record being changed.
 3. **Given** a batch that loads tariffs, **when** commit is attempted without approval, **then** it is blocked and routed to EN-038 with the proposer excluded from approving.
@@ -272,6 +295,7 @@ A migration is a **project object** (`diu_migration_projects`) with phases, owne
 18. **Given** legacy source dump files, **when** the project reaches close-out, **then** the destruction job removes them, records a destruction certificate, and retains only the file hashes for audit.
 
 ## 15. Enhancements / Later phases
+
 - **API-based real-time sync** with a legacy system during parallel run (source enhancement) — bidirectional delta sync with conflict rules rather than nightly files.
 - **Change-data-capture (Debezium)** from the legacy database for continuous, near-zero-downtime migration.
 - **AI-assisted mapping and coding** (AI-003): propose column mappings from a sample, map legacy free-text diagnoses to ICD-10 and legacy test names to LOINC with confidence scores and a human review queue for the tail.
@@ -283,6 +307,7 @@ A migration is a **project object** (`diu_migration_projects`) with phases, owne
 - **Multi-branch parallel migration orchestration** (EN-041) — 18 branches with per-branch cutover dates from one cockpit, matching the "new branch live in <24 h" objective.
 
 ## 16. Open Questions for the Hospital
+
 1. **Which legacy system(s)** are being replaced — vendor, version, database engine — and will the vendor provide schema documentation, read-only database access, and export support (and at what cost)?
 2. **How many years** of which data must migrate versus be archived read-only versus be abandoned, and who signs off the abandonment decision?
 3. What is the **identifier strategy** — preserve legacy UHIDs, issue new ones with the legacy number as an alternate identifier, or continue the legacy numbering series?

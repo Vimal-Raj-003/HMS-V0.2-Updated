@@ -1,20 +1,21 @@
 # AI-003 — AI Document Extraction ("DocXtract": Prescription OCR (Handwritten & Printed), External Lab Report Parsing to LOINC, Insurance Card & Policy Extraction, ID/Aadhaar Capture with Masking, External Discharge Summaries & Referral Letters, Invoice/GRN Extraction, Human Verification Workflow)
 
-| Field | Value |
-|---|---|
-| Domain | AI & Advanced Tech |
-| Module ID | AI-003 |
-| Phase | 12 |
-| Priority | P2 |
-| Complexity | High |
-| Depends on | **AI-001 §0 (AI Platform Foundation — mandatory)**, EN-027 (drug master, LOINC/ICD/SNOMED, units UCUM, payer master), OP-001 (patient MPI, registration auto-fill), OP-003 (pharmacy/e-Rx), OP-004 (lab results store, reference ranges), EN-002 (payer/TPA master, ROHINI), RC-002 (pre-auth documents), NC-005/NC-006 (purchase, GRN, item master), NC-003 (MRD scanning & indexing), NC-004 (DMS storage & OCR search), EN-016 (e-sign), EN-024 (audit), EN-028 (consent), EN-011 (ABDM scan-&-share, ABHA), EN-013 (barcode/QR) |
-| Consumed by | OP-001 (registration auto-fill), OP-002 (medication reconciliation, external history), OP-003, OP-004 (external results), EN-002/RC-001/RC-002 (claims documents), NC-005 (3-way match), NC-003 (MRD digitisation), AI-001 (documents sent in chat), AI-006 (coding from external summaries) |
-| Feature flag | `module.ai_docextract.enabled` (sub: `docx.rx_ocr`, `docx.lab_report`, `docx.insurance`, `docx.identity`, `docx.discharge_summary`, `docx.referral`, `docx.invoice_grn`, `docx.batch_mrd`) |
-| Primary roles | Receptionist / Front Office (24), Pharmacist (30/31), Lab Technician (33), Insurance/TPA Desk (28), MRD Officer (43), Stores Keeper (44), Purchase Officer (45) |
-| Secondary roles | Doctor (6/7 — reviews reconciled medications), Nurse (17), Accountant (46), DPO (57), IT Admin (56), Auditor (58) |
-| Regulatory | DPDP Act 2023 + Rules 2025 (document PHI, purpose limitation, storage limitation), **Aadhaar Act §7 & UIDAI regulations — Aadhaar number must be masked (last 4 digits only) in storage and display; no unauthorised Aadhaar authentication; Aadhaar is optional, never mandatory for treatment**, EHR Standards India 2016 (LOINC/SNOMED bindings), NABL 112 (external results must be labelled as external and never validated as in-house), Drugs & Cosmetics Rules (a scanned prescription is not a dispensing authority by itself; Schedule H1/X still require the original), IRDAI/ROHINI (payer identifiers), GST/HSN (vendor invoice fields), IT Act 65B (electronic evidence — original image retained with hash) |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain          | AI & Advanced Tech                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Module ID       | AI-003                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Phase           | 12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Priority        | P2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Complexity      | High                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Depends on      | **AI-001 §0 (AI Platform Foundation — mandatory)**, EN-027 (drug master, LOINC/ICD/SNOMED, units UCUM, payer master), OP-001 (patient MPI, registration auto-fill), OP-003 (pharmacy/e-Rx), OP-004 (lab results store, reference ranges), EN-002 (payer/TPA master, ROHINI), RC-002 (pre-auth documents), NC-005/NC-006 (purchase, GRN, item master), NC-003 (MRD scanning & indexing), NC-004 (DMS storage & OCR search), EN-016 (e-sign), EN-024 (audit), EN-028 (consent), EN-011 (ABDM scan-&-share, ABHA), EN-013 (barcode/QR)                                                                                                                                                                                        |
+| Consumed by     | OP-001 (registration auto-fill), OP-002 (medication reconciliation, external history), OP-003, OP-004 (external results), EN-002/RC-001/RC-002 (claims documents), NC-005 (3-way match), NC-003 (MRD digitisation), AI-001 (documents sent in chat), AI-006 (coding from external summaries)                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Feature flag    | `module.ai_docextract.enabled` (sub: `docx.rx_ocr`, `docx.lab_report`, `docx.insurance`, `docx.identity`, `docx.discharge_summary`, `docx.referral`, `docx.invoice_grn`, `docx.batch_mrd`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Primary roles   | Receptionist / Front Office (24), Pharmacist (30/31), Lab Technician (33), Insurance/TPA Desk (28), MRD Officer (43), Stores Keeper (44), Purchase Officer (45)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Secondary roles | Doctor (6/7 — reviews reconciled medications), Nurse (17), Accountant (46), DPO (57), IT Admin (56), Auditor (58)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Regulatory      | DPDP Act 2023 + Rules 2025 (document PHI, purpose limitation, storage limitation), **Aadhaar Act §7 & UIDAI regulations — Aadhaar number must be masked (last 4 digits only) in storage and display; no unauthorised Aadhaar authentication; Aadhaar is optional, never mandatory for treatment**, EHR Standards India 2016 (LOINC/SNOMED bindings), NABL 112 (external results must be labelled as external and never validated as in-house), Drugs & Cosmetics Rules (a scanned prescription is not a dispensing authority by itself; Schedule H1/X still require the original), IRDAI/ROHINI (payer identifiers), GST/HSN (vendor invoice fields), IT Act 65B (electronic evidence — original image retained with hash) |
 
 ## 1. Purpose
+
 AI-003 turns the paper that walks into the hospital into structured data: handwritten and printed prescriptions,
 outside lab reports, insurance cards and policy documents, government IDs, discharge summaries and referral letters
 from other hospitals, and supplier invoices/GRNs. Every extraction is a **suggestion with per-field confidence** that a
@@ -22,13 +23,14 @@ human verifies in a side-by-side UI before it becomes part of any record; the so
 hash and linked to every field it produced. It exists to remove typing, not to remove checking.
 
 ## 2. Users & Jobs-to-be-done
+
 - **Receptionist (24, desktop + phone camera)**: photograph an insurance card and a referral letter at registration →
   patient demographics, payer, policy number and referring doctor pre-filled → verify → register. 5000 OP visits/day
   makes this the single biggest typing saving in the hospital.
 - **Pharmacist (30, desktop + scanner)**: a patient brings an outside handwritten prescription → extract drug, strength,
   frequency, duration → map to the formulary → pharmacist verifies every line before it can be quoted or dispensed.
 - **Lab technician / doctor (33/6)**: a patient brings outside reports → parse analyte, value, unit, reference range,
-  date, lab name → map to **LOINC** → store as clearly-labelled *external* results so trends plot alongside in-house
+  date, lab name → map to **LOINC** → store as clearly-labelled _external_ results so trends plot alongside in-house
   ones without contaminating NABL-validated data.
 - **Insurance desk (28)**: extract policy number, sum insured, TPA, validity, exclusions, and pre-auth form fields
   from PDFs/photos to speed RC-002 pre-authorisation.
@@ -42,6 +44,7 @@ hash and linked to every field it produced. It exists to remove typing, not to r
 ## 3. Core Workflows
 
 ### 3.1 Capture → extract → verify → commit (the universal pipeline)
+
 1. **Capture**: phone camera (PWA, with edge-detection, glare and blur warnings, auto-crop, multi-page), flatbed/ADF
    scanner (TWAIN via the desktop bridge, EN-005), PDF upload, WhatsApp inbound media (AI-001), ABDM scan-&-share
    (EN-011), or bulk folder drop (MRD). Client-side quality gate: reject <150 DPI equivalent, warn on blur/glare/skew,
@@ -72,6 +75,7 @@ hash and linked to every field it produced. It exists to remove typing, not to r
     image, and a background job retries the extraction for later re-use.
 
 ### 3.2 Prescription OCR (handwritten & printed) — the hardest and highest-risk
+
 1. Extract per line: drug name (as written), strength, dosage form, route, frequency (including Latin abbreviations
    BD/TDS/QID/HS/SOS/OD, ×/d notation), duration, quantity, instructions, plus prescriber name, registration number,
    hospital/clinic, date, diagnosis if written.
@@ -89,6 +93,7 @@ hash and linked to every field it produced. It exists to remove typing, not to r
    than producing a plausible-looking wrong list.
 
 ### 3.3 External lab report parsing → LOINC
+
 1. Extract lab name, accreditation (NABL number if printed), collection & report date/time, and a table of
    analyte / value / unit / reference range / flag / method.
 2. Map analyte + specimen + method to **LOINC** using EN-027's concept maps + a curated synonym table (Indian lab
@@ -103,6 +108,7 @@ hash and linked to every field it produced. It exists to remove typing, not to r
 5. Trend charts plot external points with a distinct marker and the source lab in the tooltip.
 
 ### 3.4 Insurance card & policy document extraction
+
 1. Card: insurer/TPA name, policy number, member/employee ID, name, validity, sum insured, corporate/group name,
    card type, ROHINI ID of the network hospital if printed. Policy PDF: sum insured, sub-limits (room rent, ICU,
    consumables), waiting periods, exclusions list, co-pay %, network type, effective dates.
@@ -112,10 +118,11 @@ hash and linked to every field it produced. It exists to remove typing, not to r
 4. Both sides of a card are required; a single-sided capture is flagged incomplete.
 
 ### 3.5 Identity documents & Aadhaar masking rules
+
 1. Supported: Aadhaar, PAN, voter ID, driving licence, passport, ABHA card, government scheme cards (PMJAY/CGHS/ECHS/
    ESIC), corporate ID.
 2. **Aadhaar handling is deliberately restrictive**: (a) collecting Aadhaar is optional and the UI must offer
-   alternatives; (b) the full number is **never stored** — the extractor masks all but the last 4 digits *before* the
+   alternatives; (b) the full number is **never stored** — the extractor masks all but the last 4 digits _before_ the
    value leaves the extraction sandbox; (c) the stored **image is masked in place** (the number region is
    irreversibly blacked out in the stored derivative; the unmasked original is discarded within the session and never
    written to durable storage); (d) no Aadhaar authentication/eKYC is performed by this module (that is EN-011/UIDAI
@@ -126,6 +133,7 @@ hash and linked to every field it produced. It exists to remove typing, not to r
 4. Face photo may be cropped for the patient record only with consent (EN-028) and is never sent to an external model.
 
 ### 3.6 External discharge summaries & referral letters
+
 1. Extract: source hospital, admission/discharge dates, diagnoses (→ ICD-10), procedures, discharge medications,
    follow-up advice, key investigations, allergies documented, and the referring doctor with their registration
    number.
@@ -136,6 +144,7 @@ hash and linked to every field it produced. It exists to remove typing, not to r
 3. Referral letters additionally create/link an OP-021 referral record and the referring-doctor entity (PE-007).
 
 ### 3.7 Invoice / GRN extraction for procurement
+
 1. Extract header (vendor, GSTIN, invoice no/date, PO reference, totals, CGST/SGST/IGST, HSN summary) and lines
    (item description, batch, expiry, qty, free qty, MRP, rate, discount, tax %, amount).
 2. Map items to NC-006 item master (vendor-code alias table learned over time from verified corrections), validate
@@ -146,12 +155,14 @@ hash and linked to every field it produced. It exists to remove typing, not to r
 4. Expiry dates extracted for pharmacy items are cross-checked against FEFO rules and rejected if in the past.
 
 ### 3.8 Bulk / batch mode (MRD digitisation)
+
 - Folder or ADF batch → auto-split on separator sheets or barcode cover pages (EN-013) → classify → extract index
   fields (UHID, patient name, date, document type) → queue for MRD verification → filed into NC-003/NC-004 with OCR
   full-text search. Throughput target and cost per page are tracked; a per-batch accuracy sample (5 %) is manually
   audited.
 
 ## 4. Data Model (schema `ai`, prefix `docx_`; shared tables per AI-001 §0.10)
+
 - `docx_documents` — id uuidv7, hospital_id, branch_id, patient_id?, encounter_id?, subject_type enum(patient/vendor/
   claim/none), source enum(camera/scanner/upload/whatsapp/abdm/batch), file_ref (S3 key), mime, pages, sha256,
   captured_by, captured_at, device_ref, doc_type enum(prescription/lab_report/insurance_card/policy/id_document/
@@ -191,6 +202,7 @@ hash and linked to every field it produced. It exists to remove typing, not to r
   low-value rejected captures purged at 30 days.
 
 ## 5. Business Rules & Validations
+
 - **Nothing auto-commits. Ever.** Every extraction requires a human confirm action, even at 0.99 confidence. The
   confirm is a single click for a fully-green extraction, but it exists and is audited.
 - **Confidence thresholds** (per document type and field, configurable; defaults): ≥ 0.95 auto-filled green;
@@ -217,22 +229,24 @@ hash and linked to every field it produced. It exists to remove typing, not to r
 - Verified corrections feed `docx_mapping_queue` and the golden dataset — the human's edit is the training signal.
 
 ## 6. API Surface (`/api/v1/docx`)
-| Method | Path | Purpose | Permission | Notes |
-|---|---|---|---|---|
-| POST | /documents | upload/capture (multipart or presigned) | `docx.document.create` | stores original + hash first; idempotent by sha256 |
-| POST | /documents/:id/classify ; POST /documents/:id/extract | run/re-run pipeline | `docx.extract.run` | async job, returns job id |
-| GET | /documents/:id ; GET /documents/:id/pages/:n (signed URL) | source retrieval | `docx.document.read` | PHI-audited, short-lived URLs |
-| GET | /extractions/:id | payload + fields + bboxes | `docx.extract.read` | |
-| PATCH | /extractions/:id/fields/:fieldId | human edit during verification | `docx.extract.verify` | records edit + reason |
-| POST | /extractions/:id/verify | confirm the whole extraction | `docx.extract.verify` | required before commit |
-| POST | /extractions/:id/commit | hand to the owning module | `docx.extract.commit` + the target module's own permission | idempotent |
-| POST | /extractions/:id/reject | unreadable / wrong doc | `docx.extract.verify` | reason code |
-| GET/POST | /mapping-queue ; POST /mapping-queue/:id/map | unmapped value resolution | `docx.mapping.manage` (43, 32, 44) | |
-| POST | /batches ; GET /batches/:id | MRD bulk digitisation | `docx.batch.manage` (43) | split, classify, index |
-| GET | /metrics/accuracy ; /metrics/throughput ; /metrics/cost | KPIs & accuracy samples | `docx.report.read` | |
-| POST | /accuracy-samples/:id/audit | manual accuracy audit | `docx.audit.perform` (43, 58) | |
+
+| Method   | Path                                                      | Purpose                                 | Permission                                                 | Notes                                              |
+| -------- | --------------------------------------------------------- | --------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------- |
+| POST     | /documents                                                | upload/capture (multipart or presigned) | `docx.document.create`                                     | stores original + hash first; idempotent by sha256 |
+| POST     | /documents/:id/classify ; POST /documents/:id/extract     | run/re-run pipeline                     | `docx.extract.run`                                         | async job, returns job id                          |
+| GET      | /documents/:id ; GET /documents/:id/pages/:n (signed URL) | source retrieval                        | `docx.document.read`                                       | PHI-audited, short-lived URLs                      |
+| GET      | /extractions/:id                                          | payload + fields + bboxes               | `docx.extract.read`                                        |                                                    |
+| PATCH    | /extractions/:id/fields/:fieldId                          | human edit during verification          | `docx.extract.verify`                                      | records edit + reason                              |
+| POST     | /extractions/:id/verify                                   | confirm the whole extraction            | `docx.extract.verify`                                      | required before commit                             |
+| POST     | /extractions/:id/commit                                   | hand to the owning module               | `docx.extract.commit` + the target module's own permission | idempotent                                         |
+| POST     | /extractions/:id/reject                                   | unreadable / wrong doc                  | `docx.extract.verify`                                      | reason code                                        |
+| GET/POST | /mapping-queue ; POST /mapping-queue/:id/map              | unmapped value resolution               | `docx.mapping.manage` (43, 32, 44)                         |                                                    |
+| POST     | /batches ; GET /batches/:id                               | MRD bulk digitisation                   | `docx.batch.manage` (43)                                   | split, classify, index                             |
+| GET      | /metrics/accuracy ; /metrics/throughput ; /metrics/cost   | KPIs & accuracy samples                 | `docx.report.read`                                         |                                                    |
+| POST     | /accuracy-samples/:id/audit                               | manual accuracy audit                   | `docx.audit.perform` (43, 58)                              |                                                    |
 
 ## 7. Domain Events (outbox)
+
 - `docx.document.captured|classified|rejected` → NC-004 DMS indexing, audit.
 - `docx.extraction.completed` → {doc_type, field_count, low_confidence_count} → verification worklist.
 - `docx.extraction.verified|committed` → {target_module, target_ref} → owning module + audit.
@@ -248,6 +262,7 @@ hash and linked to every field it produced. It exists to remove typing, not to r
   `whatsapp.media.received`.
 
 ## 8. Screens (UI)
+
 - **Capture widget** (phone/tablet PWA + desktop scanner bridge): live edge detection, glare/blur warning, multi-page
   tray with reorder/delete, "retake this page", document-type hint selector, offline queue with upload-on-reconnect.
   Shortcuts (desktop): `S` scan, `Enter` accept page, `R` retake.
@@ -278,6 +293,7 @@ hash and linked to every field it produced. It exists to remove typing, not to r
   rejected and deleted".
 
 ## 9. Integrations
+
 - **Storage**: S3/MinIO with server-side encryption and object lock for legal-hold documents; presigned, short-lived
   URLs only.
 - **OCR/VLM stack**: cloud vision-capable Claude models by default; on-prem alternative = PaddleOCR/Tesseract +
@@ -291,6 +307,7 @@ hash and linked to every field it produced. It exists to remove typing, not to r
   path; the queue is drained by the worker with a DLQ visible in EN-017.
 
 ## 10. Reports & Analytics
+
 - **Accuracy** (from the 5 % audit sample + human-edit rate as a proxy): field-level precision per document type;
   targets in §13. Tracked per model/prompt version so a regression is visible immediately.
 - **Productivity**: documents/hour/verifier, average verification seconds, fields auto-accepted %, manual-entry
@@ -304,6 +321,7 @@ hash and linked to every field it produced. It exists to remove typing, not to r
 - Read models: `analytics.mv_docx_accuracy_daily`, `mv_docx_throughput_daily`, `mv_docx_mapping_gaps`.
 
 ## 11. Notifications
+
 - Verification worklist assignment and ageing (> 2 h unverified at a front desk) → EN-037 to the desk supervisor.
 - `docx.external_result.created` → review task to the consulting doctor (not a page).
 - `docx.allergy.reported_unconfirmed` → prompt in the doctor's consultation opening checklist.
@@ -312,6 +330,7 @@ hash and linked to every field it produced. It exists to remove typing, not to r
 - Batch completion / batch failure → MRD officer.
 
 ## 12. Permissions (RBAC keys)
+
 `docx.document.create` (24, 28, 30, 33, 43, 44, 45, 17) · `docx.document.read` (creators + owning-module roles;
 PHI-audited) · `docx.extract.run` (same as create) · `docx.extract.verify` (role-scoped per document type: 24/28
 insurance & ID, 30/31 prescriptions, 33/13 lab reports, 43 MRD, 44/45 invoices) · `docx.extract.commit` (requires
@@ -319,6 +338,7 @@ also the target module's create permission) · `docx.mapping.manage` (43, 32, 44
 `docx.batch.manage` (43) · `docx.audit.perform` (43, 58) · `docx.report.read` (2, 43, 54, 56) · plus AI-001 §0.13.
 
 ## 13. Non-functional
+
 - **Volumes (2000-bed)**: ~2500 documents/day steady state (1500 ID/insurance at registration, 400 outside
   prescriptions, 300 outside reports, 200 invoices/GRNs, 100 discharge/referral) plus MRD backlog batches of
   5000–20 000 pages/night.
@@ -343,6 +363,7 @@ also the target module's create permission) · `docx.mapping.manage` (43, 32, 44
   signed URLs ≤ 5 min, object-lock for legal holds.
 
 ## 14. Acceptance Criteria
+
 1. **Given** a handwritten prescription photo, **when** extraction completes, **then** every line has per-field
    confidence and a bounding box, drug names below 0.98 confidence are left blank and red, and nothing is committed
    until a pharmacist verifies.
@@ -387,6 +408,7 @@ also the target module's create permission) · `docx.mapping.manage` (43, 32, 44
     Committee is notified.
 
 ## 15. Enhancements / Later phases
+
 - **Learned per-source templates**: after N verified documents from the same outside lab or supplier, switch to a
   cheap deterministic template extractor with the LLM only as a fallback — large cost and accuracy win.
 - **Active learning**: automatically add every human-corrected field to the golden dataset and re-run evals weekly.
@@ -405,6 +427,7 @@ also the target module's create permission) · `docx.mapping.manage` (43, 32, 44
   submission, reducing denials (RC-004).
 
 ## 16. Open Questions for the Hospital
+
 1. Which document types are in scope at go-live, and which desks own verification for each?
 2. Does the hospital accept the confidence-threshold policy (green ≥ 0.95 / ≥ 0.98 for critical fields), or does it
    want every field manually confirmed initially?

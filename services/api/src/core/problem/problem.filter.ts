@@ -85,7 +85,12 @@ export class ProblemFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       return {
-        type: status === 404 ? ProblemType.NOT_FOUND : status === 401 ? ProblemType.UNAUTHENTICATED : ProblemType.BUSINESS_RULE_VIOLATED,
+        type:
+          status === 404
+            ? ProblemType.NOT_FOUND
+            : status === 401
+              ? ProblemType.UNAUTHENTICATED
+              : ProblemType.BUSINESS_RULE_VIOLATED,
         detail: exception.message,
         status,
         errors: [],

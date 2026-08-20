@@ -30,25 +30,114 @@ import { seedChoice, seedId, seedPick } from './ids.js';
  */
 
 const GIVEN_MALE = [
-  'Arjun', 'Rahul', 'Vikram', 'Karthik', 'Suresh', 'Ramesh', 'Anand', 'Prakash',
-  'Manoj', 'Deepak', 'Sanjay', 'Rajesh', 'Venkatesh', 'Murugan', 'Selvam', 'Ravi',
-  'Ashok', 'Mahesh', 'Naveen', 'Hari', 'Imran', 'Faisal', 'Abdul', 'Joseph',
-  'Thomas', 'Gurpreet', 'Harjit', 'Sourav', 'Amit', 'Nitin', 'Balaji', 'Sridhar',
+  'Arjun',
+  'Rahul',
+  'Vikram',
+  'Karthik',
+  'Suresh',
+  'Ramesh',
+  'Anand',
+  'Prakash',
+  'Manoj',
+  'Deepak',
+  'Sanjay',
+  'Rajesh',
+  'Venkatesh',
+  'Murugan',
+  'Selvam',
+  'Ravi',
+  'Ashok',
+  'Mahesh',
+  'Naveen',
+  'Hari',
+  'Imran',
+  'Faisal',
+  'Abdul',
+  'Joseph',
+  'Thomas',
+  'Gurpreet',
+  'Harjit',
+  'Sourav',
+  'Amit',
+  'Nitin',
+  'Balaji',
+  'Sridhar',
 ] as const;
 
 const GIVEN_FEMALE = [
-  'Priya', 'Lakshmi', 'Divya', 'Meena', 'Kavitha', 'Anitha', 'Sunita', 'Radha',
-  'Geetha', 'Shalini', 'Deepa', 'Revathi', 'Padma', 'Vani', 'Bhavani', 'Nandini',
-  'Fatima', 'Ayesha', 'Mary', 'Elizabeth', 'Simran', 'Manpreet', 'Rupa', 'Sneha',
-  'Aarthi', 'Vidya', 'Chitra', 'Jayanthi', 'Pooja', 'Rekha', 'Swathi', 'Usha',
+  'Priya',
+  'Lakshmi',
+  'Divya',
+  'Meena',
+  'Kavitha',
+  'Anitha',
+  'Sunita',
+  'Radha',
+  'Geetha',
+  'Shalini',
+  'Deepa',
+  'Revathi',
+  'Padma',
+  'Vani',
+  'Bhavani',
+  'Nandini',
+  'Fatima',
+  'Ayesha',
+  'Mary',
+  'Elizabeth',
+  'Simran',
+  'Manpreet',
+  'Rupa',
+  'Sneha',
+  'Aarthi',
+  'Vidya',
+  'Chitra',
+  'Jayanthi',
+  'Pooja',
+  'Rekha',
+  'Swathi',
+  'Usha',
 ] as const;
 
 const FAMILY = [
-  'Sharma', 'Verma', 'Iyer', 'Iyengar', 'Nair', 'Menon', 'Pillai', 'Reddy',
-  'Naidu', 'Rao', 'Gowda', 'Shetty', 'Hegde', 'Kulkarni', 'Deshpande', 'Patil',
-  'Joshi', 'Bhat', 'Das', 'Ghosh', 'Chatterjee', 'Banerjee', 'Singh', 'Kaur',
-  'Khan', 'Sheikh', 'Ansari', 'D Souza', 'Fernandes', 'Pereira', 'Patel', 'Shah',
-  'Subramanian', 'Krishnan', 'Balakrishnan', 'Muthu', 'Selvaraj', 'Ramalingam',
+  'Sharma',
+  'Verma',
+  'Iyer',
+  'Iyengar',
+  'Nair',
+  'Menon',
+  'Pillai',
+  'Reddy',
+  'Naidu',
+  'Rao',
+  'Gowda',
+  'Shetty',
+  'Hegde',
+  'Kulkarni',
+  'Deshpande',
+  'Patil',
+  'Joshi',
+  'Bhat',
+  'Das',
+  'Ghosh',
+  'Chatterjee',
+  'Banerjee',
+  'Singh',
+  'Kaur',
+  'Khan',
+  'Sheikh',
+  'Ansari',
+  'D Souza',
+  'Fernandes',
+  'Pereira',
+  'Patel',
+  'Shah',
+  'Subramanian',
+  'Krishnan',
+  'Balakrishnan',
+  'Muthu',
+  'Selvaraj',
+  'Ramalingam',
 ] as const;
 
 const BLOOD_GROUPS = ['a_pos', 'a_neg', 'b_pos', 'b_neg', 'ab_pos', 'ab_neg', 'o_pos', 'o_neg'] as const;
@@ -67,11 +156,30 @@ const LOCALITIES: readonly (readonly [string, string, string, string, string])[]
 ];
 
 const STREETS = [
-  'MG Road', 'Residency Road', 'Bannerghatta Road', 'Anna Salai', 'Sardar Patel Road',
-  'Gandhi Bazaar', 'Church Street', 'Temple Street', 'Station Road', 'Hospital Road',
+  'MG Road',
+  'Residency Road',
+  'Bannerghatta Road',
+  'Anna Salai',
+  'Sardar Patel Road',
+  'Gandhi Bazaar',
+  'Church Street',
+  'Temple Street',
+  'Station Road',
+  'Hospital Road',
 ] as const;
 
-const OCCUPATIONS = ['FARMER', 'TEACHER', 'DRIVER', 'CLERK', 'ENGINEER', 'HOMEMAKER', 'STUDENT', 'RETIRED', 'LABOUR', 'BUSINESS'] as const;
+const OCCUPATIONS = [
+  'FARMER',
+  'TEACHER',
+  'DRIVER',
+  'CLERK',
+  'ENGINEER',
+  'HOMEMAKER',
+  'STUDENT',
+  'RETIRED',
+  'LABOUR',
+  'BUSINESS',
+] as const;
 const RELIGIONS = ['HINDU', 'MUSLIM', 'CHRISTIAN', 'SIKH', 'JAIN', 'BUDDHIST', 'OTHER'] as const;
 const ID_TYPES = ['AADHAAR', 'PAN', 'PASSPORT', 'VOTER', 'DL'] as const;
 
@@ -129,19 +237,19 @@ export function syntheticPatient(hospitalCode: string, index: number): Synthetic
   const key = `${hospitalCode}|${index}`;
   const genderRoll = seedPick(100, key, 'gender');
   const gender: 'male' | 'female' | 'other' = genderRoll < 49 ? 'male' : genderRoll < 99 ? 'female' : 'other';
-  const firstName = gender === 'male'
-    ? seedChoice(GIVEN_MALE, key, 'given')
-    : seedChoice(GIVEN_FEMALE, key, 'given');
+  const firstName =
+    gender === 'male' ? seedChoice(GIVEN_MALE, key, 'given') : seedChoice(GIVEN_FEMALE, key, 'given');
   const lastName = seedChoice(FAMILY, key, 'family');
 
   // Weighted towards the adult band a general hospital sees, with real
   // paediatric and geriatric tails so age-banded rules are genuinely exercised.
   const ageRoll = seedPick(100, key, 'age-band');
-  const ageYears = ageRoll < 14
-    ? seedPick(13, key, 'age-child')
-    : ageRoll < 34
-      ? 60 + seedPick(36, key, 'age-senior')
-      : 13 + seedPick(47, key, 'age-adult');
+  const ageYears =
+    ageRoll < 14
+      ? seedPick(13, key, 'age-child')
+      : ageRoll < 34
+        ? 60 + seedPick(36, key, 'age-senior')
+        : 13 + seedPick(47, key, 'age-adult');
 
   const birthYear = 2026 - ageYears;
   const dob = `${birthYear}-${pad(1 + seedPick(12, key, 'dob-m'), 2)}-${pad(1 + seedPick(28, key, 'dob-d'), 2)}`;
@@ -150,11 +258,16 @@ export function syntheticPatient(hospitalCode: string, index: number): Synthetic
   if (locality === undefined) throw new Error('unreachable: LOCALITIES is non-empty');
   const mobileLocal = `${6 + seedPick(4, key, 'mob-lead')}${pad(seedPick(100, key, 'mob-a'), 2)}555${pad(seedPick(10_000, key, 'mob-b'), 4)}`;
 
-  const titleCode = ageYears < 2
-    ? 'BABY'
-    : gender === 'male'
-      ? (ageYears < 15 ? 'MASTER' : 'MR')
-      : (ageYears < 15 || seedPick(2, key, 'ms') === 0 ? 'MS' : 'MRS');
+  const titleCode =
+    ageYears < 2
+      ? 'BABY'
+      : gender === 'male'
+        ? ageYears < 15
+          ? 'MASTER'
+          : 'MR'
+        : ageYears < 15 || seedPick(2, key, 'ms') === 0
+          ? 'MS'
+          : 'MRS';
 
   const abhaDigits =
     `${pad(90 + seedPick(10, key, 'abha-a'), 2)}${pad(seedPick(10_000, key, 'abha-b'), 4)}` +
@@ -189,14 +302,17 @@ export function syntheticPatient(hospitalCode: string, index: number): Synthetic
     state: locality[3],
     pincode: `${locality[0]}${pad(seedPick(100, key, 'pin'), 2)}`,
     language: seedChoice(LANGUAGES, key, 'lang'),
-    occupationCode: ageYears < 18 ? 'STUDENT' : ageYears >= 60 ? 'RETIRED' : seedChoice(OCCUPATIONS, key, 'occ'),
+    occupationCode:
+      ageYears < 18 ? 'STUDENT' : ageYears >= 60 ? 'RETIRED' : seedChoice(OCCUPATIONS, key, 'occ'),
     religionCode: seedChoice(RELIGIONS, key, 'religion'),
     idTypeCode,
     idLast4: pad(seedPick(10_000, key, 'idlast4'), 4),
     hasAadhaar,
     aadhaarLast4,
     aadhaarHash: hasAadhaar
-      ? createHash('sha256').update(`${SEED_AADHAAR_PEPPER}|${key}|${aadhaarLast4 ?? ''}`).digest()
+      ? createHash('sha256')
+          .update(`${SEED_AADHAAR_PEPPER}|${key}|${aadhaarLast4 ?? ''}`)
+          .digest()
       : null,
     abhaNumber: hasAbha
       ? `${abhaDigits.slice(0, 2)}-${abhaDigits.slice(2, 6)}-${abhaDigits.slice(6, 10)}-${abhaDigits.slice(10, 14)}`
@@ -217,12 +333,14 @@ export function syntheticPatient(hospitalCode: string, index: number): Synthetic
  */
 export function dedupeFingerprint(patient: SyntheticPatient): string {
   return createHash('sha256')
-    .update([
-      patient.mobileLocal,
-      patient.dob,
-      `${patient.firstName} ${patient.lastName}`.toUpperCase().replace(/[^A-Z]/g, ''),
-      patient.gender,
-    ].join('|'))
+    .update(
+      [
+        patient.mobileLocal,
+        patient.dob,
+        `${patient.firstName} ${patient.lastName}`.toUpperCase().replace(/[^A-Z]/g, ''),
+        patient.gender,
+      ].join('|'),
+    )
     .digest('hex')
     .slice(0, 40);
 }

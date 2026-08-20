@@ -66,10 +66,7 @@ export function claimsFor(overrides: Partial<AccessTokenClaims> = {}): AccessTok
   };
 }
 
-export async function signAccessToken(
-  claims: AccessTokenClaims,
-  options: SignOptions = {},
-): Promise<string> {
+export async function signAccessToken(claims: AccessTokenClaims, options: SignOptions = {}): Promise<string> {
   const secret = new TextEncoder().encode(options.secret ?? TEST_SECRET);
   const ttl = options.expiresInSeconds ?? 900;
   const now = Math.floor(Date.now() / 1000);

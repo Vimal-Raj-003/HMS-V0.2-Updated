@@ -31,7 +31,12 @@ async function seedUserWithRole(
   username: string,
 ): Promise<void> {
   const pool = pg.pool('migrator');
-  const hash = await argon2.hash(PASSWORD, { type: argon2.argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 });
+  const hash = await argon2.hash(PASSWORD, {
+    type: argon2.argon2id,
+    memoryCost: 19456,
+    timeCost: 2,
+    parallelism: 1,
+  });
 
   await pool.query(
     `INSERT INTO core.roles (id, hospital_id, key, name, description, home_workspace, category, updated_at)
@@ -54,7 +59,15 @@ async function seedUserWithRole(
        id, hospital_id, username, email, name, display_name, password_hash,
        status, type, updated_at
      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, 'active', 'staff', now())`,
-    [userId, hospitalId, username, `${username}@example.invalid`, JSON.stringify({ given: 'Test', family: 'User' }), `Test ${username}`, hash],
+    [
+      userId,
+      hospitalId,
+      username,
+      `${username}@example.invalid`,
+      JSON.stringify({ given: 'Test', family: 'User' }),
+      `Test ${username}`,
+      hash,
+    ],
   );
 
   await pool.query(
@@ -72,9 +85,22 @@ async function syncPermissionCatalogue(): Promise<void> {
          sensitive_grant, requires_second_person, requires_reason, requires_step_up, phi_read, clinical_safety_exempt)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        ON CONFLICT (key) DO NOTHING`,
-      [p.key, p.module, p.resource, p.action, p.description, p.dataClass, p.risk, p.phase,
-       p.sensitiveGrant ?? false, p.requiresSecondPerson ?? false, p.requiresReason ?? false,
-       p.requiresStepUp ?? false, p.phiRead ?? false, p.clinicalSafetyExempt ?? false],
+      [
+        p.key,
+        p.module,
+        p.resource,
+        p.action,
+        p.description,
+        p.dataClass,
+        p.risk,
+        p.phase,
+        p.sensitiveGrant ?? false,
+        p.requiresSecondPerson ?? false,
+        p.requiresReason ?? false,
+        p.requiresStepUp ?? false,
+        p.phiRead ?? false,
+        p.clinicalSafetyExempt ?? false,
+      ],
     );
   }
 }
@@ -257,19 +283,23 @@ describe('an authenticated request completes the whole chain', () => {
   });
 
   it('writes an audit row for the read, in the same transaction', async () => {
-    const before = await pg.pool('migrator').query(
-      `SELECT count(*)::int AS n FROM core.audit_log WHERE hospital_id = $1 AND entity = 'core.users'`,
-      [tenants.hospitalA],
-    );
+    const before = await pg
+      .pool('migrator')
+      .query(
+        `SELECT count(*)::int AS n FROM core.audit_log WHERE hospital_id = $1 AND entity = 'core.users'`,
+        [tenants.hospitalA],
+      );
     await app.inject({
       method: 'GET',
       url: '/api/v1/admin/users',
       headers: { authorization: `Bearer ${tokenA}` },
     });
-    const after = await pg.pool('migrator').query(
-      `SELECT count(*)::int AS n FROM core.audit_log WHERE hospital_id = $1 AND entity = 'core.users'`,
-      [tenants.hospitalA],
-    );
+    const after = await pg
+      .pool('migrator')
+      .query(
+        `SELECT count(*)::int AS n FROM core.audit_log WHERE hospital_id = $1 AND entity = 'core.users'`,
+        [tenants.hospitalA],
+      );
     expect(after.rows[0].n).toBe(before.rows[0].n + 1);
   });
 
@@ -280,10 +310,11 @@ describe('an authenticated request completes the whole chain', () => {
       headers: { authorization: `Bearer ${tokenA}` },
     });
     const traceId = res.headers['x-trace-id'];
-    const row = await pg.pool('migrator').query(
-      `SELECT actor_user_id, trace_id, action, data_class FROM core.audit_log WHERE trace_id = $1`,
-      [traceId],
-    );
+    const row = await pg
+      .pool('migrator')
+      .query(`SELECT actor_user_id, trace_id, action, data_class FROM core.audit_log WHERE trace_id = $1`, [
+        traceId,
+      ]);
     expect(row.rows[0]).toMatchObject({
       actor_user_id: users.a,
       trace_id: traceId,

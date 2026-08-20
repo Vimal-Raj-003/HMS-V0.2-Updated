@@ -1,13 +1,6 @@
 'use client';
 
-import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  Columns3,
-  Loader2,
-  Rows3,
-} from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Columns3, Loader2, Rows3 } from 'lucide-react';
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useDelayedFlag } from '../hooks/use-delayed-flag.js';
 import { cn } from '../lib/cn.js';
@@ -21,20 +14,8 @@ import {
   DropdownMenuTrigger,
 } from '../primitives/dropdown-menu.js';
 import { Label } from '../primitives/label.js';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../primitives/select.js';
-import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '../primitives/table.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../primitives/select.js';
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '../primitives/table.js';
 import { EmptyState } from './empty-state.js';
 import { SkeletonList } from './skeleton-list.js';
 
@@ -234,9 +215,7 @@ export function WorklistTable<TRow>({
   // ── windowing (§5.2 #41 — "virtualisation above 100 rows") ─────────────────
   const virtualised = rows.length > virtualiseAbove;
   const visibleCount = Math.max(1, Math.ceil(viewportHeightPx / rowHeight));
-  const startIndex = virtualised
-    ? Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN_ROWS)
-    : 0;
+  const startIndex = virtualised ? Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN_ROWS) : 0;
   const endIndex = virtualised
     ? Math.min(rows.length, startIndex + visibleCount + OVERSCAN_ROWS * 2)
     : rows.length;
@@ -282,7 +261,11 @@ export function WorklistTable<TRow>({
     onSortChange({ columnKey: column.key, direction });
   };
 
-  const handleRowKeyDown = (event: React.KeyboardEvent<HTMLTableRowElement>, index: number, row: TRow): void => {
+  const handleRowKeyDown = (
+    event: React.KeyboardEvent<HTMLTableRowElement>,
+    index: number,
+    row: TRow,
+  ): void => {
     switch (event.key) {
       case 'ArrowDown':
         event.preventDefault();
@@ -326,7 +309,11 @@ export function WorklistTable<TRow>({
   const selectedRows = rows.filter((row) => selected.has(getRowId(row)));
 
   return (
-    <section data-slot="worklist-table" data-density={density} className={cn('flex flex-col gap-2', className)}>
+    <section
+      data-slot="worklist-table"
+      data-density={density}
+      className={cn('flex flex-col gap-2', className)}
+    >
       {/* ── toolbar: saved views, density, column chooser ─────────────────── */}
       <div className="flex flex-wrap items-center gap-2">
         {/* §1.1.1 — the count is the status; it is announced where it is shown
@@ -422,7 +409,12 @@ export function WorklistTable<TRow>({
           {...(empty.action === undefined ? {} : { action: empty.action })}
         />
       ) : showSkeleton ? (
-        <SkeletonList label={labels.loading} rowHeight={density} rows={8} columns={visibleColumns.map(() => 1)} />
+        <SkeletonList
+          label={labels.loading}
+          rowHeight={density}
+          rows={8}
+          columns={visibleColumns.map(() => 1)}
+        />
       ) : (
         <div
           ref={viewportRef}
@@ -457,8 +449,7 @@ export function WorklistTable<TRow>({
                 ) : null}
                 {visibleColumns.map((column, columnIndex) => {
                   const sorted = sort?.columnKey === column.key ? sort.direction : undefined;
-                  const SortIcon =
-                    sorted === 'asc' ? ArrowUp : sorted === 'desc' ? ArrowDown : ArrowUpDown;
+                  const SortIcon = sorted === 'asc' ? ArrowUp : sorted === 'desc' ? ArrowDown : ArrowUpDown;
                   return (
                     <TableHead
                       key={column.key}
@@ -476,7 +467,9 @@ export function WorklistTable<TRow>({
                       className={cn(
                         column.numeric === true ? 'text-end' : '',
                         // §9.A — sticky header AND sticky first column.
-                        columnIndex === 0 && !selectable ? 'sticky inset-inline-start-0 z-sticky bg-layer-1' : '',
+                        columnIndex === 0 && !selectable
+                          ? 'sticky inset-inline-start-0 z-sticky bg-layer-1'
+                          : '',
                         column.importance === 'secondary' ? 'hidden lg:table-cell' : '',
                       )}
                     >

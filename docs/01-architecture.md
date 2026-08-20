@@ -33,6 +33,7 @@
 ```
 
 **Deployment profiles** (same code, different composition — see `10-deployment-devops.md`):
+
 - **Cloud SaaS:** Vercel/containers for web, ECS/EKS or Azure Container Apps for services, RDS/Neon Postgres,
   ElastiCache/Upstash Redis, S3, Cloudflare in front.
 - **On-prem / hybrid:** single `docker compose` stack or a small K8s cluster inside the hospital, MinIO for objects,
@@ -80,6 +81,7 @@ Rule: **nothing bypasses steps 3, 6, 8.** Reports and analytics use the same gua
 ## 4. Module boundary contract
 
 Every module directory declares, in `module.contract.ts`:
+
 - `tables`: the schemas/tables it owns (nobody else may query them),
 - `publishes`: domain events it emits,
 - `subscribes`: events it consumes,
@@ -115,14 +117,14 @@ Consumers are idempotent (event id dedupe), retryable, and never assume ordering
 
 ## 7. Offline & degraded-mode strategy
 
-| Scenario | Behaviour |
-|---|---|
+| Scenario                                 | Behaviour                                                                                                                                                                                                                      |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Browser offline (nurse tablet in a lift) | PWA serves cached shell + reference data; vitals/MAR/notes queue in IndexedDB with `client_id`; sync on reconnect; server rejects duplicates by `client_id`; conflicts surfaced for human resolution (never silent overwrite). |
-| Internet down, LAN up (on-prem) | Everything works except SMS/WhatsApp/ABDM/payments; those queue with retry and the UI shows a "pending external" badge. |
-| Database failover | PgBouncer + app retry with exponential backoff; writes fail loudly (never silently dropped); read-only mode banner. |
-| Printer offline | Job stays in the print queue with retry + "print elsewhere" option. |
-| Lab analyzer offline | Manual result entry path always available; interface backlog replays on recovery. |
-| **Total system outage** | Documented **downtime protocol**: pre-printed forms, offline registration numbering block reserved per branch, and a **catch-up entry** workflow with back-dated timestamps that are flagged and audited. |
+| Internet down, LAN up (on-prem)          | Everything works except SMS/WhatsApp/ABDM/payments; those queue with retry and the UI shows a "pending external" badge.                                                                                                        |
+| Database failover                        | PgBouncer + app retry with exponential backoff; writes fail loudly (never silently dropped); read-only mode banner.                                                                                                            |
+| Printer offline                          | Job stays in the print queue with retry + "print elsewhere" option.                                                                                                                                                            |
+| Lab analyzer offline                     | Manual result entry path always available; interface backlog replays on recovery.                                                                                                                                              |
+| **Total system outage**                  | Documented **downtime protocol**: pre-printed forms, offline registration numbering block reserved per branch, and a **catch-up entry** workflow with back-dated timestamps that are flagged and audited.                      |
 
 ## 8. Multi-tenancy & multi-branch (see EN-041)
 

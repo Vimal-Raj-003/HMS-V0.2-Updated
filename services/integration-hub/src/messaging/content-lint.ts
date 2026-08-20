@@ -229,7 +229,8 @@ const RULES: readonly Rule[] = Object.freeze([
   {
     code: 'medication_term',
     re: new RegExp(`\\b(?:${words(MEDICATION_TERMS)})\\b`, 'i'),
-    message: 'refers to medication or treatment. Drug names and therapy are never permitted on an external channel.',
+    message:
+      'refers to medication or treatment. Drug names and therapy are never permitted on an external channel.',
   },
   {
     code: 'result_term',

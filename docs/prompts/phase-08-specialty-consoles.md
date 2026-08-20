@@ -4,6 +4,7 @@ Phases 0–7 complete: a general hospital works end to end. This phase turns it 
 about thirty consoles, all built on one framework, each behind its own flag.
 
 ## Read first
+
 `CLAUDE.md`, `docs/PROGRESS.md`, then **OP-025 §0 first — the Shared Specialty Console Framework, normative for
 OP-025 … OP-040**. Then, per cluster: **OP-010** (procedure console), **OP-039** (OPD nursing/injection/dressing/
 minor OT), **OP-011** (dietician), **NC-033** (dietary/kitchen/canteen), **OP-012** (OP dialysis),
@@ -37,6 +38,7 @@ audit trail. Adding the thirty-first specialty should be configuration and a for
 ## Deliverables
 
 ### 8.1 The shared framework (OP-025 §0) — build this first, alone, and prove it
+
 - `mdm.specialty_consoles` registry: code, name, module key, department mapping, ordered tabs (component or EN-039
   form template key, roles), worklist config, billing links, active flag. A console is a **tab overlay on the
   OP-002 consultation workspace**, never a separate encounter type; the generic tabs (history, Rx, orders, timeline,
@@ -64,6 +66,7 @@ audit trail. Adding the thirty-first specialty should be configuration and a for
 - **Framework acceptance F1–F5 from OP-025 §0.9 are tested once, here, and never re-tested per console.**
 
 ### 8.2 Procedure and OPD nursing spine (OP-010, OP-039)
+
 OP-010: procedure catalogue, scheduling, consent, pre-procedure checks, execution documentation with time-outs,
 consumables and implant capture, post-procedure instructions and billing. OP-039: injection and dressing room
 worklists driven from orders, OPD medication administration with the rights check, suture removal, plaster room
@@ -71,6 +74,7 @@ worklists driven from orders, OPD medication administration with the rights chec
 Most other consoles call OP-010 for their procedures — build it before them.
 
 ### 8.3 Device-heavy consoles (OP-029, OP-030, OP-028, OP-026, OP-027, OP-025)
+
 Cardiology (ECG/Echo/TMT/Holter with structured reports, cath-lab scheduling), pulmonology (PFT/spirometry with
 parsed XML, sleep study, bronchoscopy), ENT (audiometry with audiogram rendering, endoscopy, vertigo battery),
 dental (odontogram charting, treatment plan and estimate, OPG/RVG imaging, lab work tracking), dermatology
@@ -79,6 +83,7 @@ IOP, slit lamp, fundus, OCT, spectacle prescription, optical-shop link). Each de
 reuses the framework's parser/attachment path — **no console gets its own upload code**.
 
 ### 8.4 Therapy, rehabilitation and nutrition (OP-015, IP-021, TR-010, OP-016, OP-017, OP-035, OP-037, OP-011, NC-033)
+
 Physiotherapy and rehabilitation with assessment scales, goal setting, session scheduling and attendance, and
 progress scoring; IP-021 the inpatient variant with MDT conferences; TR-010 the trauma pathway with FIM/Barthel,
 cross-discipline scheduling, return-to-work/sport and the amputee/prosthetics track. Pain clinic (scores, blocks
@@ -89,6 +94,7 @@ tray-line and dispatch, canteen POS with staff subsidy, kitchen inventory and co
 tracking.
 
 ### 8.5 Programme consoles (OP-013, OP-014, OP-012, IP-022)
+
 Vaccination: schedules (national and IAP), due/overdue recall, **cold-chain checks before administration**, lot and
 VVM capture, certificates, AEFI reporting, U-WIN/CoWIN hooks. Health check-up and corporate wellness: package
 definition, appointment orchestration across stations, station board, consolidated report generation and delivery,
@@ -97,6 +103,7 @@ session flowsheet, dialyser reuse register, water quality and machine hygiene, C
 vascular-access surveillance.
 
 ### 8.6 Regulated consoles — where the law is the design (OP-040, IP-011, OP-031, IP-023, OP-032, OP-033, IP-015, OP-034, OP-024)
+
 - **OP-040 obstetrics/ANC**: EDD and gestational-age engine, trimester visit schedules, USG schedule, risk
   stratification and high-risk clinic, delivery planning hand-over to IP-011, postnatal and family planning, gynae.
   **PC-PNDT: Form F capture is mandatory for every obstetric ultrasound, the register is generated as a by-product,
@@ -129,6 +136,7 @@ vascular-access surveillance.
   expiry, donor and bank management with anonymity rules, outcome tracking and **National ART Registry reporting**.
 
 ### 8.7 Telemedicine (OP-018)
+
 Booking and payment, waiting room, WebRTC consultation with fallback to audio and to phone, identity verification
 of both parties, prescription and orders from the call, and **compliance with the Telemedicine Practice Guidelines
 2020**: explicit patient consent recorded, practitioner registration displayed, the medicine-list restrictions
@@ -136,6 +144,7 @@ of both parties, prescription and orders from the call, and **compliance with th
 stated retention period.
 
 ### 8.8 Care coordination (OP-021, IP-020, IP-019)
+
 OP-021 referral management (internal and external, TAT, outcome feedback loop) — the same engine PE-007 uses in
 Phase 10. IP-020 clinical pathways: template authoring and governance, auto-enrolment, daily execution and phase
 transitions, variance capture, outcome metrics. IP-019 transplant: recipient listing and waitlist, living-donor
@@ -143,6 +152,7 @@ pathway with authorisation committee records, deceased-donor certification and c
 transplant episode, post-transplant follow-up, and **NOTTO/state registry reporting**.
 
 ## Constraints & watch-outs
+
 - **Framework first, consoles second.** If a console needs something the framework does not have, extend the
   framework and re-run F1–F5 — never fork it. A console that ships its own worklist, its own upload path or its own
   print pipeline is a defect, not a feature.
@@ -163,6 +173,7 @@ transplant episode, post-transplant follow-up, and **NOTTO/state registry report
   correctly to scale on A4.
 
 ## Exit gate
+
 1. Register a new console purely as data (tabs referencing existing components and EN-039 templates) and it appears
    for the mapped department **with no code deploy** — OP-025 §0.9 F1 passes.
 2. A device result (spirometry XML and an OCT DICOM) attaches, parses into typed columns, appears in the console

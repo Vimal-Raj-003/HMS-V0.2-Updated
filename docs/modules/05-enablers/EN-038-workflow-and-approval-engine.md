@@ -1,23 +1,25 @@
 # EN-038 — Workflow & Approval Engine (Configurable Approval Matrices, Rule Conditions, Serial/Parallel/Quorum Approvals, Delegation & Out-of-Office, SLA Timers with Auto-Escalation, Reminders, Mobile Approvals, Matrix Versioning, Simulation & Preview)
 
-| Field | Value |
-|---|---|
-| Domain | Enabler |
-| Module ID | EN-038 |
-| Phase | 0 |
-| Priority | P0 |
-| Complexity | High |
-| Depends on | EN-007 (users, roles, org hierarchy, settings), EN-024 (audit — every approval decision), EN-037 (Notification Centre — requests, reminders, escalations), EN-027 (department/cost-centre/service masters used in conditions), NC-030 (duty roster — who is available to approve now), EN-041 (branch/group scoping of matrices), EN-016 (e-signature on approvals that legally require one), EN-039 (approval-request card & form rendering), EN-040 (entitlement — which approval features the plan includes) |
-| Consumed by | OP-005/IP-005 (discount, write-off, rate override), RC-003 (tariff change), NC-001 (refund), OP-003/IP-014 (narcotic issue, high-value drug), NC-005 (indent, PO, rate contract, emergency purchase), NC-006 (stock write-off, inter-store transfer above value), NC-009 (payment voucher, journal, credit note, budget override), NC-010 (leave, overtime, payroll release, loan, F&F), NC-012 (credit limit, corporate onboarding), EN-002/RC-002 (pre-auth enhancement above limit), EN-027 (master-data change sets), EN-029 (clinical rule publication), EN-036 (import batch commits), NC-015 (CAPA closure), IP-002 (discharge against medical advice, LAMA), IP-006 (OT slot override), NC-002 (asset disposal), NC-004 (document publication), EN-023 (privileged-access requests) |
-| Feature flag | `module.workflow.enabled` (always on; sub-flags `wf.parallel`, `wf.quorum`, `wf.delegation`, `wf.mobile_approval`, `wf.simulation`) |
-| Primary roles | Every approver role — HOD (5), Medical Superintendent (4), Hospital/Branch Admin (2/3), Finance Manager (46), Purchase Officer (45), Pharmacy In-charge (32), HR Manager (47), Nurse Supervisor (22), Billing Manager (27) |
-| Secondary roles | Any requester (all staff roles), Auditor (58 — approval evidence), Quality (54), IT Admin (56 — matrix configuration support), Super Admin (1 — shipped default matrices) |
-| Regulatory | **NABH** (documented authorisation for discounts, waivers, high-risk procedures, LAMA/DAMA, medication overrides), **Companies Act 2013 / internal financial controls** — delegation of authority (DoA) matrix, segregation of duties, maker-checker on payments; **Income Tax & GST** (approval evidence for write-offs, credit notes); **NDPS & Drugs Rules** (two-person authorisation for narcotics); **Labour law / Shops & Establishments** (leave and overtime authorisation records); **DPDP Act 2023** (approval workflows carrying patient data must minimise what an approver sees); IT Act §65B (electronic records as evidence — hence signed, immutable decision records) |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain          | Enabler                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Module ID       | EN-038                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Phase           | 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Priority        | P0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Complexity      | High                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Depends on      | EN-007 (users, roles, org hierarchy, settings), EN-024 (audit — every approval decision), EN-037 (Notification Centre — requests, reminders, escalations), EN-027 (department/cost-centre/service masters used in conditions), NC-030 (duty roster — who is available to approve now), EN-041 (branch/group scoping of matrices), EN-016 (e-signature on approvals that legally require one), EN-039 (approval-request card & form rendering), EN-040 (entitlement — which approval features the plan includes)                                                                                                                                                                                                                                                                             |
+| Consumed by     | OP-005/IP-005 (discount, write-off, rate override), RC-003 (tariff change), NC-001 (refund), OP-003/IP-014 (narcotic issue, high-value drug), NC-005 (indent, PO, rate contract, emergency purchase), NC-006 (stock write-off, inter-store transfer above value), NC-009 (payment voucher, journal, credit note, budget override), NC-010 (leave, overtime, payroll release, loan, F&F), NC-012 (credit limit, corporate onboarding), EN-002/RC-002 (pre-auth enhancement above limit), EN-027 (master-data change sets), EN-029 (clinical rule publication), EN-036 (import batch commits), NC-015 (CAPA closure), IP-002 (discharge against medical advice, LAMA), IP-006 (OT slot override), NC-002 (asset disposal), NC-004 (document publication), EN-023 (privileged-access requests) |
+| Feature flag    | `module.workflow.enabled` (always on; sub-flags `wf.parallel`, `wf.quorum`, `wf.delegation`, `wf.mobile_approval`, `wf.simulation`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Primary roles   | Every approver role — HOD (5), Medical Superintendent (4), Hospital/Branch Admin (2/3), Finance Manager (46), Purchase Officer (45), Pharmacy In-charge (32), HR Manager (47), Nurse Supervisor (22), Billing Manager (27)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Secondary roles | Any requester (all staff roles), Auditor (58 — approval evidence), Quality (54), IT Admin (56 — matrix configuration support), Super Admin (1 — shipped default matrices)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Regulatory      | **NABH** (documented authorisation for discounts, waivers, high-risk procedures, LAMA/DAMA, medication overrides), **Companies Act 2013 / internal financial controls** — delegation of authority (DoA) matrix, segregation of duties, maker-checker on payments; **Income Tax & GST** (approval evidence for write-offs, credit notes); **NDPS & Drugs Rules** (two-person authorisation for narcotics); **Labour law / Shops & Establishments** (leave and overtime authorisation records); **DPDP Act 2023** (approval workflows carrying patient data must minimise what an approver sees); IT Act §65B (electronic records as evidence — hence signed, immutable decision records)                                                                                                     |
 
 ## 1. Purpose
-EN-038 removes approval logic from every module and puts it in one configurable, auditable engine. A module says "this action needs authorisation" with a typed context; the engine decides *who* must approve (by amount band, department, payer, role, risk), in what *shape* (serial chain, parallel set, quorum, any-one-of), with what *deadline* (SLA timers, reminders, auto-escalation, auto-approve/auto-reject on expiry), handles *delegation and out-of-office*, and records an immutable decision trail. Matrices are versioned, effective-dated and simulate-able, so a CFO can see exactly what a proposed change would have done to last month's approvals before publishing it.
+
+EN-038 removes approval logic from every module and puts it in one configurable, auditable engine. A module says "this action needs authorisation" with a typed context; the engine decides _who_ must approve (by amount band, department, payer, role, risk), in what _shape_ (serial chain, parallel set, quorum, any-one-of), with what _deadline_ (SLA timers, reminders, auto-escalation, auto-approve/auto-reject on expiry), handles _delegation and out-of-office_, and records an immutable decision trail. Matrices are versioned, effective-dated and simulate-able, so a CFO can see exactly what a proposed change would have done to last month's approvals before publishing it.
 
 ## 2. Users & Jobs-to-be-done
+
 - **Billing executive (27, desktop, many times a day)**: apply a 25 % discount, see instantly "this needs HOD + Finance approval, typical turnaround 40 minutes", submit with a reason, and track it without phoning anyone.
 - **HOD / Medical Superintendent (5/4, phone between rounds)**: open a push notification, see the request with just enough context (patient initials, service, amount, reason, requester, prior approvals), approve or reject with a reason in two taps, and delegate for a week when travelling.
 - **Finance Manager (46, desktop)**: approve payment vouchers and credit notes with maker-checker separation, see the budget impact inline, and never be the person who both created and approved.
@@ -31,45 +33,49 @@ EN-038 removes approval logic from every module and puts it in one configurable,
 ## 3. Core Workflows
 
 ### 3.1 Requesting approval (the module-facing contract)
+
 1. A module calls `Workflow.request({ processKey, context, refType, refId, requestedBy, idempotencyKey })`. The **context** is a typed object declared by the process definition (e.g. discount: `{ amount, discountPct, billTotal, department, payerType, patientId, serviceCategories[], reason }`).
 2. The engine **resolves the matrix version** effective at request time, evaluates conditions in priority order, and produces an **approval plan**: ordered stages, each with its rule (serial / parallel / quorum / any-one-of), resolved approver set, SLA, reminders and escalation.
-3. **Pre-submission preview** (`POST /preview`) returns the plan without creating anything — the UI shows "Approvers: Dr Menon (HOD Cardiology) → Finance Manager. Median turnaround 38 min" *before* the user commits. This single feature removes most "where is my approval?" traffic.
+3. **Pre-submission preview** (`POST /preview`) returns the plan without creating anything — the UI shows "Approvers: Dr Menon (HOD Cardiology) → Finance Manager. Median turnaround 38 min" _before_ the user commits. This single feature removes most "where is my approval?" traffic.
 4. On submit: `wf_requests` row created (`pending`), stage 1 activated, notifications dispatched (EN-037), SLA timer started, and the calling module receives a `requestId` and holds its action in `awaiting_approval` state. Event `workflow.request.created`.
 5. **Auto-approval**: if the resolved plan has zero stages (the action is within the requester's own authority), the engine returns `auto_approved` synchronously with the reason ("within your 10 % discount authority") and still writes a decision record — self-authorised actions are audited exactly like approved ones.
 6. **Idempotency**: the same `(processKey, refType, refId, idempotencyKey)` never creates a second request; the existing one is returned.
 
 ### 3.2 Approval matrices & rule conditions
+
 A **process definition** (`wf_processes`) declares the context schema, the default matrix, and the outcome contract. A **matrix** (`wf_matrices` + `wf_matrix_versions`) is an ordered list of **rules**; the first matching rule wins (with an explicit `continue` flag for stacking):
 
-| Condition dimension | Examples |
-|---|---|
-| **Amount bands** | discount ≤ 10 % → none; 10–25 % → HOD; 25–50 % → HOD + Medical Superintendent; > 50 % → + Hospital Admin. PO ≤ ₹50 k → Purchase Officer; ₹50 k–5 L → + Finance Manager; > ₹5 L → + Hospital Admin (+ Board above ₹50 L) |
-| **Percentage & absolute together** | "25 % **or** ₹25 000, whichever is lower, triggers the next tier" — both expressible |
-| **Department / cost centre** | ICU consumables route to the Intensivist; radiology contrast to the Radiology HOD |
-| **Payer / scheme** | cash discounts need Finance; PMJAY/CGHS write-offs need the Insurance Desk + Finance; corporate credit needs NC-012 owner |
-| **Role & grade of requester** | a resident's medication override needs consultant countersign; a consultant's does not |
-| **Risk / category** | narcotics → two-person; high-alert drug → Pharmacy In-charge; implant above ₹1 L → Surgeon + Admin |
-| **Time & state** | after 20:00 or on a holiday → duty officer path; during month-end close → Finance blocks non-urgent journals |
-| **Cumulative behaviour** | "third discount for the same patient this month" or "requester's total approved discounts this month > ₹1 L" escalates a tier — computed from the engine's own history |
-| **Budget** | expense within budget → normal path; over budget → Finance + Admin (NC-009 budget check as a condition input) |
-| **Branch / group** | branch-level up to X, group office above (EN-041) |
+| Condition dimension                | Examples                                                                                                                                                                                                                |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Amount bands**                   | discount ≤ 10 % → none; 10–25 % → HOD; 25–50 % → HOD + Medical Superintendent; > 50 % → + Hospital Admin. PO ≤ ₹50 k → Purchase Officer; ₹50 k–5 L → + Finance Manager; > ₹5 L → + Hospital Admin (+ Board above ₹50 L) |
+| **Percentage & absolute together** | "25 % **or** ₹25 000, whichever is lower, triggers the next tier" — both expressible                                                                                                                                    |
+| **Department / cost centre**       | ICU consumables route to the Intensivist; radiology contrast to the Radiology HOD                                                                                                                                       |
+| **Payer / scheme**                 | cash discounts need Finance; PMJAY/CGHS write-offs need the Insurance Desk + Finance; corporate credit needs NC-012 owner                                                                                               |
+| **Role & grade of requester**      | a resident's medication override needs consultant countersign; a consultant's does not                                                                                                                                  |
+| **Risk / category**                | narcotics → two-person; high-alert drug → Pharmacy In-charge; implant above ₹1 L → Surgeon + Admin                                                                                                                      |
+| **Time & state**                   | after 20:00 or on a holiday → duty officer path; during month-end close → Finance blocks non-urgent journals                                                                                                            |
+| **Cumulative behaviour**           | "third discount for the same patient this month" or "requester's total approved discounts this month > ₹1 L" escalates a tier — computed from the engine's own history                                                  |
+| **Budget**                         | expense within budget → normal path; over budget → Finance + Admin (NC-009 budget check as a condition input)                                                                                                           |
+| **Branch / group**                 | branch-level up to X, group office above (EN-041)                                                                                                                                                                       |
 
 Rule expressions are a typed AST built in a visual condition builder (no free-form code), validated against the process's context schema at publish time, with a **`when` / `then`** shape: `when amount > 25000 and payer_type = 'cash' then stages = [HOD, FINANCE]`.
 
 ### 3.3 Stage shapes: serial, parallel, quorum, any-one-of
+
 - **Serial** (default): stage 2 activates only after stage 1 approves. Used where seniority matters (HOD then MS then Admin).
 - **Parallel**: all stage members are notified at once and **all** must approve (e.g. Clinical + Finance sign-off on a package change). The stage completes when the last one approves; any rejection ends it immediately (configurable: `reject_stops_all` default true).
 - **Quorum / N-of-M**: e.g. "any 2 of the 4 credit committee members" or "3 of 5 for a tender above ₹50 L"; the engine tracks progress (`2 of 3 received`) and closes the stage on quorum.
 - **Any-one-of**: a pool (e.g. "any Duty Medical Officer") where the first responder takes it and it disappears from the others' queues (with an optimistic-lock so two simultaneous approvals cannot both apply).
 - **Conditional stages**: a stage can be skipped when a condition evaluates false at activation time (e.g. skip Finance if the amount after a prior partial approval falls below the band).
 - **Segregation of duties**: the engine enforces `requester ≠ approver` and configurable exclusions ("the person who created the PO may not approve the GRN"); a rule that would resolve to the requester **promotes to the next tier automatically** and logs why (never silently approves).
-- **Approve-with-modification**: where the process allows it (discount, purchase quantity, pre-auth amount), an approver may approve a *different value* ("approve 20 % instead of 30 %"); this creates a counter-offer that the requester must accept, or it re-enters the matrix at the band appropriate to the modified value.
+- **Approve-with-modification**: where the process allows it (discount, purchase quantity, pre-auth amount), an approver may approve a _different value_ ("approve 20 % instead of 30 %"); this creates a counter-offer that the requester must accept, or it re-enters the matrix at the band appropriate to the modified value.
 
 ### 3.4 SLA timers, reminders & escalation
+
 1. Each stage carries an **SLA** (business hours or calendar hours, per hospital calendar with holidays and shift definitions) — e.g. clinical overrides 30 min, discounts 4 business hours, POs 2 business days, leave 3 business days.
 2. **Reminders** at configurable fractions (default 50 % and 80 % of SLA) go to the pending approver via EN-037 with escalating prominence.
 3. On **breach**, one of four configured behaviours fires:
-   - **Escalate** (default): add the next tier as an approver *in addition to* the current one, notify both, restart a shorter SLA. Repeats up to a maximum tier.
+   - **Escalate** (default): add the next tier as an approver _in addition to_ the current one, notify both, restart a shorter SLA. Repeats up to a maximum tier.
    - **Auto-approve**: only permitted for explicitly low-risk processes (e.g. `low`-value internal transfers) and never for financial disbursement, clinical safety or statutory approvals; requires Admin sign-off to configure and is loudly reported.
    - **Auto-reject**: for time-bound requests where inaction means "no" (e.g. an OT slot swap).
    - **Hold & alert**: keep pending, alert the requester and the approver's manager.
@@ -78,6 +84,7 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 6. All timers are **durable** (persisted `next_action_at` polled by the worker), survive restarts, and are computed in the hospital's timezone with the business-hours calendar.
 
 ### 3.5 Delegation & out-of-office
+
 - Any approver can set **out-of-office** (from, to, reason) with a **delegate** who must hold an equal-or-higher authority for the processes delegated; delegation can be scoped per process family (e.g. delegate purchases but not clinical overrides).
 - **Clinical-safety approvals are not delegable to a lower authority**; where the process is marked `non_delegable`, the OOO instead routes to the role's structural backup (deputy HOD, duty MS).
 - Delegated decisions are recorded as "**A. Kumar (on behalf of Dr Menon, delegation #123)**" — never as the delegator; the delegation record is part of the audit evidence.
@@ -85,6 +92,7 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 - **Bulk reassignment**: an admin can reassign all pending requests from a departed employee to a successor, with reason and audit.
 
 ### 3.6 Decision, outcome & callback
+
 1. An approver opens the request, sees the **context card** (only the fields the process declares — DPDP minimisation: an approver of a discount sees patient initials, UHID last 4, service categories and the amount, not the diagnosis), the requester's reason, attachments, prior decisions, and the policy excerpt that triggered this approval.
 2. Actions: **Approve**, **Approve with modification**, **Reject** (reason mandatory), **Request more information** (returns to the requester without losing the chain; SLA pauses), **Abstain** (quorum stages only), **Reassign** (to a peer, with reason).
 3. Where the process demands legal weight (payment release, narcotic issue, statutory documents), an **e-signature** (EN-016) or a re-authentication step-up is required at decision time.
@@ -93,6 +101,7 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 6. **Withdrawal**: the requester may withdraw while pending (reason recorded); the module releases its hold.
 
 ### 3.7 Matrix versioning, simulation & governance
+
 - Matrices are **versioned and effective-dated**; a request is forever bound to the matrix version in force when it was raised, so an audit three years later reproduces the exact authority chain.
 - **Simulation** (`wf.simulation`): before publishing a new version, run it against the last N days of historical requests and see — how many requests would have needed an extra tier, which approvers' load changes, projected turnaround impact, and a sample of 20 requests with old-vs-new plans side by side. A version cannot be published without a simulation run attached (configurable, default on for financial matrices).
 - **Publishing** a matrix version is itself an approval (Hospital Admin + Finance for financial matrices) — the engine governs its own configuration.
@@ -100,6 +109,7 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 - **Deprecation**: old versions remain queryable; a matrix cannot be deleted while requests reference it.
 
 ### 3.8 Exceptions
+
 - **No approver resolves** (vacant role, empty roster, everyone excluded by SoD) → the stage promotes to the configured fallback authority and raises `workflow.approver_gap` to Admin; the request never dead-ends.
 - **Approver has lost the permission** since the request was raised → their pending item is withdrawn and re-resolved.
 - **Context changed after submission** (the bill was edited, the PO quantity changed) → the request is invalidated and must be re-raised; approving a stale context is prevented by a context hash check at decision time.
@@ -108,6 +118,7 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 - **Emergency bypass**: a narrow, role-restricted "break-glass approval" exists for genuinely time-critical clinical/operational cases (emergency purchase at 02:00, emergency narcotic release). It requires a reason, notifies the full escalation chain immediately, and creates a **mandatory post-facto ratification request** within 24 hours; unratified bypasses are a reported governance exception.
 
 ## 4. Data Model (schema `core`, prefix `wf_`)
+
 - `wf_processes` — id, hospital_id (null = system), key citext, name, domain enum(billing/finance/purchase/pharmacy/hr/clinical/quality/master_data/it/other), context_schema jsonb (typed fields, PHI classification per field), outcome_contract jsonb, allows_modification bool, non_delegable bool, requires_esign bool, sod_rules jsonb, breach_default enum(escalate/auto_approve/auto_reject/hold), urgency_allowed bool, bypass_allowed bool, active_matrix_id, status; UNIQUE(hospital_id, key).
 - `wf_matrices` — id, hospital_id, branch_id?, process_key, name, current_version, status enum(draft/active/superseded/retired), owner_role.
 - `wf_matrix_versions` — id, matrix_id, version, rules jsonb[] (priority, condition_ast, stages[]{ kind enum(serial/parallel/quorum/any_of), approvers[] (role@scope | user | dynamic:hod_of(department) | dynamic:oncall(...) | dynamic:manager_of(requester) | dynamic:cost_centre_owner), quorum_n, sla jsonb{hours, calendar}, reminders[], breach_action, skip_condition, requires_esign }, continue_evaluation bool), effective_from, effective_to, published_by, published_at, approval_ref, simulation_ref, checksum, immutable; index (matrix_id, effective_from desc).
@@ -125,6 +136,7 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 - Retention: requests, stages, approver decisions and actions **7 years** (financial/statutory evidence); clinical approvals follow the clinical record (10 years); simulations 2 years.
 
 ## 5. Business Rules & Validations
+
 - **The engine authorises; it never executes.** The calling module holds its action and performs it only on the approved callback — so an approval can never accidentally post a payment.
 - **Requester ≠ approver, always.** A rule resolving to the requester promotes to the next tier with a logged reason; maker-checker on financial processes is enforced structurally, not by convention.
 - **A request is bound to its matrix version and its context hash.** If the underlying record changes materially after submission, the request is invalidated and must be re-raised — approving a stale context is impossible.
@@ -141,30 +153,32 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 - Concurrency: any-one-of and quorum stages use optimistic locking; a duplicate decision returns "already decided by X" rather than double-counting.
 
 ## 6. API Surface (`/api/v1/workflow`)
-| Method | Path | Purpose | Permission | Notes |
-|---|---|---|---|---|
-| POST | /preview | resolve the approval plan for a context without creating a request | `wf.request.create` | powers the "who will approve" UI |
-| POST | /requests | raise an approval request | `wf.request.create` (service + role) | Idempotency-Key; returns auto_approved when within authority |
-| GET | /requests?status&process&requester&ref&from&to | search requests | `wf.request.read` (own by default, wider by role) | cursor |
-| GET | /requests/:id | full detail incl. plan, stages, timeline | `wf.request.read` | PHI-minimised per process |
-| POST | /requests/:id/withdraw | requester withdraws | `wf.request.create` (owner) | reason |
-| POST | /requests/:id/provide-info | respond to an information request | requester | resumes SLA |
-| GET | /me/pending?process&urgency | my approval queue | authenticated | the most-hit endpoint; p95 <150 ms |
-| POST | /requests/:id/approve \| /reject \| /approve-with-modification \| /request-info \| /abstain \| /reassign | decisions | `wf.decide` + resolved-approver check | reason mandatory on reject/modify; e-sign where required; context-hash checked |
-| POST | /requests/bulk-decide | approve/reject several homogeneous requests | `wf.decide.bulk` | same process only, per-item reasons, hard cap 50 |
-| POST | /requests/:id/bypass | emergency bypass | `wf.bypass` (restricted roles) | reason; creates ratification request |
-| POST | /requests/:id/reverse | raise a reversal of an approved request | `wf.request.create` | routes one tier higher |
-| GET/POST/PATCH | /processes ; /processes/:key | process definitions | `wf.process.manage` (Super Admin/IT + owner) | context schema versioned |
-| GET/POST | /matrices ; /matrices/:id/versions | matrix authoring | `wf.matrix.manage` | draft only |
-| POST | /matrices/:id/versions/:v/simulate | run against historical requests | `wf.matrix.manage` | required before financial publish |
-| POST | /matrices/:id/versions/:v/publish \| /rollback | lifecycle | `wf.matrix.publish` (Admin + Finance) | effective-dated; self-approved via EN-038 |
-| GET/POST/DELETE | /delegations ; /out-of-office | delegation & OOO | `wf.delegation.manage` (self) / `wf.delegation.admin` | authority validation |
-| POST | /reassign-bulk {fromUser, toUser, processes} | reassign a departed approver's queue | `wf.delegation.admin` | audited |
-| GET/PUT | /calendars ; /downtime-windows | business calendars & SLA pauses | `wf.calendar.manage` (Admin) | |
-| GET | /metrics/turnaround ; /metrics/approvers ; /metrics/sla ; /metrics/bypasses | analytics | `wf.report.read` | read models |
-| GET | /audit/:requestId | full evidence pack (plan, decisions, matrix version, signatures) | `wf.audit.read` (Auditor) | PDF export |
+
+| Method          | Path                                                                                                     | Purpose                                                            | Permission                                            | Notes                                                                          |
+| --------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------------------ |
+| POST            | /preview                                                                                                 | resolve the approval plan for a context without creating a request | `wf.request.create`                                   | powers the "who will approve" UI                                               |
+| POST            | /requests                                                                                                | raise an approval request                                          | `wf.request.create` (service + role)                  | Idempotency-Key; returns auto_approved when within authority                   |
+| GET             | /requests?status&process&requester&ref&from&to                                                           | search requests                                                    | `wf.request.read` (own by default, wider by role)     | cursor                                                                         |
+| GET             | /requests/:id                                                                                            | full detail incl. plan, stages, timeline                           | `wf.request.read`                                     | PHI-minimised per process                                                      |
+| POST            | /requests/:id/withdraw                                                                                   | requester withdraws                                                | `wf.request.create` (owner)                           | reason                                                                         |
+| POST            | /requests/:id/provide-info                                                                               | respond to an information request                                  | requester                                             | resumes SLA                                                                    |
+| GET             | /me/pending?process&urgency                                                                              | my approval queue                                                  | authenticated                                         | the most-hit endpoint; p95 <150 ms                                             |
+| POST            | /requests/:id/approve \| /reject \| /approve-with-modification \| /request-info \| /abstain \| /reassign | decisions                                                          | `wf.decide` + resolved-approver check                 | reason mandatory on reject/modify; e-sign where required; context-hash checked |
+| POST            | /requests/bulk-decide                                                                                    | approve/reject several homogeneous requests                        | `wf.decide.bulk`                                      | same process only, per-item reasons, hard cap 50                               |
+| POST            | /requests/:id/bypass                                                                                     | emergency bypass                                                   | `wf.bypass` (restricted roles)                        | reason; creates ratification request                                           |
+| POST            | /requests/:id/reverse                                                                                    | raise a reversal of an approved request                            | `wf.request.create`                                   | routes one tier higher                                                         |
+| GET/POST/PATCH  | /processes ; /processes/:key                                                                             | process definitions                                                | `wf.process.manage` (Super Admin/IT + owner)          | context schema versioned                                                       |
+| GET/POST        | /matrices ; /matrices/:id/versions                                                                       | matrix authoring                                                   | `wf.matrix.manage`                                    | draft only                                                                     |
+| POST            | /matrices/:id/versions/:v/simulate                                                                       | run against historical requests                                    | `wf.matrix.manage`                                    | required before financial publish                                              |
+| POST            | /matrices/:id/versions/:v/publish \| /rollback                                                           | lifecycle                                                          | `wf.matrix.publish` (Admin + Finance)                 | effective-dated; self-approved via EN-038                                      |
+| GET/POST/DELETE | /delegations ; /out-of-office                                                                            | delegation & OOO                                                   | `wf.delegation.manage` (self) / `wf.delegation.admin` | authority validation                                                           |
+| POST            | /reassign-bulk {fromUser, toUser, processes}                                                             | reassign a departed approver's queue                               | `wf.delegation.admin`                                 | audited                                                                        |
+| GET/PUT         | /calendars ; /downtime-windows                                                                           | business calendars & SLA pauses                                    | `wf.calendar.manage` (Admin)                          |                                                                                |
+| GET             | /metrics/turnaround ; /metrics/approvers ; /metrics/sla ; /metrics/bypasses                              | analytics                                                          | `wf.report.read`                                      | read models                                                                    |
+| GET             | /audit/:requestId                                                                                        | full evidence pack (plan, decisions, matrix version, signatures)   | `wf.audit.read` (Auditor)                             | PDF export                                                                     |
 
 ## 7. Domain Events (outbox)
+
 - `workflow.request.created|submitted|auto_approved` → EN-037 notifications, calling module state.
 - `workflow.stage.activated|approved|rejected|skipped|expired|escalated` → notifications, metrics.
 - `workflow.request.approved|rejected|withdrawn|expired|invalidated` → **calling module callback** (the module performs or abandons its held action), EN-024 audit.
@@ -177,6 +191,7 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 - Consumes: `user.deactivated` (reassign pending), `roster.shift.changed` (dynamic approver resolution), `leave.approved` (OOO auto-creation), `system.downtime.recorded` (SLA pause), `mdm.department.changed` (re-resolve dynamic approvers).
 
 ## 8. Screens (UI)
+
 - **My Approvals inbox** (desktop + phone, the workhorse): grouped by urgency and ageing, each card showing process, requester, amount/subject, reason snippet, SLA countdown chip (green/amber/red), and inline `Approve` / `Reject` buttons; opening a card shows the full context, policy excerpt ("this needs you because the discount exceeds 25 %"), attachments, prior decisions and the remaining chain. **Bulk select** for homogeneous items with a per-item reason field. Keyboard: `J/K` navigate, `A` approve, `R` reject, `I` request info, `Enter` open, `Ctrl+Enter` submit. Mobile: two-tap approve with biometric/step-up where the process requires it, works on a 3G connection, offline queueing of decisions with a conflict check on sync.
 - **Request tracker** (requester view, desktop/phone): status stepper showing each stage, who is pending, how long they've had it, and a nudge button (rate-limited to one per SLA half-life); withdraw and provide-info actions.
 - **Pre-submission preview panel** (embedded in every requesting screen — billing, purchase, HR): "This will need: HOD Cardiology → Finance Manager. Median turnaround 38 min." with an option to add a note for approvers.
@@ -188,6 +203,7 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 - Empty/error states: "Nothing awaiting your approval", "This request was invalidated because the bill was edited after submission — the requester must resubmit", "No approver could be resolved for stage 2 (HOD Radiology vacant) — escalated to the Medical Superintendent", "You cannot approve your own request; it has been escalated to Finance".
 
 ## 9. Integrations
+
 - **EN-037** for every request, reminder, escalation and outcome notification, including mobile push with actionable buttons and the escalation ladder for breached SLAs.
 - **NC-030 / NC-010** for roster and leave data driving dynamic approver resolution and OOO auto-creation; **EN-007** for the org hierarchy (`manager_of`, `hod_of`, `cost_centre_owner`).
 - **EN-016** for e-signatures on decisions requiring legal weight; **EN-024** for the immutable audit trail; **EN-027** for masters used in conditions; **NC-009** for budget-availability checks as a condition input; **EN-041** for group-vs-branch matrix scoping and for group-office approval tiers.
@@ -195,6 +211,7 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 - **External**: none by default; an optional adapter can push approvals to a corporate ERP's DoA system for hospitals that must mirror group-level authority (via EN-017).
 
 ## 10. Reports & Analytics
+
 - **Turnaround**: median/p90 by process, stage, approver, branch, hour-of-day; business vs calendar time; time spent waiting on `info_requested`.
 - **SLA**: breach % by process and approver, escalation counts by tier, requests auto-approved/auto-rejected on breach (with a hard look at whether that policy is safe).
 - **Approver load**: pending count and ageing per approver, decisions per day, median decision latency, mobile vs desktop mix, "approve without opening" rate (a rubber-stamping signal: decisions made in under 5 seconds without viewing the detail).
@@ -204,15 +221,18 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 - Read models: `analytics.mv_wf_process_daily`, `analytics.mv_wf_approver_daily`, `analytics.mv_wf_financial_exposure_monthly`.
 
 ## 11. Notifications
+
 - **To approvers**: new request (severity by process and urgency), reminders at 50 %/80 % of SLA, escalation notice ("this has been escalated to your senior — please act"), delegation started/ended, bulk digest option for low-severity processes (twice daily).
 - **To requesters**: submitted with the expected chain, each stage decision, information requested, approved/rejected with reason, expired, invalidated (with why), and counter-offer to accept.
 - **To admins/finance**: SLA breach summary, bypass used (immediate), bypass unratified after 24 h, approver gap, matrix published, auto-approve-on-breach fired.
 - **To HR/roster owners**: delegation gap when an approver is on leave with no delegate and requests are pending.
 
 ## 12. Permissions (RBAC keys)
+
 `wf.request.create` (all staff, scoped by process) · `wf.request.read` (own requests always; wider by role/department via ABAC; Auditor 58 tenant-wide) · `wf.decide` (granted implicitly by being a resolved approver; the key gates the endpoint) · `wf.decide.bulk` (approvers with high volume — Finance 46, Purchase 45, HR 47) · `wf.bypass` (Medical Superintendent 4, Hospital Admin 2, Duty Officer role — narrowly granted) · `wf.process.manage` (Super Admin 1, IT Admin 56 with module-owner sign-off) · `wf.matrix.manage` (Hospital Admin 2, Finance Manager 46, HR Manager 47 for their domains) · `wf.matrix.publish` (Hospital Admin + Finance dual, itself an approval) · `wf.delegation.manage` (self) · `wf.delegation.admin` (HR 47, Hospital Admin — reassign a departed approver) · `wf.calendar.manage` (Hospital Admin) · `wf.report.read` (Admin, Finance, HODs scoped, Quality 54) · `wf.audit.read` (Auditor 58, DPO 57).
 
 ## 13. Non-functional
+
 - **Volumes (2000-bed enterprise)**: ~**3000–5000 approval requests/day** (discounts ~1200, purchase ~250, HR ~400, clinical overrides ~600, refunds ~150, master data ~100, the rest operational), ~8000 decisions/day across ~250 active approvers; peak 400 requests/hour at the 11:00–13:00 billing crest.
 - **Latency**: `POST /preview` p95 **< 80 ms** (it sits inline in the billing screen and must feel instant); `POST /requests` p95 < 150 ms; `/me/pending` p95 < 150 ms with unread counts cached in Redis; decision write p95 < 200 ms including callback enqueue.
 - **Timers**: SLA/reminder/escalation timers are durable (persisted `next_action_at`, polled every 15 s) — accuracy within 30 s; they survive worker restarts and are correct across DST and hospital holidays.
@@ -224,6 +244,7 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 - **Testing**: every shipped matrix has fixtures; a golden-path e2e covers submit → escalate → approve → callback; a chaos test kills the timer worker mid-escalation and asserts no missed or duplicated rung.
 
 ## 14. Acceptance Criteria
+
 1. **Given** a billing executive applies a 30 % discount, **when** the preview is requested before submission, **then** the exact approver chain and median turnaround are shown without creating a request.
 2. **Given** the matrix requires HOD then Finance, **when** the HOD approves, **then** Finance is activated and notified, and the request remains pending until Finance decides.
 3. **Given** a parallel stage with three required approvers, **when** two approve and one rejects, **then** the request is rejected immediately, the reason is recorded, and the remaining approver is told it is closed.
@@ -246,6 +267,7 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 20. **Given** a request is approved, **when** the callback fires, **then** the calling module performs its held action exactly once even if the callback is delivered twice.
 
 ## 15. Enhancements / Later phases
+
 - **Full BPMN-style workflow designer** beyond approvals — multi-step business processes with tasks, forms, timers, gateways and sub-processes (a natural extension once the approval core is stable).
 - **Policy-as-code import/export** so a group can version its Delegation of Authority in Git and publish it to 18 branches (pairs with EN-041).
 - **AI-assisted approvals** (AI-005): risk scoring of a request from historical patterns, "this discount pattern resembles 12 previously rejected requests", and auto-drafted rejection reasons — always advisory, never deciding.
@@ -256,6 +278,7 @@ Rule expressions are a typed AST built in a visual condition builder (no free-fo
 - **Approval SLAs tied to contractual penalties** for vendor-facing processes, and integration with corporate ERP DoA systems.
 
 ## 16. Open Questions for the Hospital
+
 1. What is the current **Delegation of Authority matrix** — the exact amount bands and approvers for discounts, refunds, write-offs, purchase orders, payments, credit limits and budget overrides? (Please provide the signed document; it becomes the seed configuration.)
 2. Which approvals are **statutory or clinical** and therefore must never auto-approve on SLA breach or be delegated?
 3. What **SLAs** does the hospital want per process, and are they in business hours or calendar hours? What are the working days, shift hours and the holiday calendar per branch?

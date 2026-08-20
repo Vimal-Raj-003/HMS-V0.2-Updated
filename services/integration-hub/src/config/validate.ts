@@ -38,10 +38,7 @@ function fromZod(error: z.ZodError): readonly ValidationIssue[] {
   }));
 }
 
-export function validateConnectorConfig(
-  input: unknown,
-  factory: ConnectorAdapterFactory,
-): ConfigValidation {
+export function validateConnectorConfig(input: unknown, factory: ConnectorAdapterFactory): ConfigValidation {
   const parsed = connectorConfigSchema.safeParse(input);
   if (!parsed.success) return { ok: false, issues: fromZod(parsed.error) };
 

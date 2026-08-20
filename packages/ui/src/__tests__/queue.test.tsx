@@ -133,9 +133,7 @@ describe('QueueList — EN-006 console', () => {
   it('calls the next token with Space, not the focused one', () => {
     const onCallNext = vi.fn();
     const onCall = vi.fn();
-    render(
-      <QueueList entries={entries} labels={labels} onCallNext={onCallNext} onCall={onCall} />,
-    );
+    render(<QueueList entries={entries} labels={labels} onCallNext={onCallNext} onCall={onCall} />);
     const list = screen.getByRole('list', { name: labels.listLabel });
     fireEvent.keyDown(list, { key: ' ' });
     expect(onCallNext).toHaveBeenCalledTimes(1);
@@ -253,10 +251,7 @@ describe('TokenDisplay — docs/06 §5.2 #11', () => {
         freshness={{ kind: 'stale', lastUpdated: '14:07:02' }}
       />,
     );
-    expect(container.querySelector('[data-slot="token-display"]')).toHaveAttribute(
-      'data-announce',
-      'false',
-    );
+    expect(container.querySelector('[data-slot="token-display"]')).toHaveAttribute('data-announce', 'false');
     expect(screen.queryByText(/please go to/)).toBeNull();
     expect(screen.getByText('Last updated 14:07:02')).toBeInTheDocument();
   });
@@ -274,10 +269,7 @@ describe('TokenDisplay — docs/06 §5.2 #11', () => {
     expect(container.querySelector('[data-staleness="expired"]')?.textContent).toContain(
       'Board offline since 13:55:00',
     );
-    expect(container.querySelector('[data-slot="token-display"]')).toHaveAttribute(
-      'data-announce',
-      'false',
-    );
+    expect(container.querySelector('[data-slot="token-display"]')).toHaveAttribute('data-announce', 'false');
   });
 
   it('shows at most seven upcoming tokens', () => {
