@@ -43,7 +43,12 @@ async function tableDigests(): Promise<ReadonlyMap<string, string>> {
   const { rows: tables } = await pool.query<{ schemaname: string; tablename: string }>(
     `SELECT schemaname, tablename
        FROM pg_tables
-      WHERE schemaname IN ('core', 'mdm', 'integration')
+      -- Every schema that holds tenant data. A narrower list silently exempts
+      -- whole phases from the idempotency check: the Phase 1 schemas were
+      -- invisible here while this read ('core','mdm','integration'), so a seed
+      -- that rewrote 220,000 patient rows on every run would have passed.
+      WHERE schemaname IN ('core', 'mdm', 'integration', 'patient', 'clinical',
+                           'queue', 'engage', 'billing')
         -- Leaf partitions are covered through their parent.
         AND tablename NOT LIKE '%\\_2%'
       ORDER BY schemaname, tablename`,
@@ -95,11 +100,14 @@ describe('seeds are idempotent', () => {
   it('writes nothing on a second run and leaves every table byte-identical', async () => {
     const pool = pg.pool('migrator');
 
-    const first = await runSeed(pool, 'minimal');
+    // 'demo' is the smallest tier that populates the Phase 1 schemas. Running
+    // 'minimal' here checked idempotency only for tables the tier never writes,
+    // which is a test that cannot fail for the code it is meant to guard.
+    const first = await runSeed(pool, 'demo');
     expect(first).toBeDefined();
 
     const before = await tableDigests();
-    const second = await runSeed(pool, 'minimal');
+    const second = await runSeed(pool, 'demo');
     const after = await tableDigests();
 
     const changed: string[] = [];
@@ -109,6 +117,14 @@ describe('seeds are idempotent', () => {
 
     expect(changed, 'tables whose contents changed on a re-run').toEqual([]);
     expect(second).toBeDefined();
+
+    // Guard the guard. This test's value is entirely in what `tableDigests()`
+    // covers, and that coverage is a schema list somebody can shorten without
+    // any test going red. Naming tables the seed actually writes means a future
+    // narrowing fails here instead of quietly exempting a phase.
+    for (const table of ['patient.patients', 'clinical.appointments', 'queue.queue_tokens']) {
+      expect(before.has(table), `${table} must be covered by the idempotency check`).toBe(true);
+    }
   }, 300_000);
 
   it('still passes the isolation suite after seeding', async () => {
