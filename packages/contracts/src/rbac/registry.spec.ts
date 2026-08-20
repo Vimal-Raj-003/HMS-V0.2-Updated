@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   CLINICAL_SAFETY_EXEMPT_PERMISSIONS,
@@ -39,20 +42,49 @@ describe('permission catalogue', () => {
     }
   });
 
+  /**
+   * Reads the index rather than a hand-maintained copy of it.
+   *
+   * The previous version of this test asserted against a literal list of the
+   * sixteen Phase-0 modules, which meant it could only ever pass for Phase 0 and
+   * would have to be edited every phase — and an assertion you edit to make it
+   * pass is not an assertion. Parsing `docs/12-module-index.md` makes the test
+   * mean what its name says: a permission may not claim a module that the index
+   * does not define.
+   */
   it('attributes every key to a module ID that exists in docs/12', () => {
-    const knownModules = new Set([
-      'EN-005', 'EN-007', 'EN-013', 'EN-017', 'EN-022', 'EN-023', 'EN-024',
-      'EN-025', 'EN-026', 'EN-027', 'EN-032', 'EN-037', 'EN-038', 'EN-039',
-      'EN-040', 'EN-041',
-    ]);
+    const index = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../../../docs/12-module-index.md'),
+      'utf8',
+    );
+    const knownModules = new Set(index.match(/\b(?:OP|IP|TR|NC|EN|RC|PE|AI)-\d{3}\b/g) ?? []);
+    expect(knownModules.size, 'docs/12 should define the full module catalogue').toBeGreaterThan(150);
+
     for (const def of PERMISSION_CATALOGUE) {
       expect(knownModules.has(def.module), `${def.key} claims unknown module ${def.module}`).toBe(true);
     }
   });
 
-  it('places every Phase-0 key in phase 0', () => {
+  /**
+   * A key's phase is the phase that introduces it (`CLAUDE.md` §6). Keys may not
+   * drift backwards into an earlier phase, because a Phase-0 role template
+   * granting a Phase-1 key would give somebody authority over a module that does
+   * not exist yet.
+   */
+  it('places each key in a build phase that exists, and never moves one backwards', () => {
+    const phase0Modules = new Set([
+      'EN-005', 'EN-007', 'EN-013', 'EN-017', 'EN-022', 'EN-023', 'EN-024',
+      'EN-025', 'EN-026', 'EN-027', 'EN-032', 'EN-037', 'EN-038', 'EN-039',
+      'EN-040', 'EN-041',
+    ]);
     for (const def of PERMISSION_CATALOGUE) {
-      expect(def.phase).toBe(0);
+      expect(def.phase, `${def.key} has an out-of-range phase`).toBeGreaterThanOrEqual(0);
+      expect(def.phase, `${def.key} has an out-of-range phase`).toBeLessThanOrEqual(13);
+      if (phase0Modules.has(def.module)) {
+        expect(def.phase, `${def.key} belongs to a Phase-0 module and must stay at phase 0`).toBe(0);
+      } else {
+        expect(def.phase, `${def.key} is not a Phase-0 module and must not claim phase 0`).toBeGreaterThan(0);
+      }
     }
   });
 

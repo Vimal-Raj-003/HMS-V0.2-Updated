@@ -170,6 +170,74 @@ const HOD_BASE = [
 /** Label/wristband printing roles. */
 const LABEL_PRINTER = ['barcode.label.print', 'barcode.label.reprint'] as const;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 1 bundles — Patient & Front Office
+//
+// Grouped so a grant is made once and reused, rather than repeated as a long
+// literal across roles where one entry can silently drift.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Read-only access to the patient master. Everyone who touches a patient needs it. */
+const PATIENT_READ = ['patient.record.read', 'patient.record.list'] as const;
+
+/**
+ * The front-office registration grant.
+ *
+ * Deliberately excludes `patient.merge.execute`, `patient.record.export` and
+ * `patient.record.create_override` — OP-001 §12 keeps merge with MRD, export
+ * behind an audited grant, and the duplicate override behind its own key, so
+ * that bypassing the duplicate check is a decision somebody is named for.
+ */
+const PATIENT_DESK = [
+  ...PATIENT_READ,
+  'patient.record.create',
+  'patient.record.update',
+  'patient.record.print',
+  'patient.mobile.verify',
+  'patient.alert.manage',
+  'consent.capture',
+  'consent.read',
+  'consent.guardian.manage',
+] as const;
+
+const APPOINTMENT_DESK = [
+  'appointment.slot.read',
+  'appointment.create',
+  'appointment.list',
+  'appointment.update',
+  'appointment.cancel',
+  'appointment.waitlist',
+] as const;
+
+const VISIT_DESK = ['visit.create', 'visit.list', 'visit.update', 'visit.cancel', 'visit.transfer'] as const;
+
+/** Issue and read tokens. Calling one is a separate grant, held by whoever runs the room. */
+const QUEUE_DESK = ['queue.token.issue', 'queue.token.read', 'queue.board.read'] as const;
+
+/** Held by anyone who calls the next patient — scoped to their own queues by ABAC. */
+const QUEUE_CALLER = ['queue.token.read', 'queue.token.call', 'queue.board.read'] as const;
+
+const ABHA_DESK = [
+  'abdm.abha.create',
+  'abdm.abha.verify',
+  'abdm.abha.link',
+  'abdm.abha.read',
+  'abdm.scan_share.manage',
+  'abdm.hip.link',
+] as const;
+
+/** A cashier's day: open a shift, collect, reprint, close. Refunds and voids are separate keys. */
+const CASHIER_BASE = [
+  'receipt.shift.open',
+  'receipt.shift.read',
+  'receipt.shift.close',
+  'receipt.collect',
+  'receipt.reprint',
+  'receipt.drawer.open',
+  'receipt.daybook.read',
+] as const;
+
+
 // ── the 64 templates ─────────────────────────────────────────────────────────
 
 const templates: readonly RoleTemplate[] = [
@@ -218,6 +286,16 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'admin-console',
     permissions: [
+      'schedule.publish',
+      'queue.config.manage',
+      'queue.overview.read',
+      'queue.analytics.read',
+      'messaging.template.approve',
+      'messaging.campaign.approve',
+      'consent.type.configure',
+      'receipt.counter.configure',
+      'receipt.daybook.read',
+
       ...BASE_STAFF,
       ...APPROVER,
       'admin.hospital.configure',
@@ -307,6 +385,16 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'branch-admin',
     permissions: [
+      'schedule.publish',
+      'schedule.configure',
+      'frontoffice.counter.configure',
+      'frontoffice.dashboard.read',
+      'queue.config.manage',
+      'queue.counter.manage',
+      'queue.overview.read',
+      'queue.analytics.read',
+      'receipt.counter.configure',
+
       ...BASE_STAFF,
       ...APPROVER,
       'admin.settings.read',
@@ -345,6 +433,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      'consent.override.review',
+      'consent.template.approve',
+      'patient.record.export',
+
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
       ...APPROVER,
@@ -381,7 +473,11 @@ const templates: readonly RoleTemplate[] = [
     description: 'Department scheduling, approvals and KPIs, scoped to their own department.',
     category: 'medical',
     homeWorkspace: 'department-dashboard',
-    permissions: [...BASE_CLINICAL, ...BREAK_GLASS, ...SIGNS_DOCUMENTS, ...HOD_BASE, 'tpl.form.manage'],
+    permissions: [
+      'appointment.overbook',
+      'schedule.publish',
+      'consent.override.review',
+...BASE_CLINICAL, ...BREAK_GLASS, ...SIGNS_DOCUMENTS, ...HOD_BASE, 'tpl.form.manage'],
     abacDefaults: { ownDepartmentOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -394,7 +490,16 @@ const templates: readonly RoleTemplate[] = [
     description: 'Outpatient consultation, e-prescribing, orders, results, referrals and own earnings.',
     category: 'medical',
     homeWorkspace: 'doctor-opd',
-    permissions: [...BASE_CLINICAL, ...BREAK_GLASS, ...SIGNS_DOCUMENTS, 'notify.escalation.read'],
+    permissions: [
+      ...PATIENT_READ,
+      'schedule.configure',
+      ...QUEUE_CALLER,
+      'queue.doctor.status',
+      'visit.list',
+      'visit.update',
+      'consent.request',
+      'consent.read',
+...BASE_CLINICAL, ...BREAK_GLASS, ...SIGNS_DOCUMENTS, 'notify.escalation.read'],
     abacDefaults: { ownPatientsOnly: false, careTeamOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -421,6 +526,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      'consent.emergency_override',
+      'patient.record.create_override',
+
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
       ...SIGNS_DOCUMENTS,
@@ -536,7 +644,13 @@ const templates: readonly RoleTemplate[] = [
     description: 'Vitals room, injections and dressings.',
     category: 'nursing',
     homeWorkspace: 'vitals-room',
-    permissions: [...BASE_CLINICAL, ...LABEL_PRINTER, 'barcode.verify.sample'],
+    permissions: [
+      ...PATIENT_READ,
+      ...QUEUE_CALLER,
+      'visit.list',
+      'visit.update',
+      'consent.capture',
+...BASE_CLINICAL, ...LABEL_PRINTER, 'barcode.verify.sample'],
     abacDefaults: { ownDepartmentOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -590,6 +704,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'triage-board',
     permissions: [
+      'receipt.collect.night',
+
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
       'barcode.wristband.issue',
@@ -636,6 +752,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-command-centre',
     permissions: [
+      'queue.token.manage',
+      'patient.record.create_override',
+
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
       ...APPROVER,
@@ -673,6 +792,15 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'registration',
     permissions: [
+      ...PATIENT_DESK,
+      ...APPOINTMENT_DESK,
+      ...VISIT_DESK,
+      ...QUEUE_DESK,
+      ...ABHA_DESK,
+      'frontoffice.dashboard.read',
+      'messaging.message.send',
+      'messaging.optin.manage',
+
       ...BASE_STAFF,
       'barcode.scan',
       ...LABEL_PRINTER,
@@ -695,7 +823,14 @@ const templates: readonly RoleTemplate[] = [
     description: 'Appointments, enquiries and follow-up calls.',
     category: 'admin',
     homeWorkspace: 'call-console',
-    permissions: [...BASE_STAFF, 'org.patient.locate', 'tpl.render'],
+    permissions: [
+      ...PATIENT_READ,
+      ...APPOINTMENT_DESK,
+      'messaging.message.send',
+      'messaging.inbox.read',
+      'messaging.inbox.reply',
+      'queue.virtual.join',
+...BASE_STAFF, 'org.patient.locate', 'tpl.render'],
     abacDefaults: { dataClassMasks: ['aadhaar', 'diagnosis'] },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -708,7 +843,11 @@ const templates: readonly RoleTemplate[] = [
     description: 'Cash counter: receipts, shift open/close and limited refunds.',
     category: 'finance',
     homeWorkspace: 'cash-counter',
-    permissions: [...BASE_STAFF, 'barcode.scan', 'tpl.render', 'print.job.reprint'],
+    permissions: [
+      ...PATIENT_READ,
+      ...CASHIER_BASE,
+      ...QUEUE_CALLER,
+...BASE_STAFF, 'barcode.scan', 'tpl.render', 'print.job.reprint'],
     abacDefaults: { amountLimit: { maxAmount: '2000.00', combine: 'whichever_is_lower' } },
     mfaMandatory: true,
     sensitiveGrant: false,
@@ -721,7 +860,11 @@ const templates: readonly RoleTemplate[] = [
     description: 'Bills, interim bills and discounts within a configured ceiling.',
     category: 'finance',
     homeWorkspace: 'billing-desk',
-    permissions: [...BASE_STAFF, 'barcode.scan', 'tpl.render', 'print.job.reprint', 'email.message.resend'],
+    permissions: [
+      ...PATIENT_READ,
+      ...CASHIER_BASE,
+      'receipt.refund.pay',
+...BASE_STAFF, 'barcode.scan', 'tpl.render', 'print.job.reprint', 'email.message.resend'],
     // docs/05 §ABAC gives the worked example: "amount_limit (discount ≤ 10 %)".
     abacDefaults: { amountLimit: { maxPercent: '10', maxAmount: '5000.00', combine: 'whichever_is_lower' } },
     mfaMandatory: true,
@@ -789,6 +932,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-admin',
     permissions: [
+      'receipt.petty.manage',
+
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
       ...APPROVER,
@@ -942,6 +1087,17 @@ const templates: readonly RoleTemplate[] = [
     category: 'records',
     homeWorkspace: 'mrd-queue',
     permissions: [
+      'abdm.abha.delink',
+      'consent.template.manage',
+
+      ...PATIENT_READ,
+      'patient.record.update',
+      'patient.merge.review',
+      'patient.merge.execute',
+      'patient.record.export',
+      'abdm.hip.link',
+      'consent.ledger.read',
+
       ...BASE_CLINICAL,
       'audit.patient.read',
       'audit.read',
@@ -1002,6 +1158,23 @@ const templates: readonly RoleTemplate[] = [
     category: 'finance',
     homeWorkspace: 'finance',
     permissions: [
+      'receipt.shift.open_any',
+      'receipt.shift.force_close',
+      'receipt.void',
+      'receipt.night.reconcile',
+      'receipt.forex.configure',
+      'receipt.forex.collect',
+      'receipt.export',
+      'receipt.petty.manage',
+
+      'receipt.report.read',
+      'receipt.daybook.read',
+      'receipt.daybook.close',
+      'receipt.shift.list',
+      'receipt.shift.variance.approve',
+      'receipt.handover.accept',
+      'messaging.cost.read',
+
       ...BASE_STAFF,
       ...APPROVER,
       'wf.decide.bulk',
@@ -1135,6 +1308,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'quality',
     permissions: [
+      'consent.report.read',
+      'consent.template.manage',
+
       ...BASE_STAFF,
       'audit.read',
       'audit.report.read',
@@ -1163,6 +1339,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'crm',
     permissions: [
+      'messaging.campaign.manage',
+      'messaging.template.configure',
+      'messaging.inbox.read',
+      'messaging.optin.read',
+
       ...BASE_STAFF,
       'email.campaign.manage',
       'email.campaign.send',
@@ -1184,6 +1365,16 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'it-console',
     permissions: [
+      'messaging.message.read',
+      'abdm.registry.manage',
+
+      'messaging.provider.configure',
+      'messaging.provider.read',
+      'messaging.template.configure',
+      'messaging.trigger.configure',
+      'integration.abdm.configure',
+      'integration.abdm.read',
+
       ...BASE_STAFF,
       'admin.user.read',
       'admin.user.reset',
@@ -1272,6 +1463,17 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'privacy-dashboard',
     permissions: [
+      'consent.artefact.manage',
+
+      'consent.ledger.read',
+      'consent.withdraw',
+      'consent.notice.manage',
+      'consent.dsar.manage',
+      'consent.report.read',
+      'messaging.optin.manage',
+      'messaging.optin.read',
+      'abdm.consent.read',
+
       ...BASE_STAFF,
       'audit.read',
       'audit.patient.read',
@@ -1310,6 +1512,14 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'audit-workspace',
     permissions: [
+      ...PATIENT_READ,
+      'appointment.list',
+      'visit.list',
+      'queue.analytics.read',
+      'receipt.report.read',
+      'consent.ledger.read',
+      'consent.report.read',
+
       'org.read',
       'mdm.read',
       'mdm.report.read',
@@ -1419,7 +1629,11 @@ const templates: readonly RoleTemplate[] = [
       'Scoped device token, not a person. Boards and kiosks read only what their pairing grants; they never idle out but their token is narrowly scoped.',
     category: 'device',
     homeWorkspace: 'device-display',
-    permissions: ['print.agent', 'print.job.create', 'barcode.scan'],
+    permissions: [
+      'kiosk.checkin',
+      'queue.token.issue',
+      'queue.board.read',
+'print.agent', 'print.job.create', 'barcode.scan'],
     abacDefaults: { deviceBound: true, dataClassMasks: ['full_name', 'aadhaar', 'address', 'mobile', 'diagnosis'] },
     mfaMandatory: false,
     sensitiveGrant: false,
