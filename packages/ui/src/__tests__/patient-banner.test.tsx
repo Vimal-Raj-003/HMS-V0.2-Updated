@@ -7,6 +7,7 @@ const labels: PatientBannerLabels = {
   region: 'Patient identity and alerts',
   allergyPrefix: 'ALLERGY:',
   allergiesNotRecorded: 'Allergies not recorded',
+  allergiesUnableToAssess: (reason) => `Allergies unable to assess — ${reason}`,
   noKnownAllergies: (verifiedOn) => `No known allergies (verified ${verifiedOn})`,
   moreAllergies: (count) => `+${String(count)}`,
   isolationPrefix: 'ISOLATION',
@@ -89,6 +90,20 @@ describe('PatientBanner — CLAUDE.md §5 / docs/06 §4.2', () => {
     const chip = container.querySelector('[data-flag="allergy-not-recorded"]');
     expect(chip?.textContent).toBe('Allergies not recorded');
     expect(chip?.className).toContain('warning');
+  });
+
+  it('keeps "unable to assess" distinct from both "not recorded" and "none known"', () => {
+    const { container } = render(
+      <PatientBanner
+        patient={{ ...base, allergies: { kind: 'unable-to-assess', reason: 'Unconscious, no informant' } }}
+        labels={labels}
+      />,
+    );
+    expect(container.querySelector('[data-flag="allergy-none-known"]')).toBeNull();
+    expect(container.querySelector('[data-flag="allergy-not-recorded"]')).toBeNull();
+    expect(container.querySelector('[data-flag="allergy-unable-to-assess"]')?.textContent).toBe(
+      'Allergies unable to assess — Unconscious, no informant',
+    );
   });
 
   it('renders "no known allergies" as an explicit verified positive state', () => {

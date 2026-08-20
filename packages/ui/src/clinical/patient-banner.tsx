@@ -44,6 +44,13 @@ export interface AllergyRecord {
 export type AllergyStatus =
   /** §4.2 — renders the amber "Allergies not recorded" chip. Never silence. */
   | { readonly kind: 'not-recorded' }
+  /**
+   * Asked, but not establishable (unconscious patient, no informant). A distinct state
+   * from both "not recorded" and "none known": the clinician DID ask. `reason` is
+   * already localised and is mandatory, so this can never degrade into a blank chip.
+   * See `allergy-editor.tsx` for the full statement type this projects from.
+   */
+  | { readonly kind: 'unable-to-assess'; readonly reason: string }
   /** §4.2 — the explicit positive state, with its verification date. */
   | { readonly kind: 'none-known'; readonly verifiedOn: string }
   | { readonly kind: 'known'; readonly allergies: readonly AllergyRecord[] };
@@ -95,6 +102,8 @@ export interface PatientBannerLabels {
   readonly region: string;
   readonly allergyPrefix: string;
   readonly allergiesNotRecorded: string;
+  /** §4.2 — "asked, could not establish". Distinct wording from "not recorded". */
+  readonly allergiesUnableToAssess: (reason: string) => string;
   readonly noKnownAllergies: (verifiedOn: string) => string;
   readonly moreAllergies: (count: number) => string;
   readonly isolationPrefix: string;
@@ -182,6 +191,18 @@ function AllergyFlag({
       >
         <AlertTriangle aria-hidden="true" />
         {labels.allergiesNotRecorded}
+      </span>
+    );
+  }
+
+  if (status.kind === 'unable-to-assess') {
+    return (
+      <span
+        data-flag="allergy-unable-to-assess"
+        className={cn(chipClassName, 'border-violet-border bg-violet-surface text-violet-on-surface font-semibold')}
+      >
+        <AlertTriangle aria-hidden="true" />
+        {labels.allergiesUnableToAssess(status.reason)}
       </span>
     );
   }

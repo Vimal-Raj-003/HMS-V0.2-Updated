@@ -29,6 +29,15 @@ if (!globalThis.ResizeObserver) {
   } as unknown as typeof ResizeObserver;
 }
 
+// jsdom has no media stack, so `video.play()` throws "Not implemented" and floods the
+// console. `PhotoCapture` already treats a failed play as non-fatal; this keeps the
+// test output readable.
+if (typeof HTMLMediaElement !== 'undefined') {
+  HTMLMediaElement.prototype.play = function play(): Promise<void> {
+    return Promise.resolve();
+  };
+}
+
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function scrollIntoView(): void {};
 }
