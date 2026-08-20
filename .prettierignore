@@ -7,3 +7,10 @@ coverage
 pnpm-lock.yaml
 docs/_source-vims-master-sheet.txt
 packages/db/prisma/migrations
+
+# Helm chart templates are Go text/template, not YAML. `{{ include ... }}` in a
+# value position is a syntax error to any YAML parser, so Prettier cannot check
+# these files -- it exits non-zero with a parse error rather than a style
+# warning, which fails the CI static job outright. `helm lint` is the right
+# gate for these.
+infra/helm/**/templates/
