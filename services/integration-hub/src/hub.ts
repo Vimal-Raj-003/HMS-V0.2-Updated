@@ -23,6 +23,20 @@ import { HealthCheckRunner } from './health/health-check-runner.js';
 import { InMemoryPayloadStore, type PayloadStore } from './payload/payload-store.js';
 import { nullEchoFactory } from './adapters/null-echo/null-echo.adapter.js';
 import { silentLogger } from './logger.js';
+import { TemplateCatalogue, InMemoryTemplateStore, type TemplateStore } from './messaging/template-catalogue.js';
+import {
+  DltTemplateRegistry,
+  InMemoryDltRegistrationStore,
+  type DltRegistrationStore,
+} from './messaging/dlt-registry.js';
+import { ConsentLedger, InMemoryConsentStore, type ConsentStore } from './messaging/consent-ledger.js';
+import { CostLedger, InMemoryCostStore, type CostStore } from './messaging/cost-ledger.js';
+import { InMemoryMessageDirectory, type MessageDirectory } from './messaging/directory.js';
+import {
+  InMemoryMessagingSettingsStore,
+  MessagingService,
+  type MessagingSettingsStore,
+} from './messaging/messaging-service.js';
 
 /**
  * Phase 0 has no secret store wired. Failing loudly is the correct behaviour:
@@ -52,6 +66,22 @@ export interface IntegrationHubOptions {
    * "everything linked" would be how one arrives by accident.
    */
   readonly adapters?: AdapterRegistry;
+  /**
+   * EN-009 stores. Each defaults to the in-memory implementation for the same
+   * reason `PayloadStore` does: `msg_templates`, `msg_optins` and `msg_costs_daily`
+   * live in the `engage` schema, which is a Phase-10 schema that does not exist
+   * yet. The contracts are here now so the send path is written against the real
+   * shape rather than retrofitted, and a durable implementation is a constructor
+   * argument away.
+   */
+  readonly messaging?: {
+    readonly templates?: TemplateStore;
+    readonly dlt?: DltRegistrationStore;
+    readonly consent?: ConsentStore;
+    readonly costs?: CostStore;
+    readonly directory?: MessageDirectory;
+    readonly settings?: MessagingSettingsStore;
+  };
 }
 
 export class IntegrationHub {
@@ -64,6 +94,14 @@ export class IntegrationHub {
   readonly circuits: CircuitStore;
   readonly health: HealthCheckRunner;
   readonly payloads: PayloadStore;
+
+  /** EN-009: the send pipeline and the registries it refuses on. */
+  readonly templates: TemplateCatalogue;
+  readonly dlt: DltTemplateRegistry;
+  readonly consent: ConsentLedger;
+  readonly costs: CostLedger;
+  readonly messageDirectory: MessageDirectory;
+  readonly messaging: MessagingService;
 
   constructor(options: IntegrationHubOptions) {
     const logger = options.logger ?? silentLogger;
@@ -103,6 +141,33 @@ export class IntegrationHub {
       registry: this.connectors,
       clock,
       logger,
+    });
+
+    this.templates = new TemplateCatalogue(options.messaging?.templates ?? new InMemoryTemplateStore());
+    this.dlt = new DltTemplateRegistry({
+      store: options.messaging?.dlt ?? new InMemoryDltRegistrationStore(),
+      clock,
+    });
+    this.consent = new ConsentLedger(options.messaging?.consent ?? new InMemoryConsentStore());
+    this.costs = new CostLedger(options.messaging?.costs ?? new InMemoryCostStore());
+    this.messageDirectory = options.messaging?.directory ?? new InMemoryMessageDirectory();
+
+    this.messaging = new MessagingService({
+      db: this.db,
+      registry: this.connectors,
+      dispatcher: this.dispatcher,
+      templates: this.templates,
+      dlt: this.dlt,
+      consent: this.consent,
+      costs: this.costs,
+      directory: this.messageDirectory,
+      settings: options.messaging?.settings ?? new InMemoryMessagingSettingsStore(),
+      payloads: this.payloads,
+      clock,
+      newId,
+      logger,
+      messageLog: this.messages,
+      dlq: this.dlq,
     });
   }
 

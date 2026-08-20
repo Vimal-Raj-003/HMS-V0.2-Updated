@@ -27,6 +27,7 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
+    "@vims/i18n": "workspace:*",
     "@vims/testing": "workspace:*",
     "tsx": "^4.19.2",
     "vitest": "^4.1.10"

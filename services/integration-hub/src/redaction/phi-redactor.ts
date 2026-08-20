@@ -251,6 +251,25 @@ const KEY_ALIASES: Readonly<Record<string, string>> = {
   impression: 'clinical_text',
   observation: 'clinical_text',
   freetext: 'clinical_text',
+  // → rendered messaging content (EN-009 §4).
+  //
+  // `msg_messages` stores `body_rendered` **encrypted** and keeps only a
+  // `vars_hash` in the clear, and the same split has to hold here or the
+  // searchable copy of an SMS becomes the thing the encryption was for. A
+  // rendered DLT body legitimately contains a patient's name and an
+  // appointment time — the template approval says so — and a name has no shape
+  // for the value scanner to find, so only a key policy can catch it. The full
+  // text stays one `ihub.payload.read` away in the payload store.
+  body: 'clinical_text',
+  bodyrendered: 'clinical_text',
+  renderedbody: 'clinical_text',
+  messagebody: 'clinical_text',
+  smsbody: 'clinical_text',
+  messagetext: 'clinical_text',
+  templatevars: 'clinical_text',
+  messagevars: 'clinical_text',
+  templateparameters: 'clinical_text',
+  templatebuttonparameters: 'clinical_text',
   // → secrets
   password: 'password_hash',
   passwordhash: 'password_hash',
@@ -517,6 +536,25 @@ function redactNode(
   }
 
   if (typeof value === 'object') {
+    // A policy on the *key* covers everything under it. Recursing into
+    // `templateVars: { patient: 'Ramesh Kumar Iyer' }` and looking each child up
+    // afresh finds no rule for `patient` and stores the name — which is how a
+    // redacted copy ends up holding exactly what it was built to exclude. The
+    // integration suite caught this; review had not. Arrays keep the existing
+    // element-wise behaviour, because `mobiles: ['9876543210', …]` must become a
+    // list of tokens rather than a single one.
+    if (keyRule !== undefined && keyRule.mask !== 'none') {
+      // The serialised form is passed so that a `«text:N»` token reports the
+      // real size of what was removed rather than claiming zero.
+      let serialised = '';
+      try {
+        serialised = JSON.stringify(value) ?? '';
+      } catch {
+        serialised = '';
+      }
+      return applyFieldRule(keyRule, serialised, tally);
+    }
+
     const out: Record<string, JsonValue> = {};
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
       const rule = FIELD_RULES.get(normaliseKey(key));

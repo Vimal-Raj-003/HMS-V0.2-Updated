@@ -66,7 +66,25 @@ export interface DispatchInput {
 }
 
 export type DispatchOutcome =
-  | { readonly status: 'sent' | 'acknowledged'; readonly messageId: string; readonly attempts: number; readonly latencyMs: number }
+  | {
+      readonly status: 'sent' | 'acknowledged';
+      readonly messageId: string;
+      readonly attempts: number;
+      readonly latencyMs: number;
+      /**
+       * The partner's own id for this message, straight from
+       * `DispatchSuccess.partnerRef`.
+       *
+       * It is surfaced here rather than read back from `response_redacted`
+       * because that column holds the *redacted* copy: an SMS request id or a
+       * `wamid` is not PHI, but it is an opaque string that the value scanner is
+       * entitled to rewrite if it happens to contain a digit run shaped like a
+       * phone number. A rewritten provider id is an unmatchable delivery
+       * webhook, which is a silent failure — the one outcome `docs/04` §7 does
+       * not allow.
+       */
+      readonly partnerRef?: string;
+    }
   | { readonly status: 'duplicate'; readonly messageId: string }
   | { readonly status: 'blocked'; readonly messageId: string; readonly reason: string }
   | {
@@ -527,7 +545,13 @@ export class Dispatcher {
         const snapshot = await this.circuits.load(tx, key);
         await this.circuits.save(tx, key, onSuccess(snapshot), now);
       });
-      return { status: result.status, messageId: handle.id, attempts, latencyMs: result.latencyMs };
+      return {
+        status: result.status,
+        messageId: handle.id,
+        attempts,
+        latencyMs: result.latencyMs,
+        ...(result.partnerRef === undefined ? {} : { partnerRef: result.partnerRef }),
+      };
     }
 
     const retry = record.config.retry;
