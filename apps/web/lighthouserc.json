@@ -1,0 +1,32 @@
+{
+  "ci": {
+    "collect": {
+      "url": ["http://localhost:3400/login", "http://localhost:3400/offline"],
+      "numberOfRuns": 3,
+      "settings": {
+        "preset": "desktop",
+        "skipAudits": ["uses-http2"]
+      }
+    },
+    "assert": {
+      "assertions": {
+        "categories:performance": ["error", { "minScore": 0.9 }],
+        "categories:accessibility": ["error", { "minScore": 0.9 }],
+        "categories:best-practices": ["error", { "minScore": 0.9 }],
+        "categories:seo": ["warn", { "minScore": 0.8 }],
+
+        "installable-manifest": ["error", { "minScore": 1 }],
+        "service-worker": ["error", { "minScore": 1 }],
+
+        "color-contrast": ["error", { "minScore": 1 }],
+        "label": ["error", { "minScore": 1 }],
+        "meta-viewport": ["error", { "minScore": 1 }],
+
+        "is-on-https": "off",
+        "redirects-http": "off",
+        "uses-long-cache-ttl": "off"
+      }
+    },
+    "upload": { "target": "filesystem", "outputDir": "./lighthouse-report" }
+  }
+}

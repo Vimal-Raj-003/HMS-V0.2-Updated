@@ -5,7 +5,7 @@
   "description": "BullMQ processors and cron: outbox relay, escalation timers, partition maintenance, retention/archival, PDF rendering, print dispatch.",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",

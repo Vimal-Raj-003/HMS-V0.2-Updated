@@ -1,3 +1,4 @@
+import withSerwistInit from '@serwist/next';
 import type { NextConfig } from 'next';
 
 const config: NextConfig = {
@@ -38,4 +39,20 @@ const config: NextConfig = {
   },
 };
 
-export default config;
+/**
+ * PWA — Phase 0 exit gate 7.
+ *
+ * Disabled in development because a service worker caching a hot-reloaded build
+ * produces failures that look like application bugs and are not.
+ */
+const withSerwist = withSerwistInit({
+  swSrc: 'src/app/sw.ts',
+  swDest: 'public/sw.js',
+  disable: process.env.NODE_ENV === 'development',
+  // The offline fallback must be in the precache or it cannot be shown when
+  // there is no network — which is the only time it is needed.
+  additionalPrecacheEntries: [{ url: '/offline', revision: null }],
+  reloadOnOnline: true,
+});
+
+export default withSerwist(config);

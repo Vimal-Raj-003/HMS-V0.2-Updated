@@ -11,11 +11,32 @@ import { ACCESS_COOKIE } from '@/lib/session';
  * 3 and 6). Treating a cookie's presence as proof of anything here would put the
  * security boundary in the browser's reach.
  */
+/**
+ * Paths that must work without a session.
+ *
+ * `/offline` is the important one and the easy one to miss: it is shown when
+ * there is no network, and a redirect to `/login` in that state produces a
+ * browser error page instead — the exact failure the offline shell exists to
+ * prevent. You cannot sign in while offline, so requiring a session to see the
+ * offline page is circular.
+ */
+const PUBLIC_PATHS = ['/login', '/offline'];
+
 export function middleware(request: NextRequest): NextResponse {
   const hasSession = request.cookies.has(ACCESS_COOKIE);
   const { pathname } = request.nextUrl;
 
-  if (!hasSession && !pathname.startsWith('/login')) {
+  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+    if (hasSession && pathname.startsWith('/login')) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/dashboard';
+      url.search = '';
+      return NextResponse.redirect(url);
+    }
+    return NextResponse.next();
+  }
+
+  if (!hasSession) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     // Bring the user back to what they were reaching for after they sign in.
@@ -23,16 +44,17 @@ export function middleware(request: NextRequest): NextResponse {
     return NextResponse.redirect(url);
   }
 
-  if (hasSession && pathname.startsWith('/login')) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/dashboard';
-    url.search = '';
-    return NextResponse.redirect(url);
-  }
-
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|manifest.webmanifest|icons).*)'],
+  // Everything excluded here is served as a static asset and must never be
+  // redirected. The service-worker scripts are the subtle ones: a browser
+  // refuses to register a worker whose script was reached via a redirect
+  // ("The script resource is behind a redirect, which is disallowed"), so a
+  // middleware that bounced /sw.js to /login silently disabled the entire PWA —
+  // the file was served with a 200 and HTML in it, and nothing else complained.
+  matcher: [
+    '/((?!api|_next/static|_next/image|favicon.ico|manifest.webmanifest|icons|sw.js|sw.js.map|swe-worker-.*|workbox-.*).*)',
+  ],
 };

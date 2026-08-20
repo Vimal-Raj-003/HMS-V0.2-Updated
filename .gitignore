@@ -23,7 +23,14 @@ generated/
 secrets/
 *.lic
 
+# generated service worker (built by @serwist/next; never hand-edited)
+apps/web/public/sw.js
+apps/web/public/sw.js.map
+apps/web/public/swe-worker-*.js
+
 # test output
+apps/web/lighthouse-report/
+.lighthouseci/
 coverage/
 playwright-report/
 test-results/

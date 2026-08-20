@@ -7,9 +7,9 @@
 
 | Field              | Value                                                                                                                                                                                     |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current phase | **Phase 0 complete** — every service and app has source; exit gates 1–6 met, gate 7 partially (see below) |
+| Current phase | **Phase 0 complete — all eight exit gates met.** Ready for Phase 1 (Patient & Front Office). |
 | Repo status | every package and service has source; **172 tables**, 8 migrations, 4 idempotent seed tiers, a running API with login, and a building Next.js front-end |
-| Last green CI | `.github/workflows/ci.yml` written (not yet run on GitHub). Locally **all green**: `lint` · `typecheck` · `test` · `build` · `test:integration` · `test:e2e` — **951 unit + 86 integration + 38 e2e = 1,075 tests** |
+| Last green CI | `.github/workflows/ci.yml` complete (8 stages; not yet run on GitHub). Locally **all green**: `lint` · `typecheck` · `test` · `build` · `test:safety` · `test:integration` · `test:e2e` — **1,033 unit + 166 integration + 72 e2e = 1,271 tests** |
 | Modules complete   | 0 / 177 — Phase 0 builds platform _rails_, not modules                                                                                                                                    |
 | Blocking questions | none blocking. **O-9 closed** (contracts coverage 60.62 % → 97 %). See `docs/DECISIONS.md` → "Open" for O-1…O-8. |
 | Project path       | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                              |
@@ -30,6 +30,51 @@
 ---
 
 ## Session log
+
+### 2026-08-20 · Phase 0 · Admin API, service entrypoints, infrastructure, Safari and gate 7 — **Phase 0 complete**
+
+**Exit gates — all eight now met**
+
+| # | Gate | |
+|---|---|---|
+| 1 | lint · typecheck · test · e2e · build | 🟩 all green, plus `test:safety` and `test:integration` |
+| 2 | login from a clean start | 🟩 |
+| 3 | eight roles, eight correct workspaces | 🟩 |
+| 4 | isolation tests break when a policy breaks | 🟩 automated mutation test |
+| 5 | audit shows login, role change, break-glass, chain intact | 🟩 **now complete** — the admin API's role-assign and deactivate routes are reason-required and each writes exactly one audit row with actor and trace id; asserted in the integration suite |
+| 6 | ESC/POS token + PDF letterhead | 🟩 |
+| 7 | Lighthouse ≥ 90, PWA installable, offline shell | 🟩 **now met** — service worker registers and controls; installable manifest with fetched icons; offline fallback; Lighthouse budgets in CI asserting `installable-manifest` and `service-worker` at 1.0 |
+| 8 | PROGRESS lists what exists, what is stubbed, every open question | 🟩 this file |
+
+**Built**
+- **Admin console API** — 23 routes across users, roles, permission matrix, branches, settings, flags, licence and audit search. Every route carries a catalogue permission key, every mutation writes its audit row and outbox event in one transaction, and cursor pagination is used throughout (`OFFSET` is banned).
+- **Service entrypoints** — `services/worker/src/main.ts` mounts the outbox relay, chain sealer, partition maintenance and print queue across the five BullMQ priority classes from `docs/07` §4, with graceful shutdown. All three back-end services now start from `node dist/main.js` (ADR-0011).
+- **Infrastructure** — OTel collector with a PHI-scrubbing processor chain, Prometheus/Alertmanager/Loki/Tempo/Grafana, 16 alert rules with 16 runbooks, pgBackRest with separated credentials, a restore drill that verifies RLS and the audit chain in the *restored* copy, on-prem compose, nginx and a Helm skeleton.
+- **CI** — stages 8 (browser) and 9 (clinical safety) added; the static stage now enforces the alert-runbook and hex-literal rules.
+
+**Six defects found by running things**
+
+1. **The middleware silently disabled the entire PWA.** Its matcher did not exclude `/sw.js`, so the service-worker script was redirected to `/login` and served as HTML with a 200. The browser refuses a worker reached via a redirect. Nothing else complained: the file existed, the build reported success, and the app simply was not a PWA.
+2. **The middleware also redirected `/offline`** — a page that exists precisely for when you cannot reach the network, and therefore cannot sign in.
+3. **`Secure` was keyed to `NODE_ENV`, not to the transport** (O-10). Chromium tolerates a `Secure` cookie on loopback HTTP; WebKit discards it, so no authenticated request worked on Safari/iPadOS. Now derived from the request URL, so a deployment that loses TLS fails loudly instead of serving sessions in clear text.
+4. **Every paginated admin list skipped rows from page 2.** `timestamptz` is microsecond-precision and a JS `Date` is millisecond, so a cursor minted from a parsed date pointed up to 999 µs before the row it named. The same class of bug as the outbox relay's — worth watching for wherever a timestamp is a key.
+5. **Any request with a long query string returned 500**: `api_route` is `varchar(200)` and a signed cursor overflows it. Storing the path only also keeps identifiers out of the audit row.
+6. **`services/integration-hub`'s entrypoint constructed the hub, logged, and exited** — nothing for a rolling deploy's readiness probe to gate on.
+
+**Closed**
+- **O-10 closed** — root cause found and fixed; a permanent `webkit-ipad` Playwright project now covers Safari, because this class of bug is invisible to Chromium-only CI.
+- **O-11 closed** — gate 7 met.
+
+**Known limitation, stated rather than hidden**
+The offline navigation fallback is verified on Chromium and **unverified on Safari/iPadOS**: Playwright's offline emulation does not drive WebKit's service-worker navigation handler. The worker registers and controls the page under WebKit, and the "never cache an API response" rule is asserted there. Needs a manual check on a real iPad before an iOS rollout.
+
+**Not done — this is Phase 1 onward**
+- Admin console **screens** (the API and the permission-driven nav exist; the pages do not).
+- `@vims/i18n` stays source-only (ADR-0011); no service imports it.
+- Print payload sourcing is a Phase-0 stand-in until the EN-039 render cache exists, and there is no LAN print-agent transport yet, so a job raises the browser-fallback error rather than a no-op transport reporting success.
+- The integration hub's mapping DSL, schedules, listeners and delivery workers.
+- The 177 clinical and administrative modules: Phases 1–13.
+
 
 ### 2026-08-19 (final) · Phase 0 · Realtime, integration hub, TV kiosk, printing, and the browser gates
 

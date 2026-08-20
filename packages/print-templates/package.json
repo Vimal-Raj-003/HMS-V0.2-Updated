@@ -4,16 +4,36 @@
   "private": true,
   "description": "HTML/CSS print templates (A4/A5), ESC/POS thermal and ZPL label templates. Templates are data, never code (EN-039 §5).",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./html": "./src/html/index.ts",
-    "./escpos": "./src/escpos/index.ts",
-    "./zpl": "./src/zpl/index.ts"
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./html": {
+      "development": "./src/html/index.ts",
+      "types": "./dist/html/index.d.ts",
+      "import": "./dist/html/index.js",
+      "default": "./dist/html/index.js"
+    },
+    "./escpos": {
+      "development": "./src/escpos/index.ts",
+      "types": "./dist/escpos/index.d.ts",
+      "import": "./dist/escpos/index.js",
+      "default": "./dist/escpos/index.js"
+    },
+    "./zpl": {
+      "development": "./src/zpl/index.ts",
+      "types": "./dist/zpl/index.d.ts",
+      "import": "./dist/zpl/index.js",
+      "default": "./dist/zpl/index.js"
+    }
   },
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
     "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

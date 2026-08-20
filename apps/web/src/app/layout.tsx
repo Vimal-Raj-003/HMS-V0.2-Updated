@@ -1,10 +1,31 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { ServiceWorkerProvider } from './service-worker-provider';
 
 export const metadata: Metadata = {
   title: "Vim's HMS",
   description: "Vim's HMS by VIMS ENTERPRISE — hospital management system",
   applicationName: "Vim's HMS",
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    title: "Vim's HMS",
+    // `default` keeps the status bar readable against the light clinical theme;
+    // `black-translucent` would put the clock over the patient banner.
+    statusBarStyle: 'default',
+  },
+  icons: {
+    icon: [
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/icons/icon-192.png', sizes: '192x192' }],
+  },
+  formatDetection: {
+    // iOS otherwise turns UHIDs, bill numbers and dosages into telephone links,
+    // which both looks wrong and makes a number tappable into a call.
+    telephone: false,
+  },
 };
 
 export const viewport: Viewport = {
@@ -22,7 +43,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en-IN" dir="ltr" suppressHydrationWarning>
-      <body className="min-h-dvh bg-canvas text-fg-default antialiased">{children}</body>
+      <body className="min-h-dvh bg-canvas text-fg-default antialiased">
+        <ServiceWorkerProvider>{children}</ServiceWorkerProvider>
+      </body>
     </html>
   );
 }

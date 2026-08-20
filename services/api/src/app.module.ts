@@ -9,13 +9,28 @@ import { ContextMiddleware } from './core/context/context.middleware.js';
 import { DatabaseService } from './core/db/database.service.js';
 import { HealthController } from './core/health/health.controller.js';
 import { OutboxService } from './core/outbox/outbox.service.js';
+import { CursorService } from './core/pagination/cursor.service.js';
 import { PermissionRegistryService } from './core/policy/permission-registry.service.js';
 import { PolicyGuard } from './core/policy/policy.guard.js';
+import { PolicyService } from './core/policy/policy.service.js';
 import { ProblemFilter } from './core/problem/problem.filter.js';
 import { TenantGuard } from './core/tenancy/tenant.guard.js';
 import { AuthController } from './modules/platform/auth/auth.controller.js';
 import { AuthService } from './modules/platform/auth/auth.service.js';
-import { UsersController, UsersService } from './modules/platform/admin/users.controller.js';
+import { AuditLogController } from './modules/platform/admin/audit-log.controller.js';
+import { AuditLogService } from './modules/platform/admin/audit-log.service.js';
+import { BranchesController } from './modules/platform/admin/branches.controller.js';
+import { BranchesService } from './modules/platform/admin/branches.service.js';
+import { FlagsController } from './modules/platform/admin/flags.controller.js';
+import { FlagsService } from './modules/platform/admin/flags.service.js';
+import { LicenceController } from './modules/platform/admin/licence.controller.js';
+import { LicenceService } from './modules/platform/admin/licence.service.js';
+import { RolesController } from './modules/platform/admin/roles.controller.js';
+import { RolesService } from './modules/platform/admin/roles.service.js';
+import { SettingsController } from './modules/platform/admin/settings.controller.js';
+import { SettingsService } from './modules/platform/admin/settings.service.js';
+import { UsersController } from './modules/platform/admin/users.controller.js';
+import { UsersService } from './modules/platform/admin/users.service.js';
 import { SessionController, SessionService } from './modules/platform/session/session.controller.js';
 
 /**
@@ -39,7 +54,21 @@ import { SessionController, SessionService } from './modules/platform/session/se
  * listed in the same order as the lifecycle they implement.
  */
 @Module({
-  controllers: [HealthController, AuthController, SessionController, UsersController],
+  controllers: [
+    HealthController,
+    AuthController,
+    SessionController,
+    // The admin console (EN-007 §6). `RolesController` is mounted at `admin` so
+    // it can own both `admin/roles` and `admin/permissions`; the rest own one
+    // path prefix each.
+    UsersController,
+    RolesController,
+    BranchesController,
+    SettingsController,
+    FlagsController,
+    LicenceController,
+    AuditLogController,
+  ],
   providers: [
     { provide: ENV, useFactory: () => loadEnv() },
     DatabaseService,
@@ -48,15 +77,23 @@ import { SessionController, SessionService } from './modules/platform/session/se
     TokenService,
     AuditService,
     OutboxService,
+    CursorService,
+    PolicyService,
     AuthService,
-    UsersService,
     SessionService,
+    UsersService,
+    RolesService,
+    BranchesService,
+    SettingsService,
+    FlagsService,
+    LicenceService,
+    AuditLogService,
     { provide: APP_FILTER, useClass: ProblemFilter },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: TenantGuard },
     { provide: APP_GUARD, useClass: PolicyGuard },
   ],
-  exports: [DatabaseService, AuditService, OutboxService],
+  exports: [DatabaseService, AuditService, OutboxService, CursorService, PolicyService],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

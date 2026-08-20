@@ -149,6 +149,30 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
+      # ── Phase 0 exit gate 7: Lighthouse >= 90, PWA installable ─────────────
+      # Runs against the same stack the browser suite just brought up, so the
+      # score reflects a production build talking to a real API, not a dev
+      # server. `meta-viewport` and `color-contrast` are asserted at 1.0
+      # individually: an aggregate 0.9 can hide a single failure that makes a
+      # clinical screen unusable on a ward tablet.
+      - name: Lighthouse budgets
+        run: |
+          pnpm --filter @vims/web exec tsx e2e/stack.mts &
+          STACK=$!
+          for _ in $(seq 1 120); do [ -f apps/web/e2e/.stack.json ] && break; sleep 2; done
+          npx --yes @lhci/cli@0.15.x autorun --config=apps/web/lighthouserc.json
+          STATUS=$?
+          kill $STACK 2>/dev/null || true
+          exit $STATUS
+
+      - name: Upload the Lighthouse report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-report
+          path: apps/web/lighthouse-report/
+          retention-days: 7
+
   # ── Stage 9: safety ────────────────────────────────────────────────────────
   # docs/09 §15 stage 9: "`pnpm test:safety` — always, every PR". The suites do
   # not exist yet (they arrive with the clinical modules that have hard stops to

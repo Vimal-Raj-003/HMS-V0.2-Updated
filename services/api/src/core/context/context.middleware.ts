@@ -3,6 +3,14 @@ import { newId } from '@vims/contracts';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { runWithContext, type MutableRequestContext } from './request-context.js';
 
+/** The path portion of a request target, bounded to what `api_route` can hold. */
+export function pathOf(url: string | undefined): string {
+  const raw = url ?? '/';
+  const queryAt = raw.indexOf('?');
+  const path = queryAt === -1 ? raw : raw.slice(0, queryAt);
+  return path.length <= 200 ? path : path.slice(0, 200);
+}
+
 /**
  * Step 1 — opens the request context and the trace.
  *
@@ -28,7 +36,15 @@ export class ContextMiddleware implements NestMiddleware {
       requestId: newId(),
       startedAtMs: Date.now(),
       method: req.method ?? 'GET',
-      route: req.url ?? '/',
+      // Path only — the query string is deliberately dropped.
+      //
+      // `route` is what lands in `core.audit_log.api_route`, and a query string
+      // carries identifiers: a page cursor encodes a row id, a search carries a
+      // patient id or a business key. `docs/04` §7 keeps identifiers out of logs
+      // and audit payloads (the filter is recorded by name in `reason_text`, the
+      // values never are), and the column is `varchar(200)`, which a signed
+      // cursor alone can overflow.
+      route: pathOf(req.url),
       ip,
       userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null,
       userId: null,
