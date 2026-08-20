@@ -21,9 +21,14 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
 
   return (
     <WorkspaceChrome
-      displayName={session.user.displayName}
-      roles={session.roles}
-      permissions={session.permissions}
+      session={{
+        userId: session.user.id,
+        displayName: session.user.displayName,
+        hospitalId: session.hospitalId,
+        branchId: session.branchId,
+        roles: session.roles,
+        permissions: session.permissions,
+      }}
     >
       {children}
     </WorkspaceChrome>

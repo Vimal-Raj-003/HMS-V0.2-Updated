@@ -1,4 +1,5 @@
 import type { RoleNavItem } from '@vims/ui';
+import { ADMIN_SCREENS } from '@/features/admin/screens';
 
 /**
  * The Phase-0 navigation.
@@ -9,9 +10,13 @@ import type { RoleNavItem } from '@vims/ui';
  * `packages/contracts`; an invented one would be dropped for everybody and the
  * mistake would look like a permissions problem rather than a typo.
  *
- * Clinical and administrative modules join this list as their phases land, each
- * behind its own key, so a hospital that has not licensed a module never sees a
- * door it cannot open.
+ * The administration group is generated from `ADMIN_SCREENS` so the menu, the
+ * console home and the ⌘K palette cannot drift apart — a screen added to one and
+ * forgotten in another is how a user ends up able to reach something their
+ * navigation deliberately hid.
+ *
+ * Clinical modules join this list as their phases land, each behind its own key,
+ * so a hospital that has not licensed a module never sees a door it cannot open.
  */
 export const PHASE0_NAV: readonly RoleNavItem[] = [
   // No permission: every authenticated user has a home.
@@ -20,12 +25,11 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
     key: 'administration',
     label: 'Administration',
     href: '/admin',
-    children: [
-      { key: 'users', label: 'Users', href: '/admin/users', permission: 'admin.user.read' },
-      { key: 'roles', label: 'Roles & permissions', href: '/admin/roles', permission: 'admin.role.read' },
-      { key: 'settings', label: 'Settings', href: '/admin/settings', permission: 'admin.settings.read' },
-      { key: 'audit', label: 'Audit log', href: '/admin/audit', permission: 'admin.audit.read' },
-      { key: 'licence', label: 'Licence', href: '/admin/licence', permission: 'admin.licence.read' },
-    ],
+    children: ADMIN_SCREENS.map((screen) => ({
+      key: screen.key,
+      label: screen.label,
+      href: screen.href,
+      permission: screen.permission,
+    })),
   },
 ];

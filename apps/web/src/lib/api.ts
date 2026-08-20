@@ -31,7 +31,7 @@ export class ApiProblem extends Error {
 }
 
 export interface ApiRequest {
-  readonly method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  readonly method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   readonly body?: unknown;
   readonly signal?: AbortSignal;
   /** Reason for a break-glass or reason-required action; sent as `x-reason`. */
