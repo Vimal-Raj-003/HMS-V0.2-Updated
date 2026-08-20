@@ -35,6 +35,17 @@ export interface EventDefinition {
 const uuid = z.string().uuid();
 const iso = z.string().datetime({ offset: true });
 
+/**
+ * Money in an event payload is a DECIMAL STRING, never a number.
+ *
+ * `Money` is bigint minor units in code (`primitives/money.ts`), and an event is
+ * JSON: a number would go through IEEE-754 on the way out and back, so
+ * ₹1,234.55 could arrive as 1234.5499999999999. A consumer posting that to a
+ * ledger would be wrong by a paisa, every time, in a way nobody notices until a
+ * reconciliation fails.
+ */
+const money = z.string().regex(/^-?\d+(\.\d{1,2})?$/, 'money must be a decimal string, e.g. "1234.55"');
+
 function ev(
   type: string,
   aggregate: string,
@@ -733,6 +744,175 @@ const opsEvents: readonly EventDefinition[] = [
 // Registry
 // ─────────────────────────────────────────────────────────────────────────────
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 1 — Patient & Front Office
+//
+// From the §7 Domain Events section of each spec. Every consumer named there
+// depends on the shape below, so a field added later must be optional and a
+// field removed needs a schemaVersion bump — an event is a contract with modules
+// that do not exist yet.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const patientEvents: readonly EventDefinition[] = [
+  ev('patient.registered', 'patient', 'OP-001',
+    'A patient was registered and issued a UHID. Consumed by OP-005 (account), EN-009 (welcome), EN-011 (ABHA), NC-003 (MRD file) and analytics.',
+    z.object({
+      patientId: uuid,
+      uhid: z.string(),
+      branchId: uuid.nullable(),
+      channel: z.enum(['counter', 'kiosk', 'online', 'app', 'call_centre', 'ivr', 'camp']),
+      registeredAt: iso,
+    }),
+    { containsPhi: true, retentionDays: 2555 }),
+
+  ev('patient.updated', 'patient', 'OP-001',
+    'Patient demographics changed. Consumers invalidate caches; the portal re-reads.',
+    z.object({ patientId: uuid, changedFields: z.array(z.string()), reason: z.string().nullable() }),
+    { containsPhi: true, retentionDays: 2555 }),
+
+  ev('patient.merged', 'patient', 'OP-001',
+    'Two records were merged. EVERY module holding a patient_id must re-point to the survivor — OP-001 §5 sets a 5-minute SLA for this and monitors it.',
+    z.object({
+      survivorId: uuid,
+      victimId: uuid,
+      victimUhid: z.string(),
+      mergedBy: uuid,
+      mergedAt: iso,
+    }),
+    { containsPhi: true, retentionDays: 2555 }),
+
+  ev('patient.unmerged', 'patient', 'OP-001',
+    'A merge was reversed. Consumers must re-split what they re-pointed.',
+    z.object({ survivorId: uuid, victimId: uuid, unmergedBy: uuid, reason: z.string() }),
+    { containsPhi: true, retentionDays: 2555 }),
+
+  ev('patient.abha.linked', 'patient', 'OP-001',
+    'An ABHA was linked to a patient. EN-011 M2 uses this to start care-context linking.',
+    z.object({ patientId: uuid, abhaAddress: z.string(), linkedAt: iso }),
+    { containsPhi: true, retentionDays: 2555 }),
+
+  ev('patient.alert.raised', 'patient_alert', 'OP-001',
+    'A safety alert was added to a patient — allergy mirror, MLC, isolation, credit block. Drives the patient banner.',
+    z.object({
+      patientId: uuid,
+      alertId: uuid,
+      type: z.enum(['allergy', 'mlc', 'vip', 'credit_block', 'isolation', 'fall_risk', 'custom']),
+      severity: z.enum(['low', 'medium', 'high', 'critical']),
+    }),
+    { containsPhi: true, retentionDays: 2555 }),
+];
+
+const appointmentEvents: readonly EventDefinition[] = [
+  ev('appointment.booked', 'appointment', 'OP-001', 'An appointment was booked.',
+    z.object({
+      appointmentId: uuid, patientId: uuid.nullable(), doctorId: uuid,
+      slotStart: iso, slotEnd: iso, channel: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 400 }),
+  ev('appointment.confirmed', 'appointment', 'OP-001', 'A booked appointment was confirmed by the patient.',
+    z.object({ appointmentId: uuid, confirmedAt: iso }), { containsPhi: true, retentionDays: 400 }),
+  ev('appointment.rescheduled', 'appointment', 'OP-001', 'An appointment moved to a new slot.',
+    z.object({ appointmentId: uuid, previousAppointmentId: uuid, slotStart: iso, slotEnd: iso }),
+    { containsPhi: true, retentionDays: 400 }),
+  ev('appointment.cancelled', 'appointment', 'OP-001',
+    'An appointment was cancelled. The reason drives the refund policy, so it is part of the event rather than looked up later.',
+    z.object({ appointmentId: uuid, reason: z.string(), cancelledBy: z.enum(['patient', 'hospital', 'system']) }),
+    { containsPhi: true, retentionDays: 400 }),
+  ev('appointment.no_show', 'appointment', 'OP-001', 'A patient did not attend.',
+    z.object({ appointmentId: uuid, markedAt: iso, automatic: z.boolean() }),
+    { containsPhi: true, retentionDays: 400 }),
+  ev('schedule.published', 'schedule_template', 'OP-001',
+    'A doctor schedule version was published. The website and portal book against published versions only.',
+    z.object({ doctorId: uuid, version: z.number().int(), effectiveFrom: iso }), { retentionDays: 90 }),
+];
+
+const visitEvents: readonly EventDefinition[] = [
+  ev('visit.checked_in', 'op_visit', 'OP-001',
+    'A patient checked in and a visit opened. Consumed by OP-007 (vitals queue), OP-002 (doctor queue), OP-005 (fee) and EN-018 (TV board).',
+    z.object({
+      visitId: uuid, patientId: uuid, doctorId: uuid, departmentId: uuid.nullable(),
+      tokenNo: z.string().nullable(), branchId: uuid,
+    }),
+    { containsPhi: true, retentionDays: 400 }),
+  ev('visit.cancelled', 'op_visit', 'OP-001', 'A visit was cancelled before consultation started.',
+    z.object({ visitId: uuid, reason: z.string() }), { containsPhi: true, retentionDays: 400 }),
+  ev('visit.closed', 'op_visit', 'OP-001', 'A visit was closed.',
+    z.object({ visitId: uuid, closedAt: iso, automatic: z.boolean() }),
+    { containsPhi: true, retentionDays: 400 }),
+];
+
+const queueEvents: readonly EventDefinition[] = [
+  ev('queue.token.issued', 'queue_token', 'EN-006', 'A token was issued.',
+    z.object({
+      tokenId: uuid, queueId: uuid, tokenNo: z.string(),
+      priorityWeight: z.number().int(), issuedAt: iso,
+    }),
+    { retentionDays: 30 }),
+  ev('queue.token.called', 'queue_token', 'EN-006',
+    'A token was called. Drives the TV board and its announcement — the board shows the token, never a diagnosis.',
+    z.object({ tokenId: uuid, queueId: uuid, tokenNo: z.string(), counterOrRoom: z.string(), calledAt: iso }),
+    { retentionDays: 30 }),
+  ev('queue.token.recalled', 'queue_token', 'EN-006', 'A token was called again after no response.',
+    z.object({ tokenId: uuid, attempt: z.number().int() }), { retentionDays: 30 }),
+  ev('queue.token.skipped', 'queue_token', 'EN-006', 'A token was skipped after repeated no-response.',
+    z.object({ tokenId: uuid, reason: z.string() }), { retentionDays: 30 }),
+  ev('queue.token.transferred', 'queue_token', 'EN-006', 'A token moved to another queue or room.',
+    z.object({ tokenId: uuid, fromQueueId: uuid, toQueueId: uuid, reason: z.string() }), { retentionDays: 30 }),
+  ev('queue.token.completed', 'queue_token', 'EN-006', 'A token was served.',
+    z.object({ tokenId: uuid, servedAt: iso, waitSeconds: z.number().int() }), { retentionDays: 30 }),
+];
+
+const cashEvents: readonly EventDefinition[] = [
+  ev('cash.shift.opened', 'cash_shift', 'NC-001', 'A cashier opened a shift with an opening float.',
+    z.object({ shiftId: uuid, counterId: uuid, cashierUserId: uuid, openingFloat: money }),
+    { retentionDays: 2555 }),
+  ev('cash.shift.closed', 'cash_shift', 'NC-001',
+    'A shift was closed. A non-zero variance is what the approval path exists for.',
+    z.object({ shiftId: uuid, declared: money, expected: money, variance: money }),
+    { retentionDays: 2555 }),
+  ev('receipt.issued', 'receipt', 'NC-001', 'A payment was taken and a receipt issued.',
+    z.object({
+      receiptId: uuid, receiptNo: z.string(), patientId: uuid.nullable(),
+      amount: money, modes: z.array(z.string()), shiftId: uuid,
+    }),
+    { retentionDays: 2555 }),
+  ev('receipt.voided', 'receipt', 'NC-001', 'A receipt was voided. The original is never deleted.',
+    z.object({ receiptId: uuid, reason: z.string(), approvedBy: uuid }), { retentionDays: 2555 }),
+  ev('refund.issued', 'refund', 'NC-001', 'A refund was paid out.',
+    z.object({ refundId: uuid, receiptId: uuid, amount: money, approvedBy: uuid }),
+    { retentionDays: 2555 }),
+];
+
+const messagingEvents: readonly EventDefinition[] = [
+  ev('messaging.message.queued', 'message', 'EN-009', 'A message was queued for delivery.',
+    z.object({ messageId: uuid, channel: z.enum(['sms', 'whatsapp', 'email', 'push']), templateKey: z.string() }),
+    { retentionDays: 90 }),
+  ev('messaging.message.delivered', 'message', 'EN-009', 'A provider confirmed delivery.',
+    z.object({ messageId: uuid, deliveredAt: iso, providerMessageId: z.string() }), { retentionDays: 90 }),
+  ev('messaging.message.failed', 'message', 'EN-009',
+    'Delivery failed permanently. WhatsApp failures fall back to SMS before this fires.',
+    z.object({ messageId: uuid, reason: z.string(), attempts: z.number().int() }), { retentionDays: 90 }),
+  ev('messaging.optout.recorded', 'messaging_optin', 'EN-009',
+    'A recipient opted out. Sending to them afterwards must be refused and recorded, never silently dropped.',
+    z.object({ mobileHash: z.string(), scope: z.enum(['promotional', 'all']), recordedAt: iso }),
+    { retentionDays: 2555 }),
+];
+
+const consentEvents: readonly EventDefinition[] = [
+  ev('consent.captured', 'consent', 'EN-028', 'A consent was captured with an explicit affirmative action.',
+    z.object({ consentId: uuid, patientId: uuid, purposeCode: z.string(), noticeVersion: z.string() }),
+    { containsPhi: true, retentionDays: 2555 }),
+  ev('consent.withdrawn', 'consent', 'EN-028',
+    'A consent was withdrawn. DPDP makes withdrawal a right, so downstream processing must stop on this event.',
+    z.object({ consentId: uuid, patientId: uuid, purposeCode: z.string(), withdrawnAt: iso }),
+    { containsPhi: true, retentionDays: 2555 }),
+  ev('consent.emergency_override', 'consent', 'EN-028',
+    'Treatment proceeded without consent in an emergency. Lawful, and reviewed — the Medical Superintendent is notified.',
+    z.object({ patientId: uuid, clinicianId: uuid, reason: z.string(), occurredAt: iso }),
+    { containsPhi: true, retentionDays: 2555 }),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -746,6 +926,15 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...integrationEvents,
   ...barcodeAndPrintEvents,
   ...opsEvents,
+
+  // Phase 1
+  ...patientEvents,
+  ...appointmentEvents,
+  ...visitEvents,
+  ...queueEvents,
+  ...cashEvents,
+  ...messagingEvents,
+  ...consentEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));
