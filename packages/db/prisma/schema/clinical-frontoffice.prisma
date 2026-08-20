@@ -1,0 +1,573 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-001 — appointments, schedules, OP visits and the front-office estate
+// (schema `clinical`)
+//
+// OP-001 §4 places these in `clinical`, alongside `clinical.encounters` which
+// OP-002 creates in Phase 2. `op_visits` is the OPD-specific record of an
+// arrival; the general `encounters` table it will hang from does not exist yet
+// and is not invented here.
+//
+// Two rules are enforced by the database rather than by the booking service,
+// because a service check is one code path away from not happening:
+//
+//   * **A slot cannot be double-booked past its capacity.** `schedule_slots`
+//     carries `capacity` and `booked_count` with a CHECK that the latter never
+//     exceeds the former plus the overbook allowance, and bookings take the
+//     slot row `FOR UPDATE`. OP-001 §14 AC-5 — two receptionists booking the
+//     last place, exactly one succeeds — is that lock, not an application
+//     mutex that a second API pod would not share.
+//
+//   * **A single-capacity doctor cannot be in two places at once.** A
+//     `btree_gist` EXCLUDE constraint on (practitioner, time range) for
+//     capacity-1 slots makes overlap impossible (OP-001 §4).
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ScheduleTemplateStatus {
+  draft
+  published
+  superseded
+  retired
+
+  @@schema("clinical")
+}
+
+enum ScheduleExceptionKind {
+  leave
+  holiday
+  extra_clinic
+  blocked
+  reduced
+  conference
+  emergency
+
+  @@schema("clinical")
+}
+
+enum SlotStatus {
+  open
+  filling
+  full
+  blocked
+  cancelled
+
+  @@schema("clinical")
+}
+
+enum AppointmentStatus {
+  waitlisted
+  booked
+  confirmed
+  checked_in
+  in_progress
+  completed
+  cancelled
+  no_show
+  rescheduled
+
+  @@schema("clinical")
+}
+
+enum AppointmentChannel {
+  counter
+  call_centre
+  kiosk
+  online
+  app
+  ivr
+  whatsapp
+  camp
+  referral
+  api
+
+  @@schema("clinical")
+}
+
+enum AppointmentCancelReason {
+  patient_request
+  doctor_unavailable
+  rescheduled
+  duplicate
+  no_payment
+  clinical
+  weather_or_force_majeure
+  other
+
+  @@schema("clinical")
+}
+
+/// Same members as `patient.PatientPayerType`. Duplicated rather than shared
+/// because a Postgres enum belongs to one schema, and a `clinical` table
+/// depending on a `patient` type would couple the two schemas' migration order
+/// for no gain — the payer model proper arrives with RC-007.
+enum VisitPayerType {
+  self
+  insurance
+  corporate
+  scheme
+  staff
+  charity
+
+  @@schema("clinical")
+}
+
+enum VisitType {
+  new
+  follow_up
+  free_review
+  referral
+  tele
+  emergency_opd
+  health_checkup
+
+  @@schema("clinical")
+}
+
+enum VisitStatus {
+  registered
+  waiting_payment
+  waiting_vitals
+  waiting_doctor
+  in_consult
+  consult_done
+  closed
+  cancelled
+  no_show
+
+  @@schema("clinical")
+}
+
+// ── doctor schedules ─────────────────────────────────────────────────────────
+
+/// OP-001 §3.6: a weekly template per doctor per branch per room, published
+/// with an effective date. `version` + `published_at` make a published template
+/// immutable — an edit produces the next version, so a booking made last week
+/// can still be explained by the template that was live when it was made.
+model DoctorScheduleTemplate {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String  @map("branch_id") @db.Uuid
+  practitionerKey String  @map("practitioner_key") @db.Uuid
+  roomKey         String? @map("room_key") @db.Uuid
+  departmentKey   String? @map("department_key") @db.Uuid
+  specialityKey   String? @map("speciality_key") @db.Uuid
+  /// ISO-8601: 1 = Monday … 7 = Sunday.
+  weekday         Int
+  /// Local clock time at the branch, stored as `time`; the branch timezone in
+  /// `core.branches.timezone` turns it into an instant. A template is a rule,
+  /// not an event, so it must survive a DST change unchanged.
+  startTime       DateTime @map("start_time") @db.Time(0)
+  endTime         DateTime @map("end_time") @db.Time(0)
+  slotMinutes     Int     @default(15) @map("slot_minutes")
+  capacityPerSlot Int     @default(1) @map("capacity_per_slot")
+  overbookAllowance Int   @default(0) @map("overbook_allowance")
+  bufferMinutes   Int     @default(0) @map("buffer_minutes")
+  consultTypeKeys String[] @default([]) @map("consult_type_keys") @db.Uuid
+  /// OP-001 §3.4.1 booking-channel quotas: what share of a slot the website may
+  /// take and how many places are held back for walk-ins.
+  onlineQuotaPct  Int     @default(100) @map("online_quota_pct")
+  walkinReserve   Int     @default(0) @map("walkin_reserve")
+  onlineBookingWindowDays Int @default(30) @map("online_booking_window_days")
+  maxWalkins      Int?    @map("max_walkins")
+  vitalsRequired  Boolean @default(false) @map("vitals_required")
+  teleEnabled     Boolean @default(false) @map("tele_enabled")
+  version         Int     @default(1)
+  status          ScheduleTemplateStatus @default(draft)
+  effectiveFrom   DateTime @map("effective_from") @db.Date
+  effectiveTo     DateTime? @map("effective_to") @db.Date
+  publishedAt     DateTime? @map("published_at") @db.Timestamptz(6)
+  publishedBy     String? @map("published_by") @db.Uuid
+  supersededById  String? @map("superseded_by_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  slots DoctorScheduleSlot[]
+
+  @@index([hospitalId, branchId, practitionerKey, weekday, status])
+  @@index([hospitalId, status, effectiveFrom])
+  @@map("doctor_schedule_templates")
+  @@schema("clinical")
+}
+
+/// OP-001 §3.6.2 — leave, holidays, extra clinics, room changes. Checked
+/// against existing bookings before it is saved (§3.4.7 bulk reschedule).
+model ScheduleException {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String  @map("branch_id") @db.Uuid
+  practitionerKey String? @map("practitioner_key") @db.Uuid
+  departmentKey   String? @map("department_key") @db.Uuid
+  roomKey         String? @map("room_key") @db.Uuid
+  kind            ScheduleExceptionKind
+  startsAt        DateTime @map("starts_at") @db.Timestamptz(6)
+  endsAt          DateTime @map("ends_at") @db.Timestamptz(6)
+  isFullDay       Boolean @default(true) @map("is_full_day")
+  reason          String  @db.Text
+  replacementPractitionerKey String? @map("replacement_practitioner_key") @db.Uuid
+  /// EN-038 approval when a doctor blocks a day that already has bookings.
+  approvalId      String? @map("approval_id") @db.Uuid
+  approvedBy      String? @map("approved_by") @db.Uuid
+  approvedAt      DateTime? @map("approved_at") @db.Timestamptz(6)
+  affectedAppointments Int @default(0) @map("affected_appointments")
+  notifiedAt      DateTime? @map("notified_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@index([hospitalId, branchId, practitionerKey, startsAt])
+  @@index([hospitalId, kind, startsAt])
+  @@map("schedule_exceptions")
+  @@schema("clinical")
+}
+
+/// The materialised slot. Computing availability by expanding templates on
+/// every keystroke cannot meet the 150 ms budget in OP-001 §13, and, more
+/// importantly, capacity cannot be locked against a computation. Slots are
+/// generated ahead from the published template and are the row a booking takes
+/// `FOR UPDATE`.
+model DoctorScheduleSlot {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String  @map("branch_id") @db.Uuid
+  templateId      String? @map("template_id") @db.Uuid
+  practitionerKey String  @map("practitioner_key") @db.Uuid
+  roomKey         String? @map("room_key") @db.Uuid
+  specialityKey   String? @map("speciality_key") @db.Uuid
+  serviceKey      String? @map("service_key") @db.Uuid
+  slotDate        DateTime @map("slot_date") @db.Date
+  slotStart       DateTime @map("slot_start") @db.Timestamptz(6)
+  slotEnd         DateTime @map("slot_end") @db.Timestamptz(6)
+  capacity        Int     @default(1)
+  overbookAllowance Int   @default(0) @map("overbook_allowance")
+  bookedCount     Int     @default(0) @map("booked_count")
+  onlineQuota     Int     @default(0) @map("online_quota")
+  onlineBookedCount Int   @default(0) @map("online_booked_count")
+  walkinReserve   Int     @default(0) @map("walkin_reserve")
+  consultTypeKeys String[] @default([]) @map("consult_type_keys") @db.Uuid
+  teleEnabled     Boolean @default(false) @map("tele_enabled")
+  status          SlotStatus @default(open)
+  blockedReason   String? @map("blocked_reason") @db.VarChar(200)
+  exceptionId     String? @map("exception_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  template     DoctorScheduleTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  appointments Appointment[]
+
+  @@unique([hospitalId, practitionerKey, slotStart], map: "schedule_slots_key")
+  @@index([hospitalId, branchId, slotDate, practitionerKey])
+  @@index([hospitalId, specialityKey, slotStart])
+  @@map("schedule_slots")
+  @@schema("clinical")
+}
+
+// ── appointments ─────────────────────────────────────────────────────────────
+
+/// OP-001 §3.4.5 waitlist offers and §15 family bookings both need a series
+/// that survives a reschedule, and §3.4 recurring appointments need one row per
+/// occurrence that still knows which series it belongs to.
+model AppointmentSeries {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String  @map("branch_id") @db.Uuid
+  patientId       String  @map("patient_id") @db.Uuid
+  practitionerKey String? @map("practitioner_key") @db.Uuid
+  serviceKey      String? @map("service_key") @db.Uuid
+  /// RFC 5545 subset: freq, interval, byday, count, until.
+  recurrenceRule  Json    @map("recurrence_rule")
+  occurrencesPlanned Int  @map("occurrences_planned")
+  occurrencesBooked  Int  @default(0) @map("occurrences_booked")
+  startsOn        DateTime @map("starts_on") @db.Date
+  endsOn          DateTime? @map("ends_on") @db.Date
+  /// active | completed | cancelled
+  status          String  @default("active") @db.VarChar(16)
+  cancelReason    String? @map("cancel_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  appointments Appointment[]
+
+  @@index([hospitalId, patientId, startsOn])
+  @@map("appointment_series")
+  @@schema("clinical")
+}
+
+model Appointment {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String  @map("branch_id") @db.Uuid
+  appointmentNo   String  @map("appointment_no") @db.VarChar(32)
+  /// Null for an unregistered lead taken by the call centre — name and mobile
+  /// are captured below and the patient is created at check-in.
+  patientId       String? @map("patient_id") @db.Uuid
+  leadName        String? @map("lead_name") @db.VarChar(200)
+  leadMobile      String? @map("lead_mobile") @db.VarChar(20)
+  practitionerKey String? @map("practitioner_key") @db.Uuid
+  /// A room, an ultrasound machine, an ECG bay — an appointment need not be
+  /// with a person.
+  resourceKey     String? @map("resource_key") @db.Uuid
+  departmentKey   String? @map("department_key") @db.Uuid
+  specialityKey   String? @map("speciality_key") @db.Uuid
+  serviceKey      String? @map("service_key") @db.Uuid
+  consultTypeKey  String? @map("consult_type_key") @db.Uuid
+  slotId          String? @map("slot_id") @db.Uuid
+  seriesId        String? @map("series_id") @db.Uuid
+  slotStart       DateTime @map("slot_start") @db.Timestamptz(6)
+  slotEnd         DateTime @map("slot_end") @db.Timestamptz(6)
+  /// The branch-local calendar date of `slot_start`. A stored column because
+  /// `slot_start::date` depends on the session TimeZone and is therefore not
+  /// immutable, so Postgres will not index it — and OP-001 §5's "same patient,
+  /// same doctor, same day" rule needs an index to be enforceable.
+  slotDate        DateTime @map("slot_date") @db.Date
+  channel         AppointmentChannel @default(counter)
+  status          AppointmentStatus @default(booked)
+  isTele          Boolean @default(false) @map("is_tele")
+  isOverbooked    Boolean @default(false) @map("is_overbooked")
+  overbookApprovedBy String? @map("overbook_approved_by") @db.Uuid
+  /// `phase-01 §1.4`: EN-010 arrives in Phase 5. Until then an advance is
+  /// recorded as owed and the receipt, once taken at the counter, points here.
+  advanceRequired Decimal? @map("advance_required") @db.Decimal(14, 2)
+  advanceReceiptId String? @map("advance_receipt_id") @db.Uuid
+  /// none | pending | paid | refunded | waived
+  paymentStatus   String  @default("none") @map("payment_status") @db.VarChar(16)
+  currency        String  @default("INR") @db.Char(3)
+  rescheduledFromId String? @map("rescheduled_from_id") @db.Uuid
+  rescheduledToId String? @map("rescheduled_to_id") @db.Uuid
+  cancelReason    AppointmentCancelReason? @map("cancel_reason")
+  cancelNote      String? @map("cancel_note") @db.Text
+  cancelledBy     String? @map("cancelled_by") @db.Uuid
+  cancelledAt     DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  noShowAt        DateTime? @map("no_show_at") @db.Timestamptz(6)
+  checkedInAt     DateTime? @map("checked_in_at") @db.Timestamptz(6)
+  visitId         String? @map("visit_id") @db.Uuid
+  /// Reminder fan-out is idempotent: a timestamp per rung, not a counter.
+  reminderSentAt  DateTime[] @default([]) @map("reminder_sent_at") @db.Timestamptz(6)
+  confirmedAt     DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  bookedBy        String? @map("booked_by") @db.Uuid
+  bookedAt        DateTime @default(now()) @map("booked_at") @db.Timestamptz(6)
+  notes           String? @db.Text
+  /// OP-001 §6: booking is an idempotent, money-adjacent operation.
+  idempotencyKey  String? @map("idempotency_key") @db.VarChar(128)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  slot    DoctorScheduleSlot? @relation(fields: [slotId], references: [id], onDelete: SetNull)
+  series  AppointmentSeries?  @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  history AppointmentStatusHistory[]
+
+  @@unique([hospitalId, appointmentNo])
+  @@index([hospitalId, branchId, practitionerKey, slotStart])
+  @@index([hospitalId, patientId, slotStart(sort: Desc)])
+  @@index([hospitalId, branchId, status, slotStart])
+  @@index([hospitalId, slotId])
+  @@map("appointments")
+  @@schema("clinical")
+}
+
+/// `docs/03 §Table rules`: "Every order/bill/result table has `status` +
+/// `status_history` … with actor & timestamp." Append-only.
+model AppointmentStatusHistory {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  appointmentId String  @map("appointment_id") @db.Uuid
+  fromStatus    AppointmentStatus? @map("from_status")
+  toStatus      AppointmentStatus  @map("to_status")
+  reason        String? @db.Text
+  channel       AppointmentChannel @default(counter)
+  actorId       String? @map("actor_id") @db.Uuid
+  /// user | patient | system | device
+  actorType     String  @default("user") @map("actor_type") @db.VarChar(16)
+  occurredAt    DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  meta          Json    @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, appointmentId, occurredAt(sort: Desc)])
+  @@map("appointment_status_history")
+  @@schema("clinical")
+}
+
+/// OP-001 §3.4.5: a cancellation offers the slot to the next waitlisted patient
+/// with a 30-minute accept window. `offer_expires_at` is what the sweeper reads.
+model AppointmentWaitlistEntry {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String  @map("branch_id") @db.Uuid
+  patientId       String  @map("patient_id") @db.Uuid
+  practitionerKey String? @map("practitioner_key") @db.Uuid
+  specialityKey   String? @map("speciality_key") @db.Uuid
+  serviceKey      String? @map("service_key") @db.Uuid
+  preferredDate   DateTime? @map("preferred_date") @db.Date
+  preferredFrom   DateTime? @map("preferred_from") @db.Timestamptz(6)
+  preferredTo     DateTime? @map("preferred_to") @db.Timestamptz(6)
+  priority        Int     @default(0)
+  /// waiting | offered | accepted | declined | expired | cancelled | booked
+  status          String  @default("waiting") @db.VarChar(16)
+  offeredSlotId   String? @map("offered_slot_id") @db.Uuid
+  offeredAt       DateTime? @map("offered_at") @db.Timestamptz(6)
+  offerExpiresAt  DateTime? @map("offer_expires_at") @db.Timestamptz(6)
+  respondedAt     DateTime? @map("responded_at") @db.Timestamptz(6)
+  appointmentId   String? @map("appointment_id") @db.Uuid
+  notes           String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@index([hospitalId, practitionerKey, status, priority(sort: Desc)])
+  @@index([hospitalId, patientId, status])
+  @@index([status, offerExpiresAt])
+  @@map("appointment_waitlist")
+  @@schema("clinical")
+}
+
+// ── the visit ────────────────────────────────────────────────────────────────
+
+/// OP-001 §3.5. The OPD arrival: what the token, the consultation fee and (from
+/// Phase 2) the encounter all hang from.
+model OpVisit {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String  @map("branch_id") @db.Uuid
+  visitNo         String  @map("visit_no") @db.VarChar(32)
+  patientId       String  @map("patient_id") @db.Uuid
+  appointmentId   String? @map("appointment_id") @db.Uuid
+  practitionerKey String? @map("practitioner_key") @db.Uuid
+  departmentKey   String? @map("department_key") @db.Uuid
+  specialityKey   String? @map("speciality_key") @db.Uuid
+  consultTypeKey  String? @map("consult_type_key") @db.Uuid
+  roomKey         String? @map("room_key") @db.Uuid
+  visitType       VisitType @default(new) @map("visit_type")
+  payerType       VisitPayerType @default(self) @map("payer_type")
+  payerRefId      String? @map("payer_ref_id") @db.Uuid
+  status          VisitStatus @default(registered)
+  /// EN-006 issues the token; the display value is denormalised so the OP slip
+  /// and the visit list do not join a partitioned table.
+  tokenId         String? @map("token_id") @db.Uuid
+  tokenDisplay    String? @map("token_display") @db.VarChar(16)
+  queueId         String? @map("queue_id") @db.Uuid
+  /// OP-001 §14 AC-7: a department that requires vitals routes there first.
+  vitalsRequired  Boolean @default(false) @map("vitals_required")
+  sourceChannel   AppointmentChannel @default(counter) @map("source_channel")
+  checkedInAt     DateTime @default(now()) @map("checked_in_at") @db.Timestamptz(6)
+  consultStartedAt DateTime? @map("consult_started_at") @db.Timestamptz(6)
+  consultEndedAt  DateTime? @map("consult_ended_at") @db.Timestamptz(6)
+  closedAt        DateTime? @map("closed_at") @db.Timestamptz(6)
+  cancelledAt     DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelReason    String? @map("cancel_reason") @db.Text
+  transferredFromVisitId String? @map("transferred_from_visit_id") @db.Uuid
+  /// Consultation fee owed for this visit. The receipt lives in `billing`;
+  /// bills themselves arrive with OP-005 in Phase 5 (`phase-01 §1.6`).
+  feeAmount       Decimal? @map("fee_amount") @db.Decimal(14, 2)
+  feeCurrency     String  @default("INR") @map("fee_currency") @db.Char(3)
+  feeReceiptId    String? @map("fee_receipt_id") @db.Uuid
+  /// none | pending | paid | credit | waived | free_review
+  feeStatus       String  @default("pending") @map("fee_status") @db.VarChar(16)
+  notes           String? @db.Text
+  idempotencyKey  String? @map("idempotency_key") @db.VarChar(128)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@unique([hospitalId, visitNo])
+  @@index([hospitalId, branchId, practitionerKey, checkedInAt(sort: Desc)])
+  @@index([hospitalId, patientId, checkedInAt(sort: Desc)])
+  @@index([hospitalId, branchId, status, checkedInAt])
+  @@index([hospitalId, appointmentId])
+  @@map("op_visits")
+  @@schema("clinical")
+}
+
+// ── the front-office estate ──────────────────────────────────────────────────
+
+/// OP-001 §4 `registration_counters`. Distinct from `billing.cash_counters`:
+/// one is where a patient is registered, the other is where money is taken, and
+/// a hospital that runs them at the same physical desk links them by
+/// `cash_counter_id` rather than by conflating the two.
+model RegistrationCounter {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  branchId       String  @map("branch_id") @db.Uuid
+  code           String  @db.VarChar(32)
+  name           String  @db.VarChar(120)
+  location       String? @db.VarChar(200)
+  roomKey        String? @map("room_key") @db.Uuid
+  /// EN-005 print routing for the UHID card and the OP slip.
+  workstationId  String? @map("workstation_id") @db.Uuid
+  cardPrinterId  String? @map("card_printer_id") @db.Uuid
+  slipPrinterId  String? @map("slip_printer_id") @db.Uuid
+  cashCounterId  String? @map("cash_counter_id") @db.Uuid
+  queueId        String? @map("queue_id") @db.Uuid
+  /// EN-006 §3.6: the reserved offline token block belongs to a counter.
+  offlineBlockSize Int   @default(100) @map("offline_block_size")
+  isActive       Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, branchId, code], map: "registration_counters_key")
+  @@index([hospitalId, branchId, isActive])
+  @@map("registration_counters")
+  @@schema("clinical")
+}
+
+/// OP-001 §8 kiosk self-service (EN-034). The device token is stored hashed for
+/// the same reason a session token is: a kiosk in a public lobby is the least
+/// physically secure endpoint in the hospital.
+model KioskDevice {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(120)
+  location      String? @db.VarChar(200)
+  deviceTokenHash Bytes? @map("device_token_hash")
+  tokenIssuedAt DateTime? @map("token_issued_at") @db.Timestamptz(6)
+  tokenExpiresAt DateTime? @map("token_expires_at") @db.Timestamptz(6)
+  printerId     String? @map("printer_id") @db.Uuid
+  scannerProfileId String? @map("scanner_profile_id") @db.Uuid
+  languages     String[] @default([])
+  /// register | checkin | both | payment
+  capabilities  String[] @default([])
+  idleResetSeconds Int  @default(60) @map("idle_reset_seconds")
+  /// unpaired | online | offline | revoked
+  status        String  @default("unpaired") @db.VarChar(16)
+  lastHeartbeatAt DateTime? @map("last_heartbeat_at") @db.Timestamptz(6)
+  appVersion    String? @map("app_version") @db.VarChar(32)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, branchId, code], map: "kiosk_devices_key")
+  @@index([hospitalId, status, lastHeartbeatAt])
+  @@map("kiosk_devices")
+  @@schema("clinical")
+}

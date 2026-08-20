@@ -1,0 +1,681 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-001 — Cash counter, and the receipt rows Phase 1 needs (schema `billing`)
+//
+// A resolved ambiguity, stated plainly. NC-001 §4 ends: "Payment/receipt/refund/
+// advance rows are OP-005 `payments`, `payment_lines`, `advances`, `refunds` —
+// NC-001 adds `counter_id`, `shift_id`, `cashier_id`." OP-005 is Phase 5.
+// But `phase-01 §1.6` requires a cashier to open a shift, take a split payment,
+// issue a refund and close with a variance **in Phase 1** — which is impossible
+// without those four tables.
+//
+// So they are created here, in OP-005's names and shapes, with the columns a
+// bill-less phase can fill: `bill_id` and `invoice_ids` are nullable because
+// bills do not exist yet, and a Phase-1 receipt is raised against an advance or
+// a consultation fee (`clinical.op_visits.fee_receipt_id`). Phase 5 expands
+// them — it does not rename them. Creating a throwaway `cash_receipts` table
+// now and migrating it later would mean re-pointing every receipt number, every
+// GST record and every audit row in the system's financial history, which is
+// precisely the rewrite the expand/contract discipline in `docs/10 §6` exists
+// to avoid.
+//
+// `payments` is partitioned monthly by `paid_at`; `payment_lines` therefore
+// carries `payment_id` without a foreign key, exactly as `core.notif_deliveries`
+// does for `core.notif_notifications` — a composite FK into a partitioned parent
+// would force every child to carry the parent's partition key for no benefit.
+// Nothing in this schema may be deleted by the application role.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum CashCounterType {
+  general
+  pharmacy
+  lab
+  radiology
+  ip_deposit
+  er_night
+  forex
+  kiosk_virtual
+  online_virtual
+  petty_cash
+
+  @@schema("billing")
+}
+
+enum CashShiftStatus {
+  open
+  closing
+  closed
+  force_closed
+
+  @@schema("billing")
+}
+
+enum PaymentMode {
+  cash
+  card
+  upi
+  netbanking
+  wallet
+  cheque
+  dd
+  gateway_link
+  advance_adjust
+  patient_wallet
+  credit
+  staff_credit
+  emi
+  forex
+
+  @@schema("billing")
+}
+
+enum PaymentKind {
+  payment
+  advance
+  refund
+  adjustment
+  wallet_topup
+  deposit
+
+  @@schema("billing")
+}
+
+enum PaymentStatus {
+  pending
+  confirmed
+  failed
+  reversed
+  voided
+
+  @@schema("billing")
+}
+
+enum RefundStatus {
+  requested
+  approved
+  processed
+  failed
+  rejected
+
+  @@schema("billing")
+}
+
+enum DenominationSheetKind {
+  opening
+  closing
+  handover
+  deposit
+  night_envelope
+
+  @@schema("billing")
+}
+
+// ── the counter and the shift ────────────────────────────────────────────────
+
+model CashCounter {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(120)
+  location      String? @db.VarChar(200)
+  counterType   CashCounterType @default(general) @map("counter_type")
+  allowedModes  PaymentMode[] @default([]) @map("allowed_modes")
+  allowedDocTypes String[] @default([]) @map("allowed_doc_types")
+  floatLimit    Decimal @default(0) @map("float_limit") @db.Decimal(14, 2)
+  drawerAlertLimit Decimal @default(0) @map("drawer_alert_limit") @db.Decimal(14, 2)
+  currency      String  @default("INR") @db.Char(3)
+  /// `core.numbering_series.key` for the receipt series. Gapless per FY.
+  receiptSeriesKey String @map("receipt_series_key") @db.VarChar(64)
+  printerProfileId String? @map("printer_profile_id") @db.Uuid
+  drawerProfile Json    @default("{}") @map("drawer_profile")
+  upiDisplayDeviceId String? @map("upi_display_device_id") @db.Uuid
+  posTerminalId String? @map("pos_terminal_id") @db.VarChar(64)
+  departmentKey String? @map("department_key") @db.Uuid
+  /// A virtual counter (online, kiosk) runs a system shift that never closes.
+  isVirtual     Boolean @default(false) @map("is_virtual")
+  isActive      Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  assignments CashCounterAssignment[]
+  shifts      CashShift[]
+
+  @@unique([hospitalId, branchId, code], map: "cash_counters_key")
+  @@index([hospitalId, branchId, isActive])
+  @@map("cash_counters")
+  @@schema("billing")
+}
+
+model CashCounterAssignment {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  counterId  String  @map("counter_id") @db.Uuid
+  userId     String  @map("user_id") @db.Uuid
+  validFrom  DateTime @map("valid_from") @db.Timestamptz(6)
+  validTo    DateTime? @map("valid_to") @db.Timestamptz(6)
+  shiftTemplateId String? @map("shift_template_id") @db.Uuid
+  assignedBy String? @map("assigned_by") @db.Uuid
+  /// NC-001 §5 segregation of duties: a supervisor may take a counter over, and
+  /// the takeover is logged rather than silently permitted.
+  isSupervisor Boolean @default(false) @map("is_supervisor")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  counter CashCounter @relation(fields: [counterId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, counterId, validFrom])
+  @@index([hospitalId, userId, validTo])
+  @@map("cash_counter_assignments")
+  @@schema("billing")
+}
+
+/// NC-001 §4. `expected_cash` is derived from payment events and never edited;
+/// `counted_cash` comes from the denomination sheet; `variance` is the
+/// difference and is what a supervisor approves. One open shift per counter is
+/// enforced by a partial unique index in the migration, not by a service check.
+model CashShift {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  counterId     String  @map("counter_id") @db.Uuid
+  cashierUserId String  @map("cashier_user_id") @db.Uuid
+  /// NC-001 §5: a shift spanning the cut-off belongs to its opening date.
+  businessDate  DateTime @map("business_date") @db.Date
+  openedAt      DateTime @default(now()) @map("opened_at") @db.Timestamptz(6)
+  closedAt      DateTime? @map("closed_at") @db.Timestamptz(6)
+  status        CashShiftStatus @default(open)
+  openingFloat  Decimal @default(0) @map("opening_float") @db.Decimal(14, 2)
+  /// main_cash | previous_shift | none
+  floatSource   String  @default("main_cash") @map("float_source") @db.VarChar(24)
+  previousShiftId String? @map("previous_shift_id") @db.Uuid
+  currency      String  @default("INR") @db.Char(3)
+  expectedCash  Decimal @default(0) @map("expected_cash") @db.Decimal(14, 2)
+  countedCash   Decimal? @map("counted_cash") @db.Decimal(14, 2)
+  variance      Decimal? @db.Decimal(14, 2)
+  varianceReason String? @map("variance_reason") @db.Text
+  varianceApprovedBy String? @map("variance_approved_by") @db.Uuid
+  varianceApprovalId String? @map("variance_approval_id") @db.Uuid
+  /// main_cash | next_shift
+  handoverTo    String? @map("handover_to") @db.VarChar(24)
+  handoverBagNo String? @map("handover_bag_no") @db.VarChar(48)
+  handoverReceivedBy String? @map("handover_received_by") @db.Uuid
+  receiptsCount Int     @default(0) @map("receipts_count")
+  voidsCount    Int     @default(0) @map("voids_count")
+  refundsCount  Int     @default(0) @map("refunds_count")
+  isNight       Boolean @default(false) @map("is_night")
+  isSystemShift Boolean @default(false) @map("is_system_shift")
+  closedBy      String? @map("closed_by") @db.Uuid
+  zReportFileId String? @map("z_report_file_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  counter      CashCounter @relation(fields: [counterId], references: [id], onDelete: Restrict)
+  totals       CashShiftTotal[]
+  denominations CashDenominationSheet[]
+
+  @@index([hospitalId, branchId, businessDate])
+  @@index([hospitalId, counterId, status])
+  @@index([hospitalId, cashierUserId, openedAt(sort: Desc)])
+  @@map("cash_shifts")
+  @@schema("billing")
+}
+
+/// NC-001 §5: "shift totals derived from payment events (event-sourced), never
+/// edited by hand". One row per (shift, mode).
+model CashShiftTotal {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  shiftId    String  @map("shift_id") @db.Uuid
+  mode       PaymentMode
+  collections Decimal @default(0) @db.Decimal(14, 2)
+  refunds    Decimal @default(0) @db.Decimal(14, 2)
+  advances   Decimal @default(0) @db.Decimal(14, 2)
+  voids      Decimal @default(0) @db.Decimal(14, 2)
+  count      Int     @default(0)
+  pendingConfirmationAmount Decimal @default(0) @map("pending_confirmation_amount") @db.Decimal(14, 2)
+  currency   String  @default("INR") @db.Char(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  shift CashShift @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+
+  @@unique([shiftId, mode], map: "cash_shift_totals_key")
+  @@index([hospitalId, shiftId])
+  @@map("cash_shift_totals")
+  @@schema("billing")
+}
+
+/// NC-001 §5: mandatory at close for a physical counter; the sheet total must
+/// equal the counted cash, which the migration enforces as a CHECK on
+/// `total = sum(lines)` being maintained by the service plus `total >= 0`.
+model CashDenominationSheet {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  shiftId     String  @map("shift_id") @db.Uuid
+  kind        DenominationSheetKind
+  currency    String  @default("INR") @db.Char(3)
+  /// [{denom, count, amount}] — the physical count as entered.
+  lines       Json
+  total       Decimal @db.Decimal(14, 2)
+  countedBy   String  @map("counted_by") @db.Uuid
+  witnessedBy String? @map("witnessed_by") @db.Uuid
+  countedAt   DateTime @default(now()) @map("counted_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  shift CashShift @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, shiftId, kind])
+  @@map("cash_denomination_sheets")
+  @@schema("billing")
+}
+
+/// Every time the drawer opens, and why. Partitioned monthly; three-year
+/// retention (NC-001 §5). It is the evidence in a shortage investigation.
+model CashDrawerEvent {
+  id          String  @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  counterId   String  @map("counter_id") @db.Uuid
+  shiftId     String? @map("shift_id") @db.Uuid
+  /// sale | refund | no_sale | change | float | count
+  reason      String  @db.VarChar(16)
+  triggeredBy String? @map("triggered_by") @db.Uuid
+  receiptId   String? @map("receipt_id") @db.Uuid
+  note        String? @db.VarChar(300)
+  openedAt    DateTime @default(now()) @map("opened_at") @db.Timestamptz(6)
+
+  @@id([id, openedAt])
+  @@index([hospitalId, counterId, openedAt(sort: Desc)])
+  @@index([shiftId, openedAt])
+  @@map("cash_drawer_events")
+  @@schema("billing")
+}
+
+model CashHandover {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String  @map("branch_id") @db.Uuid
+  fromShiftId  String  @map("from_shift_id") @db.Uuid
+  toShiftId    String? @map("to_shift_id") @db.Uuid
+  toMainCash   Boolean @default(true) @map("to_main_cash")
+  amount       Decimal @db.Decimal(14, 2)
+  currency     String  @default("INR") @db.Char(3)
+  bagNo        String? @map("bag_no") @db.VarChar(48)
+  denominationSheetId String? @map("denomination_sheet_id") @db.Uuid
+  givenBy      String  @map("given_by") @db.Uuid
+  receivedBy   String? @map("received_by") @db.Uuid
+  givenAt      DateTime @default(now()) @map("given_at") @db.Timestamptz(6)
+  receivedAt   DateTime? @map("received_at") @db.Timestamptz(6)
+  /// pending | accepted | disputed
+  status       String  @default("pending") @db.VarChar(16)
+  disputeNote  String? @map("dispute_note") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@index([hospitalId, branchId, givenAt(sort: Desc)])
+  @@index([fromShiftId])
+  @@map("cash_handovers")
+  @@schema("billing")
+}
+
+/// NC-001 §5: an unresolved variance blocks the day close. One row per
+/// (branch, business date).
+model CashDayBook {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String  @map("branch_id") @db.Uuid
+  businessDate DateTime @map("business_date") @db.Date
+  /// open | closing | closed
+  status       String  @default("open") @db.VarChar(16)
+  totalByMode  Json    @default("{}") @map("total_by_mode")
+  totalCollections Decimal @default(0) @map("total_collections") @db.Decimal(14, 2)
+  totalRefunds Decimal @default(0) @map("total_refunds") @db.Decimal(14, 2)
+  totalVariance Decimal @default(0) @map("total_variance") @db.Decimal(14, 2)
+  depositsTotal Decimal @default(0) @map("deposits_total") @db.Decimal(14, 2)
+  currency     String  @default("INR") @db.Char(3)
+  shiftsCount  Int     @default(0) @map("shifts_count")
+  openShiftsAtClose Int @default(0) @map("open_shifts_at_close")
+  closedBy     String? @map("closed_by") @db.Uuid
+  closedAt     DateTime? @map("closed_at") @db.Timestamptz(6)
+  /// NC-009 general ledger posting, when Phase 9 lands.
+  journalBatchId String? @map("journal_batch_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, branchId, businessDate], map: "cash_day_books_key")
+  @@index([hospitalId, status, businessDate(sort: Desc)])
+  @@map("cash_day_books")
+  @@schema("billing")
+}
+
+/// NC-001 §4: shortage recovery, excess suspense, correction, petty issue.
+/// The only sanctioned way to move money that a receipt cannot explain.
+model CashAdjustmentVoucher {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  shiftId    String? @map("shift_id") @db.Uuid
+  dayBookId  String? @map("day_book_id") @db.Uuid
+  voucherNo  String  @map("voucher_no") @db.VarChar(32)
+  /// shortage_recovery | excess_suspense | correction | petty_issue
+  kind       String  @db.VarChar(24)
+  amount     Decimal @db.Decimal(14, 2)
+  currency   String  @default("INR") @db.Char(3)
+  reason     String  @db.Text
+  approvalId String? @map("approval_id") @db.Uuid
+  approvedBy String? @map("approved_by") @db.Uuid
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(6)
+  journalRef String? @map("journal_ref") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, voucherNo], map: "cash_adjustment_vouchers_key")
+  @@index([hospitalId, shiftId])
+  @@map("cash_adjustment_vouchers")
+  @@schema("billing")
+}
+
+/// §269ST of the Income-tax Act: no aggregate cash receipt of ₹2,00,000 or more
+/// from one person in one day, and splitting it across receipts does not evade
+/// it. Aggregation therefore has to be a row the counter can lock and read
+/// *before* it accepts the note, which is what this table is.
+model CashPayerDayTotal {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  businessDate  DateTime @map("business_date") @db.Date
+  /// patient | payer | corporate | other
+  payerType     String  @default("patient") @map("payer_type") @db.VarChar(16)
+  payerRefId    String  @map("payer_ref_id") @db.Uuid
+  cashTotal     Decimal @default(0) @map("cash_total") @db.Decimal(14, 2)
+  receiptCount  Int     @default(0) @map("receipt_count")
+  currency      String  @default("INR") @db.Char(3)
+  /// Configurable per hospital; the statutory figure is 200000.
+  capAmount     Decimal @default(200000) @map("cap_amount") @db.Decimal(14, 2)
+  panCaptured   Boolean @default(false) @map("pan_captured")
+  panLast4      String? @map("pan_last4") @db.VarChar(4)
+  blockedAt     DateTime? @map("blocked_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, businessDate, payerType, payerRefId], map: "cash_payer_day_totals_key")
+  @@index([hospitalId, businessDate, cashTotal(sort: Desc)])
+  @@map("cash_payer_day_totals")
+  @@schema("billing")
+}
+
+model CashReceiptReprint {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  receiptId   String  @map("receipt_id") @db.Uuid
+  shiftId     String? @map("shift_id") @db.Uuid
+  copyNo      Int     @default(2) @map("copy_no")
+  reason      String  @db.Text
+  reprintedBy String  @map("reprinted_by") @db.Uuid
+  reprintedAt DateTime @default(now()) @map("reprinted_at") @db.Timestamptz(6)
+  printJobId  String? @map("print_job_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, receiptId])
+  @@index([hospitalId, reprintedAt(sort: Desc)])
+  @@map("cash_receipt_reprints")
+  @@schema("billing")
+}
+
+model CashReceiptVoid {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  receiptId  String  @map("receipt_id") @db.Uuid
+  shiftId    String  @map("shift_id") @db.Uuid
+  amount     Decimal @db.Decimal(14, 2)
+  reason     String  @db.Text
+  voidedBy   String  @map("voided_by") @db.Uuid
+  approvedBy String? @map("approved_by") @db.Uuid
+  approvalId String? @map("approval_id") @db.Uuid
+  voidedAt   DateTime @default(now()) @map("voided_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, receiptId], map: "cash_receipt_voids_key")
+  @@index([hospitalId, shiftId])
+  @@map("cash_receipt_voids")
+  @@schema("billing")
+}
+
+// ── the receipt itself (OP-005 tables, Phase-1 columns) ──────────────────────
+
+/// The receipt. Partitioned monthly by `paid_at`; the receipt number is gapless
+/// per series and financial year (`core.numbering_series`), so a cancelled
+/// receipt is voided and keeps its number rather than vanishing.
+model Payment {
+  id            String  @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  receiptNo     String  @map("receipt_no") @db.VarChar(32)
+  seriesKey     String  @map("series_key") @db.VarChar(64)
+  /// Null in Phase 1: OP-005 creates `billing.bills` in Phase 5 and back-fills.
+  billId        String? @map("bill_id") @db.Uuid
+  patientId     String? @map("patient_id") @db.Uuid
+  visitId       String? @map("visit_id") @db.Uuid
+  appointmentId String? @map("appointment_id") @db.Uuid
+  /// What was paid for, while bills do not exist: `consultation` | `advance` |
+  /// `registration` | `appointment_advance` | `misc`.
+  purpose       String  @default("consultation") @db.VarChar(32)
+  kind          PaymentKind @default(payment)
+  amount        Decimal @db.Decimal(14, 2)
+  currency      String  @default("INR") @db.Char(3)
+  status        PaymentStatus @default(confirmed)
+  counterId     String? @map("counter_id") @db.Uuid
+  shiftId       String? @map("shift_id") @db.Uuid
+  cashierId     String? @map("cashier_id") @db.Uuid
+  /// Set by the void path; a voided receipt is never deleted.
+  voidedAt      DateTime? @map("voided_at") @db.Timestamptz(6)
+  refundedAmount Decimal @default(0) @map("refunded_amount") @db.Decimal(14, 2)
+  payerName     String? @map("payer_name") @db.VarChar(200)
+  remarks       String? @db.Text
+  printJobId    String? @map("print_job_id") @db.Uuid
+  idempotencyKey String? @map("idempotency_key") @db.VarChar(128)
+  paidAt        DateTime @default(now()) @map("paid_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@id([id, paidAt])
+  @@index([hospitalId, branchId, paidAt(sort: Desc)])
+  @@index([hospitalId, patientId, paidAt(sort: Desc)])
+  @@index([shiftId])
+  @@index([hospitalId, visitId])
+  @@map("payments")
+  @@schema("billing")
+}
+
+/// The split. One row per tender: `₹500 cash + ₹1200 UPI` is two rows whose
+/// amounts must sum to the receipt. No FK to `payments` — it is partitioned.
+model PaymentLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  paymentId     String  @map("payment_id") @db.Uuid
+  /// Denormalised so a line can find its parent partition without a scan.
+  paymentPaidAt DateTime @map("payment_paid_at") @db.Timestamptz(6)
+  mode          PaymentMode
+  amount        Decimal @db.Decimal(14, 2)
+  currency      String  @default("INR") @db.Char(3)
+  /// Tendered and change, for cash: NC-001 §5 requires tendered ≥ amount.
+  tendered      Decimal? @db.Decimal(14, 2)
+  changeGiven   Decimal? @map("change_given") @db.Decimal(14, 2)
+  /// RRN / UTR / cheque no / gateway txn id.
+  reference     String? @db.VarChar(120)
+  gatewayTxnId  String? @map("gateway_txn_id") @db.VarChar(120)
+  cardLast4     String? @map("card_last4") @db.VarChar(4)
+  cardNetwork   String? @map("card_network") @db.VarChar(24)
+  bank          String? @db.VarChar(120)
+  chequeDate    DateTime? @map("cheque_date") @db.Date
+  status        PaymentStatus @default(confirmed)
+  /// NC-001 §5: a digital tender unconfirmed after 15 minutes is auto-queried.
+  confirmedAt   DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  settledAt     DateTime? @map("settled_at") @db.Timestamptz(6)
+  settlementBatchId String? @map("settlement_batch_id") @db.Uuid
+  /// Forex (NC-001 §5): the foreign amount, the rate and the certificate.
+  fxCurrency    String? @map("fx_currency") @db.Char(3)
+  fxAmount      Decimal? @map("fx_amount") @db.Decimal(14, 2)
+  fxRate        Decimal? @map("fx_rate") @db.Decimal(14, 6)
+  encashmentCertNo String? @map("encashment_cert_no") @db.VarChar(32)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@index([hospitalId, paymentId])
+  @@index([hospitalId, mode, createdAt(sort: Desc)])
+  @@index([hospitalId, status, confirmedAt])
+  @@map("payment_lines")
+  @@schema("billing")
+}
+
+/// Money taken before there is anything to bill: an appointment advance, an IP
+/// deposit, a package prepayment. `balance` falls as adjustments consume it.
+model Advance {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  advanceNo     String  @map("advance_no") @db.VarChar(32)
+  patientId     String  @map("patient_id") @db.Uuid
+  paymentId     String? @map("payment_id") @db.Uuid
+  paymentPaidAt DateTime? @map("payment_paid_at") @db.Timestamptz(6)
+  visitId       String? @map("visit_id") @db.Uuid
+  appointmentId String? @map("appointment_id") @db.Uuid
+  amount        Decimal @db.Decimal(14, 2)
+  balance       Decimal @db.Decimal(14, 2)
+  currency      String  @default("INR") @db.Char(3)
+  /// appointment | opd | ip_deposit | package | procedure | other
+  purpose       String  @default("opd") @db.VarChar(24)
+  /// open | partially_adjusted | exhausted | refunded | cancelled
+  status        String  @default("open") @db.VarChar(24)
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  adjustments AdvanceAdjustment[]
+
+  @@unique([hospitalId, advanceNo], map: "advances_key")
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, branchId, createdAt(sort: Desc)])
+  @@map("advances")
+  @@schema("billing")
+}
+
+model AdvanceAdjustment {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  advanceId  String  @map("advance_id") @db.Uuid
+  /// Null in Phase 1 — adjusted against a visit's consultation fee.
+  billId     String? @map("bill_id") @db.Uuid
+  visitId    String? @map("visit_id") @db.Uuid
+  paymentId  String? @map("payment_id") @db.Uuid
+  amount     Decimal @db.Decimal(14, 2)
+  currency   String  @default("INR") @db.Char(3)
+  /// adjusted | reversed
+  direction  String  @default("adjusted") @db.VarChar(16)
+  reason     String? @db.Text
+  adjustedBy String? @map("adjusted_by") @db.Uuid
+  adjustedAt DateTime @default(now()) @map("adjusted_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  advance Advance @relation(fields: [advanceId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, advanceId])
+  @@index([hospitalId, visitId])
+  @@map("advance_adjustments")
+  @@schema("billing")
+}
+
+/// NC-001 §5: a counter refund needs an approved refund record and identity
+/// verification, and a cash refund can never exceed the drawer.
+model Refund {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  refundNo      String  @map("refund_no") @db.VarChar(32)
+  patientId     String? @map("patient_id") @db.Uuid
+  billId        String? @map("bill_id") @db.Uuid
+  paymentId     String? @map("payment_id") @db.Uuid
+  paymentPaidAt DateTime? @map("payment_paid_at") @db.Timestamptz(6)
+  advanceId     String? @map("advance_id") @db.Uuid
+  appointmentId String? @map("appointment_id") @db.Uuid
+  visitId       String? @map("visit_id") @db.Uuid
+  amount        Decimal @db.Decimal(14, 2)
+  currency      String  @default("INR") @db.Char(3)
+  mode          PaymentMode @default(cash)
+  reasonCode    String  @map("reason_code") @db.VarChar(32)
+  justification String? @db.Text
+  status        RefundStatus @default(requested)
+  requestedBy   String? @map("requested_by") @db.Uuid
+  requestedAt   DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  approvalId    String? @map("approval_id") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  rejectedReason String? @map("rejected_reason") @db.Text
+  counterId     String? @map("counter_id") @db.Uuid
+  shiftId       String? @map("shift_id") @db.Uuid
+  cashierId     String? @map("cashier_id") @db.Uuid
+  /// The receipt raised for the outflow, once processed.
+  refundPaymentId String? @map("refund_payment_id") @db.Uuid
+  gatewayRefundId String? @map("gateway_refund_id") @db.VarChar(120)
+  /// Identity check at the counter, per NC-001 §5.
+  identityVerifiedBy String? @map("identity_verified_by") @db.Uuid
+  identityMethod String? @map("identity_method") @db.VarChar(32)
+  processedAt   DateTime? @map("processed_at") @db.Timestamptz(6)
+  idempotencyKey String? @map("idempotency_key") @db.VarChar(128)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@unique([hospitalId, refundNo], map: "refunds_key")
+  @@index([hospitalId, status, requestedAt(sort: Desc)])
+  @@index([hospitalId, patientId])
+  @@index([shiftId])
+  @@map("refunds")
+  @@schema("billing")
+}

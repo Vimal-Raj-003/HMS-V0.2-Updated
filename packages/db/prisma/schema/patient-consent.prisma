@@ -1,0 +1,432 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-028 — Consent (schema `patient`, prefix `consent_`)
+//
+// Phase 1 needs the part of EN-028 that a registration desk exercises on day
+// one: the DPDP notice with its version and language, the acknowledgement of
+// that notice, the consent artefact itself, the guardian record a minor's
+// registration cannot be saved without, and the append-only ledger that is the
+// DPO's evidence. The rest of EN-028 §4 — DSAR handling, withdrawal cascades,
+// emergency overrides, research enrolment, nominations — is deliberately not
+// here: it belongs with the modules that trigger it, and inventing its shape
+// now, before a procedure or a transfusion exists to consent to, is exactly the
+// guesswork `CLAUDE.md §0.1` forbids. `consent_requirements` *is* here, because
+// it is the gate registration itself reads.
+//
+// `consent_ledger` is hash-chained with the same primitives as `core.audit_log`
+// (`prev_hash` / `row_hash`) and partitioned monthly. It is the DPDP Act's
+// "record of consent": a consent that was withdrawn must still prove that it
+// was once lawfully given, which is why nothing in this family is ever deleted
+// — including by an erasure request (EN-028 §4, last line).
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ConsentCategory {
+  clinical
+  data
+  administrative
+  research
+
+  @@schema("patient")
+}
+
+enum ConsentValidityKind {
+  episode
+  duration
+  permanent
+
+  @@schema("patient")
+}
+
+enum ConsentStatus {
+  draft
+  active
+  refused
+  withdrawn
+  expired
+  superseded
+  void
+
+  @@schema("patient")
+}
+
+enum ConsentGrantor {
+  patient
+  guardian
+  nominee
+  emergency_doctor
+
+  @@schema("patient")
+}
+
+enum ConsentChannel {
+  bedside
+  desk
+  portal
+  app
+  kiosk
+  sms
+  whatsapp
+  ivr
+  api
+  paper
+
+  @@schema("patient")
+}
+
+enum ConsentLedgerEvent {
+  requested
+  notice_shown
+  explained
+  granted
+  refused
+  signed
+  witnessed
+  renewed
+  expired
+  withdrawn
+  overridden
+  superseded
+  exported
+  enforced_allow
+  enforced_deny
+
+  @@schema("patient")
+}
+
+enum ConsentRequirementStatus {
+  pending
+  satisfied
+  refused
+  overridden
+  waived
+  expired
+
+  @@schema("patient")
+}
+
+/// EN-028 §4, EN-027-governed. `gates` names the enforcement points
+/// (`core.lic_enforcement_points` keys) that must refuse to proceed without a
+/// satisfied consent of this type — which is how "you cannot book this
+/// procedure without consent" stops being a UI convention.
+model ConsentType {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  key        String  @db.VarChar(96)
+  name       String  @db.VarChar(200)
+  category   ConsentCategory
+  statutoryBasis String? @map("statutory_basis") @db.Text
+  requiresWitness Boolean @default(false) @map("requires_witness")
+  requiresCounselling Boolean @default(false) @map("requires_counselling")
+  requiresSecondDoctor Boolean @default(false) @map("requires_second_doctor")
+  guardianAllowed Boolean @default(true) @map("guardian_allowed")
+  emergencyOverrideAllowed Boolean @default(false) @map("emergency_override_allowed")
+  validity   ConsentValidityKind @default(episode)
+  validityDays Int?  @map("validity_days")
+  renewalRule String? @map("renewal_rule") @db.VarChar(120)
+  gates      String[] @default([])
+  requiredFields Json @default("{}") @map("required_fields")
+  requiredAttachments Json @default("[]") @map("required_attachments")
+  minAgeSelfConsent Int @default(18) @map("min_age_self_consent")
+  /// MTP, HIV and POCSO each set a different age and a different rule; they are
+  /// data because they differ by statute and change by amendment.
+  ageExceptions Json @default("{}") @map("age_exceptions")
+  dpdpPurposeCode String? @map("dpdp_purpose_code") @db.VarChar(64)
+  abdmPurposeCode String? @map("abdm_purpose_code") @db.VarChar(64)
+  active     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  templates ConsentTemplate[]
+
+  @@unique([hospitalId, key])
+  @@index([hospitalId, category, active])
+  @@map("consent_types")
+  @@schema("patient")
+}
+
+model ConsentTemplate {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  consentTypeId String  @map("consent_type_id") @db.Uuid
+  key           String  @db.VarChar(96)
+  name          String  @db.VarChar(200)
+  ownerRole     String? @map("owner_role") @db.VarChar(64)
+  /// draft | active | retired
+  status        String  @default("draft") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  consentType ConsentType @relation(fields: [consentTypeId], references: [id], onDelete: Restrict)
+  versions    ConsentTemplateVersion[]
+
+  @@unique([hospitalId, key])
+  @@index([hospitalId, consentTypeId])
+  @@map("consent_templates")
+  @@schema("patient")
+}
+
+/// One row per (template, version, language). A published version is immutable:
+/// a consent artefact points at the exact words the patient was shown, forever.
+model ConsentTemplateVersion {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  templateId String  @map("template_id") @db.Uuid
+  version    Int
+  language   String  @db.VarChar(16)
+  /// EN-039 block structure, so the same body renders to screen, PDF and paper.
+  bodyBlocks Json    @map("body_blocks")
+  risks      Json    @default("[]")
+  benefits   Json    @default("[]")
+  alternatives Json  @default("[]")
+  declarationText String @map("declaration_text") @db.Text
+  signatureBlocks Json @default("[]") @map("signature_blocks")
+  /// Read-aloud audio for a patient who cannot read the language they speak.
+  audioFileId String? @map("audio_file_id") @db.Uuid
+  /// draft | translated | reviewed | approved
+  translationStatus String @default("draft") @map("translation_status") @db.VarChar(16)
+  approvedByClinical String? @map("approved_by_clinical") @db.Uuid
+  approvedByLegal String? @map("approved_by_legal") @db.Uuid
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(6)
+  effectiveFrom DateTime? @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  /// draft | in_review | published | superseded | retired
+  status     String  @default("draft") @db.VarChar(16)
+  sha256     String? @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  template ConsentTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@unique([templateId, version, language], map: "consent_template_versions_key")
+  @@index([hospitalId, status, language])
+  @@map("consent_template_versions")
+  @@schema("patient")
+}
+
+/// The DPDP §5 notice: itemised purposes, retention, recipients, the DPO's
+/// contact and the grievance route, in one language, at one version. What
+/// `phase-01 §1.2` means by "consent capture with DPDP notice text".
+model ConsentNotice {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  version    Int
+  language   String  @db.VarChar(16)
+  title      String  @db.VarChar(200)
+  /// The notice as shown and as printed. Immutable once effective.
+  bodyText   String  @map("body_text") @db.Text
+  itemisedPurposes Json @map("itemised_purposes")
+  retentionStatement String @map("retention_statement") @db.Text
+  recipients Json    @default("[]")
+  dpoContact Json    @map("dpo_contact")
+  grievanceProcess String @map("grievance_process") @db.Text
+  rightsSummary String @map("rights_summary") @db.Text
+  crossBorderStatement String? @map("cross_border_statement") @db.Text
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  approvedBy String? @map("approved_by") @db.Uuid
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(6)
+  sha256     String? @db.VarChar(64)
+  /// draft | active | superseded
+  status     String  @default("draft") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  acknowledgements ConsentNoticeAcknowledgement[]
+
+  @@unique([hospitalId, version, language], map: "consent_notices_key")
+  @@index([hospitalId, status, effectiveFrom])
+  @@map("consent_notices")
+  @@schema("patient")
+}
+
+/// Proof that *this* patient saw *that* version of the notice, in a language
+/// they chose, on a channel, with evidence. Append-only.
+model ConsentNoticeAcknowledgement {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  noticeId   String  @map("notice_id") @db.Uuid
+  language   String  @db.VarChar(16)
+  channel    ConsentChannel @default(desk)
+  /// Scroll completion, audio played, device, ip — never PHI.
+  evidence   Json    @default("{}")
+  acknowledgedBy String? @map("acknowledged_by") @db.Uuid
+  acknowledgedAt DateTime @default(now()) @map("acknowledged_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  notice ConsentNotice @relation(fields: [noticeId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, acknowledgedAt(sort: Desc)])
+  @@index([hospitalId, noticeId])
+  @@map("consent_notice_acknowledgements")
+  @@schema("patient")
+}
+
+/// EN-028 §4 `consents` — the artefact record. `docs/03` calls this table
+/// `patient.consents` and says OP-001 stores refs to it.
+model Consent {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  encounterId   String? @map("encounter_id") @db.Uuid
+  consentTypeId String  @map("consent_type_id") @db.Uuid
+  templateVersionId String? @map("template_version_id") @db.Uuid
+  noticeId      String? @map("notice_id") @db.Uuid
+  language      String  @default("en-IN") @db.VarChar(16)
+  status        ConsentStatus @default(draft)
+  grantedBy     ConsentGrantor @default(patient) @map("granted_by")
+  grantorName   String? @map("grantor_name") @db.VarChar(200)
+  grantorRelationship String? @map("grantor_relationship") @db.VarChar(32)
+  grantorIdTypeCode String? @map("grantor_id_type_code") @db.VarChar(32)
+  grantorIdLast4 String? @map("grantor_id_last4") @db.VarChar(4)
+  guardianId    String? @map("guardian_id") @db.Uuid
+  capacityBasis String? @map("capacity_basis") @db.Text
+  purposeCodes  String[] @default([]) @map("purpose_codes")
+  /// Procedures, sites/laterality, products, data categories, recipients, dates.
+  scope         Json    @default("{}")
+  grantedAt     DateTime? @map("granted_at") @db.Timestamptz(6)
+  validFrom     DateTime? @map("valid_from") @db.Timestamptz(6)
+  validTo       DateTime? @map("valid_to") @db.Timestamptz(6)
+  explainedByUserId String? @map("explained_by_user_id") @db.Uuid
+  explanationAt DateTime? @map("explanation_at") @db.Timestamptz(6)
+  comprehensionCheck Json? @map("comprehension_check")
+  interpreter   Json?
+  witnessUserId String? @map("witness_user_id") @db.Uuid
+  witnessName   String? @map("witness_name") @db.VarChar(200)
+  secondDoctorUserId String? @map("second_doctor_user_id") @db.Uuid
+  channel       ConsentChannel @default(desk)
+  esignEnvelopeId String? @map("esign_envelope_id") @db.VarChar(120)
+  documentFileId String? @map("document_file_id") @db.Uuid
+  documentSha256 String? @map("document_sha256") @db.VarChar(64)
+  paperOrigin   Boolean @default(false) @map("paper_origin")
+  scanFileId    String? @map("scan_file_id") @db.Uuid
+  withdrawnAt   DateTime? @map("withdrawn_at") @db.Timestamptz(6)
+  withdrawnChannel ConsentChannel? @map("withdrawn_channel")
+  withdrawalReason String? @map("withdrawal_reason") @db.Text
+  withdrawnBy   String? @map("withdrawn_by") @db.Uuid
+  supersededByConsentId String? @map("superseded_by_consent_id") @db.Uuid
+  refusalReason String? @map("refusal_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@index([hospitalId, patientId, consentTypeId, status])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, encounterId])
+  @@map("consents")
+  @@schema("patient")
+}
+
+/// EN-028 §4: the append-only, hash-chained record of consent. Partitioned
+/// monthly by `at`; `@@id([id, at])` because a partitioned table's primary key
+/// must contain its partition key.
+model ConsentLedgerEntry {
+  id          String  @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  consentId   String? @map("consent_id") @db.Uuid
+  event       ConsentLedgerEvent
+  purposeCode String? @map("purpose_code") @db.VarChar(64)
+  /// user | patient | guardian | system | device | external
+  actorType   String  @map("actor_type") @db.VarChar(16)
+  actorId     String? @map("actor_id") @db.Uuid
+  channel     ConsentChannel @default(desk)
+  language    String  @default("en-IN") @db.VarChar(16)
+  /// ip, device, template version, audio played, scroll completed. Never PHI.
+  evidence    Json    @default("{}")
+  noticeId    String? @map("notice_id") @db.Uuid
+  /// The chain, per hospital, exactly as `core.audit_log` does it.
+  seq         BigInt?
+  prevHash    Bytes?  @map("prev_hash")
+  rowHash     Bytes?  @map("row_hash")
+  sealedAt    DateTime? @map("sealed_at") @db.Timestamptz(6)
+  at          DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([id, at])
+  @@index([hospitalId, patientId, at(sort: Desc)])
+  @@index([hospitalId, consentId])
+  @@index([hospitalId, event, at(sort: Desc)])
+  @@map("consent_ledger")
+  @@schema("patient")
+}
+
+/// DPDP Rules 2025 verifiable parental consent. `valid_until` defaults to the
+/// minor's date of majority, so guardianship expires by arithmetic rather than
+/// by anyone remembering (OP-001 §14 AC-12).
+model ConsentGuardian {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  guardianName String @map("guardian_name") @db.VarChar(200)
+  relationshipCode String @map("relationship_code") @db.VarChar(32)
+  guardianPatientId String? @map("guardian_patient_id") @db.Uuid
+  phone      String? @db.VarChar(20)
+  idTypeCode String? @map("id_type_code") @db.VarChar(32)
+  idLast4    String? @map("id_last4") @db.VarChar(4)
+  /// id_document | abha | digilocker | in_person | video_kyc
+  verificationMethod String @default("in_person") @map("verification_method") @db.VarChar(24)
+  verifiedBy String? @map("verified_by") @db.Uuid
+  verifiedAt DateTime? @map("verified_at") @db.Timestamptz(6)
+  validUntil DateTime? @map("valid_until") @db.Date
+  /// parent | legal_guardian | mhca_nominated_rep | court_order
+  basis      String  @default("parent") @db.VarChar(32)
+  documentFileId String? @map("document_file_id") @db.Uuid
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@index([hospitalId, patientId, revokedAt])
+  @@map("consent_guardians")
+  @@schema("patient")
+}
+
+/// EN-028 §4 `consent_requirements`: what is owed, by when, for whom. It is the
+/// worklist and the gate — registration writes one row per required consent and
+/// nothing downstream proceeds while it is `pending`.
+model ConsentRequirement {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  encounterId   String? @map("encounter_id") @db.Uuid
+  consentTypeId String  @map("consent_type_id") @db.Uuid
+  /// booking | admission | order | transfusion | registration | manual | api
+  source        String  @db.VarChar(24)
+  sourceRef     String? @map("source_ref") @db.Uuid
+  dueBy         DateTime? @map("due_by") @db.Timestamptz(6)
+  status        ConsentRequirementStatus @default(pending)
+  satisfiedByConsentId String? @map("satisfied_by_consent_id") @db.Uuid
+  satisfiedAt   DateTime? @map("satisfied_at") @db.Timestamptz(6)
+  waivedBy      String? @map("waived_by") @db.Uuid
+  waiverReason  String? @map("waiver_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@index([hospitalId, status, dueBy])
+  @@index([hospitalId, patientId, status])
+  @@map("consent_requirements")
+  @@schema("patient")
+}

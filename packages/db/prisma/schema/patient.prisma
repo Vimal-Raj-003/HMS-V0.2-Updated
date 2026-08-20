@@ -1,0 +1,720 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-001 — the Master Patient Index (schema `patient`)
+//
+// `docs/03 §Shared platform-owned tables` names these tables explicitly and
+// says every clinical module extends them: `patient.patients`,
+// `patient.identifiers`, `patient.alerts`, `patient.allergies`,
+// `patient.relationships`, `patient.consents`. Those are the names downstream
+// modules are told to reference, so those are the names used here — OP-001 §4
+// writes the same tables with a redundant `patient_` prefix inside a schema
+// already called `patient`, and the two cannot both be right. Everything else
+// in this schema follows the unprefixed form for consistency; the EN-028
+// consent family keeps its `consent_` prefix because that prefix distinguishes
+// nine tables from one another, not the schema from itself.
+//
+// Three properties are structural rather than procedural:
+//
+//   * **Aadhaar is never stored.** There is no column that could hold one. What
+//     exists is `aadhaar_last4` and `aadhaar_hash` (SHA-256 over a per-hospital
+//     pepper), which is what the Aadhaar Act permits and what the duplicate
+//     detector actually needs — an exact-match signal that cannot be read back.
+//     `aadhaar_hash_key_version` exists so the pepper can be rotated without
+//     losing the ability to say which rows were hashed with which key.
+//
+//   * **A patient is never hard-deleted.** The migration revokes DELETE from
+//     `hms_app` on every table in this schema. A wrong record is `status =
+//     inactive`; a duplicate is `merged` with `merged_into_id` set and the
+//     merge fully reversible from `merges` + `merge_repoints`.
+//
+//   * **Search is an index question, not a query question.** `phase-01 §1.2`
+//     budgets 200 ms p95 across mobile / UHID / name / ABHA / government ID on
+//     a million rows. The five paths get five index strategies in the migration
+//     (§C); nothing here is expected to be fast by accident.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PatientGender {
+  male
+  female
+  other
+  unknown
+
+  @@schema("patient")
+}
+
+enum PatientBloodGroup {
+  a_pos
+  a_neg
+  b_pos
+  b_neg
+  ab_pos
+  ab_neg
+  o_pos
+  o_neg
+  bombay
+  unknown
+
+  @@schema("patient")
+}
+
+enum PatientStatus {
+  active
+  inactive
+  merged
+  blocked
+
+  @@schema("patient")
+}
+
+/// OP-001 §3.1. Drives priority at the queue (EN-006 §3.5), the payer path at
+/// the counter (NC-001) and the concession matrix in Phase 5.
+enum PatientCategory {
+  general
+  senior_citizen
+  infant
+  staff
+  staff_dependant
+  corporate
+  insurance
+  scheme
+  charity
+  vip
+  international
+
+  @@schema("patient")
+}
+
+enum PatientPayerType {
+  self
+  insurance
+  corporate
+  scheme
+  staff
+  charity
+
+  @@schema("patient")
+}
+
+enum PatientIdentifierType {
+  abha_number
+  abha_address
+  national_id
+  passport
+  voter_id
+  driving_licence
+  pan
+  insurance_member
+  corporate_emp
+  scheme_card
+  old_mrn
+  legacy_uhid
+  other
+
+  @@schema("patient")
+}
+
+enum PatientContactKind {
+  emergency
+  attendant
+  guardian
+  next_of_kin
+  nominee
+
+  @@schema("patient")
+}
+
+enum PatientAlertType {
+  allergy
+  mlc
+  vip
+  credit_block
+  isolation
+  fall_risk
+  infection
+  do_not_disclose
+  interpreter_required
+  custom
+
+  @@schema("patient")
+}
+
+enum PatientAlertSeverity {
+  info
+  low
+  moderate
+  high
+  critical
+
+  @@schema("patient")
+}
+
+enum PatientAllergyCategory {
+  drug
+  food
+  environment
+  latex
+  biologic
+  other
+
+  @@schema("patient")
+}
+
+enum PatientAllergyCriticality {
+  low
+  high
+  unable_to_assess
+
+  @@schema("patient")
+}
+
+/// The **statement-level** allergy state, distinct from the status of any one
+/// entry. `docs/06 §10` names the conflation this exists to prevent: with only
+/// per-entry rows, "no allergy rows" is ambiguous between *nobody has asked*,
+/// *we asked and could not establish* and *the patient says none* — and a
+/// prescriber reading the first as the third is a clinical safety defect, not a
+/// modelling nicety. `packages/ui`'s AllergyEditor models the same four arms.
+enum PatientAllergyStatement {
+  /// Nobody has asked yet. The default, and the only safe default: a
+  /// backfilled or newly-inserted row must never claim someone asserted there
+  /// are no allergies.
+  not_recorded
+  /// Asked, but could not establish — unconscious, no attendant, no shared
+  /// language. `allergy_unable_reason` says which, and is mandatory.
+  unable_to_assess
+  /// Asked, and the patient states none. A clinical assertion somebody is
+  /// accountable for, which is why it cannot exist without an asserter.
+  none_known
+  /// One or more entries in `patient.allergies`.
+  known
+
+  @@schema("patient")
+}
+
+enum PatientAllergyStatus {
+  active
+  inactive
+  resolved
+  entered_in_error
+  refuted
+
+  @@schema("patient")
+}
+
+enum PatientDedupeStatus {
+  open
+  merged
+  not_duplicate
+  deferred
+
+  @@schema("patient")
+}
+
+enum PatientMergeStatus {
+  pending
+  completed
+  unmerged
+  failed
+
+  @@schema("patient")
+}
+
+// ── the record itself ────────────────────────────────────────────────────────
+
+model Patient {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  /// EN-041 §3: the branch a patient was first registered at. It is provenance,
+  /// not ownership — the MPI is shared across the group and RLS scopes on
+  /// `hospital_id`, so a Whitefield patient is visible at the main campus.
+  branchId   String  @map("branch_id") @db.Uuid
+  /// EN-041: hospitals in one group may share a single MPI. When they do, this
+  /// is the identity that spans them and `uhid` stays per-hospital.
+  mpiGroupId String? @map("mpi_group_id") @db.Uuid
+
+  uhid       String  @db.VarChar(32)
+  /// Lower-cased, punctuation-stripped UHID. Search accepts what a receptionist
+  /// types, which is rarely what was printed.
+  uhidNormalised String @map("uhid_normalised") @db.VarChar(32)
+
+  titleCode  String? @map("title_code") @db.VarChar(32)
+  firstName  String  @map("first_name") @db.VarChar(120)
+  middleName String? @map("middle_name") @db.VarChar(120)
+  lastName   String? @map("last_name") @db.VarChar(120)
+  /// Maintained by the application on every write, not a generated column:
+  /// Prisma cannot express `GENERATED ALWAYS AS`, and a column Prisma cannot
+  /// see is a column `migrate diff` proposes to drop on the next schema change.
+  /// The migration adds a CHECK that it is never blank, which is the half of
+  /// the guarantee the database can hold.
+  fullName   String  @map("full_name") @db.VarChar(400)
+  /// Name in the patient's own script, when captured. OP-001 §15 (Phase 2)
+  /// adds transliteration; the column exists now so nothing is lost meanwhile.
+  localName  String? @map("local_name") @db.VarChar(400)
+
+  gender     PatientGender @default(unknown)
+  dob        DateTime? @db.Date
+  /// OP-001 §5: age-only capture stores 1-Jan-(year) and flags it, so a report
+  /// can exclude estimated ages rather than silently averaging them in.
+  dobIsEstimated Boolean @default(false) @map("dob_is_estimated")
+  /// Neonates are aged in days; recording the captured triple keeps the
+  /// original statement rather than a lossy reconstruction from `dob`.
+  ageYears   Int?    @map("age_years")
+  ageMonths  Int?    @map("age_months")
+  ageDays    Int?    @map("age_days")
+
+  bloodGroup PatientBloodGroup @default(unknown) @map("blood_group")
+  maritalStatus String? @map("marital_status") @db.VarChar(24)
+
+  /// The four-arm allergy statement. Kept on the patient rather than inferred
+  /// from `patient.allergies` because absence of rows cannot distinguish
+  /// "never asked" from "asked, none known" — see `PatientAllergyStatement`.
+  /// Maintained by `patient.sync_allergy_statement()`: adding an active entry
+  /// moves it to `known`; removing the last one reverts to `not_recorded`,
+  /// never to `none_known`, because deleting rows is not the same as asserting
+  /// there are none.
+  allergyStatement PatientAllergyStatement @default(not_recorded) @map("allergy_statement")
+  /// `core.users(id)`. Not a foreign key, for the same reason `created_by`,
+  /// `recorded_by` and `approved_by` are not anywhere in this schema: actor
+  /// columns are written by services that may be recording a system principal
+  /// or an imported historical actor, and a hard reference would make the
+  /// patient record undeletable-by-proxy through a user row.
+  allergyAssertedBy String? @map("allergy_asserted_by") @db.Uuid
+  allergyAssertedAt DateTime? @map("allergy_asserted_at") @db.Timestamptz(6)
+  /// Mandatory when the statement is `unable_to_assess` — an unexplained
+  /// "unable to assess" tells the next clinician nothing they can act on.
+  allergyUnableReason String? @map("allergy_unable_reason") @db.Text
+
+  /// E.164, including the `+`. Stored once, canonically — every search path,
+  /// every SMS and every duplicate rule reads this column.
+  mobile     String  @db.VarChar(20)
+  /// The national significant number, digits only: what a receptionist types
+  /// and what a scanner emits. Indexed separately for prefix search.
+  mobileLocal String @map("mobile_local") @db.VarChar(16)
+  mobileVerifiedAt DateTime? @map("mobile_verified_at") @db.Timestamptz(6)
+  altPhone   String? @map("alt_phone") @db.VarChar(20)
+  email      String? @db.VarChar(320)
+  whatsappOptIn Boolean @default(false) @map("whatsapp_opt_in")
+
+  preferredLanguage String @default("en-IN") @map("preferred_language") @db.VarChar(16)
+  nationalityCode   String @default("IND") @map("nationality_code") @db.Char(3)
+  religionCode      String? @map("religion_code") @db.VarChar(32)
+  occupationCode    String? @map("occupation_code") @db.VarChar(32)
+
+  /// The government photo ID shown at the desk, other than Aadhaar. Full values
+  /// live in `patient.identifiers`, encrypted; only the last four are here so
+  /// the banner can display "PASSPORT ••••4821" without a second read.
+  idTypeCode String? @map("id_type_code") @db.VarChar(32)
+  idLast4    String? @map("id_last4") @db.VarChar(4)
+
+  /// Aadhaar, and only in the two forms the Aadhaar Act permits.
+  aadhaarLast4 String? @map("aadhaar_last4") @db.VarChar(4)
+  aadhaarHash  Bytes?  @map("aadhaar_hash")
+  aadhaarHashKeyVersion Int? @map("aadhaar_hash_key_version")
+  aadhaarKycVerifiedAt  DateTime? @map("aadhaar_kyc_verified_at") @db.Timestamptz(6)
+
+  /// Denormalised from `patient.identifiers` so the ABHA search path is one
+  /// index probe on this table. The identifier row remains the record of truth.
+  abhaNumber  String? @map("abha_number") @db.VarChar(20)
+  abhaAddress String? @map("abha_address") @db.VarChar(120)
+  abhaLinkedAt DateTime? @map("abha_linked_at") @db.Timestamptz(6)
+
+  photoFileId String? @map("photo_file_id") @db.Uuid
+
+  addressLine1 String? @map("address_line1") @db.VarChar(200)
+  addressLine2 String? @map("address_line2") @db.VarChar(200)
+  areaKey    String? @map("area_key") @db.Uuid
+  city       String? @db.VarChar(120)
+  district   String? @db.VarChar(120)
+  state      String? @db.VarChar(120)
+  countryCode String @default("IN") @map("country_code") @db.Char(2)
+  pincode    String? @db.VarChar(12)
+
+  category   PatientCategory @default(general)
+  payerType  PatientPayerType @default(self) @map("payer_type")
+  /// Employee id / policy no / scheme card no. Validated against the payer
+  /// master when RC-007 lands; recorded now so nothing has to be re-keyed.
+  payerRef   String? @map("payer_ref") @db.VarChar(64)
+  payerId    String? @map("payer_id") @db.Uuid
+
+  referralSourceCode String? @map("referral_source_code") @db.VarChar(32)
+  referredByDoctorKey String? @map("referred_by_doctor_key") @db.Uuid
+  referredByText String? @map("referred_by_text") @db.VarChar(200)
+
+  isVip      Boolean @default(false) @map("is_vip")
+  isStaff    Boolean @default(false) @map("is_staff")
+  /// EN-006 §3.5 priority and OP-001 §5 guardian rules read these directly.
+  isDifferentlyAbled Boolean @default(false) @map("is_differently_abled")
+  isPregnant Boolean @default(false) @map("is_pregnant")
+
+  isDeceased Boolean @default(false) @map("is_deceased")
+  deceasedAt DateTime? @map("deceased_at") @db.Timestamptz(6)
+  deathRegistrationNo String? @map("death_registration_no") @db.VarChar(64)
+
+  status     PatientStatus @default(active)
+  /// Set on the losing record of a merge. Every consumer follows this pointer;
+  /// the losing UHID stays searchable and redirects (OP-001 §3.8).
+  mergedIntoId String? @map("merged_into_id") @db.Uuid
+  mergedAt   DateTime? @map("merged_at") @db.Timestamptz(6)
+
+  /// OP-001 §5 deterministic duplicate rule, precomputed: a stable digest of
+  /// (normalised mobile, dob, normalised name, gender). An exact collision is a
+  /// 0.9-score candidate before any fuzzy work is done.
+  dedupeFingerprint String @map("dedupe_fingerprint") @db.VarChar(64)
+  /// OP-001 §3.1 / §14 AC-2: saving through a ≥0.85 duplicate warning requires
+  /// `patient.record.create_override` and a reason, and the reason is kept.
+  createdOverrideReason String? @map("created_override_reason") @db.Text
+
+  /// EN-036 bulk import provenance, so a reconciliation report can name the file.
+  importBatchId String? @map("import_batch_id") @db.Uuid
+  sourceChannel String @default("counter") @map("source_channel") @db.VarChar(24)
+  /// OP-001 §3.1 offline path: a kiosk-issued `TMP-…` reference, cleared when
+  /// the real UHID is allocated on sync.
+  provisionalRef String? @map("provisional_ref") @db.VarChar(48)
+
+  registeredAt DateTime @default(now()) @map("registered_at") @db.Timestamptz(6)
+  lastVisitAt  DateTime? @map("last_visit_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  identifiers        PatientIdentifier[]
+  contacts           PatientContact[]
+  alerts             PatientAlert[]
+  allergies          PatientAllergy[]
+  relationships      PatientRelationship[] @relation("patient_relationship_subject")
+  relatedTo          PatientRelationship[] @relation("patient_relationship_object")
+  demographicHistory PatientDemographicHistory[]
+
+  @@unique([hospitalId, uhid])
+  @@index([hospitalId, mobile])
+  @@index([hospitalId, mobileLocal])
+  @@index([hospitalId, dob, gender])
+  @@index([hospitalId, branchId, registeredAt(sort: Desc)])
+  @@index([hospitalId, status, updatedAt(sort: Desc)])
+  @@index([hospitalId, dedupeFingerprint])
+  @@index([hospitalId, allergyStatement])
+  @@index([mergedIntoId])
+  @@index([mpiGroupId])
+  @@map("patients")
+  @@schema("patient")
+}
+
+/// OP-001 §4 `patient_identifiers`. `value_normalised` is what is unique and
+/// what is searched; `value_encrypted` holds the full government identifier for
+/// the types whose `mdm_id_types.retention` allows it, and is null for the ones
+/// it does not — Aadhaar has no row here at all.
+model PatientIdentifier {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  type       PatientIdentifierType
+  idTypeCode String? @map("id_type_code") @db.VarChar(32)
+  /// Upper-cased, punctuation-stripped. Uniqueness and lookup use this.
+  valueNormalised String @map("value_normalised") @db.VarChar(128)
+  /// Masked form safe to render: `••••4821`.
+  valueMasked String  @map("value_masked") @db.VarChar(64)
+  valueEncrypted Bytes? @map("value_encrypted")
+  issuedBy   String? @map("issued_by") @db.VarChar(160)
+  issuedOn   DateTime? @map("issued_on") @db.Date
+  expiresOn  DateTime? @map("expires_on") @db.Date
+  verifiedAt DateTime? @map("verified_at") @db.Timestamptz(6)
+  verifiedBy String? @map("verified_by") @db.Uuid
+  /// desk | abdm | digilocker | import | portal | api
+  source     String  @default("desk") @db.VarChar(24)
+  isPrimary  Boolean @default(false) @map("is_primary")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, type, valueNormalised])
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, valueNormalised])
+  @@map("identifiers")
+  @@schema("patient")
+}
+
+model PatientContact {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  kind       PatientContactKind
+  name       String  @db.VarChar(200)
+  relationshipCode String? @map("relationship_code") @db.VarChar(32)
+  phone      String  @db.VarChar(20)
+  altPhone   String? @map("alt_phone") @db.VarChar(20)
+  email      String? @db.VarChar(320)
+  addressLine String? @map("address_line") @db.VarChar(300)
+  idTypeCode String? @map("id_type_code") @db.VarChar(32)
+  idLast4    String? @map("id_last4") @db.VarChar(4)
+  isPrimary  Boolean @default(false) @map("is_primary")
+  /// DPDP Rules 2025: a minor's registration cannot be saved without a
+  /// guardian contact whose consent is verifiable (OP-001 §14 AC-12).
+  isGuardian Boolean @default(false) @map("is_guardian")
+  notes      String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, kind])
+  @@index([hospitalId, phone])
+  @@map("contacts")
+  @@schema("patient")
+}
+
+/// Family linking (OP-001 §3.2.3). Symmetry is maintained by the service using
+/// `mdm_relationship_types.inverse_code`; the unique key stops the same pair
+/// being linked twice under the same relation.
+model PatientRelationship {
+  id               String  @id @db.Uuid
+  hospitalId       String  @map("hospital_id") @db.Uuid
+  patientId        String  @map("patient_id") @db.Uuid
+  relatedPatientId String  @map("related_patient_id") @db.Uuid
+  relationshipCode String  @map("relationship_code") @db.VarChar(32)
+  /// Family-account and family-portal access are consented, not implied.
+  consentId        String? @map("consent_id") @db.Uuid
+  isGuardian       Boolean @default(false) @map("is_guardian")
+  isEmergencyContact Boolean @default(false) @map("is_emergency_contact")
+  /// A guardianship ends on the day the minor reaches majority.
+  validFrom        DateTime? @map("valid_from") @db.Date
+  validTo          DateTime? @map("valid_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  patient        Patient @relation("patient_relationship_subject", fields: [patientId], references: [id], onDelete: Restrict)
+  relatedPatient Patient @relation("patient_relationship_object", fields: [relatedPatientId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, patientId, relatedPatientId, relationshipCode], map: "relationships_key")
+  @@index([hospitalId, relatedPatientId])
+  @@map("relationships")
+  @@schema("patient")
+}
+
+/// The banner strip. OP-001 §4: allergies live in `patient.allergies` in full;
+/// this table mirrors what must render in under a frame on every screen.
+model PatientAlert {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  type       PatientAlertType
+  severity   PatientAlertSeverity @default(moderate)
+  label      String  @db.VarChar(120)
+  detail     String? @db.Text
+  /// The row this alert mirrors — an allergy, an MLC case, a credit block.
+  sourceType String? @map("source_type") @db.VarChar(48)
+  sourceId   String? @map("source_id") @db.Uuid
+  activeFrom DateTime @default(now()) @map("active_from") @db.Timestamptz(6)
+  activeTo   DateTime? @map("active_to") @db.Timestamptz(6)
+  isActive   Boolean @default(true) @map("is_active")
+  /// EN-013 §3.2 / docs/06 §5: a critical alert must be acknowledged, and the
+  /// acknowledgement is evidence.
+  acknowledgedBy String? @map("acknowledged_by") @db.Uuid
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, isActive])
+  @@index([hospitalId, type, isActive])
+  @@map("alerts")
+  @@schema("patient")
+}
+
+/// Structured allergies, in the shape EN-029's interaction checker will read in
+/// Phase 2. Free text is kept alongside the coded value, never instead of it:
+/// an uncoded allergy still has to reach the prescriber.
+model PatientAllergy {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  category   PatientAllergyCategory
+  /// The code system and code of the substance (`mdm_concepts`). Null when the
+  /// substance was recorded as text at a busy desk — which is common and legal.
+  codeSystemKey String? @map("code_system_key") @db.VarChar(64)
+  substanceCode String? @map("substance_code") @db.VarChar(64)
+  substanceText String  @map("substance_text") @db.VarChar(300)
+  reaction   String[] @default([])
+  reactionText String? @map("reaction_text") @db.Text
+  criticality PatientAllergyCriticality @default(unable_to_assess)
+  severity   PatientAlertSeverity @default(moderate)
+  status     PatientAllergyStatus @default(active)
+  /// patient | family | practitioner | record | unknown
+  informant  String  @default("patient") @db.VarChar(24)
+  /// unconfirmed | confirmed | refuted | entered_in_error
+  verification String @default("unconfirmed") @db.VarChar(24)
+  onsetOn    DateTime? @map("onset_on") @db.Date
+  lastOccurredOn DateTime? @map("last_occurred_on") @db.Date
+  /// NOT NULL: an allergy is a clinical assertion and NABH requires it to be
+  /// attributable. It is also what `patient.sync_allergy_statement()` promotes
+  /// to `patients.allergy_asserted_by`, so a nullable recorder would leave the
+  /// statement-level accountability CHECK unsatisfiable. An import records the
+  /// system principal that ran it, not nobody.
+  recordedBy String  @map("recorded_by") @db.Uuid
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  notes      String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, substanceCode])
+  @@map("allergies")
+  @@schema("patient")
+}
+
+/// OP-001 §14 AC-14: every demographic edit is versioned with before/after, a
+/// reason and an actor. Append-only — the migration revokes UPDATE and DELETE.
+model PatientDemographicHistory {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  changedFields String[] @map("changed_fields")
+  before     Json
+  after      Json
+  reason     String  @db.Text
+  /// desk | portal | kiosk | import | abdm | merge | api
+  channel    String  @default("desk") @db.VarChar(24)
+  changedBy  String? @map("changed_by") @db.Uuid
+  changedAt  DateTime @default(now()) @map("changed_at") @db.Timestamptz(6)
+  /// The `core.audit_log` row this edit is chained to (EN-024).
+  auditId    String? @map("audit_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, changedAt(sort: Desc)])
+  @@map("demographic_history")
+  @@schema("patient")
+}
+
+// ── MPI: duplicate detection, merge, and the reversal path ───────────────────
+
+/// OP-001 §5 scoring: exact ABHA/Aadhaar-hash 1.0; mobile+DOB 0.9; name
+/// trigram ≥0.6 with gender and DOB±1y 0.85. `rule_hits` records which rules
+/// fired, so the MRD officer reviews evidence rather than a bare number and the
+/// thresholds can be re-tuned against real decisions.
+model PatientDedupeCandidate {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  /// Ordered by the service so (A,B) and (B,A) are the same candidate.
+  patientAId String  @map("patient_a_id") @db.Uuid
+  patientBId String  @map("patient_b_id") @db.Uuid
+  score      Decimal @db.Decimal(4, 3)
+  ruleHits   Json    @default("{}") @map("rule_hits")
+  /// create_time | nightly_sweep | import | manual | abha_link
+  detectedBy String  @default("create_time") @map("detected_by") @db.VarChar(24)
+  status     PatientDedupeStatus @default(open)
+  reviewedBy String? @map("reviewed_by") @db.Uuid
+  reviewedAt DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  decisionNote String? @map("decision_note") @db.Text
+  mergeId    String? @map("merge_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, patientAId, patientBId], map: "dedupe_candidates_pair_key")
+  @@index([hospitalId, status, score(sort: Desc)])
+  @@map("dedupe_candidates")
+  @@schema("patient")
+}
+
+/// The merge record. It is the *only* thing that makes a merge reversible, so
+/// it carries a full snapshot of both records as they were, the field-level
+/// choices the officer made, and a deadline after which unmerge is refused
+/// (OP-001 §3.8: 30 days). Never updated destructively, never deleted.
+model PatientMerge {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  survivorId String  @map("survivor_id") @db.Uuid
+  victimId   String  @map("victim_id") @db.Uuid
+  survivorUhid String @map("survivor_uhid") @db.VarChar(32)
+  victimUhid String  @map("victim_uhid") @db.VarChar(32)
+  status     PatientMergeStatus @default(pending)
+  reason     String  @db.Text
+  /// Both records exactly as they were immediately before the merge.
+  survivorSnapshot Json @map("survivor_snapshot")
+  victimSnapshot   Json @map("victim_snapshot")
+  /// Which value won for each contested field, and who chose it.
+  fieldChoices Json  @default("{}") @map("field_choices")
+  requestedBy String? @map("requested_by") @db.Uuid
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  /// EN-038: MRD merges are two-step and approved.
+  approvalId String? @map("approval_id") @db.Uuid
+  mergedBy   String? @map("merged_by") @db.Uuid
+  mergedAt   DateTime? @map("merged_at") @db.Timestamptz(6)
+  unmergeDeadline DateTime @map("unmerge_deadline") @db.Timestamptz(6)
+  unmergedBy String? @map("unmerged_by") @db.Uuid
+  unmergedAt DateTime? @map("unmerged_at") @db.Timestamptz(6)
+  unmergeReason String? @map("unmerge_reason") @db.Text
+  details    Json    @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  repoints PatientMergeRepoint[]
+
+  @@index([hospitalId, status, mergedAt(sort: Desc)])
+  @@index([hospitalId, survivorId])
+  @@index([hospitalId, victimId])
+  @@map("merges")
+  @@schema("patient")
+}
+
+/// OP-001 §5 SLA: "all child records re-pointed by consumers within 5 min
+/// (SLA monitored)". This is what monitors it. Each consumer of `patient.merged`
+/// acknowledges here with the rows it moved, which is also the instruction list
+/// an unmerge replays in reverse — an event that was never acknowledged cannot
+/// be silently assumed to have been applied.
+model PatientMergeRepoint {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  mergeId    String  @map("merge_id") @db.Uuid
+  module     String  @db.VarChar(16)
+  tableName  String  @map("table_name") @db.VarChar(96)
+  rowsRepointed Int  @default(0) @map("rows_repointed")
+  rowIds     String[] @default([]) @map("row_ids") @db.Uuid
+  /// pending | applied | reversed | failed | not_applicable
+  status     String  @default("pending") @db.VarChar(24)
+  appliedAt  DateTime? @map("applied_at") @db.Timestamptz(6)
+  reversedAt DateTime? @map("reversed_at") @db.Timestamptz(6)
+  errorText  String? @map("error_text") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  merge PatientMerge @relation(fields: [mergeId], references: [id], onDelete: Restrict)
+
+  @@unique([mergeId, module, tableName], map: "merge_repoints_key")
+  @@index([hospitalId, status])
+  @@map("merge_repoints")
+  @@schema("patient")
+}

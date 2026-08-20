@@ -30,6 +30,9 @@ import { seedPlatform } from './platform.js';
 import { DEV_PASSWORD, seedUsers } from './users.js';
 import { seedModuleConfiguration } from './modules.js';
 import { seedActivity } from './activity.js';
+import { seedMasters } from './masters.js';
+import { seedFrontOffice } from './frontoffice.js';
+import { seedPatientPopulation } from './patients.js';
 
 interface Args {
   readonly tier: Tier;
@@ -82,8 +85,15 @@ export async function runSeed(db: Pool, tier: Tier): Promise<ReturnType<typeof t
 
   if (tier !== 'minimal') {
     await seedModuleConfiguration(ctx, tenancy);
+    // Phase 1. The masters come first — a schedule template references a
+    // practitioner, a queue references a room, a consent type references a
+    // department — and the patient population comes last, because it
+    // references all of them.
+    await seedMasters(ctx, tenancy);
+    await seedFrontOffice(ctx, tenancy);
   }
   await seedActivity(ctx, tenancy);
+  await seedPatientPopulation(ctx, tenancy);
 
   return tally(ctx.results);
 }

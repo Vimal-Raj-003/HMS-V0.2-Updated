@@ -1,0 +1,519 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-009 — SMS & WhatsApp (schema `engage`, prefix `msg_`)
+//
+// India makes this module a compliance surface, not a wrapper around an HTTP
+// call. TRAI's DLT regime means an SMS cannot be sent unless its exact content
+// was registered against a principal-entity id and a header; the DPDP Act means
+// anything that is not transactional needs recorded consent that can be
+// withdrawn; and WhatsApp's own rules mean a free-form message is only legal
+// inside a 24-hour window after the patient wrote first. All three are modelled
+// as data:
+//
+//   * `msg_dlt_templates` is the **registry** — what TRAI approved, verbatim,
+//     with its content hash. `msg_template_versions` is what the product wants
+//     to send. A version that claims a DLT id whose `content_hash` no longer
+//     matches its own body is a send that will be rejected by the operator, and
+//     it is far better to catch that at approval time than at 3 a.m.
+//
+//   * `msg_optins` is the **DND/opt-out ledger**. It is keyed by phone as well
+//     as by patient, because a person may opt out before they are ever
+//     registered and that must still be honoured, and it is per (channel,
+//     class) because opting out of marketing is not opting out of an OTP.
+//
+//   * `msg_messages` and `msg_events` are **partitioned monthly** (EN-009 §5:
+//     metadata two years, rendered bodies 90 days) and `body_rendered` is
+//     encrypted, because a receipt or an appointment reminder is PHI-adjacent
+//     the moment it names a department.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum MsgChannel {
+  sms
+  whatsapp
+  rcs
+  email
+  voice
+
+  @@schema("engage")
+}
+
+enum MsgDirection {
+  out
+  in
+
+  @@schema("engage")
+}
+
+/// TRAI/WhatsApp category. Determines the header, the route and whether DND
+/// scrubbing applies.
+enum MsgCategory {
+  authentication
+  transactional
+  utility
+  service_explicit
+  service_implicit
+  promotional
+  marketing
+
+  @@schema("engage")
+}
+
+/// EN-009 §5 class rules: `critical` and `transactional` may be sent 24×7 to a
+/// verified number without marketing consent; `service` needs recorded consent;
+/// `promotional` needs explicit opt-in, a DND scrub and a 9am–9pm window.
+enum MsgClass {
+  critical
+  transactional
+  service
+  promotional
+
+  @@schema("engage")
+}
+
+enum MsgTemplateStatus {
+  draft
+  pending_approval
+  active
+  rejected
+  retired
+
+  @@schema("engage")
+}
+
+enum MsgStatus {
+  queued
+  sent
+  delivered
+  read
+  failed
+  undelivered
+  expired
+  dropped_policy
+
+  @@schema("engage")
+}
+
+enum MsgOptInStatus {
+  opted_in
+  opted_out
+  unknown
+
+  @@schema("engage")
+}
+
+/// Per-tenant sender configuration. Credentials are never here: `credentials_ref`
+/// names a secret in the vault (docs/04 §4), which is what lets an on-prem
+/// deployment keep its gateway password out of the database entirely.
+model MsgProvider {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  channel       MsgChannel
+  /// msg91 | gupshup | twilio | kaleyra | wa_cloud | smtp | …
+  vendor        String  @db.VarChar(32)
+  name          String  @db.VarChar(120)
+  credentialsRef String @map("credentials_ref") @db.VarChar(200)
+  senderIds     Json    @default("[]") @map("sender_ids")
+  /// entity_id, headers[], pe_tm — the DLT principal-entity registration.
+  dlt           Json    @default("{}")
+  /// waba_id, phone_number_id, display name, quality rating.
+  waba          Json    @default("{}")
+  routes        Json    @default("{}")
+  rateLimitPerSec Int   @default(20) @map("rate_limit_per_sec")
+  /// Per-segment and per-conversation pricing, for the cost tracking below.
+  costConfig    Json    @default("{}") @map("cost_config")
+  priority      Int     @default(100)
+  /// active | paused | failing | retired
+  status        String  @default("active") @db.VarChar(16)
+  health        Json    @default("{}")
+  lastHealthyAt DateTime? @map("last_healthy_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@index([hospitalId, channel, status, priority])
+  @@map("msg_providers")
+  @@schema("engage")
+}
+
+/// The DLT registry: one row per template TRAI approved, exactly as approved.
+model MsgDltTemplate {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  /// The principal-entity id under which it was registered.
+  entityId      String  @map("entity_id") @db.VarChar(32)
+  /// The registered sender header, e.g. `VIMSHL`.
+  header        String  @db.VarChar(16)
+  dltTemplateId String  @map("dlt_template_id") @db.VarChar(64)
+  templateName  String  @map("template_name") @db.VarChar(160)
+  category      MsgCategory
+  language      String  @default("en") @db.VarChar(16)
+  /// The registered body, with `{#var#}` placeholders, byte for byte.
+  content       String  @db.Text
+  /// SHA-256 of `content` after normalisation. A product template whose body
+  /// hashes differently is not the template TRAI approved.
+  contentHash   String  @map("content_hash") @db.VarChar(64)
+  variableCount Int     @default(0) @map("variable_count")
+  /// pending | approved | rejected | blacklisted | expired
+  status        String  @default("pending") @db.VarChar(16)
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  rejectionReason String? @map("rejection_reason") @db.Text
+  registeredBy  String? @map("registered_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  versions MsgTemplateVersion[]
+
+  @@unique([hospitalId, dltTemplateId], map: "msg_dlt_templates_key")
+  @@index([hospitalId, status, category])
+  @@index([hospitalId, header])
+  @@map("msg_dlt_templates")
+  @@schema("engage")
+}
+
+/// The product's view of a message: a stable key an event handler fires
+/// (`appointment_reminder_24h`), independent of language, channel or vendor.
+model MsgTemplate {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  key         String  @db.VarChar(96)
+  name        String  @db.VarChar(160)
+  description String? @db.Text
+  channel     MsgChannel
+  category    MsgCategory
+  class       MsgClass
+  ownerModule String  @map("owner_module") @db.VarChar(16)
+  ttlSec      Int     @default(86400) @map("ttl_sec")
+  /// EN-009 §5: repeats of the same (template, recipient, ref) collapse.
+  dedupeWindowSec Int @default(600) @map("dedupe_window_sec")
+  /// none | minimal — an SMS may never carry clinical content.
+  phiLevel    String  @default("none") @map("phi_level") @db.VarChar(16)
+  /// wa_then_sms | sms_only | wa_only
+  channelPolicy String @default("wa_then_sms") @map("channel_policy") @db.VarChar(16)
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  versions MsgTemplateVersion[]
+
+  @@unique([hospitalId, key])
+  @@index([hospitalId, ownerModule, active])
+  @@map("msg_templates")
+  @@schema("engage")
+}
+
+/// One row per (template, version, language). `variables` carries the ordered
+/// variable spec — index, name, type, max length, sample — which is what lets
+/// a render be validated before it is sent rather than rejected by the operator.
+model MsgTemplateVersion {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  templateId    String  @map("template_id") @db.Uuid
+  version       Int
+  language      String  @db.VarChar(16)
+  body          String  @db.Text
+  header        Json?
+  footer        String? @db.VarChar(300)
+  buttons       Json    @default("[]")
+  /// [{idx, name, type, max_len, sample}] — EN-009 §5 caps SMS variables at 30
+  /// characters, which is a property of the variable, not of the sender.
+  variables     Json    @default("[]")
+  dltTemplateRefId String? @map("dlt_template_ref_id") @db.Uuid
+  waTemplateName String? @map("wa_template_name") @db.VarChar(160)
+  /// pending | approved | rejected | paused | disabled
+  waStatus      String? @map("wa_status") @db.VarChar(24)
+  waQuality     String? @map("wa_quality") @db.VarChar(16)
+  waRejectionReason String? @map("wa_rejection_reason") @db.Text
+  bodyHash      String  @map("body_hash") @db.VarChar(64)
+  status        MsgTemplateStatus @default(draft)
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  effectiveFrom DateTime? @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  template    MsgTemplate     @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  dltTemplate MsgDltTemplate? @relation(fields: [dltTemplateRefId], references: [id], onDelete: SetNull)
+
+  @@unique([templateId, version, language], map: "msg_template_versions_key")
+  @@index([hospitalId, status, language])
+  @@map("msg_template_versions")
+  @@schema("engage")
+}
+
+/// EN-009 §5: "URLs only from whitelist". An unregistered short domain in a DLT
+/// SMS gets the whole header blocked, not just the message.
+model MsgUrlWhitelist {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  urlPattern    String  @map("url_pattern") @db.VarChar(300)
+  domain        String  @db.VarChar(200)
+  dltRegistered Boolean @default(false) @map("dlt_registered")
+  note          String? @db.VarChar(300)
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, urlPattern], map: "msg_url_whitelist_key")
+  @@index([hospitalId, domain, active])
+  @@map("msg_url_whitelist")
+  @@schema("engage")
+}
+
+/// The message log. Partitioned monthly by `created_at`.
+model MsgMessage {
+  id            String  @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  channel       MsgChannel
+  direction     MsgDirection @default(out)
+  templateKey   String? @map("template_key") @db.VarChar(96)
+  templateVersionId String? @map("template_version_id") @db.Uuid
+  language      String  @default("en-IN") @db.VarChar(16)
+  toE164        String  @map("to_e164") @db.VarChar(20)
+  fromSender    String? @map("from_sender") @db.VarChar(32)
+  /// patient | user | external
+  recipientType String  @default("patient") @map("recipient_type") @db.VarChar(16)
+  recipientId   String? @map("recipient_id") @db.Uuid
+  providerId    String? @map("provider_id") @db.Uuid
+  providerMsgId String? @map("provider_msg_id") @db.VarChar(200)
+  class         MsgClass @default(transactional)
+  category      MsgCategory @default(transactional)
+  module        String  @db.VarChar(16)
+  refType       String? @map("ref_type") @db.VarChar(48)
+  refId         String? @map("ref_id") @db.Uuid
+  campaignId    String? @map("campaign_id") @db.Uuid
+  conversationId String? @map("conversation_id") @db.Uuid
+  /// EN-009 §5: retained 90 days, encrypted, then purged. Not searchable.
+  bodyRendered  Bytes?  @map("body_rendered")
+  /// Digest of the substituted variables, so a duplicate can be recognised
+  /// without holding the body.
+  varsHash      String? @map("vars_hash") @db.VarChar(64)
+  dedupeKey     String? @map("dedupe_key") @db.VarChar(300)
+  status        MsgStatus @default(queued)
+  errorCode     String? @map("error_code") @db.VarChar(48)
+  errorText     String? @map("error_text") @db.Text
+  attempts      Int     @default(0)
+  /// The WhatsApp attempt this SMS is the fallback for (EN-009 §5).
+  fallbackOfId  String? @map("fallback_of_id") @db.Uuid
+  segments      Int     @default(1)
+  costAmount    Decimal? @map("cost_amount") @db.Decimal(14, 2)
+  costCurrency  String  @default("INR") @map("cost_currency") @db.Char(3)
+  scheduledAt   DateTime? @map("scheduled_at") @db.Timestamptz(6)
+  sentAt        DateTime? @map("sent_at") @db.Timestamptz(6)
+  deliveredAt   DateTime? @map("delivered_at") @db.Timestamptz(6)
+  readAt        DateTime? @map("read_at") @db.Timestamptz(6)
+  failedAt      DateTime? @map("failed_at") @db.Timestamptz(6)
+  nextAttemptAt DateTime? @map("next_attempt_at") @db.Timestamptz(6)
+  idempotencyKey String? @map("idempotency_key") @db.VarChar(128)
+  correlationId String? @map("correlation_id") @db.VarChar(128)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy     String? @map("created_by") @db.Uuid
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([id, createdAt])
+  @@index([hospitalId, createdAt(sort: Desc)])
+  @@index([recipientId, createdAt(sort: Desc)])
+  @@index([providerMsgId])
+  @@index([hospitalId, status, nextAttemptAt])
+  @@index([hospitalId, refType, refId])
+  @@index([dedupeKey])
+  @@map("msg_messages")
+  @@schema("engage")
+}
+
+/// Delivery-status webhooks, exactly as received. Partitioned monthly; raw
+/// payloads are purged at 30 days (EN-009 §5).
+model MsgEvent {
+  id             String  @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  messageId      String  @map("message_id") @db.Uuid
+  /// queued | sent | delivered | read | failed | undelivered | clicked | replied
+  event          String  @db.VarChar(24)
+  providerStatus String? @map("provider_status") @db.VarChar(48)
+  errorCode      String? @map("error_code") @db.VarChar(48)
+  raw            Json    @default("{}")
+  /// EN-017-style replay protection: the same webhook delivered twice is one row.
+  providerEventId String? @map("provider_event_id") @db.VarChar(200)
+  at             DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([id, at])
+  @@index([messageId, at])
+  @@index([hospitalId, event, at(sort: Desc)])
+  @@map("msg_events")
+  @@schema("engage")
+}
+
+/// The DND / opt-out ledger. Keyed by phone *and* patient: a person may opt out
+/// before they are ever registered, and that must be honoured on the day they
+/// are. `evidence` is what a TRAI or DPDP complaint is answered with.
+model MsgOptIn {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  phoneE164   String  @map("phone_e164") @db.VarChar(20)
+  patientId   String? @map("patient_id") @db.Uuid
+  channel     MsgChannel
+  class       MsgClass
+  status      MsgOptInStatus @default(unknown)
+  /// registration | portal | whatsapp_stop | sms_stop | ivr | desk | trai_dnd | import
+  source      String  @db.VarChar(32)
+  evidence    Json    @default("{}")
+  /// EN-028 consent artefact, when the opt-in was captured as consent.
+  consentId   String? @map("consent_id") @db.Uuid
+  effectiveAt DateTime @default(now()) @map("effective_at") @db.Timestamptz(6)
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, phoneE164, channel, class], map: "msg_optins_key")
+  @@index([hospitalId, patientId])
+  @@index([phoneE164, channel, class])
+  @@map("msg_optins")
+  @@schema("engage")
+}
+
+/// Hard blocks: invalid numbers, complaints, landlines, do-not-contact orders.
+/// Checked before the opt-in ledger, because a block outranks any consent.
+model MsgBlockListEntry {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  phoneE164  String  @map("phone_e164") @db.VarChar(20)
+  channel    MsgChannel?
+  /// invalid | bounced | complaint | do_not_contact | landline | deceased
+  reason     String  @db.VarChar(32)
+  note       String? @db.VarChar(300)
+  addedBy    String? @map("added_by") @db.Uuid
+  addedAt    DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+  releasedAt DateTime? @map("released_at") @db.Timestamptz(6)
+  releasedBy String? @map("released_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, phoneE164, channel], map: "msg_block_list_key")
+  @@index([phoneE164])
+  @@map("msg_block_list")
+  @@schema("engage")
+}
+
+/// The WhatsApp 24-hour service window. Free-form is legal only while
+/// `window_expires_at` is in the future; after that, a template or nothing.
+model MsgConversation {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String? @map("branch_id") @db.Uuid
+  channel    MsgChannel
+  phoneE164  String  @map("phone_e164") @db.VarChar(20)
+  patientId  String? @map("patient_id") @db.Uuid
+  providerConversationId String? @map("provider_conversation_id") @db.VarChar(200)
+  lastInboundAt DateTime? @map("last_inbound_at") @db.Timestamptz(6)
+  windowExpiresAt DateTime? @map("window_expires_at") @db.Timestamptz(6)
+  assignedTo String? @map("assigned_to") @db.Uuid
+  /// open | assigned | closed
+  status     String  @default("open") @db.VarChar(16)
+  closedAt   DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, channel, phoneE164], map: "msg_conversations_key")
+  @@index([hospitalId, status, windowExpiresAt])
+  @@map("msg_conversations")
+  @@schema("engage")
+}
+
+/// Event-driven sends. `condition` is evaluated against the outbox event
+/// payload, so wiring a new reminder is configuration, not a deployment.
+model MsgTrigger {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  eventType     String  @map("event_type") @db.VarChar(96)
+  templateKey   String  @map("template_key") @db.VarChar(96)
+  condition     Json    @default("{}")
+  /// wa_then_sms | sms_only | wa_only
+  channelPolicy String  @default("wa_then_sms") @map("channel_policy") @db.VarChar(16)
+  delaySec      Int     @default(0) @map("delay_sec")
+  /// Negative for "before": an appointment reminder is `-86400`.
+  offsetSec     Int?    @map("offset_sec")
+  module        String  @db.VarChar(16)
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, eventType, templateKey], map: "msg_triggers_key")
+  @@index([hospitalId, active, eventType])
+  @@map("msg_triggers")
+  @@schema("engage")
+}
+
+/// EN-009 §4 cost tracking, rolled up daily so the finance report never scans
+/// the partitioned message log.
+model MsgCostDaily {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String? @map("branch_id") @db.Uuid
+  costDate   DateTime @map("cost_date") @db.Date
+  channel    MsgChannel
+  providerId String? @map("provider_id") @db.Uuid
+  module     String  @db.VarChar(16)
+  campaignId String? @map("campaign_id") @db.Uuid
+  messageCount Int   @default(0) @map("message_count")
+  segments   Int     @default(0)
+  amount     Decimal @default(0) @db.Decimal(14, 2)
+  currency   String  @default("INR") @db.Char(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, branchId, costDate, channel, providerId, module], map: "msg_costs_daily_key")
+  @@index([hospitalId, costDate(sort: Desc)])
+  @@map("msg_costs_daily")
+  @@schema("engage")
+}
+
+/// Short links, so a 160-character DLT template can still carry a live-queue or
+/// reschedule deep link. Click counts feed EN-030 and NC-026.
+model MsgShortLink {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  code       String  @db.VarChar(16)
+  targetUrl  String  @map("target_url") @db.VarChar(1000)
+  messageId  String? @map("message_id") @db.Uuid
+  patientId  String? @map("patient_id") @db.Uuid
+  clicks     Int     @default(0)
+  lastClickAt DateTime? @map("last_click_at") @db.Timestamptz(6)
+  expiresAt  DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, code], map: "msg_short_links_key")
+  @@index([hospitalId, expiresAt])
+  @@map("msg_short_links")
+  @@schema("engage")
+}

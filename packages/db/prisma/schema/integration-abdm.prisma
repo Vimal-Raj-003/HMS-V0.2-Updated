@@ -1,0 +1,372 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-011 — ABDM / ABHA, Milestone 1 only (schema `integration`, prefix `abdm_`)
+//
+// `phase-01 §1.3` is explicit about the boundary: ABHA creation and
+// verification, scan-&-share intake, care-context linking with V3 linking-token
+// persistence, HFR/HPR configuration and consent artefacts. "M2/M3 are **not**
+// in this phase — leave the interfaces."
+//
+// So the tables here are M1's: config, the ABHA profile, the transaction log,
+// scan-&-share, care contexts, link requests, the consent artefact store and
+// the registry mapping. The M2/M3 tables EN-011 §4 also lists —
+// `abdm_hi_requests`, `abdm_hi_bundles`, `abdm_hiu_records`,
+// `abdm_discovery_requests`, `abdm_certification_evidence` — are deliberately
+// absent. `abdm_care_contexts.link_status` and `abdm_consents` are the
+// interfaces they will attach to.
+//
+// One rule dominates every column choice: **registration must never block on
+// ABDM** (`phase-01`, Constraints). A gateway that is down produces an
+// `abdm_txn_log` row with `status = failed` and an ABHA-pending flag on the
+// patient, never a failed registration.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AbdmMode {
+  sandbox
+  production
+
+  @@schema("integration")
+}
+
+enum AbdmKycMethod {
+  aadhaar_otp
+  mobile_otp
+  driving_licence
+  demographic
+  qr_scan
+  biometric
+
+  @@schema("integration")
+}
+
+enum AbdmLinkStatus {
+  pending
+  linked
+  failed
+  delinked
+
+  @@schema("integration")
+}
+
+enum AbdmConsentStatus {
+  requested
+  granted
+  denied
+  revoked
+  expired
+
+  @@schema("integration")
+}
+
+/// Per hospital (optionally per branch, because HFR ids are per facility).
+/// Nothing secret is stored: `*_ref` columns name vault entries, and the X25519
+/// key material keeps only public halves plus a reference to the private one.
+model AbdmConfig {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  mode          AbdmMode @default(sandbox)
+  clientId      String  @map("client_id") @db.VarChar(120)
+  secretRef     String  @map("secret_ref") @db.VarChar(200)
+  hipId         String? @map("hip_id") @db.VarChar(64)
+  hiuId         String? @map("hiu_id") @db.VarChar(64)
+  hfrId         String? @map("hfr_id") @db.VarChar(64)
+  /// `sbx` in sandbox, `abdm` in production — the consent-manager id.
+  cmId          String  @default("sbx") @map("cm_id") @db.VarChar(24)
+  bridgeUrl     String  @map("bridge_url") @db.VarChar(300)
+  gatewayUrl    String  @map("gateway_url") @db.VarChar(300)
+  callbackSecretRef String? @map("callback_secret_ref") @db.VarChar(200)
+  /// [{kid, alg, public, private_ref, created_at, retired_at}] — public halves
+  /// and vault references only.
+  keys          Json    @default("[]")
+  certStatus    String? @map("cert_status") @db.VarChar(24)
+  lastTokenAt   DateTime? @map("last_token_at") @db.Timestamptz(6)
+  /// The Phase-1 kill switch: registration proceeds regardless of this flag.
+  enabled       Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@unique([hospitalId, branchId], map: "abdm_config_key")
+  @@index([hospitalId, mode, enabled])
+  @@map("abdm_config")
+  @@schema("integration")
+}
+
+/// The ABHA link. `patient.identifiers` still holds the `abha_number` and
+/// `abha_address` rows — that is the searchable identity — while this table
+/// holds the ABDM-side facts: how it was verified, when, and against which
+/// transaction, plus the KYC profile as returned so a mismatch with the local
+/// record can be shown side by side (OP-001 §3.3.2).
+model AbdmAbhaProfile {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  abhaNumber    String  @map("abha_number") @db.VarChar(20)
+  abhaAddress   String? @map("abha_address") @db.VarChar(120)
+  kycVerified   Boolean @default(false) @map("kyc_verified")
+  method        AbdmKycMethod
+  photoFileId   String? @map("photo_file_id") @db.Uuid
+  /// Name, gender, dob, masked address — as ABDM returned it, unmodified.
+  profile       Json    @default("{}")
+  /// Fields where ABDM and the local record disagreed, and which was kept.
+  mismatchResolution Json @default("{}") @map("mismatch_resolution")
+  txnRef        String? @map("txn_ref") @db.VarChar(120)
+  noticeConsentId String? @map("notice_consent_id") @db.Uuid
+  linkedAt      DateTime? @map("linked_at") @db.Timestamptz(6)
+  verifiedAt    DateTime? @map("verified_at") @db.Timestamptz(6)
+  delinkedAt    DateTime? @map("delinked_at") @db.Timestamptz(6)
+  delinkReason  String? @map("delink_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, abhaNumber], map: "abdm_abha_profiles_key")
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, abhaAddress])
+  @@map("abdm_abha_profiles")
+  @@schema("integration")
+}
+
+/// Enrolment and verification transactions. The mobile is stored masked because
+/// the transaction log is read by support staff who have no business seeing a
+/// full number, and because `docs/04` bans PHI in operational logs.
+model AbdmTxnLog {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String? @map("branch_id") @db.Uuid
+  txnId        String  @map("txn_id") @db.VarChar(120)
+  /// enrol_aadhaar | enrol_mobile | verify | search | link | scan_share | dl
+  type         String  @db.VarChar(32)
+  method       AbdmKycMethod?
+  mobileMasked String? @map("mobile_masked") @db.VarChar(20)
+  patientId    String? @map("patient_id") @db.Uuid
+  /// started | otp_sent | otp_verified | success | failed | abandoned
+  status       String  @default("started") @db.VarChar(24)
+  errorCode    String? @map("error_code") @db.VarChar(48)
+  errorText    String? @map("error_text") @db.Text
+  attempts     Int     @default(0)
+  startedAt    DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz(6)
+  expiresAt    DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, txnId], map: "abdm_txn_log_key")
+  @@index([hospitalId, status, startedAt(sort: Desc)])
+  @@index([hospitalId, patientId])
+  @@map("abdm_txn_log")
+  @@schema("integration")
+}
+
+/// Scan & Share (ABDM V3 `/v3/hip/patient/share`): the patient scans the
+/// counter's QR and their profile arrives unsolicited. The row exists before
+/// anyone matches it to a patient, which is the point — it is an inbox.
+model AbdmScanShareEvent {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  token         String  @db.VarChar(200)
+  hipId         String? @map("hip_id") @db.VarChar(64)
+  counterId     String? @map("counter_id") @db.Uuid
+  abhaAddress   String? @map("abha_address") @db.VarChar(120)
+  abhaNumber    String? @map("abha_number") @db.VarChar(20)
+  profile       Json    @default("{}")
+  /// received | matched | created | rejected | expired
+  status        String  @default("received") @db.VarChar(16)
+  patientId     String? @map("patient_id") @db.Uuid
+  matchScore    Decimal? @map("match_score") @db.Decimal(4, 3)
+  visitId       String? @map("visit_id") @db.Uuid
+  queueTokenId  String? @map("queue_token_id") @db.Uuid
+  handledBy     String? @map("handled_by") @db.Uuid
+  handledAt     DateTime? @map("handled_at") @db.Timestamptz(6)
+  receivedAt    DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, token], map: "abdm_scan_share_events_key")
+  @@index([hospitalId, status, receivedAt(sort: Desc)])
+  @@index([hospitalId, patientId])
+  @@map("abdm_scan_share_events")
+  @@schema("integration")
+}
+
+/// EN-011 §4. A care context is "this patient had an OPD visit on this date at
+/// this facility" — the unit ABDM links and, in M2, fetches. Phase 1 creates
+/// and links them; nothing fetches yet.
+model AbdmCareContext {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  abhaAddress   String? @map("abha_address") @db.VarChar(120)
+  /// Stable, hospital-unique reference sent to ABDM. Never reused.
+  reference     String  @db.VarChar(120)
+  display       String  @db.VarChar(200)
+  /// opd | ip | lab | rad | vacc | checkup | doc
+  encounterType String  @map("encounter_type") @db.VarChar(16)
+  encounterId   String? @map("encounter_id") @db.Uuid
+  visitId       String? @map("visit_id") @db.Uuid
+  hiTypes       String[] @default([]) @map("hi_types")
+  linkStatus    AbdmLinkStatus @default(pending) @map("link_status")
+  linkTxn       String? @map("link_txn") @db.VarChar(120)
+  linkedAt      DateTime? @map("linked_at") @db.Timestamptz(6)
+  lastNotifiedAt DateTime? @map("last_notified_at") @db.Timestamptz(6)
+  errorText     String? @map("error_text") @db.Text
+  occurredAt    DateTime @map("occurred_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, reference], map: "abdm_care_contexts_key")
+  @@index([hospitalId, patientId, occurredAt(sort: Desc)])
+  @@index([hospitalId, linkStatus])
+  @@map("abdm_care_contexts")
+  @@schema("integration")
+}
+
+/// The V3 linking token, persisted. `phase-01 §1.3` calls this out by name and
+/// exit-gate 6 checks it: a link token is issued once per (patient, HIP) and
+/// re-used for every subsequent care-context notification, so losing it means
+/// re-consenting the patient.
+model AbdmLinkRequest {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  branchId       String? @map("branch_id") @db.Uuid
+  requestId      String  @map("request_id") @db.VarChar(120)
+  patientId      String  @map("patient_id") @db.Uuid
+  abhaAddress    String? @map("abha_address") @db.VarChar(120)
+  /// hip_initiated | user_initiated | discovery
+  mode           String  @default("hip_initiated") @db.VarChar(24)
+  otpRef         String? @map("otp_ref") @db.VarChar(120)
+  /// The V3 linking token itself, encrypted at rest.
+  linkTokenEncrypted Bytes? @map("link_token_encrypted")
+  linkTokenIssuedAt DateTime? @map("link_token_issued_at") @db.Timestamptz(6)
+  linkTokenExpiresAt DateTime? @map("link_token_expires_at") @db.Timestamptz(6)
+  careContextIds String[] @default([]) @map("care_context_ids") @db.Uuid
+  /// requested | otp_sent | confirmed | linked | failed | expired
+  status         String  @default("requested") @db.VarChar(24)
+  errorCode      String? @map("error_code") @db.VarChar(48)
+  errorText      String? @map("error_text") @db.Text
+  requestedAt    DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, requestId], map: "abdm_link_requests_key")
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, linkTokenExpiresAt])
+  @@map("abdm_link_requests")
+  @@schema("integration")
+}
+
+/// The signed consent artefact, stored as ABDM issued it. Distinct from
+/// EN-028's `patient.consents`: that is the hospital's consent to treat and to
+/// process; this is the consent manager's artefact authorising data exchange,
+/// and it has its own lifecycle, signature and erase-by date.
+model AbdmConsentArtefact {
+  id               String  @id @db.Uuid
+  hospitalId       String  @map("hospital_id") @db.Uuid
+  /// The artefact id as issued by the consent manager.
+  consentArtefactId String @map("consent_artefact_id") @db.VarChar(120)
+  consentRequestId String? @map("consent_request_id") @db.VarChar(120)
+  /// hip | hiu
+  role             String  @db.VarChar(8)
+  patientId        String? @map("patient_id") @db.Uuid
+  abhaAddress      String? @map("abha_address") @db.VarChar(120)
+  hipId            String? @map("hip_id") @db.VarChar(64)
+  hiuId            String? @map("hiu_id") @db.VarChar(64)
+  purposeCode      String  @map("purpose_code") @db.VarChar(32)
+  hiTypes          String[] @default([]) @map("hi_types")
+  dateFrom         DateTime? @map("date_from") @db.Timestamptz(6)
+  dateTo           DateTime? @map("date_to") @db.Timestamptz(6)
+  expiryAt         DateTime? @map("expiry_at") @db.Timestamptz(6)
+  frequency        Json    @default("{}")
+  careContextRefs  Json    @default("[]") @map("care_context_refs")
+  status           AbdmConsentStatus @default(requested)
+  /// The signed artefact, verbatim. It is the evidence, so it is never edited.
+  artefact         Json    @default("{}")
+  signatureValid   Boolean? @map("signature_valid")
+  /// ABDM requires fetched data to be erased by this date.
+  dataEraseAt      DateTime? @map("data_erase_at") @db.Timestamptz(6)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, consentArtefactId], map: "abdm_consents_key")
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, status, expiryAt])
+  @@map("abdm_consents")
+  @@schema("integration")
+}
+
+/// HFR (facility) and HPR (practitioner) registry mapping. `local_id` is a
+/// `core.branches.id` or a `mdm.mdm_practitioners.record_key` depending on
+/// `entity`, which is why it is not a foreign key.
+model AbdmRegistryMapping {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  /// facility | practitioner
+  entity       String  @db.VarChar(16)
+  localId      String  @map("local_id") @db.Uuid
+  registryId   String  @map("registry_id") @db.VarChar(64)
+  /// draft | submitted | verified | rejected | suspended
+  status       String  @default("draft") @db.VarChar(16)
+  lastSyncedAt DateTime? @map("last_synced_at") @db.Timestamptz(6)
+  payload      Json    @default("{}")
+  errorText    String? @map("error_text") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, entity, localId], map: "abdm_hfr_hpr_key")
+  @@index([hospitalId, entity, status])
+  @@map("abdm_hfr_hpr")
+  @@schema("integration")
+}
+
+/// Every ABDM request and callback. Partitioned monthly by `at`; the payload is
+/// encrypted because an ABHA profile is PHI, and the redacted copy is what
+/// support reads.
+model AbdmMessage {
+  id            String  @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  /// in | out
+  direction     String  @db.VarChar(4)
+  apiPath       String  @map("api_path") @db.VarChar(300)
+  requestId     String? @map("request_id") @db.VarChar(120)
+  correlationId String? @map("correlation_id") @db.VarChar(128)
+  txnId         String? @map("txn_id") @db.VarChar(120)
+  payloadEncrypted Bytes? @map("payload_encrypted")
+  payloadRedacted Json  @default("{}") @map("payload_redacted")
+  statusCode    Int?    @map("status_code")
+  errorText     String? @map("error_text") @db.Text
+  durationMs    Int?    @map("duration_ms")
+  at            DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([id, at])
+  @@index([hospitalId, at(sort: Desc)])
+  @@index([requestId])
+  @@index([correlationId])
+  @@map("abdm_messages")
+  @@schema("integration")
+}

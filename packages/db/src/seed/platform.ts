@@ -29,6 +29,10 @@ export async function seedPlatform(ctx: SeedContext, tenancy: SeededTenancy): Pr
 const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean, reset: string])[] = [
   ['UHID', '{BR}{SEQ:8}', false, 'never'],
   ['OP_VISIT', '{BR}/OP/{FY}/{SEQ:6}', false, 'fy'],
+  // OP-001 §4: "appointment no per branch/FY". Not gapless — a booking that
+  // fails validation must not burn a number that an auditor will later ask
+  // about, and nothing legal depends on the sequence being unbroken.
+  ['APPT', '{BR}/APPT/{FY}/{SEQ:6}', false, 'fy'],
   ['IP_NO', '{BR}/IP/{FY}/{SEQ:6}', false, 'fy'],
   ['TOKEN', '{SEQ:4}', false, 'day'],
   ['BILL_OP', '{BR}/OPB/{FY}/{SEQ:6}', true, 'fy'],

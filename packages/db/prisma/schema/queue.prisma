@@ -1,0 +1,500 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-006 — Queue management (schema `queue`)
+//
+// The operational heartbeat: 400 tokens an hour at peak, across doctor queues,
+// the vitals room, cash counters, sample collection and pharmacy, with priority
+// classes the Senior Citizens Act and the RPwD Act 2016 make legal obligations
+// rather than preferences.
+//
+// Three things here are not obvious and are deliberate:
+//
+//   * **`queue_token_series` is a real table, not a sequence.** EN-006 §5
+//     requires a daily reset, numbers that are never reused within a day, and a
+//     reserved offline block per counter. A Postgres sequence gives none of
+//     those three. One row per (queue, date) holds the high-water mark and is
+//     taken `FOR UPDATE` when a token is issued — the same discipline
+//     `core.numbering_series` uses for gapless invoice numbers.
+//
+//   * **`queue_offline_blocks` is what makes exit-gate 8 pass.** When the
+//     network is down the desk keeps issuing tokens from a block reserved in
+//     advance (EN-006 §3.6). The block is allocated *online*, ahead of time, so
+//     an offline counter can never collide with an online one; on reconnect the
+//     tokens are replayed with `offline_origin = true` and ordered by issue
+//     time.
+//
+//   * **`queue_tokens` and `queue_events` are partitioned monthly** (docs/03
+//     §Table rules names `queue_events` explicitly). Retention is two years for
+//     tokens and events, forever for the aggregates in `queue_wait_stats`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum QueueKind {
+  doctor
+  department_pool
+  counter_pool
+  stage
+
+  @@schema("queue")
+}
+
+enum QueueSeriesScope {
+  per_queue
+  per_doctor
+  per_branch
+
+  @@schema("queue")
+}
+
+enum QueueCallingMode {
+  call_next
+  auto_assign
+
+  @@schema("queue")
+}
+
+enum QueueTokenClass {
+  regular
+  appointment
+  priority_emergency
+  priority_senior
+  priority_pregnant
+  priority_disabled
+  priority_infant
+  priority_staff
+  priority_vip
+
+  @@schema("queue")
+}
+
+enum QueueTokenSource {
+  desk
+  kiosk
+  app
+  portal
+  call_centre
+  er
+  ward
+  auto_forward
+
+  @@schema("queue")
+}
+
+enum QueueTokenStatus {
+  issued
+  awaiting_payment
+  waiting
+  called
+  recalled
+  in_service
+  held
+  skipped
+  no_show
+  served
+  transferred
+  cancelled
+  expired
+
+  @@schema("queue")
+}
+
+enum QueueEventKind {
+  issued
+  activated
+  called
+  recalled
+  skipped
+  held
+  resumed
+  started
+  served
+  transferred
+  cancelled
+  no_show
+  forwarded
+  priority_changed
+  expired
+
+  @@schema("queue")
+}
+
+enum QueueCounterStatus {
+  free
+  busy
+  closed
+  paused
+
+  @@schema("queue")
+}
+
+enum QueueDoctorStatus {
+  consulting
+  on_break
+  in_ot
+  away
+  tele
+  offline
+
+  @@schema("queue")
+}
+
+/// EN-006 §3.1. One row per service point family per branch.
+model QueueDefinition {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(160)
+  kind          QueueKind
+  stageKey      String? @map("stage_key") @db.VarChar(32)
+  departmentKey String? @map("department_key") @db.Uuid
+  practitionerKey String? @map("practitioner_key") @db.Uuid
+  roomKey       String? @map("room_key") @db.Uuid
+  serviceKey    String? @map("service_key") @db.Uuid
+  /// doctor_ids / room_ids / counter_ids, for pool queues.
+  memberRefs    Json    @default("{}") @map("member_refs")
+  seriesPrefix  String  @map("series_prefix") @db.VarChar(8)
+  seriesScope   QueueSeriesScope @default(per_queue) @map("series_scope")
+  numberWidth   Int     @default(3) @map("number_width")
+  /// Local clock time at the branch. EN-006 §5: the series resets daily.
+  resetTime     DateTime @default(dbgenerated("'00:00:00'::time")) @map("reset_time") @db.Time(0)
+  startNumber   Int     @default(1) @map("start_number")
+  callingMode   QueueCallingMode @default(call_next) @map("calling_mode")
+  avgServiceSecSeed Int @default(600) @map("avg_service_sec_seed")
+  maxLength     Int?    @map("max_length")
+  /// Weight per class plus the fairness cap: "after 3 consecutive priority
+  /// calls, serve one regular" (EN-006 §3.5).
+  priorityRules Json    @default("{}") @map("priority_rules")
+  fairnessCap   Int     @default(3) @map("fairness_cap")
+  apptWalkinRatio String @default("2:1") @map("appt_walkin_ratio") @db.VarChar(12)
+  apptToleranceMin Int  @default(15) @map("appt_tolerance_min")
+  /// return_after, max_skips.
+  skipPolicy    Json    @default("{}") @map("skip_policy")
+  /// mask_mode, languages[], tts_voice, template_id (EN-018).
+  displayConfig Json    @default("{}") @map("display_config")
+  /// schedule | fixed
+  hoursSource   String  @default("schedule") @map("hours_source") @db.VarChar(16)
+  fixedHours    Json?   @map("fixed_hours")
+  /// EN-006 §5: a doctor queue token waits on payment unless this is set.
+  allowUnpaid   Boolean @default(false) @map("allow_unpaid")
+  offlineBlockSize Int  @default(100) @map("offline_block_size")
+  active        Boolean @default(true)
+  version       Int     @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  series   QueueTokenSeries[]
+  counters QueueCounter[]
+
+  @@unique([hospitalId, branchId, code], map: "queue_definitions_key")
+  @@index([hospitalId, branchId, kind, active])
+  @@index([hospitalId, practitionerKey])
+  @@map("queue_definitions")
+  @@schema("queue")
+}
+
+/// EN-006 §3.1.2 multi-stage journeys: registration → vitals → doctor →
+/// pharmacy. A token carries across stages and auto-forwards on completion.
+model QueueJourney {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String? @map("branch_id") @db.Uuid
+  code       String  @db.VarChar(32)
+  name       String  @db.VarChar(160)
+  /// [{stage_key, queue_selector, auto_forward}] in order.
+  stages     Json
+  /// department | visit_type — how a token picks up this journey.
+  appliesTo  Json    @default("{}") @map("applies_to")
+  active     Boolean @default(true)
+  version    Int     @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, code], map: "queue_journeys_key")
+  @@index([hospitalId, active])
+  @@map("queue_journeys")
+  @@schema("queue")
+}
+
+/// The daily numbering state. One row per (queue, series date). `last_number`
+/// is advanced under a row lock; `offline_reserved_from` is where the offline
+/// blocks start, so an online token can never reach them.
+model QueueTokenSeries {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String  @map("branch_id") @db.Uuid
+  queueId      String  @map("queue_id") @db.Uuid
+  /// Denormalised so a per-doctor series inside a pool queue is still one row.
+  scopeKey     String  @map("scope_key") @db.VarChar(64)
+  seriesDate   DateTime @map("series_date") @db.Date
+  prefix       String  @db.VarChar(8)
+  numberWidth  Int     @default(3) @map("number_width")
+  startNumber  Int     @default(1) @map("start_number")
+  lastNumber   Int     @default(0) @map("last_number")
+  /// EN-006 §3.6 / §5: numbers at or above this are reserved for offline
+  /// blocks and are never allocated by the online path.
+  offlineReservedFrom Int @default(900) @map("offline_reserved_from")
+  issuedCount  Int     @default(0) @map("issued_count")
+  resetAt      DateTime? @map("reset_at") @db.Timestamptz(6)
+  closedAt     DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  queue QueueDefinition @relation(fields: [queueId], references: [id], onDelete: Restrict)
+
+  @@unique([queueId, scopeKey, seriesDate], map: "queue_token_series_key")
+  @@index([hospitalId, branchId, seriesDate])
+  @@map("queue_token_series")
+  @@schema("queue")
+}
+
+/// A block of numbers handed to one counter in advance so it can keep issuing
+/// tokens with the network down. Allocated online; consumed offline; reconciled
+/// on reconnect. `issued_count` is what the sync reports back.
+model QueueOfflineBlock {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  branchId       String  @map("branch_id") @db.Uuid
+  queueId        String  @map("queue_id") @db.Uuid
+  seriesDate     DateTime @map("series_date") @db.Date
+  scopeKey       String  @map("scope_key") @db.VarChar(64)
+  counterId      String? @map("counter_id") @db.Uuid
+  workstationId  String? @map("workstation_id") @db.Uuid
+  deviceId       String? @map("device_id") @db.Uuid
+  rangeFrom      Int     @map("range_from")
+  rangeTo        Int     @map("range_to")
+  issuedCount    Int     @default(0) @map("issued_count")
+  syncedCount    Int     @default(0) @map("synced_count")
+  /// allocated | in_use | synced | expired | revoked
+  status         String  @default("allocated") @db.VarChar(16)
+  allocatedAt    DateTime @default(now()) @map("allocated_at") @db.Timestamptz(6)
+  allocatedBy    String? @map("allocated_by") @db.Uuid
+  lastSyncedAt   DateTime? @map("last_synced_at") @db.Timestamptz(6)
+  expiresAt      DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([queueId, seriesDate, rangeFrom], map: "queue_offline_blocks_key")
+  @@index([hospitalId, branchId, seriesDate, status])
+  @@map("queue_offline_blocks")
+  @@schema("queue")
+}
+
+/// EN-006 §4. Partitioned monthly by `issued_at`.
+model QueueToken {
+  id            String  @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  queueId       String  @map("queue_id") @db.Uuid
+  journeyId     String? @map("journey_id") @db.Uuid
+  stageKey      String? @map("stage_key") @db.VarChar(32)
+  seriesDate    DateTime @map("series_date") @db.Date
+  tokenNo       Int     @map("token_no")
+  /// `A-023`. Rendered once, at issue, so a board and a slip can never disagree.
+  tokenDisplay  String  @map("token_display") @db.VarChar(16)
+  patientId     String? @map("patient_id") @db.Uuid
+  visitId       String? @map("visit_id") @db.Uuid
+  appointmentId String? @map("appointment_id") @db.Uuid
+  practitionerKey String? @map("practitioner_key") @db.Uuid
+  roomKey       String? @map("room_key") @db.Uuid
+  counterId     String? @map("counter_id") @db.Uuid
+  source        QueueTokenSource @default(desk)
+  class         QueueTokenClass  @default(regular)
+  /// Effective ordering weight. EN-006 §5: emergency 100, appointment on time
+  /// 50, senior/disabled/pregnant +20, staff +10, walk-in 0.
+  priorityRank  Int     @default(0) @map("priority_rank")
+  priorityReason String? @map("priority_reason") @db.VarChar(200)
+  priorityOverriddenBy String? @map("priority_overridden_by") @db.Uuid
+  status        QueueTokenStatus @default(issued)
+  /// Where the token sits in the appointment-vs-walk-in interleave.
+  appointmentDueAt DateTime? @map("appointment_due_at") @db.Timestamptz(6)
+  activatedAt   DateTime? @map("activated_at") @db.Timestamptz(6)
+  calledAt      DateTime? @map("called_at") @db.Timestamptz(6)
+  calledBy      String? @map("called_by") @db.Uuid
+  serviceStartAt DateTime? @map("service_start_at") @db.Timestamptz(6)
+  serviceEndAt  DateTime? @map("service_end_at") @db.Timestamptz(6)
+  estWaitSecAtIssue Int?  @map("est_wait_sec_at_issue")
+  actualWaitSec Int?    @map("actual_wait_sec")
+  skipCount     Int     @default(0) @map("skip_count")
+  recallCount   Int     @default(0) @map("recall_count")
+  holdCount     Int     @default(0) @map("hold_count")
+  transferFromTokenId String? @map("transfer_from_token_id") @db.Uuid
+  transferToTokenId   String? @map("transfer_to_token_id") @db.Uuid
+  transferReason String? @map("transfer_reason") @db.Text
+  cancelReason  String? @map("cancel_reason") @db.Text
+  /// EN-006 §3.6: issued from a reserved block while the desk was offline.
+  offlineOrigin Boolean @default(false) @map("offline_origin")
+  offlineBlockId String? @map("offline_block_id") @db.Uuid
+  syncedAt      DateTime? @map("synced_at") @db.Timestamptz(6)
+  notes         String? @db.Text
+  idempotencyKey String? @map("idempotency_key") @db.VarChar(128)
+  issuedAt      DateTime @default(now()) @map("issued_at") @db.Timestamptz(6)
+  issuedBy      String? @map("issued_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@id([id, issuedAt])
+  @@index([hospitalId, queueId, seriesDate, status])
+  @@index([hospitalId, branchId, status, priorityRank(sort: Desc), issuedAt])
+  @@index([patientId, issuedAt(sort: Desc)])
+  @@index([visitId])
+  @@index([appointmentId])
+  @@map("queue_tokens")
+  @@schema("queue")
+}
+
+/// EN-006 §4: the analytics source and the audit trail of every call, skip and
+/// transfer. Partitioned monthly by `at`; append-only.
+model QueueEvent {
+  id         String  @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  queueId    String  @map("queue_id") @db.Uuid
+  tokenId    String  @map("token_id") @db.Uuid
+  tokenDisplay String @map("token_display") @db.VarChar(16)
+  event      QueueEventKind
+  fromStatus QueueTokenStatus? @map("from_status")
+  toStatus   QueueTokenStatus? @map("to_status")
+  counterId  String? @map("counter_id") @db.Uuid
+  roomKey    String? @map("room_key") @db.Uuid
+  actorId    String? @map("actor_id") @db.Uuid
+  /// user | patient | system | device
+  actorType  String  @default("user") @map("actor_type") @db.VarChar(16)
+  reason     String? @db.Text
+  meta       Json    @default("{}")
+  at         DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([id, at])
+  @@index([hospitalId, queueId, at(sort: Desc)])
+  @@index([tokenId, at])
+  @@index([hospitalId, event, at(sort: Desc)])
+  @@map("queue_events")
+  @@schema("queue")
+}
+
+/// A physical calling point: a consultation room, a cash window, a phlebotomy
+/// chair. `current_token_id` is what the board renders as "now serving".
+model QueueCounter {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  queueId       String  @map("queue_id") @db.Uuid
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(120)
+  displayName   String  @map("display_name") @db.VarChar(32)
+  location      String? @db.VarChar(200)
+  roomKey       String? @map("room_key") @db.Uuid
+  workstationId String? @map("workstation_id") @db.Uuid
+  status        QueueCounterStatus @default(closed)
+  currentUserId String? @map("current_user_id") @db.Uuid
+  currentTokenId String? @map("current_token_id") @db.Uuid
+  openedAt      DateTime? @map("opened_at") @db.Timestamptz(6)
+  closedAt      DateTime? @map("closed_at") @db.Timestamptz(6)
+  /// EN-006 §3.5 fairness cap needs to know how many priority calls in a row
+  /// this counter has made.
+  consecutivePriorityCalls Int @default(0) @map("consecutive_priority_calls")
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  queue QueueDefinition @relation(fields: [queueId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, branchId, code], map: "queue_counters_key")
+  @@index([hospitalId, queueId, status])
+  @@map("queue_counters")
+  @@schema("queue")
+}
+
+/// EN-006 §3.3.4: the doctor's own state. A break pauses the wait estimate; an
+/// absence beyond a threshold raises the reception alert and the redistribution
+/// suggestion. One current row per doctor per branch.
+model QueueDoctorState {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String  @map("branch_id") @db.Uuid
+  practitionerKey String  @map("practitioner_key") @db.Uuid
+  status          QueueDoctorStatus @default(offline)
+  since           DateTime @default(now()) @db.Timestamptz(6)
+  roomKey         String? @map("room_key") @db.Uuid
+  queueId         String? @map("queue_id") @db.Uuid
+  /// schedule | console | op_002 | system
+  source          String  @default("system") @db.VarChar(16)
+  expectedBackAt  DateTime? @map("expected_back_at") @db.Timestamptz(6)
+  note            String? @db.VarChar(200)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  @@unique([hospitalId, branchId, practitionerKey], map: "queue_doctor_status_key")
+  @@index([hospitalId, status, since])
+  @@map("queue_doctor_status")
+  @@schema("queue")
+}
+
+/// EN-006 §4 rolling statistics in 15-minute buckets. This is what dashboards
+/// read: `docs/03 §Performance rules` forbids aggregating `queue_tokens` live.
+model QueueWaitStat {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String  @map("branch_id") @db.Uuid
+  queueId      String  @map("queue_id") @db.Uuid
+  bucketStart  DateTime @map("bucket_start") @db.Timestamptz(6)
+  tokensIssued Int     @default(0) @map("tokens_issued")
+  tokensServed Int     @default(0) @map("tokens_served")
+  tokensNoShow Int     @default(0) @map("tokens_no_show")
+  tokensSkipped Int    @default(0) @map("tokens_skipped")
+  avgWaitSec   Int     @default(0) @map("avg_wait_sec")
+  p90WaitSec   Int     @default(0) @map("p90_wait_sec")
+  maxWaitSec   Int     @default(0) @map("max_wait_sec")
+  avgServiceSec Int    @default(0) @map("avg_service_sec")
+  /// EWMA (α = 0.3) of the last 20 service times — the estimator EN-006 §5
+  /// specifies, kept here so a restart does not lose it.
+  ewmaServiceSec Int   @default(0) @map("ewma_service_sec")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([queueId, bucketStart], map: "queue_wait_stats_key")
+  @@index([hospitalId, branchId, bucketStart(sort: Desc)])
+  @@map("queue_wait_stats")
+  @@schema("queue")
+}
+
+/// The rendered board payload. Redis is the live path; this is the durable
+/// snapshot a board reads on reconnect, so a TV that lost power comes back
+/// showing the truth rather than a blank screen (EN-018).
+model QueueDisplayFeed {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  queueId    String? @map("queue_id") @db.Uuid
+  boardId    String? @map("board_id") @db.Uuid
+  /// now serving, next 3, doctor status, room — already masked per
+  /// `display_config.mask_mode` (EN-018 §5 / DPDP).
+  payload    Json    @default("{}")
+  sequence   BigInt  @default(0)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, queueId, boardId], map: "queue_display_feeds_key")
+  @@index([hospitalId, branchId])
+  @@map("queue_display_feeds")
+  @@schema("queue")
+}

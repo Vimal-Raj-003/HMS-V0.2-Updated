@@ -28,7 +28,16 @@ import type { Pool, PoolClient } from 'pg';
  * issues the update — and without it every re-run would touch every row.
  */
 
-export type SeedValue = string | number | boolean | Date | null | readonly string[] | Record<string, unknown>;
+export type SeedValue =
+  | string
+  | number
+  | boolean
+  | Date
+  | Buffer
+  | null
+  | readonly string[]
+  | readonly Date[]
+  | Record<string, unknown>;
 export type SeedRow = Record<string, SeedValue>;
 
 export interface UpsertOptions {
@@ -137,6 +146,11 @@ function normalise(value: SeedValue | undefined): SeedValue {
   if (value === undefined) return null;
   if (value === null) return null;
   if (value instanceof Date) return value;
+  // A Buffer is a `bytea` parameter, not JSON. It is also an object and an
+  // Uint8Array, so it has to be recognised before either of the branches below
+  // — stringifying one produces `{"type":"Buffer","data":[…]}`, which Postgres
+  // stores as a hex-encoded copy of that JSON rather than as the bytes.
+  if (Buffer.isBuffer(value)) return value;
   if (Array.isArray(value)) return value as readonly string[];
   if (typeof value === 'object') return JSON.stringify(value);
   return value;

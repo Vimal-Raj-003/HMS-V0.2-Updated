@@ -1,0 +1,686 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-027 — the domain masters Phase 1 actually consumes (schema `mdm`)
+//
+// Phase 0 shipped the EN-027 *framework* (registry, change sets, code systems,
+// value sets, stewardship) plus exactly one domain master, `mdm_departments`,
+// as the reference implementation of the EN-027 §4 effective-dated pattern.
+// Its header says the rest land "with the phase that first reads it". Phase 1
+// (`docs/prompts/phase-01 §1.1`) is that phase for: specialities, practitioners
+// and their fees, consult types, the service catalogue, rooms, and the small
+// demographic lookups a registration form cannot be drawn without — ID types,
+// relationships, occupation, religion, area/PIN code, title, language,
+// nationality.
+//
+// Every one of them copies `mdm_departments` exactly:
+//   record_key (stable identity) + version + effective_from/to + status,
+//   UNIQUE(record_key, version), an index on
+//   (hospital_id, branch_id, status, effective_from), and a btree_gist EXCLUDE
+//   constraint in the migration that makes overlapping effective ranges
+//   impossible. `id` is one *version*; `record_key` is the thing a foreign
+//   reference points at, so a master can be superseded without every consumer
+//   re-pointing.
+//
+// ICD-10 is deliberately NOT a table here. EN-027 §4 puts terminology in
+// `mdm_code_systems` / `mdm_concepts` / `mdm_concept_designations`, which Phase
+// 0 already created and RLS already covers; the Phase-1 "ICD-10 loader" is a
+// code system row plus its concepts, seeded by `src/seed/terminology.ts`.
+// Creating a second, parallel `mdm_icd10` table would fork terminology in two.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum MdmSystemOfMedicine {
+  allopathy
+  ayurveda
+  homoeopathy
+  unani
+  siddha
+  yoga_naturopathy
+  dental
+  other
+
+  @@schema("mdm")
+}
+
+enum MdmRoomKind {
+  consult
+  vitals
+  procedure
+  counter
+  sample_collection
+  imaging
+  waiting
+  teleconsult
+
+  @@schema("mdm")
+}
+
+/// EN-027 §5 + `docs/04 §4`: how a captured identifier may be persisted. An ID
+/// type whose `retention` is `hash_last4` may never have its full value stored —
+/// Aadhaar is the case the Aadhaar Act makes non-negotiable, and modelling it as
+/// a property of the ID *type* means the rule is data, not a special case in
+/// registration code.
+enum MdmIdRetention {
+  full
+  last4
+  hash_last4
+  reference_only
+
+  @@schema("mdm")
+}
+
+// ── clinical organisation ────────────────────────────────────────────────────
+
+/// The speciality a practitioner practises and an appointment is booked against.
+/// Distinct from `mdm_departments`: a department is an organisational unit with a
+/// cost centre and an HOD; a speciality is what a patient chooses in a booking UI.
+model MdmSpeciality {
+  id                 String  @id @db.Uuid
+  recordKey          String  @map("record_key") @db.Uuid
+  hospitalId         String  @map("hospital_id") @db.Uuid
+  branchId           String? @map("branch_id") @db.Uuid
+  version            Int     @default(1)
+  code               String  @db.VarChar(32)
+  name               String  @db.VarChar(200)
+  systemOfMedicine   MdmSystemOfMedicine @default(allopathy) @map("system_of_medicine")
+  departmentKey      String? @map("department_key") @db.Uuid
+  /// `mdm_concepts.code` in the SNOMED CT / ABDM speciality code system.
+  specialityConcept  String? @map("speciality_concept") @db.VarChar(64)
+  /// Telemedicine Practice Guidelines 2020: not every speciality may consult
+  /// remotely, and the ones that may not must be unbookable as tele slots.
+  telemedicineAllowed Boolean @default(true) @map("telemedicine_allowed")
+  websiteVisible     Boolean @default(true) @map("website_visible")
+  sortOrder          Int     @default(0) @map("sort_order")
+  activeBranches     String[] @default([]) @map("active_branches") @db.Uuid
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_specialities")
+  @@schema("mdm")
+}
+
+/// The doctor/practitioner master. OP-001 §3.6 calls this the "Doctor OPD
+/// profile"; it lives in `mdm` rather than `clinical` because it is
+/// effective-dated reference data governed by EN-027 (an NMC registration
+/// expires on a date, an HPR id is issued on a date), and because the
+/// appointment engine, the queue, the print templates and the website all read
+/// it. Staff *accounts* remain EN-007's `core.users`; `user_id` is the link and
+/// is nullable for a visiting consultant who never logs in.
+model MdmPractitioner {
+  id                 String  @id @db.Uuid
+  recordKey          String  @map("record_key") @db.Uuid
+  hospitalId         String  @map("hospital_id") @db.Uuid
+  branchId           String? @map("branch_id") @db.Uuid
+  version            Int     @default(1)
+  code               String  @db.VarChar(32)
+  userId             String? @map("user_id") @db.Uuid
+  title              String? @db.VarChar(24)
+  fullName           String  @map("full_name") @db.VarChar(200)
+  displayName        String  @map("display_name") @db.VarChar(200)
+  gender             String? @db.VarChar(16)
+  qualifications     String[] @default([])
+  /// NMC / state medical council registration. NABH and the Clinical
+  /// Establishments Act both require it to be on file and displayable.
+  registrationCouncil String? @map("registration_council") @db.VarChar(120)
+  registrationNumber  String? @map("registration_number") @db.VarChar(64)
+  registrationValidTo DateTime? @map("registration_valid_to") @db.Date
+  /// ABDM Healthcare Professional Registry id (EN-011 §4 `abdm_hfr_hpr`).
+  hprId              String? @map("hpr_id") @db.VarChar(64)
+  departmentKey      String? @map("department_key") @db.Uuid
+  specialityKeys     String[] @default([]) @map("speciality_keys") @db.Uuid
+  languages          String[] @default([])
+  employmentType     String  @default("full_time") @map("employment_type") @db.VarChar(24)
+  defaultRoomKey     String? @map("default_room_key") @db.Uuid
+  teleEnabled        Boolean @default(false) @map("tele_enabled")
+  onlineBookingEnabled Boolean @default(true) @map("online_booking_enabled")
+  websiteVisible     Boolean @default(false) @map("website_visible")
+  bio                String? @db.Text
+  photoFileId        String? @map("photo_file_id") @db.Uuid
+  signatureFileId    String? @map("signature_file_id") @db.Uuid
+  /// OP-001 §5: the free-follow-up window, when the doctor overrides the
+  /// hospital default. Tariff-linked pricing arrives with RC-003 in Phase 5.
+  followUpDays       Int?    @map("follow_up_days")
+  followUpFreeVisits Int?    @map("follow_up_free_visits")
+  activeBranches     String[] @default([]) @map("active_branches") @db.Uuid
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@index([hospitalId, userId])
+  @@map("mdm_practitioners")
+  @@schema("mdm")
+}
+
+/// OP-001 §4 `consult_types`. A master rather than an enum because a hospital
+/// invents its own (`SECOND_OPINION`, `CAMP`, `INTERNATIONAL`) and because the
+/// free-follow-up rule is a business policy that changes on a date.
+model MdmConsultType {
+  id            String  @id @db.Uuid
+  recordKey     String  @map("record_key") @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  version       Int     @default(1)
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(120)
+  /// new | follow_up | free_review | procedure | tele | second_opinion
+  kind          String  @db.VarChar(24)
+  isChargeable  Boolean @default(true) @map("is_chargeable")
+  /// Free-review validity: N days from the last chargeable consult, M visits.
+  validityDays  Int?    @map("validity_days")
+  validityVisits Int?   @map("validity_visits")
+  defaultDurationMin Int @default(15) @map("default_duration_min")
+  onlineBookable Boolean @default(true) @map("online_bookable")
+  sortOrder     Int     @default(0) @map("sort_order")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_consult_types")
+  @@schema("mdm")
+}
+
+/// The consultation fee, per practitioner per consult type per branch.
+///
+/// This is deliberately a thin, effective-dated fee row and NOT a tariff: RC-003
+/// owns tariffs, payer-specific rates and package pricing in Phase 5. Phase 1
+/// needs exactly one number — what the cash counter collects for a consultation
+/// (`phase-01 §1.6`) — and inventing a tariff engine now to hold it would be the
+/// rewrite `CLAUDE.md §0.1` forbids. `tariff_item_key` is the forward reference
+/// RC-003 fills in.
+model MdmPractitionerFee {
+  id              String  @id @db.Uuid
+  recordKey       String  @map("record_key") @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String? @map("branch_id") @db.Uuid
+  version         Int     @default(1)
+  practitionerKey String  @map("practitioner_key") @db.Uuid
+  consultTypeKey  String  @map("consult_type_key") @db.Uuid
+  amount          Decimal @db.Decimal(14, 2)
+  currency        String  @default("INR") @db.Char(3)
+  /// Set when RC-003 lands; until then the fee is authoritative on its own.
+  tariffItemKey   String? @map("tariff_item_key") @db.Uuid
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, practitionerKey, consultTypeKey])
+  @@map("mdm_practitioner_fees")
+  @@schema("mdm")
+}
+
+/// EN-027 §4 `mdm_services`. Phase 1 needs the catalogue itself (a consultation,
+/// a registration charge, a health-check package are all services); pricing,
+/// payer coverage and doctor-share rules arrive with RC-003/RC-007.
+model MdmService {
+  id                  String  @id @db.Uuid
+  recordKey           String  @map("record_key") @db.Uuid
+  hospitalId          String  @map("hospital_id") @db.Uuid
+  branchId            String? @map("branch_id") @db.Uuid
+  version             Int     @default(1)
+  code                String  @db.VarChar(32)
+  name                String  @db.VarChar(200)
+  groupKey            String  @map("group_key") @db.VarChar(64)
+  departmentKey       String? @map("department_key") @db.Uuid
+  specialityKey       String? @map("speciality_key") @db.Uuid
+  /// GST: SAC for services. `mdm_hsn_sac` and effective-dated rates are RC-004.
+  sacCode             String? @map("sac_code") @db.VarChar(16)
+  gstRate             Decimal @default(0) @map("gst_rate") @db.Decimal(5, 2)
+  isProcedure         Boolean @default(false) @map("is_procedure")
+  requiresConsent     Boolean @default(false) @map("requires_consent")
+  consentTypeKey      String? @map("consent_type_key") @db.Uuid
+  defaultDurationMin  Int     @default(0) @map("default_duration_min")
+  prerequisites       String? @db.Text
+  patientInstructions String? @map("patient_instructions") @db.Text
+  isAppointable       Boolean @default(false) @map("is_appointable")
+  activeBranches      String[] @default([]) @map("active_branches") @db.Uuid
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@index([hospitalId, groupKey])
+  @@map("mdm_services")
+  @@schema("mdm")
+}
+
+/// Rooms and service points: consult rooms, the vitals room, sample-collection
+/// points and the physical front-office/cash counters a token can be called to.
+/// `display_name` is what a TV board shows (EN-018), which is not always the
+/// administrative name.
+model MdmRoom {
+  id            String  @id @db.Uuid
+  recordKey     String  @map("record_key") @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  version       Int     @default(1)
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(200)
+  displayName   String  @map("display_name") @db.VarChar(64)
+  kind          MdmRoomKind
+  departmentKey String? @map("department_key") @db.Uuid
+  block         String? @db.VarChar(64)
+  floor         String? @db.VarChar(24)
+  capacity      Int     @default(1)
+  /// EN-018: the board this room's calls are announced on, when it is fixed.
+  displayBoardId String? @map("display_board_id") @db.Uuid
+  wheelchairAccessible Boolean @default(true) @map("wheelchair_accessible")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, branchId, code])
+  @@map("mdm_rooms")
+  @@schema("mdm")
+}
+
+// ── demographic lookups: the masters a registration form is drawn from ───────
+
+/// OP-001 §5 and the Aadhaar Act, as data: `retention = hash_last4` is what
+/// makes "never store the full number" a property of the ID type rather than a
+/// line of code somebody can forget.
+model MdmIdType {
+  id            String  @id @db.Uuid
+  recordKey     String  @map("record_key") @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  version       Int     @default(1)
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(120)
+  /// government | insurance | employer | scheme | foreign | other
+  category      String  @db.VarChar(24)
+  countryCode   String  @default("IN") @map("country_code") @db.Char(2)
+  validationRegex String? @map("validation_regex") @db.VarChar(200)
+  retention     MdmIdRetention @default(full)
+  isPhotoId     Boolean @default(false) @map("is_photo_id")
+  /// NABH PRE: which types count towards the two-identifier rule.
+  countsAsIdentity Boolean @default(true) @map("counts_as_identity")
+  sortOrder     Int     @default(0) @map("sort_order")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_id_types")
+  @@schema("mdm")
+}
+
+/// Relationship master. `inverse_code` is what makes family linking symmetric —
+/// linking A as `father_of` B must create B as `child_of` A, and getting that
+/// from data rather than a switch statement is what keeps it right for the
+/// forty relations an Indian hospital actually records.
+model MdmRelationshipType {
+  id            String  @id @db.Uuid
+  recordKey     String  @map("record_key") @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  version       Int     @default(1)
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(120)
+  inverseCode   String? @map("inverse_code") @db.VarChar(32)
+  genderHint    String? @map("gender_hint") @db.VarChar(16)
+  /// DPDP Rules 2025: only some relations may give verifiable consent for a minor.
+  guardianCapable Boolean @default(false) @map("guardian_capable")
+  nextOfKinCapable Boolean @default(false) @map("next_of_kin_capable")
+  sortOrder     Int     @default(0) @map("sort_order")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_relationship_types")
+  @@schema("mdm")
+}
+
+model MdmOccupation {
+  id            String  @id @db.Uuid
+  recordKey     String  @map("record_key") @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  version       Int     @default(1)
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(120)
+  /// National Classification of Occupations code, for public-health reporting.
+  ncoCode       String? @map("nco_code") @db.VarChar(16)
+  /// Occupational-health screening flags (silica, lead, night shift…).
+  hazardClass   String? @map("hazard_class") @db.VarChar(64)
+  sortOrder     Int     @default(0) @map("sort_order")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_occupations")
+  @@schema("mdm")
+}
+
+/// Religion is optional on the registration form and is collected only because
+/// dietary orders (NC-020), last rites and mortuary handling depend on it.
+/// DPDP treats it as sensitive; the column exists so it can be governed, not so
+/// it can be required.
+model MdmReligion {
+  id            String  @id @db.Uuid
+  recordKey     String  @map("record_key") @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  version       Int     @default(1)
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(120)
+  dietaryDefaults Json  @default("{}") @map("dietary_defaults")
+  sortOrder     Int     @default(0) @map("sort_order")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_religions")
+  @@schema("mdm")
+}
+
+/// OP-001 §3.1: "address with state/district/PIN with pincode auto-fill". This
+/// is the India Post dataset, seeded offline (OP-001 §9) so registration never
+/// waits on an external API — and the catchment/area analytics in §10 read it.
+model MdmArea {
+  id            String  @id @db.Uuid
+  recordKey     String  @map("record_key") @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  version       Int     @default(1)
+  pincode       String  @db.VarChar(12)
+  areaName      String  @map("area_name") @db.VarChar(160)
+  taluk         String? @db.VarChar(120)
+  city          String  @db.VarChar(120)
+  district      String  @db.VarChar(120)
+  state         String  @db.VarChar(120)
+  /// GST state code — the same two digits `core.branches.state_code` carries.
+  stateCode     String  @map("state_code") @db.VarChar(2)
+  countryCode   String  @default("IN") @map("country_code") @db.Char(2)
+  /// Marketing/catchment analytics (NC-026) and ambulance zoning (NC-014).
+  catchmentZone String? @map("catchment_zone") @db.VarChar(64)
+  isUrban       Boolean @default(true) @map("is_urban")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, pincode])
+  @@map("mdm_areas")
+  @@schema("mdm")
+}
+
+model MdmTitle {
+  id            String  @id @db.Uuid
+  recordKey     String  @map("record_key") @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  version       Int     @default(1)
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(64)
+  genderHint    String? @map("gender_hint") @db.VarChar(16)
+  /// A title such as `BABY` or `MASTER` implies a paediatric record; the
+  /// registration form uses it to pre-select age-in-days entry.
+  impliesMinor  Boolean @default(false) @map("implies_minor")
+  sortOrder     Int     @default(0) @map("sort_order")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_titles")
+  @@schema("mdm")
+}
+
+/// The languages this hospital operates in. `CLAUDE.md §4` fixes the superset
+/// (`en-IN` plus eleven); a hospital enables a subset, and that subset drives
+/// the consent notice language (EN-028), the SMS template language (EN-009) and
+/// the TTS announcement rotation on the TV boards (EN-018).
+model MdmLanguage {
+  id            String  @id @db.Uuid
+  recordKey     String  @map("record_key") @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  version       Int     @default(1)
+  code          String  @db.VarChar(16)
+  name          String  @db.VarChar(64)
+  nativeName    String  @map("native_name") @db.VarChar(64)
+  script        String? @db.VarChar(32)
+  isRtl         Boolean @default(false) @map("is_rtl")
+  ttsVoice      String? @map("tts_voice") @db.VarChar(64)
+  usedForPatientComms Boolean @default(true) @map("used_for_patient_comms")
+  usedForDisplays Boolean @default(true) @map("used_for_displays")
+  sortOrder     Int     @default(0) @map("sort_order")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_languages")
+  @@schema("mdm")
+}
+
+model MdmNationality {
+  id            String  @id @db.Uuid
+  recordKey     String  @map("record_key") @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  version       Int     @default(1)
+  /// ISO 3166-1 alpha-3.
+  code          String  @db.Char(3)
+  alpha2        String  @db.Char(2)
+  name          String  @db.VarChar(120)
+  callingCode   String? @map("calling_code") @db.VarChar(8)
+  /// A foreign national triggers passport/visa capture and, at a forex counter,
+  /// the FEMA encashment certificate (NC-001 §5).
+  requiresPassport Boolean @default(false) @map("requires_passport")
+  sortOrder     Int     @default(0) @map("sort_order")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_nationalities")
+  @@schema("mdm")
+}
+
+/// OP-001 §3.1: "Referral source (self/doctor/camp/website)". A master because
+/// marketing (NC-026) reports conversion by source and invents new ones.
+model MdmReferralSource {
+  id            String  @id @db.Uuid
+  recordKey     String  @map("record_key") @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  version       Int     @default(1)
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(120)
+  /// self | doctor | camp | website | corporate | insurer | ambulance | other
+  kind          String  @db.VarChar(24)
+  requiresReferrer Boolean @default(false) @map("requires_referrer")
+  sortOrder     Int     @default(0) @map("sort_order")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_referral_sources")
+  @@schema("mdm")
+}
