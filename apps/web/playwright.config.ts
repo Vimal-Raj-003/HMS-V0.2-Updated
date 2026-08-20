@@ -27,15 +27,22 @@ export default defineConfig({
     // Nurses and doctors work on tablets; a nav that only works at 1440px is a
     // nav that does not work (docs/06 §7). This runs Chromium at a tablet
     // viewport, which is what exercises the responsive layout.
-    //
-    // It is deliberately NOT the WebKit iPad profile. Under WebKit the session
-    // cookie is not retained across the navigation that follows sign-in, so every
-    // authenticated test times out. That is a real finding about Safari/iPadOS
-    // support and is tracked as an open question — it is not something to paper
-    // over by weakening the cookie, which was tried and did not help either.
     {
       name: 'tablet',
       use: { ...devices['Desktop Chrome'], viewport: { width: 1080, height: 810 }, isMobile: false },
+    },
+    // The real iPad engine. This used to be excluded because every authenticated
+    // test timed out under WebKit — the cause was ours, not Safari's: the login
+    // route marked the session cookies `Secure` whenever `NODE_ENV` was
+    // `production`, and this suite serves a production build over plain HTTP on
+    // localhost. Chromium tolerates a `Secure` cookie on loopback; WebKit
+    // discards the `Set-Cookie` entirely, exactly as the specification permits.
+    // `cookiesMaySkipSecure` in `src/lib/session.ts` now keys the attribute to
+    // the transport instead of the build mode. Keeping this project is what stops
+    // that regressing, because Chromium alone would never have caught it.
+    {
+      name: 'webkit-ipad',
+      use: { ...devices['iPad (gen 7) landscape'] },
     },
   ],
 });

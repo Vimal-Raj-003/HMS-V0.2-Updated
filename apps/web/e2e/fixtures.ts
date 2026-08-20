@@ -8,7 +8,16 @@ export function stack(): StackHandoff {
   return JSON.parse(readFileSync(HANDOFF, 'utf8')) as StackHandoff;
 }
 
-/** Signs in as a seeded role and waits for the workspace to be usable. */
+/**
+ * Signs in as a seeded role and waits for the workspace to be usable.
+ *
+ * The URL alone is not that moment. Sign-in finishes with a client-side
+ * navigation, so `history` is rewritten before React has committed the new
+ * route — including the `<title>` it hoists into `<head>`. Chromium closes that
+ * gap fast enough to hide it; WebKit does not, and a caller that continued on
+ * the URL would inspect a half-rendered document. Waiting for the role nav is
+ * what makes the helper mean what it says.
+ */
 export async function signIn(page: Page, roleKey: string): Promise<void> {
   const { hospitalId } = stack();
   await page.goto('/login');
@@ -17,6 +26,7 @@ export async function signIn(page: Page, roleKey: string): Promise<void> {
   await page.getByLabel('Password').fill(DEV_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page).toHaveURL(/\/dashboard/);
+  await expect(page.getByTestId('role-nav')).toBeVisible();
 }
 
 /**

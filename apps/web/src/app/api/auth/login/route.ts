@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { ACCESS_COOKIE, REFRESH_COOKIE, WORKSPACE_COOKIE } from '@/lib/session';
+import { ACCESS_COOKIE, REFRESH_COOKIE, WORKSPACE_COOKIE, cookiesMaySkipSecure } from '@/lib/session';
 
 /**
  * Login proxy.
@@ -69,7 +69,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const result = (await upstream.json()) as LoginResponse;
-  const secure = process.env.NODE_ENV === 'production';
+  const secure = !cookiesMaySkipSecure(request);
   const response = NextResponse.json({
     user: result.user,
     roles: result.roles,

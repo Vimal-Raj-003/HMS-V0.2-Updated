@@ -23,6 +23,12 @@ test.describe('accessibility', () => {
 
   test('the workspace has no detectable WCAG violation', async ({ page }) => {
     await signIn(page, 'hospital_admin');
+    // Asserted directly rather than left to the scan below. WCAG 2.4.2 wants a
+    // page title, and after a client-side navigation the title is committed a
+    // beat after the route is — so scanning on arrival reports a missing title
+    // that the user never actually meets. Waiting on it here is both the wait
+    // and the assertion.
+    await expect(page).toHaveTitle(/^Dashboard/);
     const results = await new AxeBuilder({ page }).withTags(WCAG).analyze();
     expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
   });
