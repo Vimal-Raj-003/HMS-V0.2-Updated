@@ -7,18 +7,25 @@
  * its shape defines `MessageKey`, and every other file is merged **over** it.
  */
 
-import ar from './messages/ar.json';
-import bn from './messages/bn.json';
-import enIN from './messages/en-IN.json';
-import gu from './messages/gu.json';
-import hi from './messages/hi.json';
-import kn from './messages/kn.json';
-import ml from './messages/ml.json';
-import mr from './messages/mr.json';
-import or from './messages/or.json';
-import pa from './messages/pa.json';
-import ta from './messages/ta.json';
-import te from './messages/te.json';
+/**
+ * The `with { type: 'json' }` attribute is required, not decorative. Node's ESM
+ * loader refuses a JSON import without it (ERR_IMPORT_ATTRIBUTE_MISSING), so a
+ * service running `node dist/main.js` crashes on startup, while a bundler-based
+ * consumer such as the web app is happy either way. That asymmetry is why this
+ * broke only in the services, and only at runtime.
+ */
+import ar from './messages/ar.json' with { type: 'json' };
+import bn from './messages/bn.json' with { type: 'json' };
+import enIN from './messages/en-IN.json' with { type: 'json' };
+import gu from './messages/gu.json' with { type: 'json' };
+import hi from './messages/hi.json' with { type: 'json' };
+import kn from './messages/kn.json' with { type: 'json' };
+import ml from './messages/ml.json' with { type: 'json' };
+import mr from './messages/mr.json' with { type: 'json' };
+import or from './messages/or.json' with { type: 'json' };
+import pa from './messages/pa.json' with { type: 'json' };
+import ta from './messages/ta.json' with { type: 'json' };
+import te from './messages/te.json' with { type: 'json' };
 import type { LocaleCode } from './locales.js';
 
 /** A next-intl compatible message tree. Leaves are ICU MessageFormat strings. */
