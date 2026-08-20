@@ -1,0 +1,17 @@
+server:
+  http_listen_port: 3200
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http: { endpoint: 0.0.0.0:4318 }
+storage:
+  trace:
+    backend: local
+    local: { path: /var/tempo/traces }
+    wal: { path: /var/tempo/wal }
+compactor:
+  compaction:
+    # Traces are for debugging a live incident, not an audit record — the audit
+    # log is the audit record, and it is kept far longer under its own policy.
+    block_retention: 168h

@@ -1,0 +1,29 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "vims-hms.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels: {{- include "vims-hms.labels" . | nindent 4 }}
+  annotations:
+    # Runs before the new pods roll. Migrations are expand-only (docs/10 §6.1),
+    # so release N's code runs against N-1's schema and this can never strand a
+    # running replica.
+    "helm.sh/hook": pre-upgrade,pre-install
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "vims-hms.image" (dict "Values" .Values "component" "hms-api") }}
+          command: ['pnpm', '--filter', '@vims/db', 'migrate:deploy']
+          # The MIGRATOR credential, not the app credential: the application role
+          # cannot DDL, by design (docs/04 §6).
+          envFrom:
+            - secretRef: { name: {{ .Values.secrets.existingSecret }} }
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+{{- end }}

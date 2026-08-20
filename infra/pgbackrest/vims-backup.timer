@@ -1,0 +1,14 @@
+# Weekly full on Sunday 01:30, daily differential 01:30 — docs/10 §8.
+# 01:30 is chosen because it is after the nightly report window and before the
+# first OPD staff arrive; a backup competing with clinical traffic is a backup
+# that gets disabled.
+[Unit]
+Description=Vim's HMS PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 01:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

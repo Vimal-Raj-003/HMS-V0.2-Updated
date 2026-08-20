@@ -1,0 +1,15 @@
+[Unit]
+Description=Vim's HMS pgBackRest backup (full on Sunday, differential otherwise)
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+EnvironmentFile=/etc/vims-hms/backup.env
+# Full on Sunday, differential on every other day. Written as one unit so the
+# two cannot drift apart in separate timers.
+ExecStart=/bin/bash -c 'if [ "$(date +%%u)" = "7" ]; then pgbackrest --stanza=vimshms --type=full backup; else pgbackrest --stanza=vimshms --type=diff backup; fi'
+# Record the outcome for the BackupFailure alert, which fires on a backup older
+# than 26 hours rather than on a non-zero exit alone — a job that never ran
+# produces no exit code at all.
+ExecStartPost=/usr/local/bin/vims-backup-report.sh

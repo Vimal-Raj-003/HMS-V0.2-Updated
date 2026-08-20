@@ -1,0 +1,76 @@
+# Observability stack — Grafana / Loki / Tempo / Prometheus behind an OTel collector.
+#
+# Runs alongside the application stack on-prem, and is the reference for what the
+# cloud deployment must provide. Kept in a separate compose file so a small site
+# can run the HMS without it, and a larger one can point at an existing Grafana.
+name: vims-hms-observability
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    command: ['--config=/etc/otel/config.yaml']
+    volumes:
+      - ./otel-collector.yaml:/etc/otel/config.yaml:ro
+    environment:
+      DEPLOY_ENV: ${DEPLOY_ENV:-onprem}
+    ports:
+      - '4317:4317'   # OTLP gRPC
+      - '4318:4318'   # OTLP HTTP
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      # 30 days of metrics; long-term trend data belongs in the warehouse, not here.
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts:/etc/prometheus/alerts:ro
+      - prometheus-data:/prometheus
+    ports: ['9090:9090']
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports: ['9093:9093']
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.3.2
+    command: ['-config.file=/etc/loki/local-config.yaml']
+    volumes: [loki-data:/loki]
+    ports: ['3100:3100']
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.7.0
+    command: ['-config.file=/etc/tempo/tempo.yaml']
+    volumes:
+      - ./tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
+      # A dashboard can display aggregate clinical data; anonymous access to it is
+      # a disclosure, not a convenience.
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports: ['3000:3000']
+    depends_on: [prometheus, loki, tempo]
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  grafana-data:

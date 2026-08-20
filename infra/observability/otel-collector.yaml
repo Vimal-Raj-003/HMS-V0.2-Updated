@@ -1,0 +1,73 @@
+# OpenTelemetry collector — the single egress point for traces, metrics and logs.
+#
+# Everything the services emit passes through here, which is what makes the PHI
+# rule enforceable: `docs/04` §7 forbids patient-identifying data in logs, traces
+# and analytics events, and one processor chain is far easier to audit than a
+# redaction call at every emit site.
+receivers:
+  otlp:
+    protocols:
+      grpc: { endpoint: 0.0.0.0:4317 }
+      http: { endpoint: 0.0.0.0:4318 }
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+  # Defence in depth. The application must not put these on a span in the first
+  # place, but an accidental attribute must not leave the cluster either.
+  attributes/scrub-phi:
+    actions:
+      - key: patient.name
+        action: delete
+      - key: patient.mobile
+        action: delete
+      - key: patient.abha
+        action: delete
+      - key: patient.aadhaar
+        action: delete
+      - key: patient.address
+        action: delete
+      - key: db.statement
+        action: delete   # bind parameters can carry identifiers
+      - key: http.url
+        action: delete   # docs/04 §7: no PHI in URLs; deleted rather than trusted
+      - key: user.email
+        action: delete
+
+  resource/service:
+    attributes:
+      - key: deployment.environment
+        value: ${env:DEPLOY_ENV}
+        action: upsert
+
+exporters:
+  otlphttp/tempo:
+    endpoint: http://tempo:4318
+  prometheus:
+    endpoint: 0.0.0.0:8889
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub-phi, resource/service, batch]
+      exporters: [otlphttp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/service, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub-phi, resource/service, batch]
+      exporters: [otlphttp/loki]
+  telemetry:
+    logs: { level: warn }

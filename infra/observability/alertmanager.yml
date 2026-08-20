@@ -1,0 +1,40 @@
+# Routing follows the `pages` label on each rule, so the alert and its routing
+# live together and cannot drift apart.
+route:
+  receiver: platform-oncall
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['pages =~ "security-oncall.*"']
+      receiver: security-oncall
+      # A privacy incident is not batched with a disk alert.
+      group_wait: 0s
+    - matchers: ['pages =~ ".*nursing.*"']
+      receiver: nursing-supervisor
+      group_wait: 0s
+    - matchers: ['pages =~ ".*dba.*"']
+      receiver: dba
+    - matchers: ['pages =~ ".*integration-owner.*"']
+      receiver: integration-owner
+    - matchers: ['pages =~ ".*hospital-it.*"']
+      receiver: hospital-it
+    - matchers: ['severity = "P3"']
+      receiver: platform-oncall
+      repeat_interval: 24h
+
+receivers:
+  - name: platform-oncall
+  - name: security-oncall
+  - name: nursing-supervisor
+  - name: dba
+  - name: integration-owner
+  - name: hospital-it
+
+inhibit_rules:
+  # A service that is down will also breach its latency and error budgets. Paging
+  # three times for one failure trains people to ignore the pager.
+  - source_matchers: ['alertname = "ServiceDown"']
+    target_matchers: ['severity =~ "P2|P3"']
+    equal: [job]

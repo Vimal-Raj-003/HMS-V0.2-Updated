@@ -1,0 +1,155 @@
+# Vim's HMS — single-node on-prem stack.
+#
+# One `docker compose up` brings up a whole hospital. The same images run in
+# cloud (docs/01 §1); only the composition differs, and no code path branches on
+# the deployment profile — only DATABASE_URL and the extension capability
+# register do (ADR-0008).
+#
+# Deliberately NOT included: the observability stack (its own compose file, so a
+# small site can skip it) and Orthanc/PACS (profile `imaging`, Phase 3).
+name: vims-hms
+
+x-service-defaults: &defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    # Logs carry no PHI (docs/04 §7), but they still fill a disk, and a full disk
+    # stops the database.
+    options: { max-size: '50m', max-file: '5' }
+
+services:
+  postgres:
+    <<: *defaults
+    build: ./postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: vims_hms
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ${BACKUP_PATH:-./backup}:/backup
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d vims_hms']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # Never published beyond the host: docs/10 §5 keeps 5432 inside VLAN 10.
+    expose: ['5432']
+
+  redis:
+    <<: *defaults
+    image: redis:7.4-alpine
+    # noeviction is load-bearing: BullMQ job payloads and the refresh-token
+    # denylist must never be silently dropped.
+    command: ['redis-server', '--maxmemory-policy', 'noeviction', '--appendonly', 'yes', '--requirepass', '${REDIS_PASSWORD:?set REDIS_PASSWORD}']
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ['CMD', 'redis-cli', '--no-auth-warning', '-a', '${REDIS_PASSWORD}', 'ping']
+      interval: 10s
+      retries: 12
+    expose: ['6379']
+
+  minio:
+    <<: *defaults
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    volumes: [miniodata:/data]
+    expose: ['9000', '9001']
+
+  migrate:
+    <<: *defaults
+    image: ${IMAGE_REGISTRY:-ghcr.io/vims}/hms-api:${IMAGE_TAG:-latest}
+    restart: 'no'
+    command: ['pnpm', '--filter', '@vims/db', 'migrate:deploy']
+    environment:
+      DATABASE_MIGRATE_URL: postgresql://hms_migrator:${MIGRATOR_PASSWORD:?}@postgres:5432/vims_hms
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *defaults
+    image: ${IMAGE_REGISTRY:-ghcr.io/vims}/hms-api:${IMAGE_TAG:-latest}
+    environment:
+      NODE_ENV: production
+      PORT: '3001'
+      DATABASE_URL: postgresql://hms_app:${APP_DB_PASSWORD:?}@postgres:5432/vims_hms
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3001/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      retries: 6
+    expose: ['3001']
+
+  worker:
+    <<: *defaults
+    image: ${IMAGE_REGISTRY:-ghcr.io/vims}/hms-worker:${IMAGE_TAG:-latest}
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://hms_app:${APP_DB_PASSWORD:?}@postgres:5432/vims_hms
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    depends_on:
+      api: { condition: service_healthy }
+
+  realtime:
+    <<: *defaults
+    image: ${IMAGE_REGISTRY:-ghcr.io/vims}/hms-realtime:${IMAGE_TAG:-latest}
+    environment:
+      NODE_ENV: production
+      PORT: '4001'
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      # The same secret as the API: one token, one verifier contract.
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?}
+    depends_on:
+      redis: { condition: service_healthy }
+    expose: ['4001']
+
+  integration-hub:
+    <<: *defaults
+    image: ${IMAGE_REGISTRY:-ghcr.io/vims}/hms-integration-hub:${IMAGE_TAG:-latest}
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://hms_app:${APP_DB_PASSWORD:?}@postgres:5432/vims_hms
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    depends_on:
+      api: { condition: service_healthy }
+    ports:
+      # HL7 MLLP and ASTM listen on the device VLAN (docs/10 §5). These are the
+      # only application ports bound to the LAN besides the reverse proxy.
+      - '2575:2575'
+      - '2576:2576'
+
+  web:
+    <<: *defaults
+    image: ${IMAGE_REGISTRY:-ghcr.io/vims}/hms-web:${IMAGE_TAG:-latest}
+    environment:
+      NODE_ENV: production
+      API_ORIGIN: http://api:3001
+    depends_on:
+      api: { condition: service_healthy }
+    expose: ['3000']
+
+  proxy:
+    <<: *defaults
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx/onprem.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${TLS_CERT_PATH:-./tls}:/etc/nginx/tls:ro
+    ports:
+      - '80:80'
+      - '443:443'
+    depends_on: [web, api, realtime]
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

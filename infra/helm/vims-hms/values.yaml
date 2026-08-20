@@ -1,0 +1,83 @@
+# Defaults are the SAFE choice, not the convenient one: a values file that ships
+# a working password or an open service is how a staging shortcut reaches
+# production. Anything that must be supplied is null and fails the template.
+
+image:
+  registry: ghcr.io/vims
+  tag: ''            # required; never defaults to `latest` (docs/10 §6 needs a signed, pinned tag)
+  pullPolicy: IfNotPresent
+
+# Rolling deploy per docs/10 §6: maxUnavailable 0 so a ward never loses every
+# replica mid-round.
+rollout:
+  maxSurge: 1
+  maxUnavailable: 0
+
+api:
+  replicas: 3
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits:   { memory: 1Gi }
+  # Liveness must NOT touch the database: a brief database blip would otherwise
+  # restart every pod and turn a degradation into an outage.
+  livenessPath: /healthz
+  readinessPath: /readyz
+
+worker:
+  replicas: 2
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits:   { memory: 2Gi }
+
+realtime:
+  replicas: 2
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+
+integrationHub:
+  replicas: 1        # MLLP listeners bind device-facing ports; scale with care
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+
+web:
+  replicas: 3
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+
+database:
+  # No in-cluster PostgreSQL by default. docs/02 expects a managed provider or a
+  # dedicated host; running the primary as a pod is a decision, not a default.
+  url: null
+  migrateUrl: null
+
+redis:
+  url: null
+
+secrets:
+  # Names of existing Secrets. The chart never creates them: a secret in a values
+  # file ends up in git.
+  existingSecret: vims-hms-secrets
+
+migrations:
+  # Expand-only, run as a pre-upgrade hook (docs/10 §6.1). The app role cannot DDL.
+  enabled: true
+
+observability:
+  otlpEndpoint: ''
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile: { type: RuntimeDefault }
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: ['ALL'] }
+
+networkPolicy:
+  # Default-deny egress, matching the VLAN segmentation in docs/10 §5: the
+  # device and imaging networks have no internet route, and outbound
+  # integrations go through an explicit allow-list.
+  enabled: true
