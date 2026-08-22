@@ -52,3 +52,4 @@ Thumbs.db
 
 # local infra volumes
 infra/docker/volumes/
+.gstack/

@@ -33,6 +33,7 @@ import { seedActivity } from './activity.js';
 import { seedMasters } from './masters.js';
 import { seedFrontOffice } from './frontoffice.js';
 import { seedPatientPopulation } from './patients.js';
+import { seedClinical } from './clinical.js';
 
 interface Args {
   readonly tier: Tier;
@@ -91,6 +92,11 @@ export async function runSeed(db: Pool, tier: Tier): Promise<ReturnType<typeof t
     // references all of them.
     await seedMasters(ctx, tenancy);
     await seedFrontOffice(ctx, tenancy);
+    // Phase 2. After the Phase-1 masters, because a vitals policy references a
+    // department and a CDSS rule references the hospital; before the patient
+    // population, because a seeded allergy is only meaningful once the allergen
+    // value set and the cross-sensitivity map exist for it to be coded against.
+    await seedClinical(ctx, tenancy);
   }
   await seedActivity(ctx, tenancy);
   await seedPatientPopulation(ctx, tenancy);

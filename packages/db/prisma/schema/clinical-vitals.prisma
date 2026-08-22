@@ -1,0 +1,525 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-007 — Vital room / nursing pre-consult (schema `clinical`)
+//
+// `clinical.vitals` is a **platform-owned** table (docs/03 §Shared
+// platform-owned tables): OP-007 creates it, IP-003 (ward rounds), IP-009 (ICU)
+// and TR-006 all write to it. That is why `context` is an enum covering places
+// Phase 2 has no code for yet, and why the visit/admission/ER links are three
+// separate nullable columns rather than one polymorphic pair — a foreign key
+// that cannot be declared is a foreign key that will not hold.
+//
+// It is partitioned monthly (docs/03 §Table rules names it explicitly), so its
+// primary key is `(id, recorded_at)`. **`recorded_at` is `timestamptz(3)`, not
+// `(6)`** — see the migration §A note: a microsecond-precision timestamp read
+// into a JavaScript `Date` loses its sub-millisecond digits, and writing it back
+// as part of a composite key then matches zero rows. Phase 1 hit that twice
+// (D-31). Millisecond precision on a reading a nurse takes with a cuff is not a
+// loss anybody can perceive, and it makes the key round-trip exactly.
+//
+// `vitals_queue` from OP-007 §4 is deliberately NOT a table. EN-006 already owns
+// queue state in `queue.queue_tokens` / `queue.queue_events`, and a vitals room
+// is a `queue.queue_definitions` row of kind `vitals`. A second queue table
+// would fork the token lifecycle and make "which queue is the patient in" a
+// question with two answers.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Where the reading was taken. The set is wider than Phase 2 needs because the
+/// table is shared — see the header.
+enum VitalsContext {
+  opd_vitals_room
+  er_triage
+  ward
+  icu
+  daycare
+  ot
+  home
+  kiosk
+  telemed_self
+
+  @@schema("clinical")
+}
+
+enum BpPosition {
+  sitting
+  standing
+  supine
+
+  @@schema("clinical")
+}
+
+enum PulseRhythm {
+  regular
+  irregular
+
+  @@schema("clinical")
+}
+
+enum TempSite {
+  oral
+  axillary
+  tympanic
+  temporal
+  rectal
+  skin
+
+  @@schema("clinical")
+}
+
+enum GlucoseType {
+  rbs
+  fbs
+  ppbs
+  hba1c_poc
+
+  @@schema("clinical")
+}
+
+enum PainScale {
+  nrs
+  wong_baker
+  flacc
+  cpot
+
+  @@schema("clinical")
+}
+
+enum AvpuLevel {
+  alert
+  confusion
+  voice
+  pain
+  unresponsive
+
+  @@schema("clinical")
+}
+
+/// Deliberately four-valued. `unknown` is not the same as `no`: a CT order on a
+/// woman of child-bearing age is blocked by `unknown`, not waved through
+/// (OP-002 §5, AERB justification).
+enum PregnancyStatus {
+  unknown
+  no
+  yes
+  possible
+
+  @@schema("clinical")
+}
+
+enum VitalFlag {
+  normal
+  abnormal
+  critical
+
+  @@schema("clinical")
+}
+
+enum VitalsSource {
+  manual
+  device
+  mixed
+  kiosk
+
+  @@schema("clinical")
+}
+
+enum VitalsDeviceType {
+  bp
+  spo2
+  thermometer
+  glucometer
+  scale
+  stadiometer
+  multi_spot
+  ecg
+
+  @@schema("clinical")
+}
+
+enum VitalsDeviceConnection {
+  ble
+  usb_serial
+  wifi_hl7
+  gateway
+  manual
+
+  @@schema("clinical")
+}
+
+enum VitalsDeviceStatus {
+  active
+  inactive
+  faulty
+  retired
+
+  @@schema("clinical")
+}
+
+enum VitalsAlertAction {
+  repeat
+  doctor_informed
+  sent_to_er
+  none
+
+  @@schema("clinical")
+}
+
+enum GrowthStandard {
+  who
+  iap
+
+  @@schema("clinical")
+}
+
+/// The effective-dating status of a hospital-configurable clinical reference
+/// row. Deliberately a `clinical` enum rather than a reach across into
+/// `mdm.MdmRecordStatus`: these rows are not governed by the EN-027 change-set
+/// lifecycle, so borrowing its `draft`/`pending_approval` arms would imply an
+/// approval path that does not exist here.
+enum ClinicalReferenceStatus {
+  active
+  superseded
+  retired
+
+  @@schema("clinical")
+}
+
+/// One set of readings, at one instant, for one patient. Never updated in place
+/// for a clinical value: OP-007 §5 says "corrections versioned; readings never
+/// deleted", so a correction is a new row pointing at the old one through
+/// `corrects_id`, and the migration revokes DELETE.
+model Vitals {
+  id         String  @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  visitId    String? @map("visit_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+  /// Phase 7 / Phase 6 fill these. Declared now because the table is shared and
+  /// adding a column to a partitioned table with five years of history is a
+  /// maintenance window nobody wants.
+  admissionId String? @map("admission_id") @db.Uuid
+  erVisitId   String? @map("er_visit_id") @db.Uuid
+  context    VitalsContext @default(opd_vitals_room)
+  /// Partition key. Millisecond precision on purpose — see the header.
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(3)
+  recordedBy String  @map("recorded_by") @db.Uuid
+  stationId  String? @map("station_id") @db.Uuid
+
+  systolic     Int?
+  diastolic    Int?
+  bpPosition   BpPosition? @map("bp_position")
+  bpArm        String? @map("bp_arm") @db.VarChar(8)
+  cuffSize     String? @map("cuff_size") @db.VarChar(16)
+  pulse        Int?
+  pulseRhythm  PulseRhythm? @map("pulse_rhythm")
+  spo2         Int?
+  onOxygen     Boolean @default(false) @map("on_oxygen")
+  o2FlowLpm    Decimal? @map("o2_flow_lpm") @db.Decimal(5, 2)
+  /// COPD scale-2 SpO2 target, set by a doctor. NEWS2 scoring switches on it.
+  copdScale2   Boolean @default(false) @map("copd_scale2")
+  temperatureC Decimal? @map("temperature_c") @db.Decimal(4, 1)
+  tempSite     TempSite? @map("temp_site")
+  respRate     Int? @map("resp_rate")
+  glucoseMgdl  Decimal? @map("glucose_mgdl") @db.Decimal(6, 2)
+  glucoseType  GlucoseType? @map("glucose_type")
+  heightCm     Decimal? @map("height_cm") @db.Decimal(5, 1)
+  /// NULL means *not measured*. It can never be zero — the migration's
+  /// plausibility CHECK starts at 0.3 kg — which is the whole point: "we do not
+  /// know the weight" and "the weight is zero" must never be the same value.
+  /// `clinical.encounters.dosing_weight_source` carries that distinction
+  /// forward into prescribing.
+  weightKg     Decimal? @map("weight_kg") @db.Decimal(6, 3)
+  /// Not editable by a human: the migration CHECKs it against height and weight,
+  /// so a typed-in BMI that does not follow from the measurements is rejected.
+  bmi          Decimal? @db.Decimal(5, 2)
+  bmiCategory  String? @map("bmi_category") @db.VarChar(24)
+  waistCm      Decimal? @map("waist_cm") @db.Decimal(5, 1)
+  headCircCm   Decimal? @map("head_circ_cm") @db.Decimal(5, 1)
+  painScore    Int? @map("pain_score")
+  painScale    PainScale? @map("pain_scale")
+  avpu         AvpuLevel?
+  gcsTotal     Int? @map("gcs_total")
+  lmpDate      DateTime? @map("lmp_date") @db.Date
+  pregnancyStatus PregnancyStatus @default(unknown) @map("pregnancy_status")
+
+  news2Score Int? @map("news2_score")
+  news2Band  String? @map("news2_band") @db.VarChar(16)
+  pewsScore  Int? @map("pews_score")
+
+  /// `{parameter: normal|abnormal|critical}` — the per-field verdict EN-029
+  /// produced. jsonb because the parameter set is configurable; the *overall*
+  /// verdict is a column because every list screen filters on it.
+  flags       Json @default("{}")
+  overallFlag VitalFlag @default(normal) @map("overall_flag")
+  /// `[{field, device_id, serial, raw, at}]` — provenance for an auto-filled
+  /// reading, so "the machine said so" is auditable.
+  deviceReadings Json @default("[]") @map("device_readings")
+  source      VitalsSource @default(manual)
+  notes       String? @db.Text
+  /// The earlier reading this one repeats (OP-007 §3.2.6), so the doctor sees
+  /// "latest and prior" rather than two unrelated rows.
+  repeatOfId  String? @map("repeat_of_id") @db.Uuid
+  /// The reading this one corrects. Set together with `corrected_reason`.
+  correctsId  String? @map("corrects_id") @db.Uuid
+  correctedReason String? @map("corrected_reason") @db.Text
+  supersededAt DateTime? @map("superseded_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@id([id, recordedAt])
+  @@index([hospitalId, patientId, recordedAt(sort: Desc)])
+  @@index([hospitalId, visitId])
+  @@index([hospitalId, branchId, recordedAt(sort: Desc)])
+  @@index([hospitalId, branchId, overallFlag, recordedAt(sort: Desc)])
+  @@map("vitals")
+  @@schema("clinical")
+}
+
+/// A physical station in the vitals room. `station_group_id` is what makes
+/// several stations share one queue with "call next" locking (OP-007 §3.1).
+model VitalsStation {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  branchId       String  @map("branch_id") @db.Uuid
+  code           String  @db.VarChar(24)
+  name           String  @db.VarChar(120)
+  location       String? @db.VarChar(200)
+  stationGroupId String? @map("station_group_id") @db.Uuid
+  /// EN-006 `queue.queue_definitions` row this station serves.
+  queueId        String? @map("queue_id") @db.Uuid
+  roomKey        String? @map("room_key") @db.Uuid
+  printerId      String? @map("printer_id") @db.Uuid
+  isActive       Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  devices VitalsDevice[]
+
+  @@unique([hospitalId, branchId, code])
+  @@index([hospitalId, branchId, isActive])
+  @@map("vitals_stations")
+  @@schema("clinical")
+}
+
+/// OP-007 §3.2.2. A reading may only be auto-accepted from a registered, active
+/// device and only if it is ≤ 2 minutes old; both halves are business rules the
+/// service enforces against these rows.
+model VitalsDevice {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  branchId       String  @map("branch_id") @db.Uuid
+  stationId      String? @map("station_id") @db.Uuid
+  type           VitalsDeviceType
+  make           String? @db.VarChar(120)
+  model          String? @db.VarChar(120)
+  serial         String  @db.VarChar(120)
+  connection     VitalsDeviceConnection @default(manual)
+  /// MAC address, serial port or gateway endpoint.
+  address        String? @db.VarChar(200)
+  /// → NC-020 biomedical asset register, which arrives in Phase 9.
+  assetId        String? @map("asset_id") @db.Uuid
+  calibrationDue DateTime? @map("calibration_due") @db.Date
+  status         VitalsDeviceStatus @default(active)
+  lastSeenAt     DateTime? @map("last_seen_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  station VitalsStation? @relation(fields: [stationId], references: [id], onDelete: SetNull)
+
+  @@unique([hospitalId, serial])
+  @@index([hospitalId, branchId, status])
+  @@map("vitals_devices")
+  @@schema("clinical")
+}
+
+/// EN-029-owned, hospital-configurable, effective-dated. OP-007 §5.1 seeds the
+/// adult defaults and the paediatric bands; a hospital may override any of them
+/// without a release, which is what "abnormal/critical thresholds by
+/// age/sex/pregnancy from EN-029 effective-dated ranges" means.
+///
+/// Age is in **days**, not years: a neonate band is 0–28 days and a year-grained
+/// column could not express it.
+model VitalsReferenceRange {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String? @map("branch_id") @db.Uuid
+  parameter    String  @db.VarChar(48)
+  ageMinDays   Int     @default(0) @map("age_min_days")
+  ageMaxDays   Int     @default(43800) @map("age_max_days")
+  /// `any` when the range does not vary by sex.
+  sex          String  @default("any") @db.VarChar(8)
+  pregnancy    PregnancyStatus?
+  /// SpO2 scale 1 (default) or 2 (hypercapnic COPD). Null for every other
+  /// parameter.
+  scale        Int?
+  lowAbnormal  Decimal? @map("low_abnormal") @db.Decimal(10, 3)
+  highAbnormal Decimal? @map("high_abnormal") @db.Decimal(10, 3)
+  lowCritical  Decimal? @map("low_critical") @db.Decimal(10, 3)
+  highCritical Decimal? @map("high_critical") @db.Decimal(10, 3)
+  /// Hard plausibility bounds. A value outside these is a typo, not a finding,
+  /// and OP-007 §5 blocks it at entry.
+  lowPlausible  Decimal? @map("low_plausible") @db.Decimal(10, 3)
+  highPlausible Decimal? @map("high_plausible") @db.Decimal(10, 3)
+  unit         String  @db.VarChar(24)
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        ClinicalReferenceStatus @default(active)
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, parameter, status, effectiveFrom])
+  @@map("vitals_reference_ranges")
+  @@schema("clinical")
+}
+
+/// OP-007 §3.2.4: a critical reading raises an alert that a human must close.
+/// `acknowledged_at` null with `escalated_to` set is exactly the "doctor did not
+/// answer in 5 minutes" state the escalation ladder reads.
+model VitalsAlert {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  branchId       String  @map("branch_id") @db.Uuid
+  patientId      String  @map("patient_id") @db.Uuid
+  vitalsId       String  @map("vitals_id") @db.Uuid
+  /// Partition-key half of the `clinical.vitals` primary key. Carried so the
+  /// row can be found without a scan across every month.
+  vitalsRecordedAt DateTime @map("vitals_recorded_at") @db.Timestamptz(3)
+  level          VitalFlag
+  parameters     String[] @default([])
+  notifiedDoctorId String? @map("notified_doctor_id") @db.Uuid
+  notifiedAt     DateTime? @map("notified_at") @db.Timestamptz(6)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  acknowledgedBy String? @map("acknowledged_by") @db.Uuid
+  escalatedTo    String? @map("escalated_to") @db.Uuid
+  escalatedAt    DateTime? @map("escalated_at") @db.Timestamptz(6)
+  actionTaken    VitalsAlertAction @default(none) @map("action_taken")
+  note           String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, branchId, level, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@map("vitals_alerts")
+  @@schema("clinical")
+}
+
+/// Everything the nurse captures alongside the numbers: the allergy
+/// reconciliation, the fall screen, the substance-use questions and the
+/// specialty add-on form. One row per vitals encounter.
+model NursingPreConsultAssessment {
+  id                String  @id @db.Uuid
+  hospitalId        String  @map("hospital_id") @db.Uuid
+  branchId          String  @map("branch_id") @db.Uuid
+  patientId         String  @map("patient_id") @db.Uuid
+  visitId           String? @map("visit_id") @db.Uuid
+  vitalsId          String? @map("vitals_id") @db.Uuid
+  vitalsRecordedAt  DateTime? @map("vitals_recorded_at") @db.Timestamptz(3)
+  /// The nurse confirmed the existing list with the patient. False here plus a
+  /// `patients.allergy_statement` of `not_recorded` is the "nobody has asked"
+  /// state the OP-002 banner shouts about.
+  allergiesVerified Boolean @default(false) @map("allergies_verified")
+  allergiesVerifiedAt DateTime? @map("allergies_verified_at") @db.Timestamptz(6)
+  medicationsReconciled Boolean @default(false) @map("medications_reconciled")
+  fallRiskScore     Int? @map("fall_risk_score")
+  fallRiskFlag      Boolean @default(false) @map("fall_risk_flag")
+  smoking           String? @db.VarChar(24)
+  alcohol           String? @db.VarChar(24)
+  chiefComplaintText String? @map("chief_complaint_text") @db.Text
+  /// → `clinical.form_responses`, the EN-039 specialty add-on.
+  formResponseId    String? @map("form_response_id") @db.Uuid
+  remarks           String? @db.Text
+  /// OP-007 §3.1.4: forwarded without vitals, and why.
+  notDoneReason     String? @map("not_done_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, visitId])
+  @@map("nursing_pre_consult_assessments")
+  @@schema("clinical")
+}
+
+/// Paediatric z-scores, derived from a `vitals` row against WHO (0–5 y) or IAP
+/// (5–18 y) references. Stored rather than computed on read because the growth
+/// chart is drawn on every paediatric visit and the reference table it needs is
+/// a licensed dataset, not arithmetic.
+model GrowthMeasurement {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  vitalsId   String  @map("vitals_id") @db.Uuid
+  vitalsRecordedAt DateTime @map("vitals_recorded_at") @db.Timestamptz(3)
+  measuredAt DateTime @map("measured_at") @db.Timestamptz(6)
+  ageDays    Int     @map("age_days")
+  standard   GrowthStandard @default(who)
+  weightZ    Decimal? @map("weight_z") @db.Decimal(6, 3)
+  heightZ    Decimal? @map("height_z") @db.Decimal(6, 3)
+  bmiZ       Decimal? @map("bmi_z") @db.Decimal(6, 3)
+  hcZ        Decimal? @map("hc_z") @db.Decimal(6, 3)
+  weightPercentile Decimal? @map("weight_percentile") @db.Decimal(6, 3)
+  heightPercentile Decimal? @map("height_percentile") @db.Decimal(6, 3)
+  /// Below 3rd or above 97th percentile on any axis (OP-007 §5).
+  flagged    Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([vitalsId, standard], map: "growth_measurements_key")
+  @@index([hospitalId, patientId, measuredAt(sort: Desc)])
+  @@map("growth_measurements")
+  @@schema("clinical")
+}
+
+/// Which departments require vitals before the doctor, and which fields are
+/// mandatory there. OP-001 already carries `op_visits.vitals_required`; this is
+/// where that flag is decided from.
+model DepartmentVitalsPolicy {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  branchId        String? @map("branch_id") @db.Uuid
+  departmentKey   String? @map("department_key") @db.Uuid
+  practitionerKey String? @map("practitioner_key") @db.Uuid
+  vitalsRequired  Boolean @default(true) @map("vitals_required")
+  mandatoryFields String[] @default([]) @map("mandatory_fields")
+  /// Extra mandatory fields below the age cut-off (height, head circumference).
+  paediatricFields String[] @default([]) @map("paediatric_fields")
+  paediatricAgeDays Int @default(4380) @map("paediatric_age_days")
+  /// Minutes after which a reading is stale and must be repeated.
+  repeatThresholdMinutes Int @default(120) @map("repeat_threshold_minutes")
+  /// OP-007 §3.2.4: forwarding a critical patient without a doctor
+  /// acknowledgement. Configurable, and default-closed.
+  criticalBlocksForward Boolean @default(true) @map("critical_blocks_forward")
+  active          Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, branchId, active])
+  @@map("department_vitals_policies")
+  @@schema("clinical")
+}

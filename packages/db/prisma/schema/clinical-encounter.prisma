@@ -1,0 +1,712 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-002 — Encounter, consultation and the versioned clinical document store
+// (schema `clinical`)
+//
+// Two of these tables are **platform-owned** (docs/03 §Shared platform-owned
+// tables): `clinical.encounters`, which OP-006, IP-001 and every specialty
+// console extends, and `clinical.documents` + `clinical.document_versions`,
+// which is the versioned, signed, hash-chained store every clinical document in
+// the product lands in — consultation notes here, lab and radiology reports in
+// Phase 3, discharge summaries and operation notes in Phase 7, consents from
+// EN-028, forensic documents from TR-008.
+//
+// Naming: docs/03 names the pair `clinical.documents` / `clinical.document_versions`
+// in the shared-table register, while OP-002 §4 sketches a single
+// `clinical_documents` table carrying `(document_id, version)`. The register
+// wins — it is the more specific statement about a table many modules share, and
+// the split is what makes "the current version of this note" an index lookup
+// rather than a correlated MAX() over every version ever written.
+//
+// The append-only rule (CLAUDE.md §3, docs/04 §7) is not a convention here. The
+// migration installs `clinical.enforce_document_version_immutability()`, which
+// refuses any UPDATE that would change the content, the hash, the signature or
+// the version number of a row that is no longer a draft, and refuses every
+// DELETE. `content_sha256` is computed **by the trigger**, not accepted from the
+// application, so a caller cannot present a hash that does not match what it
+// stored. `prev_sha256` is checked against the preceding version, which is what
+// makes the chain a chain rather than a column.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum EncounterType {
+  opd
+  tele
+  er
+  ip_consult
+  daycare
+  procedure
+  health_checkup
+
+  @@schema("clinical")
+}
+
+/// `paused` is a real state, not a UI affectation: OP-002 §3 requires
+/// start/pause/resume, and a paused encounter must not hold the doctor's queue
+/// slot. Every transition is a `clinical.encounter_events` row.
+enum EncounterStatus {
+  draft
+  in_progress
+  paused
+  completed
+  amended
+  cancelled
+
+  @@schema("clinical")
+}
+
+enum EncounterEventKind {
+  started
+  paused
+  resumed
+  completed
+  reopened
+  amended
+  cancelled
+  cosign_requested
+  cosigned
+  break_glass
+
+  @@schema("clinical")
+}
+
+/// How the weight used for dosing was established.
+///
+/// This is the paediatric half of `docs/04 §7`'s hard-stop floor, modelled the
+/// way `patient.patients.allergy_statement` models the allergy half. Zero rows —
+/// or a zero value — must never read as "the patient weighs nothing"; `unknown`
+/// is the default and it is what blocks weight-based prescribing in an under-18.
+enum DosingWeightSource {
+  unknown
+  measured
+  stated
+  estimated
+
+  @@schema("clinical")
+}
+
+enum DiagnosisRank {
+  primary
+  secondary
+
+  @@schema("clinical")
+}
+
+enum DiagnosisCertainty {
+  provisional
+  confirmed
+  rule_out
+  chronic
+
+  @@schema("clinical")
+}
+
+enum Laterality {
+  left
+  right
+  bilateral
+  not_applicable
+
+  @@schema("clinical")
+}
+
+enum ProblemStatus {
+  active
+  resolved
+  inactive
+  entered_in_error
+
+  @@schema("clinical")
+}
+
+enum MedicationSource {
+  rx
+  patient_reported
+  reconciled
+  external
+  discharge
+
+  @@schema("clinical")
+}
+
+enum MedicationStatus {
+  active
+  stopped
+  completed
+  on_hold
+  entered_in_error
+
+  @@schema("clinical")
+}
+
+enum ClinicalDocumentType {
+  consult_note
+  prescription
+  certificate
+  referral_letter
+  order_summary
+  discharge_summary
+  operation_note
+  report
+  consent
+  forensic
+  other
+
+  @@schema("clinical")
+}
+
+/// A version is `draft` until it is signed. After that it is `final` (or
+/// `cancelled`, which still keeps its content) and immutable. `amended` marks
+/// the version that supersedes an earlier final one — the earlier row stays
+/// `final` and stays readable, which is exactly what exit gate 4 checks.
+enum ClinicalDocumentStatus {
+  draft
+  final
+  amended
+  cancelled
+
+  @@schema("clinical")
+}
+
+enum SignMethod {
+  system
+  dsc
+  aadhaar_esign
+  webauthn
+  countersign
+
+  @@schema("clinical")
+}
+
+enum ClinicalTemplateOwner {
+  personal
+  department
+  hospital
+
+  @@schema("clinical")
+}
+
+enum ClinicalTemplateKind {
+  complaint
+  exam
+  history
+  diagnosis_set
+  rx_set
+  order_set
+  advice
+  pathway
+  certificate
+
+  @@schema("clinical")
+}
+
+enum ReferralUrgency {
+  routine
+  urgent
+  emergency
+
+  @@schema("clinical")
+}
+
+enum ReferralStatus {
+  sent
+  accepted
+  seen
+  replied
+  closed
+  cancelled
+
+  @@schema("clinical")
+}
+
+// ── the encounter ────────────────────────────────────────────────────────────
+
+/// One doctor–patient contact. Hangs off `clinical.op_visits` in Phase 2;
+/// `admission_id` and `er_visit_id` are the hooks Phases 6 and 7 use so the same
+/// table serves an ER note and a ward round without a second encounter concept.
+model Encounter {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  visitId       String? @map("visit_id") @db.Uuid
+  admissionId   String? @map("admission_id") @db.Uuid
+  erVisitId     String? @map("er_visit_id") @db.Uuid
+  appointmentId String? @map("appointment_id") @db.Uuid
+  practitionerKey String? @map("practitioner_key") @db.Uuid
+  doctorUserId  String? @map("doctor_user_id") @db.Uuid
+  departmentKey String? @map("department_key") @db.Uuid
+  specialityKey String? @map("speciality_key") @db.Uuid
+  type          EncounterType @default(opd)
+  status        EncounterStatus @default(draft)
+  startedAt     DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz(6)
+  cancelledAt   DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelReason  String? @map("cancel_reason") @db.Text
+  /// Seconds actually spent with the patient, excluding paused stretches. The
+  /// "≤ 3 minutes for a follow-up" budget in the exit gate is measured from here.
+  activeSeconds Int @default(0) @map("active_seconds")
+
+  chiefComplaintText String? @map("chief_complaint_text") @db.Text
+  /// Coded chief complaints (SNOMED/local concept codes) picked from the
+  /// specialty quick-pick value set.
+  chiefComplaintCodes String[] @default([]) @map("chief_complaint_codes")
+  treatmentPlan String? @map("treatment_plan") @db.Text
+  advice        String? @db.Text
+  /// `mdm_instructions.record_key` values chosen from the advice library.
+  adviceCodes   String[] @default([]) @map("advice_codes")
+  followUpDate  DateTime? @map("follow_up_date") @db.Date
+  followUpIntervalDays Int? @map("follow_up_interval_days")
+  followUpAppointmentId String? @map("follow_up_appointment_id") @db.Uuid
+  /// OP-002 §14 AC-16: completing with no diagnosis is allowed only with a
+  /// stated reason. The migration makes that a CHECK, not a service branch.
+  noDiagnosisReason String? @map("no_diagnosis_reason") @db.Text
+
+  // ── the dosing weight (docs/04 §7 paediatric hard-stop) ──────────────────
+  /// The weight prescribing will use. NULL exactly when `dosing_weight_source`
+  /// is `unknown`, and never zero — both enforced by CHECK.
+  dosingWeightKg     Decimal? @map("dosing_weight_kg") @db.Decimal(6, 3)
+  dosingWeightSource DosingWeightSource @default(unknown) @map("dosing_weight_source")
+  dosingWeightAt     DateTime? @map("dosing_weight_at") @db.Timestamptz(6)
+  dosingWeightBy     String? @map("dosing_weight_by") @db.Uuid
+  /// The `clinical.vitals` row it came from, when the source is `measured`.
+  dosingWeightVitalsId String? @map("dosing_weight_vitals_id") @db.Uuid
+  /// Body-surface area, for the chemo/paediatric per-m² rules. Same rule: a
+  /// value only ever accompanies a known weight and height.
+  bsaM2              Decimal? @map("bsa_m2") @db.Decimal(5, 3)
+  /// Last known eGFR and its date, snapshotted onto the encounter so the renal
+  /// dose rule is reproducible three years later without re-querying the lab.
+  egfr               Decimal? @db.Decimal(6, 2)
+  egfrAt             DateTime? @map("egfr_at") @db.Timestamptz(6)
+
+  /// The EN-039 form set in use, and the signed note this encounter produced.
+  formTemplateId  String? @map("form_template_id") @db.Uuid
+  formVersionId   String? @map("form_version_id") @db.Uuid
+  templateId      String? @map("template_id") @db.Uuid
+  signedDocumentId String? @map("signed_document_id") @db.Uuid
+
+  /// OP-002 §2: a resident's encounter needs a consultant's countersignature
+  /// before its Rx reaches pharmacy.
+  cosignRequired Boolean @default(false) @map("cosign_required")
+  cosignedBy     String? @map("cosigned_by") @db.Uuid
+  cosignedAt     DateTime? @map("cosigned_at") @db.Timestamptz(6)
+
+  /// D-9: an Rx signed while the vendor knowledge base was unreachable is
+  /// marked, surfaced to the pharmacist and re-validated on the next sync. The
+  /// allergy and contraindicated-interaction checks never degrade, so this flag
+  /// never means "unchecked for allergy".
+  cdssDegraded   Boolean @default(false) @map("cdss_degraded")
+  cdssDegradedFamilies String[] @default([]) @map("cdss_degraded_families")
+
+  idempotencyKey String? @map("idempotency_key") @db.VarChar(128)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  events      EncounterEvent[]
+  diagnoses   EncounterDiagnosis[]
+  referrals   Referral[]
+
+  @@index([hospitalId, patientId, startedAt(sort: Desc)])
+  @@index([hospitalId, branchId, practitionerKey, startedAt(sort: Desc)])
+  @@index([hospitalId, branchId, status, startedAt(sort: Desc)])
+  @@index([hospitalId, visitId])
+  @@map("encounters")
+  @@schema("clinical")
+}
+
+/// The encounter lifecycle, append-only. docs/03 §Table rules: "Every order/bill/
+/// result table has `status` + `status_history` with actor & timestamp." An
+/// encounter is the same kind of object, and pause/resume is unreconstructible
+/// from the row alone.
+model EncounterEvent {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  encounterId String  @map("encounter_id") @db.Uuid
+  kind        EncounterEventKind
+  fromStatus  EncounterStatus? @map("from_status")
+  toStatus    EncounterStatus? @map("to_status")
+  reason      String? @db.Text
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  actorRole   String? @map("actor_role") @db.VarChar(64)
+  at          DateTime @default(now()) @db.Timestamptz(6)
+
+  encounter Encounter @relation(fields: [encounterId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, encounterId, at])
+  @@map("encounter_events")
+  @@schema("clinical")
+}
+
+/// A diagnosis as stated on one encounter. The longitudinal view is
+/// `clinical.problems`; this row is what the doctor wrote that day and is never
+/// rewritten by a later visit.
+model EncounterDiagnosis {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  encounterId  String  @map("encounter_id") @db.Uuid
+  patientId    String  @map("patient_id") @db.Uuid
+  /// The `mdm_code_systems.key` the code belongs to — `ICD10`, `ICD11`,
+  /// `SNOMEDCT`. Stored rather than assumed so a hospital on ICD-11 and one on
+  /// ICD-10 can share the table.
+  codeSystemKey String @map("code_system_key") @db.VarChar(64)
+  code         String  @db.VarChar(64)
+  codeVersion  String? @map("code_version") @db.VarChar(32)
+  snomedCode   String? @map("snomed_code") @db.VarChar(32)
+  description  String  @db.VarChar(500)
+  rank         DiagnosisRank @default(secondary)
+  certainty    DiagnosisCertainty @default(provisional)
+  severity     String? @db.VarChar(24)
+  laterality   Laterality @default(not_applicable)
+  onsetDate    DateTime? @map("onset_date") @db.Date
+  isChronic    Boolean @default(false) @map("is_chronic")
+  /// OP-002 §5: notifiable diseases feed the IDSP register through NC-015.
+  isNotifiable Boolean @default(false) @map("is_notifiable")
+  problemId    String? @map("problem_id") @db.Uuid
+  codedBy      String? @map("coded_by") @db.Uuid
+  /// `doctor` until MRD verifies it. MRD may change this without touching the
+  /// doctor's text (OP-002 §5).
+  codingStatus String  @default("doctor") @map("coding_status") @db.VarChar(24)
+  codingVerifiedBy String? @map("coding_verified_by") @db.Uuid
+  codingVerifiedAt DateTime? @map("coding_verified_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  encounter Encounter @relation(fields: [encounterId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, encounterId])
+  @@index([hospitalId, codeSystemKey, code])
+  @@map("encounter_diagnoses")
+  @@schema("clinical")
+}
+
+/// The patient's problem list, carried across visits. One row per problem, not
+/// per mention — that is what makes "active problems" a filter rather than a
+/// deduplication job.
+model Problem {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  codeSystemKey String  @map("code_system_key") @db.VarChar(64)
+  code          String  @db.VarChar(64)
+  description   String  @db.VarChar(500)
+  status        ProblemStatus @default(active)
+  onsetDate     DateTime? @map("onset_date") @db.Date
+  resolvedAt    DateTime? @map("resolved_at") @db.Timestamptz(6)
+  isChronic     Boolean @default(false) @map("is_chronic")
+  sourceEncounterId String? @map("source_encounter_id") @db.Uuid
+  note          String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@unique([hospitalId, patientId, codeSystemKey, code], map: "problems_patient_code_key")
+  @@index([hospitalId, patientId, status])
+  @@map("problems")
+  @@schema("clinical")
+}
+
+/// The medication list EN-029 evaluates interactions against — hospital
+/// prescriptions **and** what the patient says they take at home. A drug the
+/// patient buys over the counter interacts exactly as hard as one the hospital
+/// wrote, which is why `source` has a `patient_reported` arm and why the
+/// interaction rule reads this table rather than `prescription_items`.
+model MedicationListEntry {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  patientId    String  @map("patient_id") @db.Uuid
+  encounterId  String? @map("encounter_id") @db.Uuid
+  /// → `mdm_drugs.record_key`. Null when the patient named something not in the
+  /// formulary, which `drug_text` then holds verbatim.
+  drugKey      String? @map("drug_key") @db.Uuid
+  drugText     String  @map("drug_text") @db.VarChar(300)
+  atcCode      String? @map("atc_code") @db.VarChar(16)
+  doseText     String? @map("dose_text") @db.VarChar(120)
+  frequencyCode String? @map("frequency_code") @db.VarChar(24)
+  route        MdmDrugRoute?
+  source       MedicationSource @default(rx)
+  status       MedicationStatus @default(active)
+  startedAt    DateTime? @map("started_at") @db.Timestamptz(6)
+  stoppedAt    DateTime? @map("stopped_at") @db.Timestamptz(6)
+  stopReason   String? @map("stop_reason") @db.Text
+  prescriptionItemId String? @map("prescription_item_id") @db.Uuid
+  reconciledBy String? @map("reconciled_by") @db.Uuid
+  reconciledAt DateTime? @map("reconciled_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, patientId, drugKey])
+  @@map("medications")
+  @@schema("clinical")
+}
+
+// ── the versioned document store ─────────────────────────────────────────────
+
+/// The document's identity: what it is, whose it is, and which version is
+/// current. Content lives only in `clinical.document_versions`.
+model ClinicalDocument {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+  visitId     String? @map("visit_id") @db.Uuid
+  type        ClinicalDocumentType
+  title       String  @db.VarChar(300)
+  /// Maintained by trigger from `document_versions`. Never written by hand.
+  currentVersion Int @default(0) @map("current_version")
+  currentStatus  ClinicalDocumentStatus @default(draft) @map("current_status")
+  /// The module that owns this document's content, e.g. `OP-002`, `OP-004`.
+  ownerModule String  @default("OP-002") @map("owner_module") @db.VarChar(16)
+  /// Set only when a medico-legal hold or a retention rule pins the document.
+  legalHold   Boolean @default(false) @map("legal_hold")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  versions ClinicalDocumentVersion[]
+
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, encounterId])
+  @@index([hospitalId, type, currentStatus])
+  @@map("documents")
+  @@schema("clinical")
+}
+
+/// One immutable version. `content_sha256` is computed by the trigger from
+/// `content`, and `prev_sha256` must equal the previous version's hash — so the
+/// chain cannot be re-linked and a version cannot be edited into a different
+/// document after the fact.
+///
+/// An "edit" of a signed note is a new row with `amendment_reason` set. Exit
+/// gate 4 is exactly this: the old row is still there, still readable, still
+/// carrying its own signature.
+model ClinicalDocumentVersion {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  documentId String  @map("document_id") @db.Uuid
+  version    Int
+  status     ClinicalDocumentStatus @default(draft)
+  /// The document body. jsonb because it is an EN-039 form response plus free
+  /// text, and docs/03 explicitly allows jsonb for form payloads.
+  content    Json
+  /// Rendered plain text, for full-text search and for the hash to be
+  /// human-checkable. Optional — an empty note has none.
+  contentText String? @map("content_text") @db.Text
+  /// sha256 of the canonical jsonb text. Written by the trigger, not by the app.
+  contentSha256 String @map("content_sha256") @db.VarChar(64)
+  /// The previous version's `content_sha256`. Null only for version 1.
+  prevSha256 String? @map("prev_sha256") @db.VarChar(64)
+  signedBy   String? @map("signed_by") @db.Uuid
+  signedAt   DateTime? @map("signed_at") @db.Timestamptz(6)
+  signMethod SignMethod? @map("sign_method")
+  /// The signer's professional registration, captured at signing time so a
+  /// later change to the practitioner master cannot rewrite what was signed.
+  signerRegistrationNo String? @map("signer_registration_no") @db.VarChar(64)
+  /// Mandatory from version 2 (CHECK in the migration): an amendment with no
+  /// reason is an overwrite wearing a version number.
+  amendmentReason String? @map("amendment_reason") @db.Text
+  cancelledReason String? @map("cancelled_reason") @db.Text
+  /// The rendered artefact in `core.files`.
+  renderedFileId String? @map("rendered_file_id") @db.Uuid
+  /// Set when a later version supersedes this one. The only two columns the
+  /// immutability trigger lets an UPDATE touch after `final`.
+  supersededByVersion Int? @map("superseded_by_version")
+  supersededAt DateTime? @map("superseded_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  document ClinicalDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+
+  @@unique([documentId, version], map: "document_versions_key")
+  @@index([hospitalId, documentId, version(sort: Desc)])
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@map("document_versions")
+  @@schema("clinical")
+}
+
+/// EN-039 form payloads. docs/03 §Table rules names this table by name as the
+/// legitimate home of a jsonb form payload: `clinical.form_responses.data`.
+model FormResponse {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  patientId     String? @map("patient_id") @db.Uuid
+  encounterId   String? @map("encounter_id") @db.Uuid
+  visitId       String? @map("visit_id") @db.Uuid
+  /// → `core.tpl_form_templates` and the exact `core.tpl_form_versions` row.
+  /// Pinning the version is what stops a template edit changing the meaning of
+  /// an answer recorded last year.
+  formTemplateId String @map("form_template_id") @db.Uuid
+  formVersionId  String @map("form_version_id") @db.Uuid
+  data          Json    @default("{}")
+  /// `draft` while the doctor is typing; `final` once the encounter is signed.
+  status        String  @default("draft") @db.VarChar(16)
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@index([hospitalId, encounterId])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, formTemplateId])
+  @@map("form_responses")
+  @@schema("clinical")
+}
+
+/// Personal, departmental and hospital templates: complaint sets, examination
+/// layouts, diagnosis favourites, Rx combos, order sets, advice blocks.
+/// One table because they differ only in `kind` and `payload`, and a doctor's
+/// "apply template" is the same action for all of them.
+model ClinicalTemplate {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  ownerType   ClinicalTemplateOwner @default(personal) @map("owner_type")
+  /// The user for a personal template, the department record key for a
+  /// departmental one, null for a hospital-wide one.
+  ownerId     String? @map("owner_id") @db.Uuid
+  kind        ClinicalTemplateKind
+  specialityKey String? @map("speciality_key") @db.Uuid
+  code        String? @db.VarChar(48)
+  name        String  @db.VarChar(200)
+  description String? @db.Text
+  payload     Json    @default("{}")
+  /// Sharing a personal template into a department needs HOD approval
+  /// (OP-002 §3.2); `published_by` is who granted it.
+  isShared    Boolean @default(false) @map("is_shared")
+  publishedBy String? @map("published_by") @db.Uuid
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(6)
+  usageCount  Int     @default(0) @map("usage_count")
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@index([hospitalId, ownerType, ownerId, kind])
+  @@index([hospitalId, kind, active])
+  @@map("clinical_templates")
+  @@schema("clinical")
+}
+
+/// One row per doctor per hospital. Favourites are arrays of record keys rather
+/// than a join table because they are read as a whole, written as a whole, and
+/// never joined against.
+model DoctorPreference {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  userId      String  @map("user_id") @db.Uuid
+  defaultBranchId String? @map("default_branch_id") @db.Uuid
+  defaultFormIds  String[] @default([]) @map("default_form_ids") @db.Uuid
+  favouriteDrugKeys String[] @default([]) @map("favourite_drug_keys") @db.Uuid
+  favouriteServiceKeys String[] @default([]) @map("favourite_service_keys") @db.Uuid
+  favouriteDiagnosisCodes String[] @default([]) @map("favourite_diagnosis_codes")
+  hotkeys     Json    @default("{}")
+  /// Print on complete, print at nurse station, WhatsApp only …
+  autoPrint   Json    @default("{}") @map("auto_print")
+  genericFirst Boolean @default(true) @map("generic_first")
+  quietHours  Json    @default("{}") @map("quiet_hours")
+  notificationPrefs Json @default("{}") @map("notification_prefs")
+  homeWidgets Json    @default("[]") @map("home_widgets")
+  voiceLang   String? @map("voice_lang") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@unique([hospitalId, userId])
+  @@map("doctor_preferences")
+  @@schema("clinical")
+}
+
+/// Internal and external referrals raised from a consultation. An internal
+/// referral creates a cross-consult visit through OP-001; an external one
+/// produces a letter and is tracked by OP-021 in a later phase.
+model Referral {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  encounterId   String  @map("encounter_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  fromUserId    String  @map("from_user_id") @db.Uuid
+  toDepartmentKey String? @map("to_department_key") @db.Uuid
+  toPractitionerKey String? @map("to_practitioner_key") @db.Uuid
+  externalFacility String? @map("external_facility") @db.VarChar(300)
+  urgency       ReferralUrgency @default(routine)
+  reason        String  @db.Text
+  sharedNote    String? @map("shared_note") @db.Text
+  status        ReferralStatus @default(sent)
+  replyText     String? @map("reply_text") @db.Text
+  repliedBy     String? @map("replied_by") @db.Uuid
+  repliedAt     DateTime? @map("replied_at") @db.Timestamptz(6)
+  targetVisitId String? @map("target_visit_id") @db.Uuid
+  documentId    String? @map("document_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  encounter Encounter @relation(fields: [encounterId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, toDepartmentKey, status])
+  @@map("referrals")
+  @@schema("clinical")
+}
+
+/// Closing the critical-result loop (OP-002 §3.5, D-10). Phase 3 produces the
+/// results; the acknowledgement table exists now because the doctor inbox is a
+/// Phase-2 screen and an unacknowledged critical value may never be auto-closed.
+model ResultAcknowledgement {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  doctorUserId String @map("doctor_user_id") @db.Uuid
+  /// `lab_result` | `rad_report` | `vitals` | `cdss_alert` — the kind of thing
+  /// acknowledged, plus its id. A declared foreign key is impossible while the
+  /// producing modules are still unbuilt; the kind makes the reference legible.
+  resultKind  String  @map("result_kind") @db.VarChar(24)
+  resultRef   String  @map("result_ref") @db.Uuid
+  critical    Boolean @default(false)
+  acknowledgedAt DateTime @default(now()) @map("acknowledged_at") @db.Timestamptz(6)
+  note        String? @db.Text
+  patientInformed Boolean @default(false) @map("patient_informed")
+  /// D-10: a read-back, or a documented "clinician unreachable — escalated".
+  readBackBy  String? @map("read_back_by") @db.VarChar(200)
+  escalated   Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@unique([hospitalId, resultKind, resultRef, doctorUserId], map: "result_acknowledgements_key")
+  @@index([hospitalId, doctorUserId, acknowledgedAt(sort: Desc)])
+  @@map("result_acknowledgements")
+  @@schema("clinical")
+}

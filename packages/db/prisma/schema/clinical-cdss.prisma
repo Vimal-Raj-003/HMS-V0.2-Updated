@@ -1,0 +1,777 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-029 — Clinical Decision Support (schema `clinical`, prefix `cdss_`)
+//
+// Deterministic rules. No AI here — D-5 puts the LLM layer in Phase 12 and
+// forbids it from ever overriding this engine.
+//
+// ── The shape of the safety guarantee ────────────────────────────────────────
+//
+// `docs/04 §7` and `docs/DECISIONS.md` D-9 both say the same thing in different
+// words: some hard-stops can never be configured away, and they must not
+// degrade when the vendor knowledge base or the rules service is unreachable.
+// `phase-02` exit gate 2 asks for a test proving **no configuration flag can
+// disable the allergy hard-stop**.
+//
+// The way to pass that test is not to add a well-guarded flag. It is to make
+// sure there is no flag — and no row, and no column — to write.
+//
+//   * `cdss_safety_floor` is the product-level list of families that always
+//     interrupt. It has **no `hospital_id`**, so no tenant can shadow a row;
+//     **no `status`, `active`, `enabled`, `disabled_at`, `effective_to` or
+//     `suppression` column**, so there is no value that turns one off; and the
+//     migration revokes INSERT, UPDATE and DELETE from `hms_app`, so the
+//     application cannot remove one either. The rows are code-owned, seeded by
+//     the migration, and the migration asserts — in SQL, at apply time — that
+//     the table carries no boolean and no status-shaped column. If a later phase
+//     adds one, the *migration* fails, not a test somebody might skip.
+//
+//   * `cdss_rules` / `cdss_rule_versions` are where hospitals tune everything
+//     else. A trigger refuses to publish a rule version in a floor family at
+//     anything below `hard_stop`, refuses to attach a suppression policy to it,
+//     and refuses to set such a rule to `disabled`, `shadow` or `retired`. So
+//     the tunable table cannot be used to route around the floor either.
+//
+//   * `cdss_alert_events` is append-only. The clinician's response is a separate
+//     append-only row in `cdss_alert_actions` carrying a **coded** reason from
+//     `cdss_override_reasons` — a CHECK makes an override without a code
+//     impossible, which is what makes the alert-fatigue dashboard (exit gate 8)
+//     tunable rather than a word cloud.
+//
+// The floor is therefore enforced in four independent places: the absence of a
+// column, the absence of a grant, a trigger on the tuning table, and a NOT NULL
+// on the reason. Defeating it requires a migration written by the schema owner —
+// which is exactly the level of ceremony `docs/04 §7 Change control` demands.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The rule families EN-029 §3.1 enumerates. `cdss_safety_floor` names the
+/// subset that always interrupts.
+enum CdssFamily {
+  allergy
+  ddi
+  drug_food
+  drug_disease
+  drug_lab
+  duplicate_therapy
+  dose_range
+  organ_dosing
+  pregnancy
+  lactation
+  geriatric
+  paediatric_weight
+  schedule_guardrail
+  high_alert_lasa
+  critical_value
+  delta_check
+  deterioration
+  sepsis
+  vte
+  stewardship
+  care_gap
+  order_set_prompt
+  imaging
+  blood
+  prereq
+
+  @@schema("clinical")
+}
+
+enum CdssScope {
+  system
+  group
+  hospital
+  branch
+  department
+
+  @@schema("clinical")
+}
+
+enum CdssRuleStatus {
+  draft
+  in_review
+  approved
+  active
+  shadow
+  disabled
+  retired
+
+  @@schema("clinical")
+}
+
+/// The interruption ladder. `shadow` is evaluated and logged but never shown —
+/// EN-029 §3.4.6 makes it the default for a new tenant-authored rule.
+enum CdssInterruption {
+  passive
+  soft_stop
+  hard_stop
+  shadow
+
+  @@schema("clinical")
+}
+
+enum CdssSeverity {
+  info
+  low
+  moderate
+  major
+  contraindicated
+
+  @@schema("clinical")
+}
+
+enum CdssTrigger {
+  order_entry
+  verify
+  administer
+  result
+  vitals
+  scheduled
+  encounter_open
+  manual
+  sync_revalidation
+
+  @@schema("clinical")
+}
+
+/// The disposition at the moment the alert was produced. What the clinician then
+/// did is a `cdss_alert_actions` row, because an immutable event cannot record
+/// something that has not happened yet.
+enum CdssAlertOutcome {
+  shown_passive
+  shown_interrupting
+  hard_stop_blocked
+  auto_suppressed
+  shadow_logged
+  degraded
+
+  @@schema("clinical")
+}
+
+enum CdssAlertActionKind {
+  displayed
+  acknowledged
+  overridden
+  order_changed
+  order_abandoned
+  countersigned
+  snoozed
+  expired
+
+  @@schema("clinical")
+}
+
+enum CdssKbProvider {
+  local_formulary
+  fdb
+  medispan
+  micromedex
+  multum
+  cims_india
+  mims_india
+
+  @@schema("clinical")
+}
+
+enum CdssKbStatus {
+  staged
+  reviewed
+  active
+  superseded
+  expired
+
+  @@schema("clinical")
+}
+
+enum CdssDoseBasis {
+  flat
+  per_kg
+  per_m2
+
+  @@schema("clinical")
+}
+
+enum CdssPopulation {
+  neonate
+  infant
+  child
+  adolescent
+  adult
+  geriatric
+  pregnancy
+  lactation
+  dialysis
+
+  @@schema("clinical")
+}
+
+enum CdssScoreType {
+  news2
+  pews
+  mews
+  qsofa
+  sirs
+  padua
+  caprini
+  improve_bleed
+  gcs_trend
+
+  @@schema("clinical")
+}
+
+enum CdssScoreSource {
+  engine
+  manual
+
+  @@schema("clinical")
+}
+
+// ── the floor ────────────────────────────────────────────────────────────────
+
+/// The hard-stop families that can never be configured away (`docs/04 §7`,
+/// EN-029 §5, D-9).
+///
+/// Read the column list twice. There is no `active`, no `enabled`, no `status`,
+/// no `effective_to`, no `hospital_id` and no `suppression`. That is the design:
+/// a hospital cannot disable a floor family because there is nothing to write,
+/// and `hms_app` holds no INSERT/UPDATE/DELETE on the table so it cannot delete
+/// the row either. `degrades_offline` is `false` on every seeded row and is a
+/// **documentation** column carrying D-9's distinction between checks that
+/// evaluate against locally-cached patient data (allergy, contraindicated
+/// interaction) and checks that need a vendor database — it is never read as
+/// permission to skip anything.
+model CdssSafetyFloor {
+  /// Deterministic, stable across deployments: the key IS the identity.
+  key              String  @id @db.VarChar(64)
+  family           CdssFamily
+  /// The precise condition, in prose, for the assessor and the rule author.
+  /// e.g. "documented anaphylaxis to the exact substance or a cross-reactive
+  /// class member".
+  condition        String  @db.Text
+  /// Why this one can never be softened. NABH / DPDP / statute reference.
+  rationale        String  @db.Text
+  /// The regulatory or guideline citation.
+  authority        String  @db.VarChar(300)
+  /// Whether an *acknowledged countersignature* is permitted (EN-029 §5: "may be
+  /// acknowledged with countersign, never silently bypassed"), and by whom.
+  countersignRole  String? @map("countersign_role") @db.VarChar(64)
+  /// D-9. Always false for the families that evaluate off locally-cached patient
+  /// data. Documentation, never a switch.
+  degradesOffline  Boolean @default(false) @map("degrades_offline")
+  sortOrder        Int     @default(0) @map("sort_order")
+
+  rules CdssRule[]
+
+  @@index([family])
+  @@map("cdss_safety_floor")
+  @@schema("clinical")
+}
+
+// ── the tunable rules ────────────────────────────────────────────────────────
+
+/// A rule's identity and current governance state. `hospital_id` is nullable:
+/// null is a rule the product ships, a value is one the tenant authored.
+model CdssRule {
+  id             String  @id @db.Uuid
+  hospitalId     String? @map("hospital_id") @db.Uuid
+  branchId       String? @map("branch_id") @db.Uuid
+  key            String  @db.VarChar(96)
+  name           String  @db.VarChar(200)
+  family         CdssFamily
+  scope          CdssScope @default(hospital)
+  ownerRole      String? @map("owner_role") @db.VarChar(64)
+  clinicalRationale String @map("clinical_rationale") @db.Text
+  /// Citations, URLs, guideline + year.
+  evidence       Json    @default("{}")
+  /// Set when this rule is a tenant's *implementation* of a product safety-floor
+  /// entry. A rule that declares one is locked by trigger: every published
+  /// version must be `hard_stop`, its suppression policy must be empty, and the
+  /// rule can never be set to `disabled`, `shadow` or `retired`. Without this
+  /// column a future implementer could move a floor check into the tunable
+  /// table and then turn it off — which is precisely the hole `phase-02` exit
+  /// gate 2 exists to close.
+  enforcesFloorKey String? @map("enforces_floor_key") @db.VarChar(64)
+  status         CdssRuleStatus @default(draft)
+  currentVersion Int     @default(0) @map("current_version")
+  /// The tenant's fire budget for this rule. Above it, EN-029 §3.4.2 requires a
+  /// Medical Superintendent sign-off before it may be published as a soft-stop.
+  alertBudgetPer1000 Decimal? @map("alert_budget_per_1000") @db.Decimal(8, 2)
+  /// EN-029 §3.4.5 emergency disable. Never reachable for a floor family — the
+  /// trigger refuses.
+  disabledAt     DateTime? @map("disabled_at") @db.Timestamptz(6)
+  disabledBy     String? @map("disabled_by") @db.Uuid
+  disabledReason String? @map("disabled_reason") @db.Text
+  /// The last governance committee decision (EN-029 §3.7.2).
+  governanceDecision String? @map("governance_decision") @db.Text
+  governanceReviewedAt DateTime? @map("governance_reviewed_at") @db.Timestamptz(6)
+  governanceMinutesRef String? @map("governance_minutes_ref") @db.VarChar(200)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  versions   CdssRuleVersion[]
+  floorEntry CdssSafetyFloor? @relation(fields: [enforcesFloorKey], references: [key], onDelete: Restrict)
+
+  /// NOT a Prisma `@@unique`: `hospital_id` is nullable, and PostgreSQL treats
+  /// NULLs as distinct in a unique index — two shipped rules could then share a
+  /// key. The migration §C creates `uq_cdss_rules_key … NULLS NOT DISTINCT`.
+  @@index([hospitalId, key])
+  @@index([hospitalId, family, status])
+  @@map("cdss_rules")
+  @@schema("clinical")
+}
+
+/// An immutable published rule. Every alert stores the exact `rule_version_id`,
+/// so an audit three years later reconstructs precisely what the clinician saw.
+model CdssRuleVersion {
+  id            String  @id @db.Uuid
+  hospitalId    String? @map("hospital_id") @db.Uuid
+  ruleId        String  @map("rule_id") @db.Uuid
+  version       Int
+  family        CdssFamily
+  /// Typed predicate AST, validated against the snapshot schema at publish time.
+  condition     Json
+  /// Title, one-liner, detail markdown, suggested actions, alternatives.
+  action        Json
+  interruption  CdssInterruption
+  severity      CdssSeverity @default(moderate)
+  /// Encounter types, roles, age band, sex, departments.
+  applicability Json    @default("{}")
+  /// Scope, window_hours, snooze_allowed, max_per_encounter. Must be empty for a
+  /// floor family — EN-029 §5: "Suppression never applies to hard-stops."
+  suppression   Json    @default("{}")
+  overrideReasonSetId String? @map("override_reason_set_id") @db.Uuid
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  publishedBy   String? @map("published_by") @db.Uuid
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  /// The EN-038 approval request. A hard-stop always needs one.
+  approvalRef   String? @map("approval_ref") @db.Uuid
+  /// The mandatory pre-publish harness output (EN-029 §3.4.2).
+  testReport    Json    @default("{}") @map("test_report")
+  checksum      String  @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  rule CdssRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+
+  @@unique([ruleId, version], map: "cdss_rule_versions_key")
+  @@index([ruleId, effectiveFrom(sort: Desc)])
+  @@index([hospitalId, family, interruption])
+  @@map("cdss_rule_versions")
+  @@schema("clinical")
+}
+
+/// A named set of override reasons. Attached to a rule version so the reasons a
+/// prescriber is offered are the ones that make sense for that rule.
+model CdssOverrideReasonSet {
+  id         String  @id @db.Uuid
+  hospitalId String? @map("hospital_id") @db.Uuid
+  key        String  @db.VarChar(64)
+  name       String  @db.VarChar(200)
+  /// Which families this set is offered for. Empty means any.
+  familyScope CdssFamily[] @default([]) @map("family_scope")
+  active     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  reasons CdssOverrideReason[]
+
+  /// Uniqueness is `NULLS NOT DISTINCT` in migration §C — see `CdssRule`.
+  @@index([hospitalId, key])
+  @@map("cdss_override_reason_sets")
+  @@schema("clinical")
+}
+
+/// One coded reason. EN-029 §5: "Override reason is mandatory and coded; free
+/// text alone is not accepted; `other` requires ≥20 characters." Both halves are
+/// CHECKs on `cdss_alert_actions` in the migration.
+model CdssOverrideReason {
+  id           String  @id @db.Uuid
+  hospitalId   String? @map("hospital_id") @db.Uuid
+  reasonSetId  String  @map("reason_set_id") @db.Uuid
+  code         String  @db.VarChar(48)
+  label        String  @db.VarChar(300)
+  requiresFreeText Boolean @default(false) @map("requires_free_text")
+  minFreeTextLength Int @default(0) @map("min_free_text_length")
+  sortOrder    Int     @default(0) @map("sort_order")
+  active       Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  reasonSet CdssOverrideReasonSet @relation(fields: [reasonSetId], references: [id], onDelete: Restrict)
+  actions   CdssAlertAction[]
+
+  @@unique([reasonSetId, code], map: "cdss_override_reasons_key")
+  @@index([hospitalId, active])
+  @@map("cdss_override_reasons")
+  @@schema("clinical")
+}
+
+// ── what actually fired ──────────────────────────────────────────────────────
+
+/// One evaluation result. Append-only and partitioned monthly by `fired_at`,
+/// which is `timestamptz(3)` for the composite-key round-trip reason documented
+/// in the migration §A.
+///
+/// Retention is ten years (EN-029 §4) — the same as the clinical record, because
+/// "what was the prescriber shown" is a medico-legal question.
+model CdssAlertEvent {
+  id            String  @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  encounterId   String? @map("encounter_id") @db.Uuid
+  /// Null for a floor evaluation that ran with no tenant rule behind it — the
+  /// allergy hard-stop fires from `cdss_safety_floor` whether or not anybody
+  /// authored a rule, which is the entire point of the floor.
+  ruleId        String? @map("rule_id") @db.Uuid
+  ruleVersionId String? @map("rule_version_id") @db.Uuid
+  /// Set when the fire came from the product floor rather than a tenant rule.
+  safetyFloorKey String? @map("safety_floor_key") @db.VarChar(64)
+  family        CdssFamily
+  severity      CdssSeverity
+  interruption  CdssInterruption
+  trigger       CdssTrigger
+  /// order_id, order_line_id, prescription_item_id, result_id, vitals_id.
+  contextRef    Json    @default("{}") @map("context_ref")
+  /// Denormalised for the two joins that matter: "alerts on this Rx line" and
+  /// "alerts on this order".
+  prescriptionItemId String? @map("prescription_item_id") @db.Uuid
+  orderItemId   String? @map("order_item_id") @db.Uuid
+  /// Partition key. Millisecond precision — see the migration §A.
+  firedAt       DateTime @default(now()) @map("fired_at") @db.Timestamptz(3)
+  displayed     Boolean @default(false)
+  displayedAt   DateTime? @map("displayed_at") @db.Timestamptz(6)
+  latencyMs     Int? @map("latency_ms")
+  outcome       CdssAlertOutcome
+  actorUserId   String? @map("actor_user_id") @db.Uuid
+  actorRole     String? @map("actor_role") @db.VarChar(64)
+  /// sha256 of the evaluation inputs. `POST /cdss/replay` reproduces a
+  /// historical alert exactly from this plus `rule_version_id` (EN-029 §5).
+  snapshotDigest String @map("snapshot_digest") @db.VarChar(64)
+  /// True when a family could not be evaluated. Never true for a floor family:
+  /// D-9 makes those evaluate off locally-cached data or block.
+  degraded      Boolean @default(false)
+  degradedReason String? @map("degraded_reason") @db.Text
+  /// A short, non-PHI summary for the fatigue dashboard.
+  title         String  @db.VarChar(300)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([id, firedAt])
+  @@index([hospitalId, firedAt(sort: Desc)])
+  @@index([hospitalId, patientId, firedAt(sort: Desc)])
+  @@index([hospitalId, ruleVersionId, firedAt(sort: Desc)])
+  @@index([hospitalId, family, outcome, firedAt(sort: Desc)])
+  @@index([hospitalId, prescriptionItemId])
+  @@map("cdss_alert_events")
+  @@schema("clinical")
+}
+
+/// What the human did about an alert. A separate append-only table because
+/// EN-029 §5 requires the alert row itself to be immutable, and an outcome that
+/// is written by an UPDATE is not immutable.
+///
+/// `override_reason_id` is NOT NULL whenever `kind = 'overridden'` (CHECK in the
+/// migration), which is what makes exit gate 8's override-rate-by-reason report
+/// possible at all.
+model CdssAlertAction {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  /// Both halves of the alert's composite primary key.
+  alertEventId    String  @map("alert_event_id") @db.Uuid
+  alertFiredAt    DateTime @map("alert_fired_at") @db.Timestamptz(3)
+  kind            CdssAlertActionKind
+  overrideReasonId String? @map("override_reason_id") @db.Uuid
+  /// Snapshotted so a later edit of the reason master cannot rewrite history.
+  overrideReasonCode String? @map("override_reason_code") @db.VarChar(48)
+  overrideNote    String? @map("override_note") @db.Text
+  actorUserId     String  @map("actor_user_id") @db.Uuid
+  actorRole       String? @map("actor_role") @db.VarChar(64)
+  /// EN-029 §5: a resident overriding a major or contraindicated severity needs
+  /// a consultant countersignature before the order reaches pharmacy.
+  countersignedBy String? @map("countersigned_by") @db.Uuid
+  countersignedAt DateTime? @map("countersigned_at") @db.Timestamptz(6)
+  timeToActionMs  Int? @map("time_to_action_ms")
+  at              DateTime @default(now()) @db.Timestamptz(6)
+
+  overrideReason CdssOverrideReason? @relation(fields: [overrideReasonId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, alertEventId])
+  @@index([hospitalId, kind, at(sort: Desc)])
+  @@index([hospitalId, actorUserId, at(sort: Desc)])
+  @@map("cdss_alert_actions")
+  @@schema("clinical")
+}
+
+/// The evaluation input set, cached. Redis is primary; this row exists only so
+/// an alert can be reproduced for medico-legal review. Ninety-day retention
+/// (EN-029 §4), which is why it is the one table here `hms_retention` may prune.
+model CdssPatientSnapshot {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+  builtAt     DateTime @default(now()) @map("built_at") @db.Timestamptz(6)
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz(6)
+  /// Demographics, allergies, problems, meds, labs, flags.
+  payload     Json
+  digest      String  @db.VarChar(64)
+
+  @@unique([hospitalId, digest], map: "cdss_patient_snapshots_digest_key")
+  @@index([hospitalId, patientId, builtAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("cdss_patient_snapshots")
+  @@schema("clinical")
+}
+
+// ── knowledge base ───────────────────────────────────────────────────────────
+
+/// A loaded knowledge-base release. `hospital_id` null is the shipped local
+/// formulary content; a value is a tenant's licensed vendor load. O-1 in
+/// `docs/DECISIONS.md` is still open — the product must run acceptably on
+/// `local_formulary` alone, which is why the provider is a column and not a
+/// build-time choice.
+model CdssKbRelease {
+  id             String  @id @db.Uuid
+  hospitalId     String? @map("hospital_id") @db.Uuid
+  provider       CdssKbProvider @default(local_formulary)
+  releaseVersion String  @map("release_version") @db.VarChar(64)
+  /// Reference into the secret store. Never the licence key itself.
+  licenceRef     String? @map("licence_ref") @db.VarChar(200)
+  loadedAt       DateTime? @map("loaded_at") @db.Timestamptz(6)
+  checksum       String? @db.VarChar(64)
+  /// Drugs mapped %, interactions, dose bands.
+  coverage       Json    @default("{}")
+  status         CdssKbStatus @default(staged)
+  diffReportFileId String? @map("diff_report_file_id") @db.Uuid
+  expiresAt      DateTime? @map("expires_at") @db.Timestamptz(6)
+  reviewedBy     String? @map("reviewed_by") @db.Uuid
+  reviewedAt     DateTime? @map("reviewed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  interactions CdssKbInteraction[]
+  doseRules    CdssKbDoseRule[]
+
+  /// Uniqueness is `NULLS NOT DISTINCT` in migration §C — see `CdssRule`.
+  @@index([hospitalId, provider, releaseVersion])
+  @@index([hospitalId, status])
+  @@map("cdss_kb_releases")
+  @@schema("clinical")
+}
+
+/// One interaction pair. `subject_a`/`subject_b` are (kind, code) pairs so the
+/// same table holds drug↔drug, drug↔class, drug↔food and drug↔condition.
+model CdssKbInteraction {
+  id            String  @id @db.Uuid
+  hospitalId    String? @map("hospital_id") @db.Uuid
+  kbReleaseId   String  @map("kb_release_id") @db.Uuid
+  /// drug | class | atc | food | condition | lab
+  subjectAKind  String  @map("subject_a_kind") @db.VarChar(16)
+  subjectACode  String  @map("subject_a_code") @db.VarChar(64)
+  subjectADisplay String? @map("subject_a_display") @db.VarChar(300)
+  subjectBKind  String  @map("subject_b_kind") @db.VarChar(16)
+  subjectBCode  String  @map("subject_b_code") @db.VarChar(64)
+  subjectBDisplay String? @map("subject_b_display") @db.VarChar(300)
+  severity      CdssSeverity
+  /// rapid | delayed
+  onset         String? @db.VarChar(16)
+  /// excellent | good | fair
+  documentation String? @db.VarChar(16)
+  mechanismMd   String? @map("mechanism_md") @db.Text
+  managementMd  String? @map("management_md") @db.Text
+  sourceRef     String? @map("source_ref") @db.VarChar(300)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  kbRelease CdssKbRelease @relation(fields: [kbReleaseId], references: [id], onDelete: Cascade)
+
+  @@unique([kbReleaseId, subjectAKind, subjectACode, subjectBKind, subjectBCode], map: "cdss_kb_interactions_key")
+  @@index([subjectACode, subjectBCode])
+  @@index([hospitalId, severity])
+  @@map("cdss_kb_interactions")
+  @@schema("clinical")
+}
+
+/// Dose bands per drug, route, indication and population — including the
+/// paediatric mg/kg tables and the renal/hepatic adjustment bands. This is the
+/// table exit gate 3's 10× overdose check reads.
+model CdssKbDoseRule {
+  id            String  @id @db.Uuid
+  hospitalId    String? @map("hospital_id") @db.Uuid
+  kbReleaseId   String  @map("kb_release_id") @db.Uuid
+  /// ATC code, `mdm_drugs.record_key` rendered as text, or a molecule name —
+  /// `drug_key_kind` says which, because the local formulary and a vendor KB do
+  /// not agree on identity and the mapping is EN-027's job.
+  drugKeyKind   String  @map("drug_key_kind") @db.VarChar(16)
+  drugKey       String  @map("drug_key") @db.VarChar(96)
+  route         MdmDrugRoute?
+  indicationCode String? @map("indication_code") @db.VarChar(64)
+  population    CdssPopulation @default(adult)
+  basis         CdssDoseBasis @default(flat)
+  minDose       Decimal? @map("min_dose") @db.Decimal(12, 4)
+  maxDose       Decimal? @map("max_dose") @db.Decimal(12, 4)
+  unit          String  @db.VarChar(24)
+  maxDaily      Decimal? @map("max_daily") @db.Decimal(12, 4)
+  /// `docs/04 §7`: more than 200 % of the absolute ceiling is a floor family.
+  absoluteCeiling Decimal? @map("absolute_ceiling") @db.Decimal(12, 4)
+  maxCourseDays Int? @map("max_course_days")
+  freqMin       Decimal? @map("freq_min") @db.Decimal(8, 4)
+  freqMax       Decimal? @map("freq_max") @db.Decimal(8, 4)
+  /// eGFR ranges → adjustment.
+  renalBands    Json    @default("[]") @map("renal_bands")
+  /// Child-Pugh bands.
+  hepaticBands  Json    @default("[]") @map("hepatic_bands")
+  notes         String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  kbRelease CdssKbRelease @relation(fields: [kbReleaseId], references: [id], onDelete: Cascade)
+
+  @@index([kbReleaseId, drugKey, population])
+  @@index([hospitalId, drugKey])
+  @@map("cdss_kb_dose_rules")
+  @@schema("clinical")
+}
+
+/// Cross-sensitivity classes — penicillin ↔ cephalosporin, the sulfa group, the
+/// NSAID class. This is what turns "allergic to Amoxicillin" into a hard stop on
+/// Ampicillin, and it evaluates against locally-held data, so D-9's
+/// no-degradation rule applies to it.
+model CdssAllergyCrossMap {
+  id            String  @id @db.Uuid
+  hospitalId    String? @map("hospital_id") @db.Uuid
+  allergenClass String  @map("allergen_class") @db.VarChar(96)
+  /// The code system the member codes belong to (`ATC`, `SNOMEDCT`).
+  codeSystemKey String  @map("code_system_key") @db.VarChar(64)
+  memberSubstance String @map("member_substance") @db.VarChar(96)
+  memberDisplay String? @map("member_display") @db.VarChar(300)
+  crossClasses  String[] @default([]) @map("cross_classes")
+  crossReactivityPct Decimal? @map("cross_reactivity_pct") @db.Decimal(5, 2)
+  source        String? @db.VarChar(300)
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  /// Uniqueness is `NULLS NOT DISTINCT` in migration §C — see `CdssRule`.
+  @@index([hospitalId, allergenClass, memberSubstance])
+  @@index([memberSubstance])
+  @@map("cdss_allergy_cross_map")
+  @@schema("clinical")
+}
+
+// ── scores, emergency mode, metrics ──────────────────────────────────────────
+
+/// NEWS2, PEWS and friends. Partitioned monthly by `computed_at`; lives with the
+/// clinical record, so `hms_retention` gets nothing here.
+model CdssScore {
+  id          String  @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+  scoreType   CdssScoreType @map("score_type")
+  value       Decimal @db.Decimal(8, 2)
+  band        String? @db.VarChar(24)
+  /// Per-parameter contributions, so the score can be explained on the chart.
+  components  Json    @default("{}")
+  /// The `clinical.vitals` row (or lab result) it was computed from.
+  sourceKind  String? @map("source_kind") @db.VarChar(24)
+  sourceRef   String? @map("source_ref") @db.Uuid
+  ruleVersionId String? @map("rule_version_id") @db.Uuid
+  computedBy  CdssScoreSource @default(engine) @map("computed_by")
+  /// Partition key. Millisecond precision — see the migration §A.
+  computedAt  DateTime @default(now()) @map("computed_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([id, computedAt])
+  @@index([hospitalId, encounterId, computedAt(sort: Desc)])
+  @@index([hospitalId, patientId, scoreType, computedAt(sort: Desc)])
+  @@map("cdss_scores")
+  @@schema("clinical")
+}
+
+/// EN-029 §3.8: a declared emergency turns soft-stops passive for a bounded
+/// window. `expires_at` is NOT NULL and CHECKed to be after `started_at`,
+/// because an emergency mode with no end is a permanently silenced CDSS.
+/// Hard-stops in the floor families never relax — the floor is not consulted
+/// through this table at all.
+model CdssEmergencyMode {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  encounterId   String  @map("encounter_id") @db.Uuid
+  activatedBy   String  @map("activated_by") @db.Uuid
+  reason        String  @db.Text
+  startedAt     DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  expiresAt     DateTime @map("expires_at") @db.Timestamptz(6)
+  extendedCount Int     @default(0) @map("extended_count")
+  extendReason  String? @map("extend_reason") @db.Text
+  /// The retrospective review EN-029 §3.8 requires of every emergency-mode order.
+  reviewedBy    String? @map("reviewed_by") @db.Uuid
+  reviewedAt    DateTime? @map("reviewed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, encounterId])
+  @@index([hospitalId, expiresAt])
+  @@map("cdss_emergency_modes")
+  @@schema("clinical")
+}
+
+/// The alert-fatigue read model (exit gate 8). Refreshed every 15 minutes by the
+/// worker from `cdss_alert_events` + `cdss_alert_actions`; the dashboard never
+/// aggregates the partitioned event table live (docs/03 §Performance rules).
+///
+/// `day` is a `date`, not a timestamp — the governance pack is a daily figure and
+/// a date has no time-zone ambiguity to argue about.
+model CdssRuleMetric {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  ruleVersionId String? @map("rule_version_id") @db.Uuid
+  safetyFloorKey String? @map("safety_floor_key") @db.VarChar(64)
+  family        CdssFamily
+  day           DateTime @db.Date
+  fires         Int @default(0)
+  displays      Int @default(0)
+  acknowledgements Int @default(0)
+  overrides     Int @default(0)
+  blocks        Int @default(0)
+  ordersEvaluated Int @default(0) @map("orders_evaluated")
+  alertsPer1000Orders Decimal? @map("alerts_per_1000_orders") @db.Decimal(10, 3)
+  overrideRatePct Decimal? @map("override_rate_pct") @db.Decimal(6, 2)
+  medianTimeToActionMs Int? @map("median_time_to_action_ms")
+  /// Orders changed after the alert — EN-029's "effective alert" measure.
+  effectiveAlertPct Decimal? @map("effective_alert_pct") @db.Decimal(6, 2)
+  /// Override counts by reason code, for the tuning conversation.
+  overridesByReason Json @default("{}") @map("overrides_by_reason")
+
+  refreshedAt DateTime @default(now()) @map("refreshed_at") @db.Timestamptz(6)
+
+  /// Uniqueness is `NULLS NOT DISTINCT` in migration §C — three of the five key
+  /// columns are nullable, so a plain unique index would permit duplicates for
+  /// exactly the rows the refresher rewrites every fifteen minutes.
+  @@index([hospitalId, branchId, ruleVersionId, safetyFloorKey, day])
+  @@index([hospitalId, day(sort: Desc)])
+  @@index([hospitalId, family, day(sort: Desc)])
+  @@map("cdss_rule_metrics")
+  @@schema("clinical")
+}

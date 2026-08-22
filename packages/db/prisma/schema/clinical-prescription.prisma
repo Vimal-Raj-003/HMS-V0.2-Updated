@@ -1,0 +1,213 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-002 §3.3 — e-Prescription (schema `clinical`)
+//
+// The prescription is a `clinical.documents` document like every other signed
+// clinical artefact: `prescriptions.document_id` points at it, and the signed
+// content, its hash chain and its immutability come from there. What lives here
+// is the *structured* form the pharmacy dispenses from and EN-029 evaluates.
+//
+// Two constraints in the migration carry the safety weight, and both are
+// deliberately in the database rather than in a service:
+//
+//   1. A `per_kg` line cannot exist without a positive `weight_used_kg`. That is
+//      `docs/04 §7`'s "missing paediatric weight" floor expressed as a CHECK, so
+//      it holds for an offline sync replay, a data migration and a support
+//      script, not only for the code path that happens to run the rule.
+//   2. A line that fired a hard-stop cannot be stored `active` without an
+//      `override` action recorded in `clinical.cdss_alert_actions` carrying a
+//      coded reason. Free text alone is not a reason (EN-029 §5).
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PrescriptionStatus {
+  draft
+  awaiting_cosign
+  signed
+  amended
+  cancelled
+  /// A hard-stop rule fired on re-validation after an offline sign (OP-019
+  /// §3.5): the pharmacy is blocked and the prescriber is pushed.
+  held
+  dispensed
+  partially_dispensed
+
+  @@schema("clinical")
+}
+
+enum RxLineStatus {
+  active
+  discontinued
+  dispensed
+  cancelled
+
+  @@schema("clinical")
+}
+
+/// How the dose was arrived at. `per_kg` and `per_m2` are the arms that make a
+/// weight (or a BSA) mandatory.
+enum DoseBasis {
+  flat
+  per_kg
+  per_m2
+
+  @@schema("clinical")
+}
+
+/// Where the signature happened. `offline` matters to the pharmacist: an
+/// offline-signed Rx is dispensable only after the server re-runs CDSS
+/// (OP-019 §5).
+enum RxSignChannel {
+  online
+  offline
+
+  @@schema("clinical")
+}
+
+model Prescription {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String  @map("branch_id") @db.Uuid
+  encounterId  String? @map("encounter_id") @db.Uuid
+  patientId    String  @map("patient_id") @db.Uuid
+  visitId      String? @map("visit_id") @db.Uuid
+  practitionerKey String? @map("practitioner_key") @db.Uuid
+  doctorUserId String  @map("doctor_user_id") @db.Uuid
+  /// Numbering series `RX`, per hospital/branch/FY, non-gapless (OP-002 §5).
+  /// Null while the prescription is still a draft — a number is burnt at signing.
+  rxNo         String? @map("rx_no") @db.VarChar(32)
+  status       PrescriptionStatus @default(draft)
+  /// Bumped by each amendment. Version 1 is the signed original.
+  revision     Int     @default(1)
+  supersedesId String? @map("supersedes_id") @db.Uuid
+  supersededById String? @map("superseded_by_id") @db.Uuid
+  amendmentReason String? @map("amendment_reason") @db.Text
+
+  signedAt     DateTime? @map("signed_at") @db.Timestamptz(6)
+  signedBy     String? @map("signed_by") @db.Uuid
+  signMethod   SignMethod? @map("sign_method")
+  signChannel  RxSignChannel @default(online) @map("sign_channel")
+  /// The registration number printed on the Rx, snapshotted at signing.
+  signerRegistrationNo String? @map("signer_registration_no") @db.VarChar(64)
+
+  /// OP-002 §14 AC-5: a resident's Rx stays provisional until a consultant
+  /// countersigns, and the pharmacy cannot dispense it meanwhile.
+  isProvisional Boolean @default(false) @map("is_provisional")
+  cosignRequired Boolean @default(false) @map("cosign_required")
+  cosignedBy   String? @map("cosigned_by") @db.Uuid
+  cosignedAt   DateTime? @map("cosigned_at") @db.Timestamptz(6)
+
+  /// The signed `clinical.documents` row and its rendered PDF.
+  documentId   String? @map("document_id") @db.Uuid
+  pdfFileId    String? @map("pdf_file_id") @db.Uuid
+  /// Populated in Phase 11 when the ABDM Prescription bundle is actually sent.
+  fhirBundleId String? @map("fhir_bundle_id") @db.Uuid
+  /// The OP pharmacy store the Rx is pushed to (OP-003, Phase 4).
+  pharmacyStoreId String? @map("pharmacy_store_id") @db.Uuid
+
+  /// D-9: true only when a *vendor-database-dependent* check could not run.
+  /// The allergy and contraindicated-interaction checks never degrade, so this
+  /// never means "not checked for allergy".
+  cdssDegraded Boolean @default(false) @map("cdss_degraded")
+  cdssDegradedFamilies String[] @default([]) @map("cdss_degraded_families")
+  /// Set when EN-029 ran with an `emergency_mode` window open on the encounter.
+  /// Every such Rx is listed for retrospective review (EN-029 §3.8).
+  emergencyMode Boolean @default(false) @map("emergency_mode")
+
+  notes        String? @db.Text
+  idempotencyKey String? @map("idempotency_key") @db.VarChar(128)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  items PrescriptionItem[]
+
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, branchId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, encounterId])
+  @@index([hospitalId, doctorUserId, createdAt(sort: Desc)])
+  @@map("prescriptions")
+  @@schema("clinical")
+}
+
+model PrescriptionItem {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  prescriptionId String  @map("prescription_id") @db.Uuid
+  lineNo         Int     @map("line_no")
+  /// → `mdm_drugs.record_key` and `mdm_drug_brands.record_key`. The generic and
+  /// brand names are also snapshotted, because the master is effective-dated and
+  /// a reprint two years later must show what was written, not what is current.
+  drugKey        String? @map("drug_key") @db.Uuid
+  brandKey       String? @map("brand_key") @db.Uuid
+  genericName    String  @map("generic_name") @db.VarChar(300)
+  brandName      String? @map("brand_name") @db.VarChar(300)
+  strengthText   String? @map("strength_text") @db.VarChar(120)
+  form           MdmDoseForm?
+  route          MdmDrugRoute?
+  atcCode        String? @map("atc_code") @db.VarChar(16)
+
+  doseQty        Decimal? @map("dose_qty") @db.Decimal(12, 4)
+  doseUnit       String? @map("dose_unit") @db.VarChar(24)
+  doseBasis      DoseBasis @default(flat) @map("dose_basis")
+  /// The weight the dose was computed from. NOT NULL whenever `dose_basis` is
+  /// `per_kg`, and always > 0 — see the file header. This is the column that
+  /// makes "missing weight blocks paediatric dosing" a storage-level fact.
+  weightUsedKg   Decimal? @map("weight_used_kg") @db.Decimal(6, 3)
+  bsaUsedM2      Decimal? @map("bsa_used_m2") @db.Decimal(5, 3)
+  /// The computed per-administration dose, kept so the pharmacist and the MAR
+  /// do not recompute it from a weight that may have changed.
+  computedDoseQty Decimal? @map("computed_dose_qty") @db.Decimal(12, 4)
+
+  /// → `mdm_dose_frequencies.code`.
+  frequencyCode  String? @map("frequency_code") @db.VarChar(24)
+  frequencyCustom Json?  @map("frequency_custom")
+  /// before_food | after_food | with_food | empty_stomach | bedtime | any
+  timing         String? @db.VarChar(24)
+  durationValue  Int?    @map("duration_value")
+  /// days | weeks | months | continuous
+  durationUnit   String? @map("duration_unit") @db.VarChar(16)
+  quantity       Decimal? @db.Decimal(12, 3)
+  quantityUnit   String? @map("quantity_unit") @db.VarChar(24)
+  refills        Int     @default(0)
+
+  isPrn          Boolean @default(false) @map("is_prn")
+  prnReason      String? @map("prn_reason") @db.VarChar(300)
+  /// `mdm_instructions.record_key` values; `instructions_text` is the free text
+  /// the doctor added, validated against `mdm_unsafe_abbreviations`.
+  instructionCodes String[] @default([]) @map("instruction_codes") @db.Uuid
+  instructionsText String? @map("instructions_text") @db.Text
+  /// Tapering schedule: `[{fromDay, toDay, doseQty, frequencyCode}]`.
+  taper          Json?
+  doNotSubstitute Boolean @default(false) @map("do_not_substitute")
+  scheduleClass  MdmDrugSchedule? @map("schedule_class")
+  /// OP-002 §3.3.5: a line the hospital pharmacy does not dispense.
+  externalOnly   Boolean @default(false) @map("external_only")
+
+  /// A denormalised snapshot of what EN-029 showed for this line, for the
+  /// printed Rx and for offline reproduction. The reportable record — the one
+  /// the alert-fatigue dashboard reads — is `clinical.cdss_alert_events` plus
+  /// `clinical.cdss_alert_actions`, never this column.
+  cdssAlerts     Json    @default("[]") @map("cdss_alerts")
+  /// True when at least one hard-stop fired on this line. Stored so the
+  /// "no active line may carry an unresolved hard stop" trigger is a lookup.
+  hardStopFired  Boolean @default(false) @map("hard_stop_fired")
+
+  status         RxLineStatus @default(active)
+  discontinuedAt DateTime? @map("discontinued_at") @db.Timestamptz(6)
+  discontinuedReason String? @map("discontinued_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Restrict)
+
+  @@unique([prescriptionId, lineNo], map: "prescription_items_line_key")
+  @@index([hospitalId, prescriptionId])
+  @@index([hospitalId, drugKey])
+  @@map("prescription_items")
+  @@schema("clinical")
+}

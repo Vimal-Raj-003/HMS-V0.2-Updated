@@ -1,0 +1,76 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-019 §3.5 / §4 — the doctor PWA's offline mutation ledger (schema `core`)
+//
+// `phase-02 §2.6` requires the doctor PWA to queue a draft note offline and sync
+// it cleanly "with a simulated conflict" (exit gate 7). The conflict rules are
+// server-authoritative and per aggregate, and every one of them ends in an
+// outcome the doctor has to be shown — "accepted", "saved as an addendum draft
+// because someone signed meanwhile", "deduplicated", "held because a hard-stop
+// fired on re-validation". A conflict the user is not told about is a lost note.
+//
+// So this is a ledger, not a queue: one row per client mutation, retained,
+// queryable, and the thing the "N pending / M conflicted" indicator reads.
+// Partitioned monthly by `received_at` because a hospital with 300 doctors on
+// tablets writes a lot of these and none of them is a clinical record.
+//
+// The device itself is `core.devices` (EN-007, Phase 0) and the push
+// registration is `core.notif_devices` (EN-037, Phase 0). Neither is
+// re-created here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// What the server did with the mutation. `conflict_draft` and `held` are the
+/// two that require the doctor to look: the first means their work became a
+/// draft version rather than the signed one they expected, the second means a
+/// hard-stop fired on server-side re-validation and the prescription is blocked
+/// from pharmacy (OP-019 §5, D-9).
+enum MobileSyncResult {
+  applied
+  deduped
+  conflict_draft
+  rejected
+  held
+
+  @@schema("core")
+}
+
+model MobileSyncLog {
+  id         String  @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String? @map("branch_id") @db.Uuid
+  userId     String  @map("user_id") @db.Uuid
+  /// → `core.devices.id`.
+  deviceId   String? @map("device_id") @db.Uuid
+  /// The client-generated idempotency key. Unique per (user, key) for seven
+  /// days (OP-019 §5); the migration makes that a unique index, so a retried
+  /// mutation is deduplicated by the database rather than by hope.
+  clientMutationId String @map("client_mutation_id") @db.VarChar(128)
+  /// `encounter` | `prescription` | `order` | `queue` | `acknowledgement`.
+  aggregate  String  @db.VarChar(32)
+  aggregateId String? @map("aggregate_id") @db.Uuid
+  action     String  @db.VarChar(48)
+  /// The entity version the client based its edit on. Null means "create".
+  baseVersion Int? @map("base_version")
+  serverVersion Int? @map("server_version")
+  /// Device clock, retained alongside the server's. A skew over five minutes is
+  /// flagged rather than silently trusted (OP-019 §3.5.3).
+  clientAt   DateTime @map("client_at") @db.Timestamptz(6)
+  clockSkewMs Int? @map("clock_skew_ms")
+  /// Partition key. `timestamptz(3)`, for the composite-key round-trip reason
+  /// documented in the Phase-2 migration §A.
+  receivedAt DateTime @default(now()) @map("received_at") @db.Timestamptz(3)
+  result     MobileSyncResult
+  conflictReason String? @map("conflict_reason") @db.Text
+  /// The row the server actually produced — the addendum draft, the deduplicated
+  /// original, the held prescription — so the client can link to it.
+  resolvedRef String? @map("resolved_ref") @db.Uuid
+  /// Never the mutation payload: it is PHI and this table is a sync ledger, not
+  /// a shadow copy of the clinical record. Only an error string.
+  errorText  String? @map("error_text") @db.Text
+
+  @@id([id, receivedAt])
+  @@index([hospitalId, userId, receivedAt(sort: Desc)])
+  @@index([hospitalId, result, receivedAt(sort: Desc)])
+  @@index([hospitalId, aggregate, aggregateId])
+  @@map("mobile_sync_log")
+  @@schema("core")
+}

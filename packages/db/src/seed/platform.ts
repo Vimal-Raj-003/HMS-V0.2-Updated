@@ -40,6 +40,15 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   ['RECEIPT', '{BR}/RCP/{FY}/{SEQ:6}', true, 'fy'],
   ['REFUND', '{BR}/REF/{FY}/{SEQ:6}', true, 'fy'],
   ['CREDIT_NOTE', '{BR}/CN/{FY}/{SEQ:6}', true, 'fy'],
+  // OP-002 §5: "Numbering: `RX`, `ORD` per hospital/branch/FY (non-gapless)."
+  // Not gapless — an abandoned prescription draft must not burn a number an
+  // auditor will later ask about, and nothing legal depends on the sequence
+  // being unbroken. The number is allocated at signing, not at draft.
+  ['RX', '{BR}/RX/{FY}/{SEQ:6}', false, 'fy'],
+  ['ORD', '{BR}/ORD/{FY}/{SEQ:6}', false, 'fy'],
+  // NC-003: the medical-record number. Per hospital rather than per branch and
+  // never reset, because a patient's record follows them between campuses.
+  ['MRD', 'MRD{SEQ:8}', false, 'never'],
   ['LAB_ACC', '{BR}/LAB/{FY}/{SEQ:7}', false, 'fy'],
   ['SAMPLE', '{BR}/SMP/{SEQ:8}', false, 'never'],
   ['RAD_ACC', '{BR}/RAD/{FY}/{SEQ:7}', false, 'fy'],

@@ -1,0 +1,284 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-002 §3.4 — CPOE (schema `clinical`) and the charge intent it raises
+// (schema `billing`)
+//
+// `clinical.orders` and `clinical.order_items` are platform-owned (docs/03):
+// OP-004 (lab), OP-008 (radiology), IP-003 and IP-006 all consume them. An
+// order line therefore names the ordered thing twice — once as a
+// `mdm_services.record_key` (which exists now and is what gets priced) and once
+// as `fulfilment_ref`, the id the fulfilling module creates when it picks the
+// order up. Neither can be a declared foreign key to a table that does not
+// exist yet, and inventing `mdm_lab_tests` in Phase 2 to have something to point
+// at would be exactly the guessing CLAUDE.md §0.1 forbids.
+//
+// `billing.charge_intents` is created here for the same reason `billing.payments`
+// was created in Phase 1: OP-005 owns it and expands it in Phase 5, but exit
+// gate 5 requires an order to produce one *now*, and a table invented under a
+// temporary name and renamed later is a migration nobody wants to write twice.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum OrderCategory {
+  lab
+  radiology
+  procedure
+  nursing
+  referral
+  admission
+  diet
+  physio
+  therapy
+  other
+
+  @@schema("clinical")
+}
+
+enum OrderPriority {
+  routine
+  urgent
+  stat
+
+  @@schema("clinical")
+}
+
+enum OrderStatus {
+  draft
+  placed
+  acknowledged
+  in_progress
+  completed
+  cancelled
+  rejected
+
+  @@schema("clinical")
+}
+
+enum OrderBillingStatus {
+  not_billable
+  pending
+  posted
+  paid
+  credit
+  waived
+  reversed
+
+  @@schema("clinical")
+}
+
+enum OrderSource {
+  opd
+  er
+  ip
+  portal
+  health_checkup
+  standing_order
+  mobile
+
+  @@schema("clinical")
+}
+
+enum OrderItemStatus {
+  ordered
+  acknowledged
+  collected
+  in_progress
+  completed
+  cancelled
+  rejected
+
+  @@schema("clinical")
+}
+
+model ClinicalOrder {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  branchId       String  @map("branch_id") @db.Uuid
+  encounterId    String? @map("encounter_id") @db.Uuid
+  patientId      String  @map("patient_id") @db.Uuid
+  visitId        String? @map("visit_id") @db.Uuid
+  orderingUserId String  @map("ordering_user_id") @db.Uuid
+  orderingPractitionerKey String? @map("ordering_practitioner_key") @db.Uuid
+  /// Numbering series `ORD`, per hospital/branch/FY, non-gapless. Null while the
+  /// order is a draft.
+  orderNo        String? @map("order_no") @db.VarChar(32)
+  category       OrderCategory
+  priority       OrderPriority @default(routine)
+  status         OrderStatus @default(draft)
+  source         OrderSource @default(opd)
+  /// Mandatory for radiology (AERB justification) — enforced by CHECK.
+  clinicalNotes  String? @map("clinical_notes") @db.Text
+  diagnosisCodes String[] @default([]) @map("diagnosis_codes")
+  isBillable     Boolean @default(true) @map("is_billable")
+  billingStatus  OrderBillingStatus @default(pending) @map("billing_status")
+  placedAt       DateTime? @map("placed_at") @db.Timestamptz(6)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz(6)
+  cancelledAt    DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  /// OP-002 §3.4.7: cancellation always carries a reason. CHECK, not convention.
+  cancelReason   String? @map("cancel_reason") @db.Text
+  /// The `clinical_templates` order set this order came from, for pathway
+  /// adherence analytics (EN-029 §3.6).
+  orderSetId     String? @map("order_set_id") @db.Uuid
+  /// OP-002 §5 / §14 AC-8: pregnancy status recorded on the order itself for
+  /// any imaging on a female of child-bearing age. Snapshotted, because the
+  /// justification must be reconstructible from the order alone.
+  pregnancyStatus PregnancyStatus? @map("pregnancy_status")
+  lmpDate        DateTime? @map("lmp_date") @db.Date
+  radiationJustification String? @map("radiation_justification") @db.Text
+  /// EN-002 pre-authorisation is needed before the order may be executed.
+  preauthRequired Boolean @default(false) @map("preauth_required")
+  preauthRef     String? @map("preauth_ref") @db.Uuid
+  idempotencyKey String? @map("idempotency_key") @db.VarChar(128)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  items   ClinicalOrderItem[]
+  history OrderStatusHistory[]
+
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, branchId, category, status, placedAt(sort: Desc)])
+  @@index([hospitalId, encounterId])
+  @@index([hospitalId, branchId, status, priority, placedAt])
+  @@map("orders")
+  @@schema("clinical")
+}
+
+model ClinicalOrderItem {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  orderId     String  @map("order_id") @db.Uuid
+  lineNo      Int     @map("line_no")
+  /// → `mdm_services.record_key`. This is the priced, catalogued thing.
+  serviceKey  String? @map("service_key") @db.Uuid
+  /// The name as it stood when the order was placed.
+  serviceName String  @map("service_name") @db.VarChar(300)
+  /// Catalogue codes the fulfilling module will resolve: LOINC for a lab test,
+  /// a DICOM modality code for imaging. Text because the masters that own them
+  /// arrive in Phase 3.
+  catalogueCode String? @map("catalogue_code") @db.VarChar(64)
+  modalityCode String? @map("modality_code") @db.VarChar(16)
+  bodyPartCode String? @map("body_part_code") @db.VarChar(64)
+  qty         Decimal @default(1) @db.Decimal(10, 2)
+  laterality  Laterality @default(not_applicable)
+  contrast    Boolean @default(false)
+  /// `mdm_instructions.record_key` — fasting and prep instructions messaged to
+  /// the patient (OP-002 §3.4.2).
+  prepInstructionKey String? @map("prep_instruction_key") @db.Uuid
+  fastingRequired Boolean @default(false) @map("fasting_required")
+  status      OrderItemStatus @default(ordered)
+  /// The row the fulfilling module created — a lab order, a radiology order, a
+  /// procedure worklist entry. `fulfilment_module` says which table to look in.
+  fulfilmentModule String? @map("fulfilment_module") @db.VarChar(16)
+  fulfilmentRef    String? @map("fulfilment_ref") @db.Uuid
+  /// The tariff in force when the order was placed, so a later tariff revision
+  /// cannot silently reprice a placed order.
+  priceSnapshot Decimal? @map("price_snapshot") @db.Decimal(14, 2)
+  currency    String @default("INR") @db.Char(3)
+  chargeIntentId String? @map("charge_intent_id") @db.Uuid
+  cancelReason String? @map("cancel_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  order ClinicalOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, lineNo], map: "order_items_line_key")
+  @@index([hospitalId, orderId])
+  @@index([hospitalId, serviceKey])
+  @@index([hospitalId, fulfilmentModule, fulfilmentRef])
+  @@map("order_items")
+  @@schema("clinical")
+}
+
+/// docs/03 §Table rules: "Every order/bill/result table has `status` +
+/// `status_history` with actor & timestamp." Append-only — the migration
+/// revokes UPDATE and DELETE.
+model OrderStatusHistory {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  orderId    String  @map("order_id") @db.Uuid
+  orderItemId String? @map("order_item_id") @db.Uuid
+  fromStatus OrderStatus? @map("from_status")
+  toStatus   OrderStatus  @map("to_status")
+  reason     String? @db.Text
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  actorRole  String? @map("actor_role") @db.VarChar(64)
+  at         DateTime @default(now()) @db.Timestamptz(6)
+
+  order ClinicalOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, orderId, at])
+  @@map("order_status_history")
+  @@schema("clinical")
+}
+
+// ── the charge intent (billing) ──────────────────────────────────────────────
+
+enum ChargeIntentStatus {
+  pending
+  posted
+  cancelled
+  waived
+  reversed
+
+  @@schema("billing")
+}
+
+/// "Orders create **charge intents** (Phase 5 turns them into bill lines)"
+/// — `phase-02 §2.5`. An intent is the statement *that money is owed*, made by
+/// the module that caused it; turning it into a priced bill line, applying the
+/// tariff plan, the payer scheme and the tax treatment is OP-005's job in
+/// Phase 5, and `bill_line_id` is where it records having done so.
+///
+/// Owned by OP-005 (docs/03 §Shared platform-owned tables), created here for
+/// the same reason `billing.payments` was created in Phase 1.
+model ChargeIntent {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  visitId     String? @map("visit_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+  /// Which module raised it, and the row that did — `clinical.order_items`,
+  /// `clinical.prescription_items`, a procedure record. Text pair rather than a
+  /// foreign key because the sources span schemas and phases.
+  sourceModule String @map("source_module") @db.VarChar(16)
+  sourceTable  String @map("source_table") @db.VarChar(64)
+  sourceId     String @map("source_id") @db.Uuid
+  /// → `mdm_services.record_key`, the catalogued thing being charged for.
+  serviceKey  String? @map("service_key") @db.Uuid
+  description String  @db.VarChar(300)
+  qty         Decimal @default(1) @db.Decimal(10, 2)
+  /// The tariff snapshot at intent time. Phase 5 may re-price under a scheme;
+  /// the snapshot is what the doctor and the patient were shown.
+  unitPrice   Decimal? @map("unit_price") @db.Decimal(14, 2)
+  amount      Decimal? @db.Decimal(14, 2)
+  currency    String  @default("INR") @db.Char(3)
+  status      ChargeIntentStatus @default(pending)
+  /// Filled by OP-005 in Phase 5.
+  billId      String? @map("bill_id") @db.Uuid
+  billLineId  String? @map("bill_line_id") @db.Uuid
+  postedAt    DateTime? @map("posted_at") @db.Timestamptz(6)
+  reversedAt  DateTime? @map("reversed_at") @db.Timestamptz(6)
+  reversalReason String? @map("reversal_reason") @db.Text
+  idempotencyKey String? @map("idempotency_key") @db.VarChar(128)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@unique([hospitalId, sourceTable, sourceId], map: "charge_intents_source_key")
+  @@index([hospitalId, branchId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, visitId])
+  @@map("charge_intents")
+  @@schema("billing")
+}

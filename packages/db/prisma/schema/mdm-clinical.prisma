@@ -1,0 +1,373 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-027 — the clinical masters Phase 2 consumes (schema `mdm`)
+//
+// `mdm.prisma` said each domain master "lands with the phase that first reads
+// it (… drugs & items → Phase 4)". `docs/prompts/phase-02 §2.1` is louder and
+// more specific: the drug master is a Phase-2 deliverable, because e-Rx and
+// every EN-029 dose/interaction/schedule rule read it. So `mdm_drugs` and
+// `mdm_drug_brands` arrive here. What still waits for Phase 4 is `mdm_items` —
+// the *stock* identity of a brand, with its GTIN, storage class and ABC/VED
+// grade — because nothing in Phase 2 issues, counts or values a pack. The link
+// is `mdm_drug_brands.item_key`, nullable until Phase 4 fills it.
+//
+// Terminology is NOT here. ICD-10, ICD-11, SNOMED CT and LOINC live in
+// `mdm_code_systems` / `mdm_concepts` / `mdm_concept_closure` /
+// `mdm_concept_designations`, which Phase 0 created and Phase 1 seeded ICD-10
+// into. Phase 2 extends that: SNOMED CT India subset and the allergen/complaint
+// value sets are code-system rows plus concepts plus `mdm_value_sets`, never a
+// parallel table. `docs/prompts/phase-02 §2.1`'s "allergen master" and
+// "symptom/complaint master" are therefore value sets over concepts — a hospital
+// curating its own quick-pick list is exactly what a value set is for, and a
+// bespoke table would fork terminology in two and break subsumption.
+//
+// Every effective-dated master below copies `mdm_departments` exactly:
+//   record_key (stable identity) + version + effective_from/to + status,
+//   UNIQUE(record_key, version), an index on
+//   (hospital_id, branch_id, status, effective_from), and a btree_gist EXCLUDE
+//   constraint in the migration that makes overlapping effective ranges
+//   impossible.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Drugs & Cosmetics Rules schedule. Drives the OP-002 §5 guardrails: H1 needs a
+/// diagnosis and a bounded duration, X and NDPS need a reason and a dual-signed
+/// register entry in OP-003.
+enum MdmDrugSchedule {
+  otc
+  g
+  h
+  h1
+  x
+  ndps_narcotic
+  ndps_psychotropic
+
+  @@schema("mdm")
+}
+
+enum MdmDoseForm {
+  tablet
+  capsule
+  syrup
+  suspension
+  injection
+  infusion
+  drops
+  ointment
+  cream
+  gel
+  lotion
+  inhaler
+  rotacap
+  respule
+  patch
+  suppository
+  pessary
+  powder
+  sachet
+  spray
+  solution
+  implant
+  other
+
+  @@schema("mdm")
+}
+
+enum MdmDrugRoute {
+  oral
+  sublingual
+  buccal
+  intravenous
+  intramuscular
+  subcutaneous
+  intradermal
+  topical
+  inhalation
+  nebulised
+  nasal
+  ophthalmic
+  otic
+  rectal
+  vaginal
+  intrathecal
+  intraarticular
+  epidural
+  transdermal
+  irrigation
+  other
+
+  @@schema("mdm")
+}
+
+/// US FDA letter categories. `x` is one of the `docs/04 §7` hard-stop floor
+/// families when the patient is confirmed pregnant, which is why it is a
+/// first-class enum value and not a free-text note.
+enum MdmPregnancyCategory {
+  a
+  b
+  c
+  d
+  x
+  unknown
+
+  @@schema("mdm")
+}
+
+enum MdmInstructionKind {
+  dosing
+  diet
+  lifestyle
+  activity
+  procedure_prep
+  warning
+  follow_up
+  general
+
+  @@schema("mdm")
+}
+
+/// The prescribable formulation. One row is one (generic, form, strength,
+/// route) — the thing a dose rule, an interaction pair and an allergy class all
+/// key off. Brands hang off it, never the other way round, because NMC
+/// reg. 1.5 makes the generic the primary identity on a prescription.
+model MdmDrug {
+  id            String  @id @db.Uuid
+  recordKey     String  @map("record_key") @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  version       Int     @default(1)
+  code          String  @db.VarChar(32)
+  /// INN / generic. Combination products list every molecule in `molecules`;
+  /// `generic_name` is the printed one.
+  genericName   String  @map("generic_name") @db.VarChar(300)
+  molecules     String[] @default([])
+  /// WHO ATC, the classification EN-029 allergy-class and duplicate-therapy
+  /// rules subsume over (`mdm_concept_closure` on the ATC code system).
+  atcCode       String? @map("atc_code") @db.VarChar(16)
+  snomedCode    String? @map("snomed_code") @db.VarChar(32)
+  rxnormCode    String? @map("rxnorm_code") @db.VarChar(32)
+  form          MdmDoseForm
+  route         MdmDrugRoute
+  /// Numeric strength plus its unit, kept apart so a dose-range rule can do
+  /// arithmetic. `strength_text` is what the label prints (e.g. "80 mg + 12.5 mg").
+  strengthValue Decimal? @map("strength_value") @db.Decimal(12, 4)
+  strengthUnit  String?  @map("strength_unit") @db.VarChar(24)
+  strengthText  String?  @map("strength_text") @db.VarChar(120)
+  schedule      MdmDrugSchedule @default(h)
+  /// ISMP high-alert list. Drives the double-check prompt in OP-003/IP-004.
+  isHighAlert   Boolean @default(false) @map("is_high_alert")
+  /// Look-alike / sound-alike. `tall_man_display` is the rendered form
+  /// (e.g. "predniSONE" vs "predniSOLONE"), stored rather than derived because
+  /// the capitalisation is a published convention, not an algorithm.
+  isLasa        Boolean @default(false) @map("is_lasa")
+  tallManDisplay String? @map("tall_man_display") @db.VarChar(300)
+  /// DPCO 2013: a scheduled formulation has a notified ceiling price no brand
+  /// MRP may exceed. Enforced by a trigger in the migration, not a service check.
+  dpcoScheduled     Boolean @default(false) @map("dpco_scheduled")
+  dpcoCeilingPrice  Decimal? @map("dpco_ceiling_price") @db.Decimal(14, 2)
+  currency          String  @default("INR") @db.Char(3)
+  pregnancyCategory MdmPregnancyCategory @default(unknown) @map("pregnancy_category")
+  lactationCaution  Boolean @default(false) @map("lactation_caution")
+  /// Beers criteria — a geriatric caution, never a block.
+  beersListed       Boolean @default(false) @map("beers_listed")
+  renalDoseAdjust   Boolean @default(false) @map("renal_dose_adjust")
+  hepaticDoseAdjust Boolean @default(false) @map("hepatic_dose_adjust")
+  /// The column the paediatric hard-stop turns on. When true, a prescription
+  /// line for this drug may not be stored without a positive dosing weight —
+  /// see `clinical.prescription_items` and `docs/04 §7`.
+  isWeightBased     Boolean @default(false) @map("is_weight_based")
+  maxDailyDose      Decimal? @map("max_daily_dose") @db.Decimal(12, 4)
+  maxDailyDoseUnit  String?  @map("max_daily_dose_unit") @db.VarChar(24)
+  therapeuticClass  String?  @map("therapeutic_class") @db.VarChar(160)
+  /// On the hospital formulary. Off-formulary drugs stay prescribable (a doctor
+  /// may name what the patient buys outside) but are flagged in the UI.
+  inFormulary       Boolean @default(true) @map("in_formulary")
+  defaultUom        String? @map("default_uom") @db.VarChar(24)
+  notes             String? @db.Text
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@index([hospitalId, atcCode])
+  @@index([hospitalId, status, genericName])
+  @@map("mdm_drugs")
+  @@schema("mdm")
+}
+
+/// The commercial packing of a drug. Search shows brand ↔ generic both ways
+/// (OP-002 §3.3); the prescription stores the *drug* key and, only if the doctor
+/// named one, the brand key.
+model MdmDrugBrand {
+  id           String  @id @db.Uuid
+  recordKey    String  @map("record_key") @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  branchId     String? @map("branch_id") @db.Uuid
+  version      Int     @default(1)
+  /// → `mdm_drugs.record_key`. A brand belongs to exactly one formulation.
+  drugKey      String  @map("drug_key") @db.Uuid
+  code         String  @db.VarChar(32)
+  brandName    String  @map("brand_name") @db.VarChar(300)
+  manufacturer String? @db.VarChar(200)
+  packSize     Decimal? @map("pack_size") @db.Decimal(12, 3)
+  packUom      String? @map("pack_uom") @db.VarChar(24)
+  mrp          Decimal? @db.Decimal(14, 2)
+  currency     String  @default("INR") @db.Char(3)
+  hsnCode      String? @map("hsn_code") @db.VarChar(16)
+  gstRate      Decimal? @map("gst_rate") @db.Decimal(5, 2)
+  gtin         String? @db.VarChar(20)
+  /// → NC-006 `mdm_items`, which arrives in Phase 4. Null until then.
+  itemKey      String? @map("item_key") @db.Uuid
+  isAvailable  Boolean @default(true) @map("is_available")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, drugKey, status])
+  @@index([hospitalId, status, brandName])
+  @@map("mdm_drug_brands")
+  @@schema("mdm")
+}
+
+/// OD/BD/TDS/QID/HS/SOS/stat and whatever else the hospital writes. A table and
+/// not an enum because the auto-quantity calculation needs `times_per_day` as a
+/// number, and because a hospital that dispenses "alternate days" or
+/// "once weekly" must be able to add it without a release.
+model MdmDoseFrequency {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  code         String  @db.VarChar(24)
+  label        String  @db.VarChar(120)
+  /// Doses per day. 0.5 for alternate-day, 0.142857 for weekly. Null for PRN,
+  /// where quantity cannot be computed and the doctor states it.
+  timesPerDay  Decimal? @map("times_per_day") @db.Decimal(10, 6)
+  /// Wall-clock administration times, for the IP MAR in Phase 7.
+  scheduleTimes String[] @default([]) @map("schedule_times")
+  isPrn        Boolean @default(false) @map("is_prn")
+  isStat       Boolean @default(false) @map("is_stat")
+  sortOrder    Int     @default(0) @map("sort_order")
+  active       Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, code])
+  @@index([hospitalId, active, sortOrder])
+  @@map("mdm_dose_frequencies")
+  @@schema("mdm")
+}
+
+/// `phase-02 §2.1` "instruction/advice library". Coded rather than free text
+/// because OP-002 §3.3 prints the patient's copy in the patient's language, and
+/// a translation can only be looked up from a code.
+model MdmInstruction {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  version     Int     @default(1)
+  code        String  @db.VarChar(32)
+  kind        MdmInstructionKind @default(general)
+  /// Free-form grouping the UI renders as a section ("Diabetes", "Post-op").
+  category    String? @db.VarChar(96)
+  /// The `en-IN` text. Other locales live in `mdm_instruction_texts`; en-IN is
+  /// stored here because CLAUDE.md §4 makes it the always-present fallback.
+  defaultText String  @map("default_text") @db.Text
+  specialityKey String? @map("speciality_key") @db.Uuid
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  texts MdmInstructionText[]
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, kind, status])
+  @@map("mdm_instructions")
+  @@schema("mdm")
+}
+
+/// One translation of one instruction. A child table and not a jsonb map so the
+/// advice library is searchable in the language the patient speaks — `docs/03`
+/// forbids jsonb for "anything queried in WHERE without an expression index",
+/// and an advice picker is nothing but a search box.
+model MdmInstructionText {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  instructionId String  @map("instruction_id") @db.Uuid
+  locale        String  @db.VarChar(16)
+  text          String  @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  instruction MdmInstruction @relation(fields: [instructionId], references: [id], onDelete: Cascade)
+
+  @@unique([instructionId, locale], map: "mdm_instruction_texts_key")
+  @@index([hospitalId, locale])
+  @@map("mdm_instruction_texts")
+  @@schema("mdm")
+}
+
+/// OP-002 §5: "abbreviations blocklist (NABH: no `U`, `QD`, trailing zeros)
+/// enforced in free-text instruction". Data rather than a regex in the service,
+/// because the NABH "do not use" list is a document a quality manager owns and
+/// revises, and CLAUDE.md §3 says configuration over code.
+model MdmUnsafeAbbreviation {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  /// The literal or POSIX pattern that must not appear. `is_regex` says which.
+  pattern     String  @db.VarChar(120)
+  isRegex     Boolean @default(false) @map("is_regex")
+  /// What the writer should have typed instead — shown in the rejection.
+  preferred   String  @db.VarChar(120)
+  rationale   String? @db.Text
+  /// `block` refuses the save; `warn` shows a chip. Both are recorded.
+  severity    String  @default("block") @db.VarChar(8)
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, pattern])
+  @@index([hospitalId, active])
+  @@map("mdm_unsafe_abbreviations")
+  @@schema("mdm")
+}

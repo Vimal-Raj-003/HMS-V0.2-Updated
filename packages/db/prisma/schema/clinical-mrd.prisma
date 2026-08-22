@@ -1,0 +1,536 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-003 — Digital MRD, foundation only (schema `clinical`, prefix `mrd_`)
+//
+// `phase-02 §2.7` scopes this precisely: "Every encounter creates a medical
+// record entry; document attachment (scan/upload) with OCR text index; coding
+// queue for MRD staff; deficiency checks (missing diagnosis, unsigned notes);
+// retention policy config; medico-legal flag that blocks deletion and requires
+// dual approval."
+//
+// What NC-003 §4 also specifies and this phase deliberately does NOT build:
+// `mrd_requests` and `mrd_disclosure_log` (release of information — it needs
+// EN-028 consent artefacts and the certified-copy numbering series, and Phase 10
+// builds the portals that consume it), `mrd_physical_files` / `mrd_file_movements`
+// (paper file tracking, Phase 9 with the rest of the non-clinical estate),
+// `mrd_coding_qa` (needs a coding population to sample from) and
+// `mrd_statistics_monthly` (an analytics read model, Phase 11). Each is listed
+// in the Phase-2 report as deferred, with the phase that owns it.
+//
+// `mrd_record_sections` from NC-003 §4 is folded into
+// `mrd_record_documents.section`: the separate table only carried ordering, and
+// a section a document can be filed under but which has no configured row would
+// be a document nobody can find.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum MrdEncounterKind {
+  op
+  ip
+  daycare
+  er
+  mlc_op
+  dialysis
+  chemo
+  other
+
+  @@schema("clinical")
+}
+
+enum MrdRecordStatus {
+  open
+  pending_completion
+  deficient
+  complete
+  closed
+  archived
+  destroyed
+
+  @@schema("clinical")
+}
+
+/// HIV, psychiatry and sexual-assault records are `restricted` per hospital
+/// policy: they need a DPO or Medical Superintendent approval before release,
+/// and they are excluded from bulk exports.
+enum MrdSensitivity {
+  normal
+  restricted
+
+  @@schema("clinical")
+}
+
+enum MrdCodingStatus {
+  not_required
+  pending
+  in_progress
+  queried
+  coded
+  qa_passed
+  qa_failed
+
+  @@schema("clinical")
+}
+
+enum MrdSection {
+  admission
+  consents
+  history_exam
+  progress_notes
+  orders
+  prescriptions
+  nursing
+  mar
+  ot
+  anaesthesia
+  icu
+  lab
+  radiology
+  discharge
+  death
+  mlc
+  billing
+  scanned
+  correspondence
+  other
+
+  @@schema("clinical")
+}
+
+enum MrdDocumentSource {
+  auto
+  scan
+  upload
+  late_entry
+
+  @@schema("clinical")
+}
+
+enum MrdDeficiencyCheckType {
+  document_exists
+  document_signed
+  within_hours_of
+  field_present
+  coded
+
+  @@schema("clinical")
+}
+
+enum MrdDeficiencyStatus {
+  open
+  escalated
+  resolved
+  waived
+
+  @@schema("clinical")
+}
+
+enum MrdScanBatchStatus {
+  uploaded
+  processing
+  tagging
+  qa
+  completed
+  rejected
+
+  @@schema("clinical")
+}
+
+enum MrdScanCategory {
+  consent
+  insurance
+  external_report
+  referral
+  old_record
+  icu_chart
+  police
+  discharge_paper
+  other
+
+  @@schema("clinical")
+}
+
+enum MrdRetentionAction {
+  review
+  archive
+  destroy
+
+  @@schema("clinical")
+}
+
+enum MrdDestructionMethod {
+  crypto_shred
+  delete
+  physical_shred
+
+  @@schema("clinical")
+}
+
+enum MrdDestructionStatus {
+  proposed
+  approved
+  executed
+  rejected
+  cancelled
+
+  @@schema("clinical")
+}
+
+enum DiagnosisCodeSystem {
+  icd10
+  icd11
+
+  @@schema("clinical")
+}
+
+/// One record per encounter. `UNIQUE (encounter_kind, encounter_ref)` is what
+/// makes that a fact rather than an intention.
+model MrdRecord {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  /// Numbering series `MRD`, per hospital, non-gapless.
+  mrdNo         String? @map("mrd_no") @db.VarChar(32)
+  encounterKind MrdEncounterKind @map("encounter_kind")
+  /// The visit, admission or encounter this record assembles. Kind + ref rather
+  /// than a foreign key, because the referent is a different table per kind and
+  /// two of those tables arrive in later phases.
+  encounterRef  String  @map("encounter_ref") @db.Uuid
+  encounterId   String? @map("encounter_id") @db.Uuid
+  openedAt      DateTime @default(now()) @map("opened_at") @db.Timestamptz(6)
+  closedAt      DateTime? @map("closed_at") @db.Timestamptz(6)
+  status        MrdRecordStatus @default(open)
+  completenessPct Decimal @default(0) @map("completeness_pct") @db.Decimal(5, 2)
+
+  /// The medico-legal flag. While true, no destruction run may include this
+  /// record — the migration enforces that with a trigger, not a service check,
+  /// and removing the flag needs a Medical Superintendent plus a case reference.
+  isMedicoLegal Boolean @default(false) @map("is_medico_legal")
+  mlReason      String? @map("ml_reason") @db.Text
+  /// TR-008 MLC case id, once trauma lands in Phase 6.
+  mlSourceRef   String? @map("ml_source_ref") @db.Uuid
+  mlFlaggedBy   String? @map("ml_flagged_by") @db.Uuid
+  mlFlaggedAt   DateTime? @map("ml_flagged_at") @db.Timestamptz(6)
+  mlClearedBy   String? @map("ml_cleared_by") @db.Uuid
+  mlClearedAt   DateTime? @map("ml_cleared_at") @db.Timestamptz(6)
+  legalHoldUntil DateTime? @map("legal_hold_until") @db.Date
+
+  sensitivity   MrdSensitivity @default(normal)
+  retentionPolicyId String? @map("retention_policy_id") @db.Uuid
+  retentionUntil DateTime? @map("retention_until") @db.Date
+  archivedAt    DateTime? @map("archived_at") @db.Timestamptz(6)
+  archiveTier   String? @map("archive_tier") @db.VarChar(24)
+  destroyedAt   DateTime? @map("destroyed_at") @db.Timestamptz(6)
+  destructionRunId String? @map("destruction_run_id") @db.Uuid
+  /// The frozen index hash taken at closure. Later additions are `late_entry`
+  /// and visibly so.
+  indexHash     String? @map("index_hash") @db.VarChar(64)
+
+  codingStatus  MrdCodingStatus @default(pending) @map("coding_status")
+  codedBy       String? @map("coded_by") @db.Uuid
+  codedAt       DateTime? @map("coded_at") @db.Timestamptz(6)
+  drgCode       String? @map("drg_code") @db.VarChar(24)
+  drgVersion    String? @map("drg_version") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  documents    MrdRecordDocument[]
+  deficiencies MrdDeficiency[]
+  codings      MrdCoding[]
+
+  @@unique([encounterKind, encounterRef], map: "mrd_records_encounter_key")
+  @@index([hospitalId, status])
+  @@index([hospitalId, patientId, openedAt(sort: Desc)])
+  @@index([hospitalId, codingStatus, openedAt])
+  @@index([hospitalId, retentionUntil])
+  @@map("mrd_records")
+  @@schema("clinical")
+}
+
+/// The record's index: which document version sits in which section. Pinning
+/// the *version* is the point — a record assembled from "whatever the current
+/// version is" would silently change after an amendment.
+model MrdRecordDocument {
+  id              String  @id @db.Uuid
+  hospitalId      String  @map("hospital_id") @db.Uuid
+  recordId        String  @map("record_id") @db.Uuid
+  section         MrdSection @default(other)
+  documentId      String  @map("document_id") @db.Uuid
+  documentVersion Int     @map("document_version")
+  sortOrder       Int     @default(0) @map("sort_order")
+  source          MrdDocumentSource @default(auto)
+  /// Mandatory when `source = 'late_entry'` — enforced by CHECK.
+  lateEntryReason String? @map("late_entry_reason") @db.Text
+  movedFromRecordId String? @map("moved_from_record_id") @db.Uuid
+  addedBy         String? @map("added_by") @db.Uuid
+  addedAt         DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+
+  record MrdRecord @relation(fields: [recordId], references: [id], onDelete: Restrict)
+
+  @@unique([recordId, documentId, documentVersion], map: "mrd_record_documents_key")
+  @@index([hospitalId, recordId, section, sortOrder])
+  @@map("mrd_record_documents")
+  @@schema("clinical")
+}
+
+/// What "complete" means, per encounter kind. Configuration, so a hospital can
+/// add "pain score recorded" for a NABH audit without a release.
+model MrdDeficiencyRule {
+  id             String  @id @db.Uuid
+  hospitalId     String  @map("hospital_id") @db.Uuid
+  branchId       String? @map("branch_id") @db.Uuid
+  encounterKind  MrdEncounterKind @map("encounter_kind")
+  code           String  @db.VarChar(48)
+  description    String  @db.VarChar(300)
+  checkType      MrdDeficiencyCheckType @map("check_type")
+  params         Json    @default("{}")
+  responsibleRole String? @map("responsible_role") @db.VarChar(64)
+  /// NABH: a discharge summary is due within 24 hours of discharge.
+  dueHours       Int     @default(24) @map("due_hours")
+  escalation     Json    @default("{}")
+  active         Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  deficiencies MrdDeficiency[]
+
+  @@unique([hospitalId, encounterKind, code], map: "mrd_deficiency_rules_key")
+  @@index([hospitalId, active])
+  @@map("mrd_deficiency_rules")
+  @@schema("clinical")
+}
+
+model MrdDeficiency {
+  id                String  @id @db.Uuid
+  hospitalId        String  @map("hospital_id") @db.Uuid
+  branchId          String  @map("branch_id") @db.Uuid
+  recordId          String  @map("record_id") @db.Uuid
+  ruleId            String  @map("rule_id") @db.Uuid
+  responsibleUserId String? @map("responsible_user_id") @db.Uuid
+  responsibleRole   String? @map("responsible_role") @db.VarChar(64)
+  detail            String? @db.Text
+  raisedAt          DateTime @default(now()) @map("raised_at") @db.Timestamptz(6)
+  dueAt             DateTime @map("due_at") @db.Timestamptz(6)
+  status            MrdDeficiencyStatus @default(open)
+  resolvedAt        DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy        String? @map("resolved_by") @db.Uuid
+  waivedReason      String? @map("waived_reason") @db.Text
+  escalationLevel   Int     @default(0) @map("escalation_level")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  record MrdRecord         @relation(fields: [recordId], references: [id], onDelete: Restrict)
+  rule   MrdDeficiencyRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+
+  @@unique([recordId, ruleId], map: "mrd_deficiencies_key")
+  @@index([hospitalId, responsibleUserId, status])
+  @@index([hospitalId, status, dueAt])
+  @@map("mrd_deficiencies")
+  @@schema("clinical")
+}
+
+/// The MRD coder's output, versioned. Recoding after a claim has been submitted
+/// creates a new version and notifies EN-002; the earlier version stays.
+model MrdCoding {
+  id                 String  @id @db.Uuid
+  hospitalId         String  @map("hospital_id") @db.Uuid
+  recordId           String  @map("record_id") @db.Uuid
+  version            Int     @default(1)
+  principalDxCode    String? @map("principal_dx_code") @db.VarChar(64)
+  principalDxSystem  DiagnosisCodeSystem @default(icd10) @map("principal_dx_system")
+  /// Present on admission — the flag that separates a comorbidity from a
+  /// complication, and therefore drives the DRG and the quality indicator.
+  poaPrincipal       String? @map("poa_principal") @db.VarChar(8)
+  /// `[{code, system, poa, type}]`
+  secondaryDx        Json    @default("[]") @map("secondary_dx")
+  externalCauseCodes String[] @default([]) @map("external_cause_codes")
+  placeOfOccurrence  String? @map("place_of_occurrence") @db.VarChar(64)
+  morphologyCodes    String[] @default([]) @map("morphology_codes")
+  /// `[{code, system, date, surgeon_id, laterality}]`
+  procedures         Json    @default("[]")
+  /// Medical Certificate of Cause of Death, for a death record.
+  mccd               Json?
+  drgCode            String? @map("drg_code") @db.VarChar(24)
+  drgWeight          Decimal? @map("drg_weight") @db.Decimal(8, 4)
+  codedBy            String? @map("coded_by") @db.Uuid
+  codedAt            DateTime? @map("coded_at") @db.Timestamptz(6)
+  /// coder | doctor_prefill | ai_suggested — AI only from Phase 12, and always
+  /// as a suggestion a coder confirms (AI-001 §0).
+  source             String  @default("coder") @db.VarChar(24)
+  status             MrdCodingStatus @default(in_progress)
+  notes              String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  record  MrdRecord @relation(fields: [recordId], references: [id], onDelete: Restrict)
+  queries MrdCodingQuery[]
+
+  @@unique([recordId, version], map: "mrd_coding_key")
+  @@index([hospitalId, status, codedAt])
+  @@map("mrd_coding")
+  @@schema("clinical")
+}
+
+/// A coder's question back to the clinician. `resulted_in_amendment` is what
+/// closes the loop to the versioned document store.
+model MrdCodingQuery {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  codingId   String  @map("coding_id") @db.Uuid
+  toUserId   String  @map("to_user_id") @db.Uuid
+  question   String  @db.Text
+  askedBy    String? @map("asked_by") @db.Uuid
+  askedAt    DateTime @default(now()) @map("asked_at") @db.Timestamptz(6)
+  answeredAt DateTime? @map("answered_at") @db.Timestamptz(6)
+  answer     String? @db.Text
+  resultedInAmendment Boolean @default(false) @map("resulted_in_amendment")
+
+  coding MrdCoding @relation(fields: [codingId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, toUserId, answeredAt])
+  @@map("mrd_coding_queries")
+  @@schema("clinical")
+}
+
+/// A scanning session at a station. One batch, many pages, one operator.
+model MrdScanBatch {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  stationId  String? @map("station_id") @db.Uuid
+  operatorId String  @map("operator_id") @db.Uuid
+  startedAt  DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  pages      Int     @default(0)
+  status     MrdScanBatchStatus @default(uploaded)
+  rejectReason String? @map("reject_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  documents MrdScanDocument[]
+
+  @@index([hospitalId, branchId, status, startedAt(sort: Desc)])
+  @@map("mrd_scan_batches")
+  @@schema("clinical")
+}
+
+/// A scanned paper document, its OCR text and the full-text index over it.
+/// `sha256` is unique per hospital, which is the duplicate detection NC-003 §5
+/// asks for: the same discharge paper scanned twice lands once.
+///
+/// The OCR full-text search is a GIN **expression** index over
+/// `to_tsvector('simple', coalesce(ocr_text, ''))`, created in the migration.
+/// Not a stored `tsvector` column, because a column Prisma cannot express is a
+/// column the next `migrate diff` proposes to drop. It is what makes "find the
+/// 2019 operative note that mentions a K-wire" answerable.
+model MrdScanDocument {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  batchId       String  @map("batch_id") @db.Uuid
+  recordId      String? @map("record_id") @db.Uuid
+  patientId     String? @map("patient_id") @db.Uuid
+  category      MrdScanCategory @default(other)
+  documentDate  DateTime? @map("document_date") @db.Date
+  /// Where the paper came from — the patient, another hospital, the police.
+  origin        String? @db.VarChar(120)
+  pages         Int     @default(1)
+  /// → `core.files`. PDF/A, ≥ 200 dpi (300 for legal).
+  fileId        String  @map("file_id") @db.Uuid
+  ocrTextFileId String? @map("ocr_text_file_id") @db.Uuid
+  /// Inline OCR text, so the tsvector has something to index without fetching
+  /// from object storage. Truncated only by the OCR engine, never by us.
+  ocrText       String? @map("ocr_text") @db.Text
+  ocrConfidence Decimal? @map("ocr_confidence") @db.Decimal(5, 2)
+  classificationSuggested String? @map("classification_suggested") @db.VarChar(64)
+  taggedBy      String? @map("tagged_by") @db.Uuid
+  taggedAt      DateTime? @map("tagged_at") @db.Timestamptz(6)
+  qaBy          String? @map("qa_by") @db.Uuid
+  qaAt          DateTime? @map("qa_at") @db.Timestamptz(6)
+  /// pending | tagged | qa_passed | qa_failed | superseded
+  status        String  @default("pending") @db.VarChar(16)
+  sha256        String  @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  batch MrdScanBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, sha256], map: "mrd_scan_documents_sha_key")
+  @@index([hospitalId, recordId])
+  @@index([hospitalId, patientId, documentDate(sort: Desc)])
+  @@index([hospitalId, batchId, status])
+  @@map("mrd_scan_documents")
+  @@schema("clinical")
+}
+
+/// How long a record is kept and what happens then. Conditions are jsonb because
+/// they are predicates over the record (`age_at_encounter < 18`, `is_death`,
+/// `is_ml`, `sensitivity`), evaluated at closure and re-evaluated when a flag
+/// changes.
+model MrdRetentionPolicy {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  code          String  @db.VarChar(48)
+  name          String  @db.VarChar(200)
+  encounterKind MrdEncounterKind? @map("encounter_kind")
+  condition     Json    @default("{}")
+  retainYears   Int     @map("retain_years")
+  /// closure | last_visit | age18
+  countFrom     String  @default("closure") @map("count_from") @db.VarChar(24)
+  action        MrdRetentionAction @default(review)
+  /// NC-003 §5: a medico-legal record is never destroyed. A policy claiming
+  /// otherwise is rejected by CHECK.
+  appliesToMedicoLegal Boolean @default(false) @map("applies_to_medico_legal")
+  priority      Int     @default(100)
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, code], map: "mrd_retention_policies_key")
+  @@index([hospitalId, active, priority])
+  @@map("mrd_retention_policies")
+  @@schema("clinical")
+}
+
+/// The dual-approval destruction run. `approved_by` is an array with a CHECK
+/// requiring at least two *distinct* approvers, and a trigger refuses to execute
+/// a run whose record set contains a medico-legal or legally-held record.
+model MrdDestructionRun {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  proposedBy    String  @map("proposed_by") @db.Uuid
+  proposedAt    DateTime @default(now()) @map("proposed_at") @db.Timestamptz(6)
+  recordIds     String[] @default([]) @map("record_ids") @db.Uuid
+  approvedBy    String[] @default([]) @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  method        MrdDestructionMethod @default(crypto_shred)
+  certificateFileId String? @map("certificate_file_id") @db.Uuid
+  status        MrdDestructionStatus @default(proposed)
+  executedAt    DateTime? @map("executed_at") @db.Timestamptz(6)
+  executedBy    String? @map("executed_by") @db.Uuid
+  rejectionReason String? @map("rejection_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, status, proposedAt(sort: Desc)])
+  @@map("mrd_destruction_runs")
+  @@schema("clinical")
+}
