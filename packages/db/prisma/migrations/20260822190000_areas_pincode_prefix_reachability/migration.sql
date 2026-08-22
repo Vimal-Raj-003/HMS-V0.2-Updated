@@ -1,0 +1,96 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- `GET /areas?pin=` — a measured dead end, and the fix that is actually open.
+--
+-- The report this migration answers was that `idx_mdm_areas_pincode_prefix` is
+-- unreachable under row-level security because the tenant predicate is a
+-- ScalarArrayOp (`hospital_id = ANY (CASE …)`) and the planner will not combine
+-- it with a prefix range on the index's *second* column — the proposed fix being
+-- to reorder the index to `(pincode varchar_pattern_ops, hospital_id)` so the
+-- pattern range leads.
+--
+-- **Measured, and the premise is false.** The planner combines them happily.
+-- No index is reordered here, and none should be.
+--
+-- ── what was measured ───────────────────────────────────────────────────────
+-- As `hms_app`, inside a transaction carrying a COMPLETE tenant context
+-- (`app.hospital_id`, `app.user_id`, `app.scope` AND `app.branch_ids` — an
+-- incomplete one makes the policy's branch arm match nothing, returns zero rows
+-- and produces a plan that looks superb, which is the trap D-37 records).
+-- `mdm.mdm_areas` inflated to 25 012 and then 155 012 active rows in the tenant,
+-- with an equal-sized second tenant so the tenant predicate selects something.
+--
+--   (A) `m.pincode LIKE '5601' || '%'`      — what `ReferenceService.listAreas`
+--                                              emits today
+--         25 012 rows :  4.16 ms   Bitmap Heap Scan on the tenant index,
+--                                  12 503 rows removed by filter
+--        155 012 rows : 20.39 ms   same plan, 51 664 rows removed per worker
+--
+--   (B) `m.pincode ~>=~ '5601' AND m.pincode ~<~ '5602'` — the same predicate,
+--        asked for in leakproof operators
+--         25 012 rows :  0.028 ms  Index Scan using idx_mdm_areas_pincode_prefix
+--        155 012 rows :  0.080 ms  Index Cond carries BOTH the hospital_id
+--                                  ScalarArrayOp and the pattern range
+--
+-- Plan (B), verbatim from the second column of the index:
+--
+--   Index Scan using idx_mdm_areas_pincode_prefix on mdm_areas m
+--     Index Cond: ((hospital_id = ANY (CASE WHEN ... END))
+--                  AND ((pincode)::text ~>=~ '5601'::text)
+--                  AND ((pincode)::text ~<~  '5602'::text))
+--
+-- The existing column order is reachable. A ScalarArrayOp on the leading column
+-- is an index *condition*, not a filter, and PostgreSQL goes on to bound the
+-- second column inside each array element's scan.
+--
+-- ── and the reorder, measured too ───────────────────────────────────────────
+-- `(pincode varchar_pattern_ops, hospital_id) WHERE status = 'active'` was
+-- created and measured both alongside the existing index and with the existing
+-- index dropped, so the planner had no alternative:
+--
+--        with LIKE, 155 012 rows : 14.47 ms / 15.17 ms — unchanged. The planner
+--                                  ignores BOTH pattern indexes and falls back
+--                                  to `..._hospital_id_branch_id_status_...`
+--        with the range          :  0.070 ms / 0.046 ms — same as the existing
+--                                  index, within noise
+--
+-- It is a wash on the fast path and no help at all on the slow one, and it costs
+-- a second index to maintain on every write. So: no change.
+--
+-- ── what is actually wrong ──────────────────────────────────────────────────
+-- The 20 ms is D-37, not a column order. `~~` (LIKE) is not LEAKPROOF, so under
+-- RLS `restriction_is_securely_promotable()` refuses to promote it to an index
+-- condition on *any* index, whatever its columns are ordered by. The fix is the
+-- one D-37 already names and `PatientSearchService` already applies: ask for the
+-- half-open bytewise range with `~>=~` / `~<~`, which is the identical predicate
+-- in operators the planner will push down.
+--
+-- `ReferenceService.listAreas` in `services/api` has NOT had that rewrite — it
+-- still emits `m.pincode LIKE $n || '%'`. That is the change that turns 20 ms
+-- into 0.08 ms, and it lives in the service, not here. This migration exists so
+-- that the next person to time this query finds the answer on the index rather
+-- than re-deriving it.
+--
+-- Nothing else in the endpoint needs work: `m.district = $n` and the keyset
+-- comparison use `=` and `>`, both leakproof.
+--
+-- ── `GET /services`, checked and left alone ─────────────────────────────────
+-- It has a different shape — a top-N sort over the tenant's whole active
+-- catalogue, with no pattern operator on the default path. Measured the same
+-- way at 20 010 services in the tenant: first page 5.99 ms, deep keyset page
+-- 2.81 ms, both `top-N heapsort` over a bitmap scan of the tenant. A covering
+-- `(hospital_id, name, id) WHERE status = 'active'` was built and measured:
+-- 5.85 ms on the first page (the planner does not even choose it) and 1.47 ms on
+-- the deep page. That is not a defect and does not pay for an index — a real
+-- hospital catalogue is 500–5 000 services, not 20 000, and `docs/07 §2.1` gives
+-- a master picker far more headroom than 6 ms. Left alone deliberately.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+COMMENT ON INDEX mdm.idx_mdm_areas_pincode_prefix IS
+  'PIN-code prefix auto-fill on the registration form. The column order is CORRECT and reachable: measured as hms_app with a complete tenant context, the planner puts BOTH the hospital_id ScalarArrayOp and the pattern range into one Index Cond (0.08 ms over 155 000 rows). It is reachable ONLY via the leakproof bytewise range `pincode ~>=~ $lower AND pincode ~<~ $upper`; a bare `LIKE ''nnn%''` is demoted to a heap filter because `~~` is not leakproof (D-37) and costs 20 ms at the same volume. Reordering to (pincode, hospital_id) was measured and changes nothing — see this migration''s header.';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- ROLLBACK: a comment only; nothing to undo. To restore the previous (absent)
+-- comment:
+--
+--   COMMENT ON INDEX mdm.idx_mdm_areas_pincode_prefix IS NULL;
+-- ─────────────────────────────────────────────────────────────────────────────

@@ -120,7 +120,11 @@ describe('Phase 1 role grants', () => {
     // `audit.integrity.run` verifies the hash chain and reports findings. It
     // changes nothing, and an auditor who cannot run the verification cannot do
     // the job the role exists for — so it is a read in everything but its verb.
-    const NON_MUTATING_EXCEPTIONS = new Set(['audit.integrity.run']);
+    // `cdss.alert.replay` (EN-029 §12, added in Phase 2) belongs in the same
+    // bucket: it reproduces a historical alert from its stored snapshot digest
+    // for medico-legal review. It writes nothing, and EN-029 §12 names the
+    // Auditor as one of the three roles that hold it.
+    const NON_MUTATING_EXCEPTIONS = new Set(['audit.integrity.run', 'cdss.alert.replay']);
     const auditor = getRoleTemplate('auditor');
     const mutating = (auditor?.permissions ?? []).filter((key) => {
       if (NON_MUTATING_EXCEPTIONS.has(key)) return false;

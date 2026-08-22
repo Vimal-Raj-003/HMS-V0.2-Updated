@@ -241,6 +241,144 @@ const CASHIER_BASE = [
   'receipt.daybook.read',
 ] as const;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 2 bundles — OPD clinical core
+//
+// Built the way CASHIER_BASE and PATIENT_DESK are: a grant is made once and
+// composed, so "who may sign a prescription" is one line to read rather than
+// eleven literals to diff.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Terminology and drug lookup. Every prescriber, coder and pharmacist needs it. */
+const CLINICAL_LOOKUP = ['terminology.read', 'rx.drug.search'] as const;
+
+/**
+ * The CDSS safety floor (EN-040 §5, D-9).
+ *
+ * Held by every role that can put a drug or an order in front of a patient, and
+ * kept whole: a clinician who can fire an alert but cannot read or answer it is
+ * worse off than one with no CDSS at all, because the order simply stops.
+ */
+const CDSS_SAFETY_FLOOR = [
+  'cdss.evaluate',
+  'cdss.alert.read',
+  'cdss.alert.respond',
+  'cdss.snapshot.read',
+  'cdss.score.read',
+] as const;
+
+/** Reading a chart without writing to it. */
+const CHART_READ = ['opd.encounter.read', 'opd.inbox.read', 'vitals.record.read'] as const;
+
+/** The consultation loop: queue → note → diagnosis → sign. */
+const CONSULTATION = [
+  ...CHART_READ,
+  'opd.queue.read',
+  'opd.queue.manage',
+  'opd.encounter.create',
+  'opd.encounter.update',
+  'opd.encounter.sign',
+  'opd.encounter.amend',
+  'opd.diagnosis.update',
+  'opd.allergy.update',
+  'opd.result.acknowledge',
+  'opd.certificate.create',
+  'opd.preferences.manage',
+  'opd.template.manage',
+  'vitals.alert.acknowledge',
+  'vitals.recheck.request',
+] as const;
+
+/** Prescribing. Schedule X / NDPS is deliberately not in here. */
+const PRESCRIBER = ['rx.create', 'rx.sign', 'rx.amend', 'rx.cancel', 'rx.print'] as const;
+
+/** CPOE. */
+const ORDERING = ['order.create', 'order.list', 'order.cancel'] as const;
+
+/** The doctor PWA. `mobile.offline_rx` is a separate grant — OP-019 §12 withholds it from residents. */
+const MOBILE_CLINICIAN = ['mobile.sync', 'auth.device.manage'] as const;
+
+/**
+ * A consultant-grade doctor's Phase 2 surface.
+ *
+ * Includes `rx.cosign` (releasing a resident's Rx) and the MRD keys a doctor
+ * needs to answer a coder and clear their own record deficiencies — but not
+ * `mrd.deficiency.waive`, which is a governance decision, nor
+ * `rx.schedule_x.prescribe`, which each role takes explicitly.
+ */
+const DOCTOR_CLINICAL = [
+  ...CLINICAL_LOOKUP,
+  ...CDSS_SAFETY_FLOOR,
+  ...CONSULTATION,
+  ...PRESCRIBER,
+  ...ORDERING,
+  ...MOBILE_CLINICIAN,
+  'rx.cosign',
+  'order.admission.request',
+  'mrd.coding.query.answer',
+  'mrd.deficiency.read',
+  'mrd.deficiency.resolve',
+  'mobile.offline_rx',
+] as const;
+
+/**
+ * A resident's surface: everything a consultant has minus the signatures.
+ *
+ * No `rx.sign`, no `opd.encounter.sign`, no `rx.cosign`, no
+ * `rx.schedule_x.prescribe` and no `mobile.offline_rx` — docs/05 row 14 and
+ * OP-002 §12 ("no schedule_x unless granted", sign per department config) make
+ * the resident's output something a consultant puts their name to.
+ */
+const RESIDENT_CLINICAL = [
+  ...CLINICAL_LOOKUP,
+  ...CDSS_SAFETY_FLOOR,
+  ...CHART_READ,
+  ...MOBILE_CLINICIAN,
+  'opd.queue.read',
+  'opd.encounter.create',
+  'opd.encounter.update',
+  'opd.diagnosis.update',
+  'opd.allergy.update',
+  'opd.preferences.manage',
+  'opd.template.manage',
+  'rx.create',
+  'rx.print',
+  'order.create',
+  'order.list',
+] as const;
+
+/** A diagnostic consultant (radiologist, pathologist): reads charts and orders, prescribes nothing. */
+const DIAGNOSTIC_CLINICIAN = [
+  ...CLINICAL_LOOKUP,
+  ...CDSS_SAFETY_FLOOR,
+  ...CHART_READ,
+  ...MOBILE_CLINICIAN,
+  'order.list',
+] as const;
+
+/** Charting observations. Held by every nurse; recording vitals is never signing an Rx. */
+const VITALS_RECORDER = ['vitals.record.create', 'vitals.record.read', 'cdss.score.compute'] as const;
+
+/** MRD's Phase 2 desk: assemble, code, scan, retain. QA and destruction approval sit elsewhere. */
+const MRD_DESK = [
+  'mrd.record.list',
+  'mrd.record.read',
+  'mrd.record.close',
+  'mrd.record.reopen',
+  'mrd.record.export',
+  'mrd.search',
+  'mrd.deficiency.read',
+  'mrd.deficiency.resolve',
+  'mrd.coding.list',
+  'mrd.coding.assign',
+  'mrd.coding.code',
+  'mrd.scan.operate',
+  'mrd.scan.qa',
+  'mrd.retention.manage',
+  'mrd.report.read',
+  'mrd.configure',
+] as const;
+
 // ── the 64 templates ─────────────────────────────────────────────────────────
 
 const templates: readonly RoleTemplate[] = [
@@ -298,6 +436,11 @@ const templates: readonly RoleTemplate[] = [
       'consent.type.configure',
       'receipt.counter.configure',
       'receipt.daybook.read',
+      'mrd.configure',
+      'mrd.report.read',
+      'vitals.configure',
+      'cdss.governance.read',
+      'cdss.report.read',
 
       ...BASE_STAFF,
       ...APPROVER,
@@ -397,6 +540,8 @@ const templates: readonly RoleTemplate[] = [
       'queue.overview.read',
       'queue.analytics.read',
       'receipt.counter.configure',
+      'vitals.configure',
+      'vitals.report.read',
 
       ...BASE_STAFF,
       ...APPROVER,
@@ -440,6 +585,40 @@ const templates: readonly RoleTemplate[] = [
       'consent.template.approve',
       'patient.record.export',
 
+      // Clinical governance over Phase 2. The Medical Superintendent publishes
+      // rules but never authors them, approves destruction runs but never
+      // proposes them, and QAs coding but never codes — every one of those pairs
+      // is a blocking SoD rule in the catalogue.
+      'opd.encounter.read',
+      'opd.inbox.read',
+      'opd.audit.read',
+      'opd.department.view',
+      'order.list',
+      'terminology.read',
+      'vitals.record.read',
+      'vitals.report.read',
+      'cdss.alert.read',
+      'cdss.alert.replay',
+      'cdss.snapshot.read',
+      'cdss.score.read',
+      'cdss.rule.read',
+      'cdss.rule.publish',
+      'cdss.governance.read',
+      'cdss.governance.manage',
+      'cdss.report.read',
+      'cdss.emergency.declare',
+      'mrd.record.list',
+      'mrd.record.read',
+      'mrd.record.reopen',
+      'mrd.search',
+      'mrd.deficiency.read',
+      'mrd.deficiency.waive',
+      'mrd.coding.qa',
+      'mrd.legal_hold.set',
+      'mrd.legal_hold.release',
+      'mrd.destruction.approve',
+      'mrd.report.read',
+
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
       ...APPROVER,
@@ -480,6 +659,17 @@ const templates: readonly RoleTemplate[] = [
       'appointment.overbook',
       'schedule.publish',
       'consent.override.review',
+      ...DOCTOR_CLINICAL,
+      'rx.schedule_x.prescribe',
+      'opd.department.view',
+      'opd.template.publish',
+      'opd.audit.read',
+      'vitals.queue.read',
+      'vitals.report.read',
+      'cdss.rule.read',
+      'cdss.governance.read',
+      'cdss.report.read',
+      'mrd.report.read',
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
       ...SIGNS_DOCUMENTS,
@@ -507,6 +697,8 @@ const templates: readonly RoleTemplate[] = [
       'visit.update',
       'consent.request',
       'consent.read',
+      ...DOCTOR_CLINICAL,
+      'rx.schedule_x.prescribe',
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
       ...SIGNS_DOCUMENTS,
@@ -524,7 +716,14 @@ const templates: readonly RoleTemplate[] = [
     description: 'Ward rounds, inpatient orders, notes, discharge and transfers.',
     category: 'medical',
     homeWorkspace: 'ip-rounds',
-    permissions: [...BASE_CLINICAL, ...BREAK_GLASS, ...SIGNS_DOCUMENTS, 'notify.escalation.read'],
+    permissions: [
+      ...DOCTOR_CLINICAL,
+      'rx.schedule_x.prescribe',
+      ...BASE_CLINICAL,
+      ...BREAK_GLASS,
+      ...SIGNS_DOCUMENTS,
+      'notify.escalation.read',
+    ],
     abacDefaults: { careTeamOnly: true, assignedWardOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -540,6 +739,12 @@ const templates: readonly RoleTemplate[] = [
     permissions: [
       'consent.emergency_override',
       'patient.record.create_override',
+
+      ...DOCTOR_CLINICAL,
+      'rx.schedule_x.prescribe',
+      'cdss.emergency.declare',
+      'vitals.escalate.er',
+      'vitals.queue.read',
 
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
@@ -562,7 +767,14 @@ const templates: readonly RoleTemplate[] = [
     description: 'OT booking, operation notes, implant capture and surgical consent.',
     category: 'medical',
     homeWorkspace: 'ot-schedule',
-    permissions: [...BASE_CLINICAL, ...BREAK_GLASS, ...SIGNS_DOCUMENTS, 'barcode.verify.implant'],
+    permissions: [
+      ...DOCTOR_CLINICAL,
+      'rx.schedule_x.prescribe',
+      ...BASE_CLINICAL,
+      ...BREAK_GLASS,
+      ...SIGNS_DOCUMENTS,
+      'barcode.verify.implant',
+    ],
     abacDefaults: { careTeamOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -575,7 +787,13 @@ const templates: readonly RoleTemplate[] = [
     description: 'Pre-anaesthetic checkup, intra-operative record and PACU.',
     category: 'medical',
     homeWorkspace: 'anaesthesia-worklist',
-    permissions: [...BASE_CLINICAL, ...BREAK_GLASS, ...SIGNS_DOCUMENTS],
+    permissions: [
+      ...DOCTOR_CLINICAL,
+      'rx.schedule_x.prescribe',
+      ...BASE_CLINICAL,
+      ...BREAK_GLASS,
+      ...SIGNS_DOCUMENTS,
+    ],
     abacDefaults: { careTeamOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -588,7 +806,14 @@ const templates: readonly RoleTemplate[] = [
     description: 'ICU flowsheet, ventilator management and severity scores.',
     category: 'medical',
     homeWorkspace: 'icu-board',
-    permissions: [...BASE_CLINICAL, ...BREAK_GLASS, ...SIGNS_DOCUMENTS, 'notify.escalation.read'],
+    permissions: [
+      ...DOCTOR_CLINICAL,
+      'rx.schedule_x.prescribe',
+      ...BASE_CLINICAL,
+      ...BREAK_GLASS,
+      ...SIGNS_DOCUMENTS,
+      'notify.escalation.read',
+    ],
     abacDefaults: { assignedWardOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -601,7 +826,13 @@ const templates: readonly RoleTemplate[] = [
     description: 'Reading worklist, PACS viewer, structured reporting and sign-off.',
     category: 'diagnostics',
     homeWorkspace: 'radiology-reading',
-    permissions: [...BASE_CLINICAL, ...BREAK_GLASS, ...SIGNS_DOCUMENTS, 'mdm.radiology.propose'],
+    permissions: [
+      ...DIAGNOSTIC_CLINICIAN,
+      ...BASE_CLINICAL,
+      ...BREAK_GLASS,
+      ...SIGNS_DOCUMENTS,
+      'mdm.radiology.propose',
+    ],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -614,7 +845,14 @@ const templates: readonly RoleTemplate[] = [
     description: 'Result validation, quality control, sign-off and external quality assessment.',
     category: 'diagnostics',
     homeWorkspace: 'lab-validation',
-    permissions: [...BASE_CLINICAL, ...BREAK_GLASS, ...SIGNS_DOCUMENTS, 'mdm.lab.propose', 'mdm.lab.approve'],
+    permissions: [
+      ...DIAGNOSTIC_CLINICIAN,
+      ...BASE_CLINICAL,
+      ...BREAK_GLASS,
+      ...SIGNS_DOCUMENTS,
+      'mdm.lab.propose',
+      'mdm.lab.approve',
+    ],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -630,7 +868,7 @@ const templates: readonly RoleTemplate[] = [
     homeWorkspace: 'doctor-opd',
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
-    permissions: [...BASE_CLINICAL],
+    permissions: [...RESIDENT_CLINICAL, ...BASE_CLINICAL],
     abacDefaults: { careTeamOnly: true, ownDepartmentOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -663,6 +901,21 @@ const templates: readonly RoleTemplate[] = [
       'visit.list',
       'visit.update',
       'consent.capture',
+
+      // OP-007 §12 defaults. The nurse runs the vitals room, records and
+      // corrects observations and can send a deteriorating patient to the ER --
+      // and prints an Rx, but never creates or signs one.
+      ...VITALS_RECORDER,
+      ...CDSS_SAFETY_FLOOR,
+      'vitals.queue.read',
+      'vitals.queue.manage',
+      'vitals.record.correct',
+      'vitals.escalate.er',
+      'opd.encounter.read',
+      'opd.allergy.update',
+      'terminology.read',
+      'rx.print',
+
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
       'barcode.verify.sample',
@@ -680,6 +933,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...VITALS_RECORDER,
+      ...CDSS_SAFETY_FLOOR,
+      'opd.encounter.read',
+      'order.list',
+
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
       'barcode.wristband.issue',
@@ -700,6 +958,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'icu-flowsheet',
     permissions: [
+      ...VITALS_RECORDER,
+      ...CDSS_SAFETY_FLOOR,
+      'opd.encounter.read',
+      'order.list',
+
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
       'barcode.verify.mar',
@@ -721,6 +984,13 @@ const templates: readonly RoleTemplate[] = [
     homeWorkspace: 'triage-board',
     permissions: [
       'receipt.collect.night',
+
+      ...VITALS_RECORDER,
+      ...CDSS_SAFETY_FLOOR,
+      'vitals.escalate.er',
+      'vitals.queue.read',
+      'opd.encounter.read',
+      'order.list',
 
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
@@ -770,6 +1040,15 @@ const templates: readonly RoleTemplate[] = [
     permissions: [
       'queue.token.manage',
       'patient.record.create_override',
+
+      // OP-007 §12: the supervisor corrects any nurse's observation, configures
+      // the stations and reads the room's throughput. She does not chart in it.
+      'vitals.queue.read',
+      'vitals.queue.manage',
+      'vitals.record.read',
+      'vitals.record.correct',
+      'vitals.configure',
+      'vitals.report.read',
 
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
@@ -823,6 +1102,7 @@ const templates: readonly RoleTemplate[] = [
       'frontoffice.dashboard.read',
       'messaging.message.send',
       'messaging.optin.manage',
+      'vitals.queue.read',
 
       ...BASE_STAFF,
       'barcode.scan',
@@ -945,7 +1225,14 @@ const templates: readonly RoleTemplate[] = [
     description: 'Outpatient dispensing, over-the-counter sales and returns.',
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-rx-queue',
-    permissions: [...BASE_CLINICAL, ...LABEL_PRINTER, 'mdm.pharmacy.propose'],
+    permissions: [
+      ...CDSS_SAFETY_FLOOR,
+      'rx.drug.search',
+      'cdss.kb.read',
+      ...BASE_CLINICAL,
+      ...LABEL_PRINTER,
+      'mdm.pharmacy.propose',
+    ],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -958,7 +1245,14 @@ const templates: readonly RoleTemplate[] = [
     description: 'Ward indents, unit-dose dispensing and returns.',
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-ward-indents',
-    permissions: [...BASE_CLINICAL, ...LABEL_PRINTER, 'mdm.pharmacy.propose'],
+    permissions: [
+      ...CDSS_SAFETY_FLOOR,
+      'rx.drug.search',
+      'cdss.kb.read',
+      ...BASE_CLINICAL,
+      ...LABEL_PRINTER,
+      'mdm.pharmacy.propose',
+    ],
     abacDefaults: { assignedWardOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -974,6 +1268,14 @@ const templates: readonly RoleTemplate[] = [
     homeWorkspace: 'pharmacy-admin',
     permissions: [
       'receipt.petty.manage',
+
+      'rx.drug.search',
+      'cdss.rule.read',
+      'cdss.rule.manage',
+      'cdss.rule.test',
+      'cdss.kb.read',
+      'cdss.kb.manage',
+      'cdss.report.read',
 
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
@@ -1145,6 +1447,15 @@ const templates: readonly RoleTemplate[] = [
       'abdm.hip.link',
       'consent.ledger.read',
 
+      // NC-003 §12. The coder codes and never QAs; proposes a destruction run
+      // and never approves it; may place a legal hold but not lift one -- the
+      // protective direction is the safe one to delegate.
+      ...MRD_DESK,
+      'mrd.legal_hold.set',
+      'opd.encounter.read',
+      'opd.diagnosis.update',
+      'terminology.read',
+
       ...BASE_CLINICAL,
       'audit.patient.read',
       'audit.read',
@@ -1286,6 +1597,8 @@ const templates: readonly RoleTemplate[] = [
       ...BASE_STAFF,
       'barcode.scan',
       ...LABEL_PRINTER,
+      'vitals.configure',
+      'vitals.report.read',
       'security.patch.manage',
       'admin.status.read',
     ],
@@ -1384,6 +1697,18 @@ const templates: readonly RoleTemplate[] = [
       'consent.report.read',
       'consent.template.manage',
 
+      'mrd.coding.qa',
+      'mrd.coding.list',
+      'mrd.record.list',
+      'mrd.deficiency.read',
+      'mrd.report.read',
+      'opd.audit.read',
+      'vitals.report.read',
+      'cdss.rule.read',
+      'cdss.governance.read',
+      'cdss.governance.manage',
+      'cdss.report.read',
+
       ...BASE_STAFF,
       'audit.read',
       'audit.report.read',
@@ -1447,6 +1772,13 @@ const templates: readonly RoleTemplate[] = [
       'messaging.trigger.configure',
       'integration.abdm.configure',
       'integration.abdm.read',
+
+      'cdss.rule.read',
+      'cdss.rule.publish',
+      'cdss.kb.read',
+      'cdss.kb.manage',
+      'cdss.snapshot.read',
+      'vitals.configure',
 
       ...BASE_STAFF,
       'admin.user.read',
@@ -1547,6 +1879,14 @@ const templates: readonly RoleTemplate[] = [
       'messaging.optin.read',
       'abdm.consent.read',
 
+      'mrd.record.list',
+      'mrd.record.read',
+      'mrd.record.export',
+      'mrd.search',
+      'mrd.destruction.approve',
+      'cdss.alert.replay',
+      'opd.audit.read',
+
       ...BASE_STAFF,
       'audit.read',
       'audit.patient.read',
@@ -1592,6 +1932,25 @@ const templates: readonly RoleTemplate[] = [
       'receipt.report.read',
       'consent.ledger.read',
       'consent.report.read',
+
+      'opd.encounter.read',
+      'opd.audit.read',
+      'order.list',
+      'terminology.read',
+      'vitals.record.read',
+      'vitals.report.read',
+      'cdss.alert.read',
+      'cdss.alert.replay',
+      'cdss.snapshot.read',
+      'cdss.rule.read',
+      'cdss.governance.read',
+      'cdss.report.read',
+      'mrd.record.list',
+      'mrd.record.read',
+      'mrd.search',
+      'mrd.coding.list',
+      'mrd.deficiency.read',
+      'mrd.report.read',
 
       'org.read',
       'mdm.read',
@@ -1711,6 +2070,7 @@ const templates: readonly RoleTemplate[] = [
       'print.agent',
       'print.job.create',
       'barcode.scan',
+      'integration.vitals.ingest',
     ],
     abacDefaults: {
       deviceBound: true,

@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Page } from '@vims/contracts';
+import { prefixPredicate } from '../opd/patient/patient.search.service.js';
 import { MastersQueryService, likeTerm } from './masters.query.js';
 import type { ListAreasQuery, ListReferenceQuery, ReferenceKind } from './masters.schemas.js';
 
@@ -170,9 +171,14 @@ export class ReferenceService {
       q,
       (bind) => {
         const where: string[] = [];
-        // The term is digits-only by schema, so it carries no LIKE
-        // metacharacter and the prefix pattern is exactly what it looks like.
-        if (q.pin !== undefined) where.push(`m.pincode LIKE ${bind(q.pin)} || '%'`);
+        // A bare `LIKE` cannot reach `idx_mdm_areas_pincode_prefix` under RLS:
+        // `~~` is not LEAKPROOF, so the planner will not promote it to an index
+        // condition ahead of the tenant policy, whatever the index's column
+        // order (D-37). Measured at India Post's ~155,000 rows, the `LIKE` form
+        // filters 51,664 rows per worker at 20.4 ms; the leakproof range form
+        // reaches the index at 0.08 ms. The term is digits-only by schema, so it
+        // carries no LIKE metacharacter.
+        if (q.pin !== undefined) where.push(prefixPredicate('m.pincode', q.pin, bind));
         if (q.district !== undefined) where.push(`m.district = ${bind(q.district)}`);
         if (q.q !== undefined) where.push(`m.area_name ILIKE '%' || ${bind(likeTerm(q.q))} || '%'`);
         return where;
