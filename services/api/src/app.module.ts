@@ -39,6 +39,7 @@ import { SessionController, SessionService } from './modules/platform/session/se
 // back for the shared platform providers needs a `forwardRef` cycle through this
 // file. Spreading keeps one pool and one guard chain, which is how every
 // platform module here is already wired.
+import { IDEMPOTENCY_PROVIDERS } from './core/idempotency/index.js';
 import { NumberingService } from './core/numbering/numbering.service.js';
 import { PatientController } from './modules/opd/patient/patient.controller.js';
 import { PatientDedupeService } from './modules/opd/patient/patient.dedupe.service.js';
@@ -131,6 +132,10 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: TenantGuard },
     { provide: APP_GUARD, useClass: PolicyGuard },
+    // Registered globally for the same reason the guards are: a route carrying
+    // `@Idempotent()` in a module whose author forgot to attach the interceptor
+    // would look protected in review and take a double payment in production.
+    ...IDEMPOTENCY_PROVIDERS,
   ],
   exports: [DatabaseService, AuditService, OutboxService, CursorService, PolicyService],
 })

@@ -6,7 +6,6 @@ import { createTenantFixture, startTestPostgres, type TenantFixture, type TestPo
 import argon2 from 'argon2';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../../../app.module.js';
-import { CashModule } from './cash.module.js';
 
 /**
  * NC-001 against a real PostgreSQL 17.
@@ -25,7 +24,13 @@ import { CashModule } from './cash.module.js';
  *     tender that does not balance is refused at write time.
  */
 
-@Module({ imports: [AppModule, CashModule] })
+/**
+ * `AppModule` declares this module's controllers and providers directly (see
+ * app.module.ts), so importing the feature module here as well mounts every
+ * route twice and Fastify refuses the second with FST_ERR_DUPLICATED_ROUTE --
+ * the suite then fails to bootstrap at all rather than failing a test.
+ */
+@Module({ imports: [AppModule] })
 class CashTestApp {}
 
 let pg: TestPostgres;
@@ -223,12 +228,20 @@ interface CallOptions {
   readonly url: string;
   readonly token: string;
   readonly reason?: string;
+  /** Supply one only to test replay; otherwise every call is a fresh submission. */
+  readonly idempotencyKey?: string;
   readonly payload?: Record<string, unknown>;
 }
 
 async function call(options: CallOptions) {
   const headers: Record<string, string> = { authorization: `Bearer ${options.token}` };
   if (options.reason !== undefined) headers['x-reason'] = options.reason;
+  // Routes marked `@Idempotent()` refuse a POST with no key. A fresh key per
+  // call keeps each one a distinct submission, which is what these tests mean;
+  // a test that is about replay passes the same key twice deliberately.
+  if (options.method === 'POST') {
+    headers['idempotency-key'] = options.idempotencyKey ?? newId();
+  }
   return app.inject({
     method: options.method,
     url: options.url,

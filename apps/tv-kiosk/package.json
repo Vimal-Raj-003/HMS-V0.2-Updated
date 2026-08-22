@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@vims/contracts": "workspace:*",
+    "@vims/i18n": "workspace:*",
     "@vims/ui": "workspace:*",
     "next": "15.5.23",
     "react": "19.2.8",

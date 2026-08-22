@@ -72,7 +72,7 @@ describe('pairing flow', () => {
     // Persisted, so the next power cut does not need an operator.
     const stored = loadCredential(storage);
     expect(stored?.boardId).toBe('board-opd-a');
-    expect(stored?.scopes).toContain('display.token_board.read');
+    expect(stored?.scopes).toContain('queue.board.read');
   });
 
   it('keeps showing a code, and keeps retrying, when the pairing service is down', async () => {

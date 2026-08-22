@@ -7,7 +7,22 @@ import { z } from 'zod';
  * because a token that has been tampered with in `localStorage` must be discarded
  * rather than sent.
  */
-export const DISPLAY_BOARD_SCOPE = 'display.token_board.read';
+/**
+ * The one authority a display device holds.
+ *
+ * `queue.board.read` is the key registered in `packages/contracts`, and its
+ * catalogue entry says what it is for in as many words: "Render a queue board.
+ * Held by display device tokens as well as staff." It replaces the
+ * `display.token_board.read` this file previously invented — a scope the API
+ * would have refused, because `PermissionRegistryService` verifies the
+ * catalogue at boot and nothing may hold a key that is not in it.
+ *
+ * Written as a literal rather than imported from `@vims/contracts` so that a
+ * board on a 2 GB Android box does not ship the 2,000-entry permission
+ * catalogue in its bundle. `pairing-scope.test.ts` imports the catalogue and
+ * asserts this string is in it, so the saving costs nothing in safety.
+ */
+export const DISPLAY_BOARD_SCOPE = 'queue.board.read';
 
 export const DeviceCredentialSchema = z.object({
   deviceId: z.string().min(1),

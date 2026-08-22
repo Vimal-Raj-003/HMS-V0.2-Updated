@@ -1,4 +1,4 @@
-import type { BoardSnapshot } from '../features/board/board-contract';
+import type { BoardSnapshot, NowServing } from '../features/board/board-contract';
 import type {
   BoardTransport,
   BoardTransportHandlers,
@@ -45,6 +45,21 @@ export function snapshot(overrides: Partial<BoardSnapshot> = {}): BoardSnapshot 
     ticker: ['Please keep the corridor clear'],
     ...overrides,
   };
+}
+
+/**
+ * The fixture's now-serving entry.
+ *
+ * A function rather than `snapshot().nowServing[0]!` because
+ * `noUncheckedIndexedAccess` makes that `NowServing | undefined` and the
+ * non-null assertion is banned (CLAUDE.md §4). Throwing here also makes a
+ * broken fixture fail with a sentence rather than with `Cannot read properties
+ * of undefined` twenty lines away.
+ */
+export function servingFixture(overrides: Partial<NowServing> = {}): NowServing {
+  const entry = snapshot().nowServing[0];
+  if (entry === undefined) throw new Error('fixture has no now-serving entry');
+  return { ...entry, ...overrides };
 }
 
 export interface ManualTransport {

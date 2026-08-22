@@ -15,6 +15,14 @@ export interface TokenBoardProps {
   readonly lastUpdatedAt: Date | null;
   readonly now: Date | null;
   readonly transportKind: BoardTransportKind;
+  /**
+   * The current announcement, rendered between the not-live banner and the
+   * grid. Passed in rather than rendered here because the announcement is
+   * device state (what this screen's speaker is saying) and the board is
+   * snapshot state (what the queue is doing) — keeping the two apart is what
+   * lets the whole board be rendered in a test with no speech engine.
+   */
+  readonly announcement?: ReactNode;
 }
 
 /**
@@ -24,7 +32,7 @@ export interface TokenBoardProps {
  * adding content (docs/06 §4.4).
  */
 export function TokenBoard(props: TokenBoardProps): ReactNode {
-  const { snapshot, freshness, status, lastUpdatedAt, now, transportKind } = props;
+  const { snapshot, freshness, status, lastUpdatedAt, now, transportKind, announcement } = props;
   const shift = burnInShift(now ?? new Date(0));
   const safeAreaStyle: CSSProperties = { transform: burnInTransform(shift) };
   const notLive = freshness === 'expired';
@@ -56,6 +64,8 @@ export function TokenBoard(props: TokenBoardProps): ReactNode {
             tokens below.
           </p>
         ) : null}
+
+        {announcement}
 
         <div className="grid min-h-0 flex-1 grid-cols-3 gap-6">
           <div className="col-span-2 min-h-0">

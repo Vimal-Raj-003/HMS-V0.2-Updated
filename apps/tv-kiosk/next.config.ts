@@ -4,7 +4,7 @@ const config: NextConfig = {
   reactStrictMode: true,
   // Workspace packages ship TypeScript source, so Next compiles them itself —
   // the same reason apps/web does it (docs/09 §4): one Zod schema, not two copies.
-  transpilePackages: ['@vims/ui', '@vims/contracts'],
+  transpilePackages: ['@vims/ui', '@vims/contracts', '@vims/i18n'],
   poweredByHeader: false,
   async headers() {
     return [

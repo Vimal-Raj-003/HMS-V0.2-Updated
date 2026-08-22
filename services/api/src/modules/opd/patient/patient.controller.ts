@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 import type { Page } from '@vims/contracts';
+import { Idempotent } from '../../../core/idempotency/idempotency.decorator.js';
 import { Permission } from '../../../core/policy/permission.decorator.js';
 import { ZodBody } from '../../../core/validation/zod.pipe.js';
 import { PatientMergeService } from './patient.merge.service.js';
@@ -94,6 +95,7 @@ export class PatientController {
    * acknowledgement of those exact records, and a reason (§3.1, §14 AC-2).
    */
   @Permission('patient.record.create')
+  @Idempotent()
   @Post()
   async register(
     @Body(new ZodBody(registerPatientSchema)) body: RegisterPatientRequest,
@@ -109,6 +111,7 @@ export class PatientController {
    * `PatientMergeService` for why the two are separated.
    */
   @Permission('patient.merge.execute')
+  @Idempotent()
   @Post('merge')
   async merge(
     @Body(new ZodBody(mergeRequestSchema)) body: MergeRequest,
@@ -118,6 +121,7 @@ export class PatientController {
 
   /** OP-001 §6 `POST /patients/unmerge` — reverse within the 30-day window. */
   @Permission('patient.merge.execute')
+  @Idempotent()
   @Post('unmerge')
   async unmerge(@Body(new ZodBody(unmergeRequestSchema)) body: UnmergeRequest): Promise<UnmergeResult> {
     return this.merges.unmerge(body);

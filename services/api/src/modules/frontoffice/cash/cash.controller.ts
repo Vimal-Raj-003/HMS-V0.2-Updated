@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Headers, Inject, Param, Post, Query } from '@nestjs/common';
 import type { Page } from '@vims/contracts';
+import { Idempotent } from '../../../core/idempotency/idempotency.decorator.js';
 import { Permission } from '../../../core/policy/permission.decorator.js';
 import { ZodBody } from '../../../core/validation/zod.pipe.js';
 import { PaymentsService, type PaymentView, type RefundView } from './payments.service.js';
@@ -43,6 +44,7 @@ export class CashController {
   ) {}
 
   @Permission('receipt.shift.open')
+  @Idempotent()
   @Post('shifts/open')
   async openShift(@Body(new ZodBody(openShiftRequestSchema)) body: OpenShiftRequest): Promise<ShiftView> {
     return this.shifts.open(body);
@@ -69,6 +71,7 @@ export class CashController {
   }
 
   @Permission('receipt.shift.close')
+  @Idempotent()
   @Post('shifts/:id/close')
   async closeShift(
     @Param('id', new ZodBody(uuidSchema)) id: string,
@@ -78,12 +81,14 @@ export class CashController {
   }
 
   @Permission('receipt.shift.variance.approve')
+  @Idempotent()
   @Post('shifts/:id/variance/approve')
   async approveVariance(@Param('id', new ZodBody(uuidSchema)) id: string): Promise<ShiftView> {
     return this.shifts.approveVariance(id);
   }
 
   @Permission('receipt.collect')
+  @Idempotent()
   @Post('payments')
   async collect(
     @Body(new ZodBody(collectPaymentRequestSchema)) body: CollectPaymentRequest,
@@ -94,6 +99,7 @@ export class CashController {
   }
 
   @Permission('receipt.collect')
+  @Idempotent()
   @Post('refunds/:id/pay')
   async payRefund(
     @Param('id', new ZodBody(uuidSchema)) id: string,
@@ -103,6 +109,7 @@ export class CashController {
   }
 
   @Permission('receipt.collect')
+  @Idempotent()
   @Post('receipts/:id/void')
   async voidReceipt(
     @Param('id', new ZodBody(uuidSchema)) id: string,

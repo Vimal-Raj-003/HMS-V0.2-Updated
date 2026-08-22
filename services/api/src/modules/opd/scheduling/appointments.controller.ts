@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Headers, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 import type { Page } from '@vims/contracts';
 import { z } from 'zod';
+import { Idempotent } from '../../../core/idempotency/idempotency.decorator.js';
 import { Permission } from '../../../core/policy/permission.decorator.js';
 import { ZodBody } from '../../../core/validation/zod.pipe.js';
 import {
@@ -68,6 +69,7 @@ export class AppointmentsController {
   }
 
   @Permission('appointment.create')
+  @Idempotent()
   @Post()
   async book(
     @Body(new ZodBody(bookAppointmentSchema)) body: BookAppointmentRequest,

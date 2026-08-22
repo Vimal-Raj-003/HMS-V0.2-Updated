@@ -9,6 +9,8 @@ import { PairingScreen } from '../features/pairing/pairing-screen';
 import { usePairing } from '../features/pairing/use-pairing';
 import type { DeviceCredential } from '../features/pairing/pairing-contract';
 import { BoardClock } from '../features/board/board-clock';
+import { AnnouncementBanner } from '../features/announce/announcement-banner';
+import { useAnnouncer } from '../features/announce/use-announcer';
 import { DiagnosticsCard } from './diagnostics-card';
 import { useNow } from './use-now';
 import { useRuntimeConfig } from './runtime-config';
@@ -73,6 +75,12 @@ function PairedBoard(props: PairedBoardProps): ReactNode {
     thresholds: { staleAfterMs: env.staleAfterMs, expiredAfterMs: env.expiredAfterMs },
   });
 
+  // EN-018 §3.4 / §14 AC-1 and AC-4. The hook is called unconditionally — before
+  // the "no snapshot yet" branch below — because a hook behind a condition is a
+  // hook that stops running the moment the feed drops, which is exactly when the
+  // in-flight announcement must be cancelled rather than left hanging.
+  const announcer = useAnnouncer({ snapshot: feed.snapshot, freshness, now });
+
   // Before the first snapshot there is nothing truthful to show, so the board
   // says so rather than rendering an empty frame that looks like a quiet clinic.
   const diagnostics = (
@@ -120,6 +128,7 @@ function PairedBoard(props: PairedBoardProps): ReactNode {
         lastUpdatedAt={feed.lastUpdatedAt}
         now={props.now}
         transportKind={feed.transportKind}
+        announcement={<AnnouncementBanner state={announcer} />}
       />
       {diagnostics}
     </>

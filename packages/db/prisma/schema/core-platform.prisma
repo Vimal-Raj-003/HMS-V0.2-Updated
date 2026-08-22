@@ -248,6 +248,9 @@ model IdempotencyKey {
   /// Hash of the request body. A same-key-different-body request is a client bug
   /// and must be rejected loudly rather than silently replaying the wrong answer.
   requestHash String @map("request_hash") @db.VarChar(64)
+  /// `in_flight` | `completed` | `failed`, enforced by a CHECK in
+  /// `..._idempotency_key_guard` — the interceptor's admission test compares
+  /// against these literals, so a fourth spelling would silently defeat it.
   status     String  @default("in_flight") @db.VarChar(16)
   responseStatus Int? @map("response_status")
   responseBody   Json? @map("response_body")

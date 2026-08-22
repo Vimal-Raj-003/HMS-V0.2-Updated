@@ -180,12 +180,20 @@ interface CallOptions {
   readonly url: string;
   readonly token: string;
   readonly reason?: string;
+  /** Supply one only to test replay; otherwise every call is a fresh submission. */
+  readonly idempotencyKey?: string;
   readonly payload?: Record<string, unknown>;
 }
 
 async function call(options: CallOptions) {
   const headers: Record<string, string> = { authorization: `Bearer ${options.token}` };
   if (options.reason !== undefined) headers['x-reason'] = options.reason;
+  // Routes marked `@Idempotent()` refuse a POST with no key. A fresh key per
+  // call keeps each one a distinct submission, which is what these tests mean;
+  // a test that is about replay passes the same key twice deliberately.
+  if (options.method === 'POST') {
+    headers['idempotency-key'] = options.idempotencyKey ?? newId();
+  }
   return app.inject({
     method: options.method,
     url: options.url,

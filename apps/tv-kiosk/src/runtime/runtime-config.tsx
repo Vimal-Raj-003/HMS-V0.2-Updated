@@ -6,7 +6,14 @@ import { createDeviceLog, type DeviceLog } from '../lib/device-log';
 import { readKioskEnv, type KioskEnv } from '../lib/env';
 import { createLocalStorageStore, type KeyValueStore } from '../lib/storage';
 import { createBoardTransport } from '../features/board/create-transport';
+import type { BoardAudio } from '../features/board/board-contract';
 import type { BoardTransport } from '../features/board/transport';
+import {
+  browserSpeechEngine,
+  createSpeechSpeaker,
+  silentSpeaker,
+  type Speaker,
+} from '../features/announce/speaker';
 import { createHttpPairingClient } from '../features/pairing/http-pairing-client';
 import type { DeviceCredential, PairingClient } from '../features/pairing/pairing-contract';
 
@@ -27,6 +34,18 @@ export interface RuntimeConfig {
   readonly createTransport: (credential: DeviceCredential) => BoardTransport;
   readonly deviceKind: string;
   readonly appVersion: string;
+  /**
+   * How the board speaks. `silentSpeaker` where the platform has no speech
+   * engine — the announcement still appears on screen, which EN-018 §3.4.4
+   * requires of every announcement regardless of audio.
+   */
+  readonly speaker: Speaker;
+  /**
+   * Audio configuration to use when the snapshot does not carry its own.
+   * `null` means the device was commissioned without audio, and the
+   * authoritative `display_boards` setting has not arrived either.
+   */
+  readonly announceAudio: BoardAudio | null;
 }
 
 const RuntimeConfigContext = createContext<RuntimeConfig | null>(null);
@@ -41,6 +60,7 @@ export function RuntimeConfigProvider(props: RuntimeConfigProviderProps): ReactN
   const value = useMemo<RuntimeConfig>(() => {
     const clock = overrides?.clock ?? systemClock;
     const env = overrides?.env ?? readKioskEnv();
+    const engine = browserSpeechEngine();
     return {
       clock,
       env,
@@ -52,10 +72,34 @@ export function RuntimeConfigProvider(props: RuntimeConfigProviderProps): ReactN
         ((credential: DeviceCredential) => createBoardTransport({ env, credential })),
       deviceKind: overrides?.deviceKind ?? 'smart_tv_browser',
       appVersion: overrides?.appVersion ?? APP_VERSION,
+      speaker: overrides?.speaker ?? (engine === null ? silentSpeaker : createSpeechSpeaker({ engine })),
+      // A `??` here would swallow a deliberate `announceAudio: null`, which is
+      // how a test (and a board control bar, later) says "this board is muted".
+      announceAudio:
+        overrides !== undefined && 'announceAudio' in overrides
+          ? (overrides.announceAudio ?? null)
+          : audioFromEnv(env),
     };
   }, [overrides]);
 
   return <RuntimeConfigContext.Provider value={value}>{children}</RuntimeConfigContext.Provider>;
+}
+
+/**
+ * The board's own audio setting, from the device's environment.
+ *
+ * Off unless the device was explicitly commissioned with audio: a screen that
+ * has not been told it may speak does not speak. A snapshot carrying
+ * `display_boards.audio_enabled` overrides this — the console is authoritative,
+ * this is what lets a board be useful before the console knows about it.
+ */
+function audioFromEnv(env: KioskEnv): BoardAudio | null {
+  if (!env.audioEnabled) return null;
+  return {
+    enabled: true,
+    locales: [...env.announceLocales],
+    repeatCount: env.announceRepeatCount,
+  };
 }
 
 export function useRuntimeConfig(): RuntimeConfig {
