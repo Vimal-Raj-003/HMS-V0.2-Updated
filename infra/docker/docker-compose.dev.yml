@@ -92,7 +92,11 @@ services:
       - --maxmemory-policy
       - noeviction
     ports:
-      - '6380:6379'
+      # Host port is overridable because 6380 is a popular second-Redis port and
+      # a developer with another stack running cannot start this one at all:
+      # compose fails the whole `up` on the bind, leaving Postgres running and
+      # the environment half-built. The default is unchanged.
+      - '${VIMS_REDIS_PORT:-6380}:6379'
     volumes:
       - redis-data:/data
     healthcheck:

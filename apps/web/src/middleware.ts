@@ -19,15 +19,23 @@ import { ACCESS_COOKIE } from '@/lib/session';
  * browser error page instead — the exact failure the offline shell exists to
  * prevent. You cannot sign in while offline, so requiring a session to see the
  * offline page is circular.
+ *
+ * `/` is the landing page: the front door has to open for someone who has never
+ * signed in, which is the entire population it is written for. Note that `/` is
+ * matched exactly -- `startsWith('//')` is never true -- so adding it here opens
+ * the root and nothing beneath it.
  */
-const PUBLIC_PATHS = ['/login', '/offline'];
+const PUBLIC_PATHS = ['/', '/login', '/offline'];
 
 export function middleware(request: NextRequest): NextResponse {
   const hasSession = request.cookies.has(ACCESS_COOKIE);
   const { pathname } = request.nextUrl;
 
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
-    if (hasSession && pathname.startsWith('/login')) {
+    // A signed-in user has no use for the sign-in screen or the front door;
+    // send them to the work they came back for. `/offline` is deliberately not
+    // in this list -- it must render whether or not there is a session.
+    if (hasSession && (pathname === '/' || pathname.startsWith('/login'))) {
       const url = request.nextUrl.clone();
       url.pathname = '/dashboard';
       url.search = '';
