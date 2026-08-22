@@ -98,6 +98,22 @@ describe('Phase 1 wiring', () => {
     ['GET', '/api/v1/cash/counters'],
     ['GET', '/api/v1/areas'],
     ['GET', '/api/v1/masters/id_types'],
+    // Phase 2 — vitals, encounters, prescribing, CDSS, orders.
+    ['POST', '/api/v1/vitals/records'],
+    ['GET', '/api/v1/vitals/records'],
+    ['POST', '/api/v1/encounters'],
+    ['GET', '/api/v1/encounters'],
+    ['POST', '/api/v1/prescriptions'],
+    // OP-002 §6 defines no list route for prescriptions -- a patient's current
+    // medication comes from `GET /patients/:id/medications` on the timeline,
+    // which is the list a clinician actually wants. Asserting a bare
+    // `GET /prescriptions` here was my error, not a missing route.
+    ['GET', '/api/v1/patients/00000000-0000-7000-8000-000000000000/medications'],
+    ['GET', '/api/v1/drugs/search'],
+    ['POST', '/api/v1/cdss/evaluate'],
+    ['GET', '/api/v1/cdss/alerts'],
+    ['POST', '/api/v1/orders'],
+    ['GET', '/api/v1/orders'],
   ] as const;
 
   it('mounts every Phase 1 route', async () => {

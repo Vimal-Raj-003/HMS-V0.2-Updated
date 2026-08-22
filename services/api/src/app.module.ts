@@ -48,6 +48,11 @@ import { PatientSearchService } from './modules/opd/patient/patient.search.servi
 import { PatientService } from './modules/opd/patient/patient.service.js';
 import { SCHEDULING_CONTROLLERS, SCHEDULING_PROVIDERS } from './modules/opd/scheduling/scheduling.module.js';
 import { MASTERS_CONTROLLERS, MASTERS_PROVIDERS } from './modules/masters/masters.module.js';
+import { CLINICAL_CONTROLLERS, CLINICAL_PROVIDERS } from './modules/opd/clinical/clinical.module.js';
+import {
+  PRESCRIBING_CONTROLLERS,
+  PRESCRIBING_PROVIDERS,
+} from './modules/opd/prescribing/prescribing.module.js';
 import { CashController } from './modules/frontoffice/cash/cash.controller.js';
 import { CoSignService } from './modules/frontoffice/cash/cosign.service.js';
 import { PaymentsService } from './modules/frontoffice/cash/payments.service.js';
@@ -99,6 +104,9 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     // and the write half is EN-027's change-set workflow (propose -> validate ->
     // approve -> activate), not a bare POST.
     ...MASTERS_CONTROLLERS,
+    // Phase 2 — vitals, encounters, prescribing and CDSS.
+    ...CLINICAL_CONTROLLERS,
+    ...PRESCRIBING_CONTROLLERS,
   ],
   providers: [
     { provide: ENV, useFactory: () => loadEnv() },
@@ -134,6 +142,10 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     ShiftsService,
     PaymentsService,
     ...MASTERS_PROVIDERS,
+    // `NumberingService` is already a platform provider above; filtering it out
+    // keeps one instance rather than relying on the token collapsing.
+    ...CLINICAL_PROVIDERS.filter((provider) => provider !== NumberingService),
+    ...PRESCRIBING_PROVIDERS.filter((provider) => provider !== NumberingService),
     { provide: APP_FILTER, useClass: ProblemFilter },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: TenantGuard },
