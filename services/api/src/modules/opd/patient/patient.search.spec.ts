@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AppError } from '../../../core/problem/app-error.js';
-import { escapeLike, resolveSearch } from './patient.search.service.js';
+import { escapeLike, prefixPredicate, prefixUpperBound, resolveSearch } from './patient.search.service.js';
 
 /**
  * The search router, tested for the property that matters and is invisible: that
@@ -22,8 +22,10 @@ describe('search routing', () => {
   it('sends an explicit UHID to the prefix index, never to a trigram', () => {
     const result = resolve({ uhid: 'blr-a/000 0123' });
     expect(result.mode).toBe('uhid_prefix');
-    expect(result.predicate).toContain('p.uhid_normalised LIKE');
-    expect(result.values).toEqual(['BLRA0000123%']);
+    expect(result.predicate).toBe(
+      'p.uhid_normalised ~>=~ $1 AND p.uhid_normalised ~<~ $2 AND p.uhid_normalised LIKE $3',
+    );
+    expect(result.values).toEqual(['BLRA0000123', 'BLRA0000124', 'BLRA0000123%']);
   });
 
   it('sends a complete mobile to the exact E.164 probe', () => {
@@ -36,8 +38,10 @@ describe('search routing', () => {
   it('sends a partial mobile to the local prefix index', () => {
     const result = resolve({ mobile: '98450' });
     expect(result.mode).toBe('mobile_prefix');
-    expect(result.predicate).toContain('p.mobile_local LIKE');
-    expect(result.values).toEqual(['98450%']);
+    expect(result.predicate).toBe(
+      'p.mobile_local ~>=~ $1 AND p.mobile_local ~<~ $2 AND p.mobile_local LIKE $3',
+    );
+    expect(result.values).toEqual(['98450', '98451', '98450%']);
   });
 
   it('sends an ABHA number to the partial index in every spelling of it', () => {
@@ -59,7 +63,7 @@ describe('search routing', () => {
     expect(result.mode).toBe('identifier_prefix');
     expect(result.predicate).toContain('p.id IN (SELECT i.patient_id FROM patient.identifiers i');
     expect(result.predicate).not.toContain(' OR ');
-    expect(result.values).toEqual(['P1234567%']);
+    expect(result.values).toEqual(['P1234567', 'P1234568', 'P1234567%']);
   });
 
   it('sends a name to the trigram index', () => {
@@ -134,7 +138,56 @@ describe('LIKE escaping', () => {
     // arrive there today. `escapeLike` is the guarantee that survives somebody
     // loosening a normaliser later, which is exactly the change that would not
     // look dangerous in review.
-    expect(resolve({ mobile: '98%450' }).values).toEqual(['98450%']);
-    expect(resolve({ uhid: 'BL%R' }).values).toEqual(['BLR%']);
+    expect(resolve({ mobile: '98%450' }).values).toEqual(['98450', '98451', '98450%']);
+    expect(resolve({ uhid: 'BL%R' }).values).toEqual(['BLR', 'BLS', 'BLR%']);
+  });
+});
+
+/**
+ * D-37. Under row-level security PostgreSQL will not let a non-leakproof
+ * qualifier become an index condition, so `LIKE` alone could not enter
+ * `idx_patients_mobile_prefix` on its pattern column and the search filtered
+ * every row of the tenant. The half-open bytewise range does the same job with
+ * the leakproof `~>=~` / `~<~` comparators, which is what `varchar_pattern_ops`
+ * orders by. The plan-level proof lives in `patient.integration.spec.ts`; these
+ * are the arithmetic that has to be right for it.
+ */
+describe('prefix ranges, so the index survives row-level security', () => {
+  it('bounds a prefix by incrementing its last character', () => {
+    expect(prefixUpperBound('894555865')).toBe('894555866');
+    expect(prefixUpperBound('BLRA0000123')).toBe('BLRA0000124');
+    expect(prefixUpperBound('A')).toBe('B');
+    // Carrying is deliberately NOT done: `AZ` → `A[` is still a correct
+    // exclusive bound bytewise, because `[` (0x5B) sorts immediately after
+    // `Z` (0x5A) and nothing beginning with `AZ` can reach it.
+    expect(prefixUpperBound('AZ')).toBe('A[');
+    expect(prefixUpperBound('99')).toBe('9:');
+  });
+
+  it('refuses to guess a bound it cannot derive safely', () => {
+    expect(prefixUpperBound('')).toBeNull();
+    expect(prefixUpperBound('कविता')).toBeNull();
+    expect(prefixUpperBound('AB~')).toBeNull();
+  });
+
+  it('always emits the LIKE as well, so a bad bound can only cost speed', () => {
+    // The range is exactly equivalent to the prefix under bytewise ordering, so
+    // the LIKE is redundant by construction. It is kept because "redundant"
+    // and "verified for every possible input" are not the same claim, and the
+    // failure this guards against would show one patient's record on another
+    // patient's search.
+    const { predicate } = resolve({ uhid: 'BLR1' });
+    expect(predicate).toContain('~>=~');
+    expect(predicate).toContain('~<~');
+    expect(predicate).toContain('LIKE');
+  });
+
+  it('still emits a usable predicate when no bound can be derived', () => {
+    // Not reachable through a normaliser today; reachable the day one is
+    // loosened, and it must degrade to a filter rather than to wrong rows.
+    const values: unknown[] = [];
+    const predicate = prefixPredicate('p.full_name', 'क', (v) => `$${values.push(v)}`);
+    expect(predicate).toBe('p.full_name ~>=~ $1 AND p.full_name LIKE $2');
+    expect(values).toEqual(['क', 'क%']);
   });
 });

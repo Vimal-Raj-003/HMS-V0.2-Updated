@@ -38,27 +38,54 @@ import type { PatientListItem } from './patient.types.js';
  * `uhid` › `identifier` › `abha` › `mobile` › `q`. Silently ANDing them would
  * look helpful and would defeat the index of whichever one lost.
  *
- * ── A limitation this routing cannot fix on its own ─────────────────────────
+ * ── Why the prefix modes are ranges and not `LIKE` (D-37) ───────────────────
  *
- * `patient.integration.spec.ts` puts each predicate to the planner at thirty
- * thousand rows, and the answer splits in two:
+ * Routing to the right index is necessary and was not sufficient. Under
+ * row-level security PostgreSQL refuses to evaluate a **non-leakproof**
+ * qualifier ahead of the policy's own qualifier, because a leaky operator could
+ * reveal — through an error, or through how long it took — the contents of a row
+ * the policy was about to hide. Mechanically (`restriction_is_securely_promotable`
+ * in `optimizer/util/restrictinfo.c`) such a clause is rejected as an *index*
+ * condition and demoted to a heap filter.
  *
- *  * The **equality** modes — exact mobile, ABHA number, ABHA address — become
- *    index conditions under row-level security, as intended.
- *  * The **pattern** modes — mobile prefix, UHID prefix, name trigram — do not.
- *    `~~` (LIKE) and `%` (pg_trgm) are not marked leakproof in `pg_proc`, and
- *    PostgreSQL will not evaluate a non-leakproof qualifier ahead of an RLS
- *    qualifier, because a leaky operator could reveal through an error or a
- *    timing difference the contents of a row the policy was about to hide. They
- *    therefore arrive as heap filters and the index is unreachable; the same
- *    query with the policy out of the way uses the index perfectly.
+ * `~~` (LIKE) and `%` (`pg_trgm`) are not leakproof. So `mobile_local LIKE 'x%'`
+ * entered `idx_patients_mobile_prefix` on `hospital_id` only and filtered every
+ * row of the tenant: 101 ms over 176 000 patients, and over a second at the
+ * three million `OP-001` §13 plans for. `=` is leakproof, which is why the exact
+ * modes were always fine and the defect looked like a partial one.
  *
- * At the three million rows `OP-001` §13 plans for, that is a sequential scan
- * on the hospital's busiest screen. The fix is outside this module — mark the
- * pattern operators `LEAKPROOF` (a deliberate trade-off only a superuser can
- * make), or restructure the policy so the tenant predicate folds to a constant
- * at plan time. The routing below is still the right shape and becomes correct
- * the moment that lands, which is why it is not contorted around the defect.
+ * The bytewise pattern comparators **are** leakproof — `text_pattern_ge` (`~>=~`)
+ * and `text_pattern_lt` (`~<~`), the same operators the planner itself derives
+ * from a prefix `LIKE` in `prefix_quals()`, and exactly the ordering that
+ * `varchar_pattern_ops` indexes. Writing them out by hand gets the index
+ * condition back without touching a single policy:
+ *
+ *   mobile_local ~>=~ '894555865' AND mobile_local ~<~ '894555866'
+ *
+ * `[prefix, nextPrefix)` under bytewise ordering is *exactly* the set of strings
+ * beginning with `prefix` — not an approximation — so this is a rewrite, not a
+ * widening. The `LIKE` is nevertheless kept alongside it, so that correctness
+ * never depends on the bound arithmetic in `prefixUpperBound()`; see there.
+ *
+ * Measured as `hms_app` with a complete tenant context on the 220 000-row
+ * `volume` seed (176 000 in the tenant):
+ *
+ *   mobile prefix      103.7 ms  →  0.04 ms   (idx_patients_mobile_prefix)
+ *   UHID prefix         82.2 ms  →  0.04 ms   (idx_patients_uhid_prefix)
+ *   identifier prefix   49.4 ms  →  0.04 ms   (idx_identifiers_value_prefix)
+ *
+ * ── The one mode this does not fix: `name_trigram` ──────────────────────────
+ *
+ * There is no leakproof way to drive a trigram index. Of the eight operators
+ * `gin_trgm_ops` supports (`%`, `%>`, `%>>`, `~~`, `~~*`, `~`, `~*`, `=`) only
+ * `=` is leakproof, and equality on a whole name is not a name search. A name
+ * search therefore still filters the tenant's rows (148 ms here). Restructuring
+ * the policy does not help — that was measured too, and the reason is that
+ * `restriction_is_securely_promotable` looks only at the *query's* clause, never
+ * at the policy's shape. The only remaining lever is marking `similarity_op`
+ * `LEAKPROOF`, which is a superuser action and a deliberate information-leak
+ * trade-off; it belongs in an ADR and in the database bootstrap, not here. See
+ * `docs/DECISIONS.md` D-37.
  */
 
 const RESOURCE = 'opd.patients';
@@ -194,11 +221,13 @@ export function resolveSearch(
 /**
  * UHID is printed as `BLRA00000123` and typed as `blra 123` or `00000123`.
  *
- * `LIKE 'x%'` on `uhid_normalised varchar_pattern_ops` is the only form that
+ * A prefix probe on `uhid_normalised varchar_pattern_ops` is the only form that
  * index serves, and it covers the exact case too — a complete UHID is a prefix
  * of itself and the column is unique per hospital, so the probe returns one row.
- * The input is escaped rather than interpolated: a `%` typed at the desk would
- * otherwise turn a bounded prefix scan into a full one.
+ * `prefixPredicate` writes it as the leakproof bytewise range that survives
+ * row-level security; the `LIKE` it also emits is escaped rather than
+ * interpolated, because a `%` typed at the desk would otherwise turn a bounded
+ * prefix scan into a full one.
  */
 function uhidSearch(raw: string, bind: (value: unknown) => string): ResolvedSearch {
   const normalised = normaliseUhid(raw);
@@ -207,7 +236,7 @@ function uhidSearch(raw: string, bind: (value: unknown) => string): ResolvedSear
   }
   return {
     mode: 'uhid_prefix',
-    predicate: `p.uhid_normalised LIKE ${bind(`${escapeLike(normalised)}%`)}`,
+    predicate: prefixPredicate('p.uhid_normalised', normalised, bind),
   };
 }
 
@@ -232,7 +261,7 @@ function identifierSearch(raw: string, bind: (value: unknown) => string): Resolv
     mode: 'identifier_prefix',
     predicate:
       `p.id IN (SELECT i.patient_id FROM patient.identifiers i ` +
-      `WHERE i.deleted_at IS NULL AND i.value_normalised LIKE ${bind(`${escapeLike(normalised)}%`)})`,
+      `WHERE i.deleted_at IS NULL AND ${prefixPredicate('i.value_normalised', normalised, bind)})`,
   };
 }
 
@@ -264,7 +293,7 @@ function mobileSearch(raw: string, bind: (value: unknown) => string): ResolvedSe
   }
   return {
     mode: 'mobile_prefix',
-    predicate: `p.mobile_local LIKE ${bind(`${escapeLike(local)}%`)}`,
+    predicate: prefixPredicate('p.mobile_local', local, bind),
   };
 }
 
@@ -315,4 +344,47 @@ function freeTextSearch(raw: string, bind: (value: unknown) => string): Resolved
  */
 export function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+/**
+ * The exclusive upper bound of a prefix under **bytewise** (`C`-collation)
+ * ordering — the ordering `varchar_pattern_ops` indexes and `~<~` compares in.
+ *
+ * `null` means "no bound could be derived safely", and the caller falls back to
+ * the `LIKE` alone. That is a performance fallback, never a correctness one.
+ *
+ * The rule is deliberately narrower than PostgreSQL's own `make_greater_string`:
+ * a bound is derived only for printable ASCII whose last character is below
+ * `~`, where incrementing one code unit is unambiguous and stays inside ASCII.
+ * Every prefix that reaches here is already the output of a normaliser —
+ * `[A-Z0-9]` for UHID, `[A-Z0-9@.]` for identifiers, `[0-9]` for mobile — so the
+ * narrow rule covers every real input, and a future normaliser that starts
+ * emitting Devanagari degrades to a filter rather than guessing at a bound.
+ */
+export function prefixUpperBound(prefix: string): string | null {
+  if (prefix.length === 0) return null;
+  if (!/^[ -}]*$/.test(prefix)) return null; // printable ASCII, last char below `~`
+  const last = prefix.charCodeAt(prefix.length - 1);
+  return `${prefix.slice(0, -1)}${String.fromCharCode(last + 1)}`;
+}
+
+/**
+ * The prefix predicate, in the only form that keeps its index under RLS.
+ *
+ * Emits the leakproof half-open range that the planner would have derived from
+ * the `LIKE` itself if it were allowed to (see the file header), **and** the
+ * `LIKE`. The `LIKE` is redundant — `[prefix, upper)` bytewise is exactly the
+ * set of strings starting with `prefix` — and it is kept anyway, because it
+ * costs a filter over the handful of rows the range already returned and it
+ * means a mistake in `prefixUpperBound()` can only ever cost speed, never show a
+ * receptionist a patient who does not match what they typed. Verified: the
+ * plan is still `Index Scan using idx_patients_mobile_prefix` with the `LIKE`
+ * present.
+ */
+export function prefixPredicate(column: string, prefix: string, bind: (value: unknown) => string): string {
+  const upper = prefixUpperBound(prefix);
+  const parts = [`${column} ~>=~ ${bind(prefix)}`];
+  if (upper !== null) parts.push(`${column} ~<~ ${bind(upper)}`);
+  parts.push(`${column} LIKE ${bind(`${escapeLike(prefix)}%`)}`);
+  return parts.join(' AND ');
 }

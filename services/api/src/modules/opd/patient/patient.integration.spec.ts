@@ -7,7 +7,6 @@ import { createTenantFixture, startTestPostgres, type TenantFixture, type TestPo
 import argon2 from 'argon2';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../../../app.module.js';
-import { PatientModule } from './patient.module.js';
 
 /**
  * The patient master / MPI, proven against a real PostgreSQL 17.
@@ -227,12 +226,19 @@ function registration(overrides: Record<string, unknown> = {}): Record<string, u
 }
 
 /**
- * `AppModule` does not import `PatientModule` — wiring it there is the caller's
- * change, deliberately left out of this module's diff. Composing both here is
- * what that wiring will look like, and proves `PatientModule` resolves its
- * platform dependencies through the `forwardRef` rather than duplicating them.
+ * `AppModule` spreads `PatientController` and the patient providers into itself
+ * rather than importing `PatientModule` (see the comment above the Phase-1
+ * imports there: an imported module gets its own injector, and that would have
+ * meant a second `pg.Pool` against the same database). Composing
+ * `[AppModule, PatientModule]` here therefore declares the same controller
+ * twice, and Fastify refuses the duplicate route before a single test runs.
+ *
+ * So the root under test is `AppModule` alone — the application as it is
+ * actually assembled, which is the thing this suite is supposed to be proving
+ * things about. Declaring `PatientModule` alongside it proved nothing that
+ * `AppModule` does not already prove, and cost the whole suite.
  */
-@Module({ imports: [AppModule, PatientModule] })
+@Module({ imports: [AppModule] })
 class TestRootModule {}
 
 beforeAll(async () => {
@@ -1430,7 +1436,7 @@ describe('merge and unmerge (OP-001 §3.8, §14 AC-11)', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 /**
  * The claim this module is built around, put to the planner rather than left in
- * a comment — and the one place the answer came back "no".
+ * a comment.
  *
  * `phase-01` §1.2 budgets 200 ms p95 across mobile / UHID / name / ABHA / ID on
  * a million patients, and `PatientSearchService` is shaped the way it is — one
@@ -1441,8 +1447,15 @@ describe('merge and unmerge (OP-001 §3.8, §14 AC-11)', () => {
  * patients and `ANALYZE`s. (Separate on purpose: thirty thousand rows in
  * hospital A would turn the pagination test above into ten thousand pages.)
  *
- * What that showed is recorded below in two halves, because the two halves
- * disagree — see `docs/PROGRESS.md` and the report accompanying this module.
+ * These tests once recorded a defect (D-37): under row-level security the
+ * *pattern* modes could not reach their indexes, because PostgreSQL refuses to
+ * evaluate a non-leakproof qualifier ahead of a policy's own qualifier and
+ * neither `~~` (LIKE) nor `%` (`pg_trgm`) is leakproof. Three of the four are
+ * now fixed — the prefix modes ask for the leakproof bytewise range `~>=~` /
+ * `~<~` that `varchar_pattern_ops` actually orders by, which is the same
+ * rewrite the planner performs for itself when RLS is not in the way. The
+ * fourth, the name trigram, has no leakproof formulation and is asserted below
+ * as the *remaining* defect so that it cannot be quietly forgotten.
  */
 describe('search predicates and the planner', () => {
   const BULK_ROWS = 30_000;
@@ -1569,88 +1582,126 @@ describe('search predicates and the planner', () => {
     expect(plan, plan).not.toMatch(/Seq Scan on patients/);
   });
 
-  // ── the half that does not: pattern matching under RLS ─────────────────────
+  // ── the half that used to fail: pattern matching under RLS ────────────────
   /**
-   * The finding, recorded as a test so it cannot be forgotten and so the day it
-   * is fixed, this fails and gets rewritten as the stronger assertion.
+   * D-37, now the fixed half.
    *
-   * `~~` (LIKE) and `%` (pg_trgm similarity) are **not** leakproof. Under a
-   * row-level-security policy PostgreSQL will not evaluate a non-leakproof
-   * qualifier before the security qualifier — a leaky operator could otherwise
-   * reveal, through an error or a timing difference, the contents of a row the
-   * policy was about to hide. The consequence is mechanical: those predicates
-   * cannot become index conditions, so `idx_patients_mobile_prefix`,
-   * `idx_patients_uhid_prefix` and `idx_patients_name_trgm` are unreachable from
-   * an application query, and the search falls back to a sequential scan of the
-   * table.
+   * `~~` (LIKE) is not leakproof, and PostgreSQL will not evaluate a
+   * non-leakproof qualifier ahead of a row-level-security qualifier — a leaky
+   * operator could otherwise reveal, through an error or a timing difference,
+   * the contents of a row the policy was about to hide. The consequence is
+   * mechanical (`restriction_is_securely_promotable`): the clause is rejected as
+   * an *index* condition and demoted to a heap filter, so
+   * `idx_patients_mobile_prefix` and `idx_patients_uhid_prefix` were entered on
+   * `hospital_id` alone and every row of the tenant was filtered.
    *
-   * At thirty thousand rows that is milliseconds and invisible. At the three
-   * million `OP-001` §13 plans for, it is the 200 ms p95 budget, missed by a
-   * wide margin, on the busiest screen in the hospital.
+   * `text_pattern_ge` (`~>=~`) and `text_pattern_lt` (`~<~`) *are* leakproof:
+   * they compare bytewise, which is exactly what `varchar_pattern_ops` orders
+   * by and exactly the pair PostgreSQL derives from a prefix `LIKE` in
+   * `prefix_quals()` when it is allowed to. Asking for the range directly is
+   * therefore the same predicate, expressed in operators the planner is willing
+   * to push into the index — with no change to any policy.
    *
-   * This is a property of the schema and the policy, not of this module: the
-   * predicates below are the exact shapes the indexes were built for, and the
-   * control immediately after proves they are reachable the moment the policy is
-   * out of the way. Fixing it means changing something outside
-   * `services/api/src/modules/opd/patient/` — the candidates are marking the
-   * pattern operators `LEAKPROOF` (a deliberate, documented trade-off a
-   * superuser must make), or restructuring the policy so the tenant predicate
-   * folds to a constant at plan time.
+   * Each case asserts both directions, because only the pair is evidence: the
+   * range form reaches the index under RLS, and the `LIKE` form still does not.
+   * If the second assertion ever starts failing, someone has marked `textlike`
+   * LEAKPROOF and that is a decision, not an accident.
    */
-  const patternCases: ReadonlyArray<[name: string, sql: string, values: unknown[], index: RegExp]> = [
-    [
-      'mobile prefix',
-      `SELECT id FROM patient.patients p WHERE p.hospital_id = $1 AND p.mobile_local LIKE $2`,
-      ['700000424%'],
-      /idx_patients_mobile_prefix/,
-    ],
+  const prefixCases: ReadonlyArray<
+    [name: string, column: string, lower: string, upper: string, like: string, index: RegExp]
+  > = [
+    ['mobile prefix', 'p.mobile_local', '700000424', '700000425', '700000424%', /idx_patients_mobile_prefix/],
     [
       'UHID prefix',
-      `SELECT id FROM patient.patients p WHERE p.hospital_id = $1 AND p.uhid_normalised LIKE $2`,
-      ['BULK0000424%'],
+      'p.uhid_normalised',
+      'BULK0000424',
+      'BULK0000425',
+      'BULK0000424%',
       /idx_patients_uhid_prefix/,
-    ],
-    [
-      'name trigram',
-      `SELECT id FROM patient.patients p
-        WHERE p.hospital_id = $1 AND p.full_name % $2 AND p.status = 'active' AND p.deleted_at IS NULL`,
-      [BULK_NAME],
-      /idx_patients_(active_)?name_trgm/,
     ],
   ];
 
-  it.each(patternCases)(
-    '%s reaches its index only when row-level security is out of the way',
-    async (_name, sql, values, index) => {
-      // The control: the index exists, and the predicate is the shape it serves.
-      const control = await explainWithoutRls(sql, values);
-      expect(control, control).toMatch(index);
-      expect(control, control).not.toMatch(/Seq Scan on patients/);
-
-      // The real request, with the same predicate: the index is unreachable.
-      const underRls = await explainUnderRls(
-        sql.replace('p.hospital_id = $1 AND ', '').replace(/\$2/g, '$1'),
-        values,
+  it.each(prefixCases)(
+    '%s reaches its index under RLS as a leakproof range',
+    async (_name, column, lower, upper, like, index) => {
+      // The predicate `PatientSearchService` now emits: the leakproof range
+      // first, the redundant LIKE kept as the exactness guard.
+      const plan = await explainUnderRls(
+        `SELECT id FROM patient.patients p
+          WHERE ${column} ~>=~ $1 AND ${column} ~<~ $2 AND ${column} LIKE $3`,
+        [lower, upper, like],
       );
-      expect(underRls, underRls).toMatch(/Seq Scan on patients/);
+      expect(plan, plan).toMatch(index);
+      expect(plan, plan).not.toMatch(/Seq Scan on patients/);
+      // The range is an *index condition*, not a filter — the whole point.
+      expect(plan, plan).toMatch(/Index Cond:[\s\S]*~>=~/);
+
+      // The predicate it used to emit, under the same policy: still unreachable.
+      // This is what makes the rewrite above load-bearing rather than cosmetic.
+      const likeOnly = await explainUnderRls(`SELECT id FROM patient.patients p WHERE ${column} LIKE $1`, [
+        like,
+      ]);
+      expect(likeOnly, likeOnly).not.toMatch(index);
     },
   );
 
   /**
-   * The identifier path degrades rather than collapsing, which is worth
-   * distinguishing: the semi-join still enters `idx_identifiers_value_prefix`,
-   * but only on its leading `hospital_id` column — the `LIKE` arrives as a
-   * filter over every identifier the tenant owns instead of as a prefix range.
+   * The one mode still broken, kept as an assertion rather than a comment.
+   *
+   * There is no leakproof way to drive a trigram index. `gin_trgm_ops` supports
+   * eight operators — `%`, `%>`, `%>>`, `~~`, `~~*`, `~`, `~*` and `=` — and only
+   * `=` is marked leakproof in `pg_proc`, which is equality on a whole name and
+   * therefore not a name search. Restructuring the policy does not help either:
+   * `restriction_is_securely_promotable` looks at the *query's* clause and never
+   * at the policy's shape, which was measured against three policy forms.
+   *
+   * So a name search still filters the tenant's rows: 148 ms over 176 000 on the
+   * `volume` seed, and a sequential scan at the three million `OP-001` §13 plans
+   * for. The only remaining lever is `ALTER FUNCTION ext.similarity_op(text,text)
+   * LEAKPROOF` — a superuser action (`hms_migrator` cannot perform it, so it
+   * cannot land in a migration), and a deliberate information-leak trade-off.
+   * Measured to be worth 148 ms → 34 ms. It needs an ADR, not a commit.
+   *
+   * This test fails the day that lands, which is the intent: it is the
+   * changelog entry that cannot be skipped.
    */
-  it('identifier search keeps its index but loses the prefix range under RLS', async () => {
+  it('name trigram is the one mode row-level security still costs its index', async () => {
+    const sql = `SELECT id FROM patient.patients p
+                  WHERE p.full_name % $1 AND p.status = 'active' AND p.deleted_at IS NULL`;
+
+    // The control: the index exists and the predicate is the shape it serves.
+    const control = await explainWithoutRls(
+      `SELECT id FROM patient.patients p
+        WHERE p.hospital_id = $1 AND p.full_name % $2 AND p.status = 'active' AND p.deleted_at IS NULL`,
+      [BULK_NAME],
+    );
+    expect(control, control).toMatch(/idx_patients_(active_)?name_trgm/);
+
+    // The real request: the trigram index is unreachable.
+    const underRls = await explainUnderRls(sql, [BULK_NAME]);
+    expect(underRls, underRls).not.toMatch(/idx_patients_(active_)?name_trgm/);
+  });
+
+  /**
+   * The identifier path, which had the same defect in a milder form — the
+   * semi-join entered `idx_identifiers_value_prefix` on its leading
+   * `hospital_id` and then filtered every identifier the tenant owns. The same
+   * range rewrite turns that back into the prefix probe it was built to be.
+   */
+  it('identifier search regains its prefix range under RLS', async () => {
     const plan = await explainUnderRls(
       `SELECT id FROM patient.patients p WHERE p.id IN (
          SELECT i.patient_id FROM patient.identifiers i
-          WHERE i.deleted_at IS NULL AND i.value_normalised LIKE $1)`,
-      ['BULKID00004242%'],
+          WHERE i.deleted_at IS NULL
+            AND i.value_normalised ~>=~ $1 AND i.value_normalised ~<~ $2
+            AND i.value_normalised LIKE $3)`,
+      ['BULKID00004242', 'BULKID00004243', 'BULKID00004242%'],
     );
     expect(plan, plan).toMatch(/idx_identifiers_value_prefix/);
     expect(plan, plan).not.toMatch(/Seq Scan on identifiers/);
+    // The range is an index condition, not a filter: the probe is bounded on
+    // `value_normalised`, not just on `hospital_id`.
+    expect(plan, plan).toMatch(/Index Cond:[\s\S]*value_normalised/);
   });
 
   /**
