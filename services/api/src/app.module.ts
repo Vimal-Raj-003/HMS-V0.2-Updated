@@ -32,6 +32,26 @@ import { SettingsService } from './modules/platform/admin/settings.service.js';
 import { UsersController } from './modules/platform/admin/users.controller.js';
 import { UsersService } from './modules/platform/admin/users.service.js';
 import { SessionController, SessionService } from './modules/platform/session/session.controller.js';
+// Phase 1 (OP-001, EN-006, NC-001). Controllers and providers are spread into
+// this module rather than imported as sub-modules: Nest gives an imported module
+// its own injector, so `imports: [PatientModule, ...]` would have produced a
+// second, third and fourth `pg.Pool` against the same database, and reaching
+// back for the shared platform providers needs a `forwardRef` cycle through this
+// file. Spreading keeps one pool and one guard chain, which is how every
+// platform module here is already wired.
+import { NumberingService } from './core/numbering/numbering.service.js';
+import { PatientController } from './modules/opd/patient/patient.controller.js';
+import { PatientDedupeService } from './modules/opd/patient/patient.dedupe.service.js';
+import { PatientMergeService } from './modules/opd/patient/patient.merge.service.js';
+import { PatientSearchService } from './modules/opd/patient/patient.search.service.js';
+import { PatientService } from './modules/opd/patient/patient.service.js';
+import { SCHEDULING_CONTROLLERS, SCHEDULING_PROVIDERS } from './modules/opd/scheduling/scheduling.module.js';
+import { CashController } from './modules/frontoffice/cash/cash.controller.js';
+import { CoSignService } from './modules/frontoffice/cash/cosign.service.js';
+import { PaymentsService } from './modules/frontoffice/cash/payments.service.js';
+import { ShiftsService } from './modules/frontoffice/cash/shifts.service.js';
+import { QueueController } from './modules/frontoffice/queue/queue.controller.js';
+import { QueueService } from './modules/frontoffice/queue/queue.service.js';
 
 /**
  * Every constructor parameter in this service is annotated with an explicit
@@ -68,6 +88,11 @@ import { SessionController, SessionService } from './modules/platform/session/se
     FlagsController,
     LicenceController,
     AuditLogController,
+    // Phase 1 — patient master, scheduling, queue and cash.
+    PatientController,
+    ...SCHEDULING_CONTROLLERS,
+    QueueController,
+    CashController,
   ],
   providers: [
     { provide: ENV, useFactory: () => loadEnv() },
@@ -88,6 +113,20 @@ import { SessionController, SessionService } from './modules/platform/session/se
     FlagsService,
     LicenceService,
     AuditLogService,
+    // Phase 1. `NumberingService` is a platform provider rather than a
+    // per-module one now that four modules allocate human-facing numbers from
+    // the same series table; it is stateless and takes the caller's
+    // transaction, so a single instance is correct.
+    NumberingService,
+    PatientDedupeService,
+    PatientService,
+    PatientSearchService,
+    PatientMergeService,
+    ...SCHEDULING_PROVIDERS.filter((provider) => provider !== NumberingService),
+    QueueService,
+    CoSignService,
+    ShiftsService,
+    PaymentsService,
     { provide: APP_FILTER, useClass: ProblemFilter },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: TenantGuard },
