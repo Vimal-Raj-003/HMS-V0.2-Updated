@@ -5,31 +5,75 @@
 
 ## Current state
 
-| Field              | Value                                                                                                                                                                                                                                             |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current phase      | **Phase 0 complete — all eight exit gates met.** Ready for Phase 1 (Patient & Front Office).                                                                                                                                                      |
-| Repo status        | every package and service has source; **172 tables**, 8 migrations, 4 idempotent seed tiers, a running API with login, and a building Next.js front-end                                                                                           |
-| Last green CI      | `.github/workflows/ci.yml` complete (8 stages; not yet run on GitHub). Locally **all green**: `lint` · `typecheck` · `test` · `build` · `test:safety` · `test:integration` · `test:e2e` — **1,033 unit + 166 integration + 72 e2e = 1,271 tests** |
-| Modules complete   | 0 / 177 — Phase 0 builds platform _rails_, not modules                                                                                                                                                                                            |
-| Blocking questions | none blocking. **O-9 closed** (contracts coverage 60.62 % → 97 %). See `docs/DECISIONS.md` → "Open" for O-1…O-8.                                                                                                                                  |
-| Project path       | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                      |
+| Field              | Value                                                                                                                                                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Current phase      | **Phase 1 (Patient & Front Office) in progress.** Phase 0 complete — all eight exit gates met.                                                                                                                                                                           |
+| Repo status        | **415 tables** across eight tenant schemas (265 excluding partitions), 10 migrations, 4 idempotent seed tiers, a running API with login, an admin console, and a building Next.js front-end                                                                              |
+| Last green CI      | Locally **all green**: `lint` · `typecheck` · `test` · `build` · `format:check` — **1,429 unit tests** across 13 packages, plus integration and e2e suites. `prettier --check` passes for the first time (it could never have passed while the Helm chart was in scope). |
+| Modules complete   | 0 / 177 end-to-end. Phase 1 foundations are in (schema, clinical components, messaging connectors, numbering); the Phase 1 API modules and screens are being built now.                                                                                                  |
+| Blocking questions | none blocking. **O-9 closed** (contracts coverage 60.62 % → 97 %). See `docs/DECISIONS.md` → "Open" for O-1…O-8.                                                                                                                                                         |
+| Project path       | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                             |
 
-### Exit-gate status (`docs/prompts/phase-00-foundation.md`)
+### Exit-gate status (`docs/prompts/phase-01-patient-front-office.md`)
 
-| #   | Gate                                                                                       | Status                                                                                                                                                                                                                                               |
-| --- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | `pnpm lint && typecheck && test && test:e2e && build` green in CI                          | ⬜ partial — `contracts` typechecks and 85 tests pass; other packages have no source yet                                                                                                                                                             |
-| 2   | `docker compose up` → working login in < 10 min from a clean clone                         | ⬜ infra up in ~90 s; no login yet (API/web not built)                                                                                                                                                                                               |
-| 3   | Log in as each of 8 roles, each seeing a correct empty workspace                           | ⬜ not reachable yet                                                                                                                                                                                                                                 |
-| 4   | Tenant-isolation + permission-matrix tests pass, **and breaking a policy makes them fail** | 🟩 **done at SQL level and now proven both ways automatically** — the negative proof is a permanent test (`harness.integration.spec.ts` → "the isolation proof has teeth"), no longer a manual ritual. Permission-matrix half awaits `services/api`. |
-| 5   | Audit log shows login, role change, break-glass read, hash chain intact                    | 🟨 chain sealer + verifier built and proven; no login/role-change events yet                                                                                                                                                                         |
-| 6   | Token printed to ESC/POS emulator; PDF rendered with letterhead                            | ⬜ not started                                                                                                                                                                                                                                       |
-| 7   | Lighthouse ≥ 90 on `/login` and dashboard; PWA installable; offline shell                  | ⬜ not started                                                                                                                                                                                                                                       |
-| 8   | `docs/PROGRESS.md` lists what exists, what is stubbed, every open question                 | 🟩 this file                                                                                                                                                                                                                                         |
+Phase 0's eight gates were all met on 2026-08-20 (see that session entry). Phase 1's nine:
+
+| #   | Gate                                                                                            | Status                                                                                                                              |
+| --- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Register 3 patients end-to-end; UHID card and wristband print                                   | ⬜ patient API in progress; UHID allocation done and proven under concurrency                                                       |
+| 2   | A deliberate duplicate is caught; a merge is performed and fully audited; nothing is lost       | ⬜ permission split done (merge is MRD-only, proven by test); merge API in progress                                                 |
+| 3   | Book / reschedule / cancel an appointment; patient gets all three messages; status shown        | ⬜ messaging connectors + DLT gate done; scheduling API in progress                                                                 |
+| 4   | Walk-ins and appointments interleave in the queue; TV board calls with audio; room display < 1s | ⬜ queue schema + UI components done; queue API in progress                                                                         |
+| 5   | Cashier opens a shift, takes split payment, refunds with approval, closes with zero variance    | ⬜ denomination sheet (bigint) + cash schema done; cash API in progress                                                             |
+| 6   | ABHA created via mobile OTP in sandbox and linked; scan & share works                           | ⬜ ABDM M1 schema done; blocked on O-4 (sandbox credentials)                                                                        |
+| 7   | 1 M-row patient search under 200 ms p95 (k6 script committed)                                   | 🟨 **partially** — measured at 220,000 rows, worst p95 1.7 ms against a 200 ms budget. Not the specified 1 M; k6 script not written |
+| 8   | Kill the SMS provider and the internet: registration, tokens and cash still work                | ⬜ not started. The design supports it (queue tokens are `clinicalSafetyExempt`), but it has not been exercised                     |
+| 9   | All Phase-0 gates still green; `docs/PROGRESS.md` updated                                       | 🟩 Phase-0 gates re-verified green this session; this file updated                                                                  |
 
 ---
 
 ## Session log
+
+### 2026-08-21 · Phase 1 · Contracts, schema, clinical components, messaging, numbering
+
+**Built**
+
+- **Phase 1 permission catalogue and role grants** (`packages/contracts`). +95 keys across `patient.*`, `appointment.*`, `visit.*`, `schedule.*`, `queue.*`, `receipt.*`, `messaging.*`, `abdm.*`, `consent.*`, granted across 22 of the 64 role templates. Without this every Phase 1 route would have failed _at module load_ — `assertRegisteredPermission` runs on import.
+- **Phase 1 domain events** — the registry had none, and the outbox writer validates against it, so every Phase 1 publish would have been refused. 286 events registered. Money in an event payload is a decimal string, never a number: `Money` is bigint minor units and an event is JSON, so a number round-trips through IEEE-754 and ₹1,234.55 arrives as 1234.5499999999999.
+- **Phase 1 schema** (`packages/db`) — 93 tables across `mdm`, `patient`, `clinical`, `queue`, `engage` plus `billing` and `integration`, one migration of 4,951 lines, 8 tables partitioned monthly. Verified against a real container: **415 tables in the business schemas, 0 without RLS or a policy**.
+- **12 clinical components** (`packages/ui`) — patient search, worklist, slot picker, queue tiles and TV board, denomination sheet, consent capture, allergy editor, address form, photo capture, print preview. 74 → 203 tests.
+- **Messaging connectors** (`services/integration-hub`) — MSG91, Twilio, WhatsApp Cloud, dry-run; TRAI-DLT registry; consent/DND gate. 214 unit + 43 integration tests.
+- **Admin console** (`apps/web`) — 8 screens, permission matrix over 212 keys × 64 roles. 106 vitest + 34 Playwright, axe clean on all eight.
+- **Numbering service** (`services/api`) — UHID, visit, appointment, bill and receipt numbers. The tables existed and were seeded in Phase 0 but nothing allocated from them, which blocked every Phase 1 write path.
+
+**Tested**
+
+1,429 unit tests across 13 packages, all green, plus the integration suites. `prettier --check` passes for the first time.
+
+**Defects found by running, not by reading**
+
+- **The RLS coverage monitor was scoped to three schemas.** 93 tables in five new schemas would have been invisible to the very view that exists to catch an unprotected table. Widened before the policies were generated, and the migration now raises if any table lacks RLS.
+- **Two tests that could not fail.** The seed-idempotency check digested only `('core','mdm','integration')` and ran the `minimal` tier, which seeds no Phase 1 rows — between them, a seed rewriting 220,000 patient rows on every run would have passed. Now covers all eight tenant schemas on the `demo` tier, and asserts which tables it covered so a future narrowing fails loudly.
+- **The CI static job could never have passed.** It runs `prettier --check` over `**/*.yaml`, which matches the Helm chart templates — Go templates, not YAML. Prettier reported a _parse error_ and exited non-zero regardless of formatting, so no amount of `--write` would have fixed it.
+- **`@vims/i18n` shipped TypeScript** (D-36). Typechecked and passed every vitest run; only a real Node runtime failed.
+- **The toast viewport had `aria-label` on a role-less `<div>`**, which ARIA prohibits — so a container carrying critical clinical alerts announced as nothing. The existing axe test rendered the toast _item_ alone; the viewport was never tested.
+- **`patient.patients` had no allergy statement column**, so zero allergy rows read as "safe to prescribe" when it may mean "nobody asked". Added with three CHECKs and a trigger whose invariant is that no sequence of deletions can ever produce `none_known`.
+
+**Stubbed / not done**
+
+- Messaging template, consent, cost and provider-id state are in-memory. The `engage` tables now exist, so the connectors can be repointed at them, but until then none of it survives a restart.
+- Patient search is benchmarked at 220,000 rows, not the 1,000,000 the exit gate specifies. Worst p95 is 1.7 ms against a 200 ms budget; the k6 script is not written.
+- ABDM M1 is schema-only, blocked on O-4 (sandbox credentials).
+- Exit gate 8 (kill the SMS provider and the internet) has not been exercised.
+
+**Open questions**
+
+- **`EN-009 §4.1` contradicts `§5`** and needs correcting — see D-34. §4.1 seeds a critical-alert SMS carrying a test name and a result value; §5, `EN-037 §135` and the phase-01 constraint all prohibit it. The implementation follows the prohibition.
+- O-1…O-8 unchanged.
+
+**Next step**
+
+Phase 1 API modules — patient/MPI/dedupe/merge, appointments/visits/schedules, queue/tokens and cash counter — then the Phase 1 screens, then the nine exit-gate criteria.
 
 ### 2026-08-20 · Phase 0 · Admin API, service entrypoints, infrastructure, Safari and gate 7 — **Phase 0 complete**
 
