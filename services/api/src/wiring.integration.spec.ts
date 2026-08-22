@@ -86,6 +86,18 @@ describe('Phase 1 wiring', () => {
     ['POST', '/api/v1/queue/tokens'],
     ['GET', '/api/v1/cash/shifts'],
     ['POST', '/api/v1/cash/payments'],
+    // EN-027 masters. Every picker on every screen reads these; before they
+    // existed the screens asked a receptionist to paste a UUID.
+    ['GET', '/api/v1/doctors'],
+    ['GET', '/api/v1/departments'],
+    ['GET', '/api/v1/specialities'],
+    ['GET', '/api/v1/consult-types'],
+    ['GET', '/api/v1/services'],
+    ['GET', '/api/v1/rooms'],
+    ['GET', '/api/v1/queues'],
+    ['GET', '/api/v1/cash/counters'],
+    ['GET', '/api/v1/areas'],
+    ['GET', '/api/v1/masters/id_types'],
   ] as const;
 
   it('mounts every Phase 1 route', async () => {
