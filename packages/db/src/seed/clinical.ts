@@ -1141,17 +1141,33 @@ type Range = readonly [
   string,
 ];
 
-const ADULT_RANGES: readonly Range[] = [
+/**
+ * Tuple order: parameter, ageMin, ageMax, sex, **low_abnormal, high_abnormal**,
+ * **low_critical, high_critical**, low_plausible, high_plausible, unit.
+ *
+ * `low_abnormal`/`high_abnormal` bound the **normal** band — a value outside
+ * them is amber — and `low_critical`/`high_critical` bound the amber band, so a
+ * value outside *those* is red. The schema's `vitals_reference_ranges_band_order`
+ * CHECK (`low_critical <= low_abnormal`, `high_critical >= high_abnormal`) only
+ * makes sense under that reading.
+ *
+ * `OP-007 §5.1` tabulates the **amber** and **red** bands instead, so its rows
+ * cannot be copied into these columns directly. Doing so inverts the flag: a
+ * normal value falls outside the "normal" band and reads amber, while a genuinely
+ * abnormal one falls inside it and reads normal. Six parameters were encoded that
+ * way and are corrected below; each carries the §5.1 band it was derived from.
+ */
+export const ADULT_RANGES: readonly Range[] = [
   ['systolic', 6570, 43800, 'any', 100, 140, 90, 180, 40, 300, 'mmHg'],
   ['diastolic', 6570, 43800, 'any', null, 90, 50, 110, 10, 200, 'mmHg'],
   ['pulse', 6570, 43800, 'any', 60, 100, 50, 120, 20, 300, '/min'],
-  ['spo2', 6570, 43800, 'any', 92, null, null, null, 0, 100, '%'],
-  ['temperature_c', 6570, 43800, 'any', 37.6, 38.9, 35.0, 39.0, 30, 45, 'degC'],
+  ['spo2', 6570, 43800, 'any', 95, null, 92, null, 0, 100, '%'], // §5.1: amber 92-94, red < 92
+  ['temperature_c', 6570, 43800, 'any', 36.1, 37.5, 35.0, 39.0, 30, 45, 'degC'], // §5.1: amber 37.6-38.9 / 35.1-36.0, red >= 39.0 / <= 35.0
   ['resp_rate', 6570, 43800, 'any', 9, 24, 8, 25, 4, 80, '/min'],
-  ['glucose_rbs', 6570, 43800, 'any', 141, 250, 70, 300, 10, 900, 'mg/dL'],
-  ['glucose_fbs', 6570, 43800, 'any', 100, 125, 60, 200, 10, 900, 'mg/dL'],
-  ['pain_score', 6570, 43800, 'any', 4, 6, null, 7, 0, 10, 'NRS'],
-  ['bmi', 6570, 43800, 'any', 23, 24.9, 16, 30, 8, 80, 'kg/m2'],
+  ['glucose_rbs', 6570, 43800, 'any', 70, 140, 70, 300, 10, 900, 'mg/dL'], // §5.1: amber 141-250, red < 70 or > 300
+  ['glucose_fbs', 6570, 43800, 'any', 70, 99, 60, 200, 10, 900, 'mg/dL'], // §5.1: amber 100-125, red < 60 or >= 200
+  ['pain_score', 6570, 43800, 'any', null, 3, null, 7, 0, 10, 'NRS'], // §5.1: amber 4-6, red >= 7
+  ['bmi', 6570, 43800, 'any', 18.5, 22.9, 16, 30, 8, 80, 'kg/m2'], // WHO Asian: normal 18.5-22.9, overweight 23-24.9, red >= 30
   // paediatric bands, APLS normal ranges
   ['pulse', 0, 28, 'any', 120, 160, 100, 180, 20, 300, '/min'],
   ['pulse', 29, 365, 'any', 110, 160, 90, 180, 20, 300, '/min'],
@@ -1165,7 +1181,7 @@ const ADULT_RANGES: readonly Range[] = [
   ['systolic', 0, 28, 'any', 60, 90, 50, 100, 30, 200, 'mmHg'],
   ['systolic', 29, 1825, 'any', 75, 110, 65, 120, 30, 200, 'mmHg'],
   ['systolic', 1826, 6569, 'any', 90, 120, 80, 140, 30, 250, 'mmHg'],
-  ['spo2', 0, 6569, 'any', 94, null, null, null, 0, 100, '%'],
+  ['spo2', 0, 6569, 'any', 95, null, 92, null, 0, 100, '%'], // amber 92-94, red < 92
 ];
 
 async function seedVitalsConfiguration(ctx: SeedContext, tenancy: SeededTenancy): Promise<void> {
@@ -1268,7 +1284,10 @@ async function seedVitalsConfiguration(ctx: SeedContext, tenancy: SeededTenancy)
       scale: 2,
       low_abnormal: 88,
       high_abnormal: 93,
-      low_critical: null,
+      // §5.1: "< 88 on COPD scale 2" is red. Without this bound the scale-2
+      // patient the row exists for could never trigger a critical alert at all,
+      // which is the opposite of what a separate COPD scale is for.
+      low_critical: 88,
       high_critical: null,
       low_plausible: 0,
       high_plausible: 100,
