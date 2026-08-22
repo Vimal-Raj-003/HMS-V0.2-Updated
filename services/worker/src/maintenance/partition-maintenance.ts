@@ -34,7 +34,15 @@ export interface PartitionedTable {
  * partitioned table without adding it here shows up as a diff in review —
  * whereas auto-discovery would silently start maintaining a table nobody
  * decided to maintain, and silently stop if a migration changed its shape.
- * `partition-maintenance.integration.spec.ts` asserts the two lists agree.
+ * `partition-maintenance.integration.spec.ts` asserts the two lists agree, and
+ * that assertion earned its keep: it went red the moment Phase 1 added a
+ * partitioned table and stayed red through Phases 2 and 3, by which point this
+ * list covered 17 of 35 tables. The 18 it missed included `billing.payments`,
+ * `queue.queue_tokens`, `clinical.vitals` and every lab result — so on the first
+ * of a month with no premade partition, a hospital stops taking payments,
+ * issuing tokens, recording observations and filing results at the same
+ * instant. The list is correct now; the lesson is that a red guard is only
+ * useful if somebody reads it.
  */
 export const PARTITIONED_TABLES: readonly PartitionedTable[] = Object.freeze([
   // 20260817152224_partitions_and_indexes
@@ -56,6 +64,27 @@ export const PARTITIONED_TABLES: readonly PartitionedTable[] = Object.freeze([
   Object.freeze({ schema: 'core', table: 'bc_scan_events' }),
   Object.freeze({ schema: 'core', table: 'display_device_events' }),
   Object.freeze({ schema: 'integration', table: 'ihub_messages' }),
+  // 20260820091500_phase1_patient_front_office
+  Object.freeze({ schema: 'queue', table: 'queue_tokens' }),
+  Object.freeze({ schema: 'queue', table: 'queue_events' }),
+  Object.freeze({ schema: 'engage', table: 'msg_messages' }),
+  Object.freeze({ schema: 'engage', table: 'msg_events' }),
+  Object.freeze({ schema: 'billing', table: 'payments' }),
+  Object.freeze({ schema: 'billing', table: 'cash_drawer_events' }),
+  Object.freeze({ schema: 'patient', table: 'consent_ledger' }),
+  Object.freeze({ schema: 'integration', table: 'abdm_messages' }),
+  // 20260822160000_phase2_opd_clinical_core
+  Object.freeze({ schema: 'clinical', table: 'vitals' }),
+  Object.freeze({ schema: 'clinical', table: 'cdss_alert_events' }),
+  Object.freeze({ schema: 'clinical', table: 'cdss_scores' }),
+  Object.freeze({ schema: 'core', table: 'mobile_sync_log' }),
+  // 20260823090000_phase3_diagnostics
+  Object.freeze({ schema: 'lab', table: 'lab_results' }),
+  Object.freeze({ schema: 'lab', table: 'lab_result_versions' }),
+  Object.freeze({ schema: 'lab', table: 'labq_qc_runs' }),
+  Object.freeze({ schema: 'integration', table: 'lab_if_messages' }),
+  Object.freeze({ schema: 'rad', table: 'pacs_instances' }),
+  Object.freeze({ schema: 'rad', table: 'pacs_view_audit' }),
 ]);
 
 export interface PartitionMaintenanceOptions {
