@@ -230,6 +230,10 @@ const ABHA_DESK = [
 const CASHIER_BASE = [
   'receipt.shift.open',
   'receipt.shift.read',
+  // A cashier cannot find their own open shift without this. `.read` needs an id
+  // the cashier has no way to obtain, so the omission did not restrict a
+  // sensitive action -- it made the role's first action of the day impossible.
+  'receipt.shift.list',
   'receipt.shift.close',
   'receipt.collect',
   'receipt.reprint',

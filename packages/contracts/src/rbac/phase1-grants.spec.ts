@@ -92,6 +92,9 @@ describe('Phase 1 role grants', () => {
   it('lets a cashier run a shift but not pay a refund', () => {
     const c = held('cashier');
     expect(c.has('receipt.shift.open')).toBe(true);
+    // Without `.list` a cashier cannot find their own open shift: `.read` needs
+    // an id they have no way to obtain, so the day cannot start.
+    expect(c.has('receipt.shift.list')).toBe(true);
     expect(c.has('receipt.collect')).toBe(true);
     expect(c.has('receipt.shift.close')).toBe(true);
     // NC-001 §12 puts the payout behind its own key with an amount limit.
