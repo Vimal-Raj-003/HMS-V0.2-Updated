@@ -1,0 +1,506 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-027 — the diagnostics masters Phase 3 consumes (schema `mdm`)
+//
+// `OP-004 §4` marks the test catalogue as `lab_tests (mdm)` — the only entry in
+// its own data model that is *not* in schema `lab` — and `EN-035 §4` does the
+// same for `mdm_rad_procedures`. Both are right: a catalogue entry is priced by
+// RC-003, ordered by OP-002, consumed by OP-004/OP-008 and reported on by
+// EN-001, so it is master data with the effective-dated identity every other
+// master already has, not an operational row.
+//
+// Everything else in the phase — an order, a sample, a result, a study — is
+// operational and lives in `lab` or `rad`.
+//
+// Every master here copies `mdm_departments` exactly:
+//   record_key (stable identity) + version + effective_from/to + status,
+//   UNIQUE(record_key, version), an index on
+//   (hospital_id, branch_id, status, effective_from), and a btree_gist EXCLUDE
+//   constraint in the migration that makes overlapping effective ranges
+//   impossible.
+//
+// Terminology is NOT here. LOINC, SNOMED CT, RadLex and the DICOM body-part
+// codes live in `mdm_code_systems` / `mdm_concepts`, which Phase 0 created; the
+// columns below carry the *code*, and the concept tables carry its meaning.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The lab sub-department a test belongs to. `OP-004 §3.1` names biochemistry,
+/// haematology, microbiology, histopathology, serology and molecular as routing
+/// destinations; the rest are the sub-departments those six split into in a
+/// hospital of this size, plus `outsourced` for work that is sent away.
+enum LabDiscipline {
+  biochemistry
+  haematology
+  clinical_pathology
+  microbiology
+  serology
+  immunology
+  histopathology
+  cytopathology
+  molecular
+  genetics
+  blood_bank
+  outsourced
+
+  @@schema("mdm")
+}
+
+/// `OP-004 §3.3.2`: "numeric/qualitative/text/multi-select/microbiology …
+/// /histopathology … semi-quantitative". Typed, because `docs/prompts/phase-03
+/// §Constraints` is explicit: "Result values are typed (numeric with units,
+/// coded, text) — do not store everything as strings."
+enum LabResultType {
+  numeric
+  semi_quantitative
+  qualitative
+  coded
+  text
+  multiselect
+  microbiology
+  histopathology
+  calculated
+
+  @@schema("mdm")
+}
+
+/// DICOM modality codes (PS3.16 CID 29), narrowed to what a hospital of this
+/// size actually operates. `OP-008 §4` lists the same set.
+enum RadModality {
+  CR
+  DX
+  CT
+  MR
+  US
+  MG
+  XA
+  RF
+  NM
+  PT
+  DXA
+  IO
+  OT
+
+  @@schema("mdm")
+}
+
+/// The specimen a test is performed on. Separate from the container because one
+/// specimen type is drawn into different tubes by different methods, and because
+/// `OP-004 §3.2.1` prints the *container* on the label while the reference range
+/// in `lab.lab_reference_ranges` is keyed by *specimen*.
+model MdmLabSpecimenType {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  version     Int     @default(1)
+  code        String  @db.VarChar(32)
+  name        String  @db.VarChar(160)
+  /// SNOMED CT specimen concept, e.g. 119364003 "serum specimen".
+  snomedCode  String? @map("snomed_code") @db.VarChar(32)
+  /// The HL7 v2 table 0070 / DICOM specimen code an analyzer will send back.
+  hl7Code     String? @map("hl7_code") @db.VarChar(32)
+  /// Hours a drawn specimen stays valid for an add-on test — `OP-004 §3.1.4`'s
+  /// "add HbA1c to EDTA sample < 24 h". Zero means no add-on window.
+  stabilityHours Decimal? @map("stability_hours") @db.Decimal(8, 2)
+  storageTempC   Decimal? @map("storage_temp_c") @db.Decimal(5, 2)
+  /// Days a specimen is kept after reporting before disposal (`OP-004 §5`:
+  /// serum 7 days, histo blocks 10 years, MLC until release order).
+  retentionDays  Int? @map("retention_days")
+  isBiohazard    Boolean @default(true) @map("is_biohazard")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_lab_specimen_types")
+  @@schema("mdm")
+}
+
+/// The tube or pot the specimen is drawn into. `cap_colour` is a first-class
+/// column and not a note: `OP-004 §3.2.1` prints it on the barcode label and
+/// `docs/prompts/phase-03 §3.2` calls it "container colour guidance", which is
+/// the thing that stops a phlebotomist filling a lithium-heparin tube for a
+/// coagulation screen.
+model MdmLabContainer {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  version     Int     @default(1)
+  code        String  @db.VarChar(32)
+  name        String  @db.VarChar(160)
+  /// Printed on the label and rendered as a swatch in the phlebotomy worklist.
+  capColour   String  @map("cap_colour") @db.VarChar(32)
+  /// Hex, so the label renderer and the screen agree. Validated by CHECK.
+  capColourHex String? @map("cap_colour_hex") @db.VarChar(7)
+  additive    String? @db.VarChar(120)
+  drawVolumeMl Decimal? @map("draw_volume_ml") @db.Decimal(8, 2)
+  minVolumeMl  Decimal? @map("min_volume_ml") @db.Decimal(8, 2)
+  /// CLSI GP41 order of draw. A lower number is drawn first; two containers
+  /// sharing a number is a configuration error the UI cannot resolve.
+  orderOfDraw  Int? @map("order_of_draw")
+  inversions   Int?
+  specimenTypeKey String? @map("specimen_type_key") @db.Uuid
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_lab_containers")
+  @@schema("mdm")
+}
+
+/// The orderable test. A panel is a test with `is_panel = true` whose members
+/// are rows in `mdm_lab_panel_members`; a multi-analyte test (a CBC, a lipid
+/// profile reported as one test) carries its analytes in
+/// `mdm_lab_test_parameters`. The difference matters: a panel expands into
+/// several `lab.lab_order_tests`, each separately billable and separately
+/// cancellable, while a multi-analyte test is one order line with several
+/// results.
+model MdmLabTest {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  version     Int     @default(1)
+  code        String  @db.VarChar(32)
+  name        String  @db.VarChar(300)
+  shortCode   String? @map("short_code") @db.VarChar(16)
+  /// LOINC is the interoperability spine of this phase: EN-004 maps an
+  /// analyzer's own code to it, EN-011 publishes an ABDM DiagnosticReport with
+  /// it, and a result whose LOINC is missing cannot be exchanged with anybody.
+  loincCode   String? @map("loinc_code") @db.VarChar(24)
+  snomedCode  String? @map("snomed_code") @db.VarChar(32)
+  discipline  LabDiscipline
+  /// → `mdm_departments.record_key`, for routing and for the signatory list.
+  departmentKey String? @map("department_key") @db.Uuid
+  specimenTypeKey String? @map("specimen_type_key") @db.Uuid
+  containerKey    String? @map("container_key") @db.Uuid
+  volumeMl        Decimal? @map("volume_ml") @db.Decimal(8, 2)
+  isPanel     Boolean @default(false) @map("is_panel")
+  resultType  LabResultType @default(numeric) @map("result_type")
+  unit        String? @db.VarChar(32)
+  decimals    Int?
+  /// The analytical method (e.g. "CLIA", "HPLC", "Sandwich ELISA"). Printed on
+  /// the report, and part of the reference-range key: a range established on
+  /// one method does not transfer to another.
+  method      String? @db.VarChar(160)
+  /// A calculated test derives from other results rather than an analyzer
+  /// (eGFR CKD-EPI, LDL Friedewald, anion gap). `calc_formula` names the
+  /// implementation the service dispatches on — a formula string is not
+  /// evaluated as code.
+  isCalculated Boolean @default(false) @map("is_calculated")
+  calcFormulaKey String? @map("calc_formula_key") @db.VarChar(64)
+  /// `docs/prompts/phase-03 §3.1`: TAT targets per test *and priority*. The
+  /// per-source and per-department overrides live in `lab.tat_targets`; these
+  /// are the defaults every hospital gets on day one.
+  tatRoutineMinutes Int? @map("tat_routine_minutes")
+  tatUrgentMinutes  Int? @map("tat_urgent_minutes")
+  tatStatMinutes    Int? @map("tat_stat_minutes")
+  /// Sent to a referral lab by default. The partner is `referral_lab_key`.
+  isOutsourcedDefault Boolean @default(false) @map("is_outsourced_default")
+  referralLabKey      String? @map("referral_lab_key") @db.Uuid
+  /// `OP-004 §5`: the NABL logo prints only on accredited-scope tests, and the
+  /// footer carries a disclaimer for everything else. A boolean is the cheap
+  /// answer; `lab.labq_scope_tests` is the evidence behind it.
+  isNablScope Boolean @default(false) @map("is_nabl_scope")
+  /// HIV, genetic, PNDT-adjacent. Drives `lab.result.sensitive.read` and blocks
+  /// WhatsApp/SMS delivery (`OP-004 §3.6.3`).
+  isSensitive Boolean @default(false) @map("is_sensitive")
+  requiresFasting Boolean @default(false) @map("requires_fasting")
+  fastingHours    Decimal? @map("fasting_hours") @db.Decimal(5, 2)
+  /// `mdm_instructions.record_key` — the patient-facing preparation text.
+  prepInstructionKey String? @map("prep_instruction_key") @db.Uuid
+  /// → `mdm_services.record_key`. What RC-003 prices and OP-005 bills.
+  serviceKey  String? @map("service_key") @db.Uuid
+  /// `OP-004 §3.3.4`: reflex rules ("TSH abnormal → FT4"). JSONB because the
+  /// shape is a rule expression the service interprets, and because a hospital
+  /// authors them. Never queried in a WHERE without an expression index.
+  reflexRules Json? @map("reflex_rules") @db.JsonB
+  /// `EN-031 §5`: an accredited test is not orderable until it has an approved
+  /// method validation, a current calibration, an active QC schedule with
+  /// targets, a competent operator and an EQA enrolment. This is the flag the
+  /// quality manager flips once all five hold; the trigger in the migration
+  /// refuses to set it while `is_nabl_scope` is true and the evidence is absent.
+  isOrderable Boolean @default(true) @map("is_orderable")
+  /// `OP-004 §3.3.3`: values outside this are absurd, not abnormal, and are
+  /// refused at entry rather than flagged. Distinct from the critical bounds in
+  /// `lab.reference_ranges`, which are real and must reach a clinician fast.
+  absurdLow   Decimal? @map("absurd_low") @db.Decimal(18, 6)
+  absurdHigh  Decimal? @map("absurd_high") @db.Decimal(18, 6)
+  notes       String? @db.Text
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@index([hospitalId, loincCode])
+  @@index([hospitalId, discipline, status, name])
+  @@map("mdm_lab_tests")
+  @@schema("mdm")
+}
+
+/// One analyte of a multi-analyte test. A CBC has nineteen; a serum sodium has
+/// none, and its result is stored against the test itself with a null parameter.
+model MdmLabTestParameter {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  version     Int     @default(1)
+  /// → `mdm_lab_tests.record_key`.
+  testKey     String  @map("test_key") @db.Uuid
+  code        String  @db.VarChar(32)
+  name        String  @db.VarChar(300)
+  loincCode   String? @map("loinc_code") @db.VarChar(24)
+  resultType  LabResultType @default(numeric) @map("result_type")
+  unit        String? @db.VarChar(32)
+  decimals    Int?
+  method      String? @db.VarChar(160)
+  sequence    Int     @default(0)
+  /// Printed on the report but not itself reportable (a haematocrit used only to
+  /// derive an index). Kept, because a NABL assessor asks how the index was got.
+  isReportable Boolean @default(true) @map("is_reportable")
+  isCalculated Boolean @default(false) @map("is_calculated")
+  calcFormulaKey String? @map("calc_formula_key") @db.VarChar(64)
+  absurdLow   Decimal? @map("absurd_low") @db.Decimal(18, 6)
+  absurdHigh  Decimal? @map("absurd_high") @db.Decimal(18, 6)
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, testKey, status, sequence])
+  @@index([hospitalId, loincCode])
+  @@map("mdm_lab_test_parameters")
+  @@schema("mdm")
+}
+
+/// A panel's members. Effective-dated like everything else, because a hospital
+/// that adds vitamin D to its "Master Health Check" in April must still be able
+/// to reprint a January report showing what was actually included then.
+model MdmLabPanelMember {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  version     Int     @default(1)
+  /// → `mdm_lab_tests.record_key` of the panel.
+  panelKey    String  @map("panel_key") @db.Uuid
+  /// → `mdm_lab_tests.record_key` of the member.
+  memberTestKey String @map("member_test_key") @db.Uuid
+  sequence    Int     @default(0)
+  /// A member that is dropped when the panel is ordered for a patient the rule
+  /// excludes (a PSA in a female patient) rather than resulted as "not done".
+  isOptional  Boolean @default(false) @map("is_optional")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, panelKey, status, sequence])
+  @@index([hospitalId, memberTestKey])
+  @@map("mdm_lab_panel_members")
+  @@schema("mdm")
+}
+
+/// The imaging procedure catalogue. `EN-035 §4` puts it here and names EN-027 as
+/// its owner; `OP-008 §4` lists the same columns as `rad_procedures (mdm)`.
+///
+/// `is_pcpndt` is the column the whole PC-PNDT machinery hangs off: an exam of a
+/// procedure carrying it cannot be completed, and a report of it cannot be
+/// signed, without a complete `rad.rad_form_f`. It is not a preference.
+model MdmRadProcedure {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  version     Int     @default(1)
+  code        String  @db.VarChar(32)
+  name        String  @db.VarChar(300)
+  modality    RadModality
+  /// SNOMED CT body structure, plus the DICOM body-part-examined string the
+  /// modality will actually send.
+  bodyPartSnomed String? @map("body_part_snomed") @db.VarChar(32)
+  bodyPartDicom  String? @map("body_part_dicom") @db.VarChar(64)
+  radlexPlaybookId String? @map("radlex_playbook_id") @db.VarChar(32)
+  loincCode   String? @map("loinc_code") @db.VarChar(24)
+  lateralityRequired Boolean @default(false) @map("laterality_required")
+  contrastDefault    Boolean @default(false) @map("contrast_default")
+  durationMinutes    Int? @map("duration_minutes")
+  prepInstructionKey String? @map("prep_instruction_key") @db.Uuid
+  consentRequired    Boolean @default(false) @map("consent_required")
+  /// `OP-008 §3.1.2`'s safety screen, as configuration rather than as code.
+  requiresPregnancyCheck Boolean @default(false) @map("requires_pregnancy_check")
+  requiresCreatinine     Boolean @default(false) @map("requires_creatinine")
+  requiresMriSafety      Boolean @default(false) @map("requires_mri_safety")
+  sedationOption         Boolean @default(false) @map("sedation_option")
+  /// True for every ionising procedure. A dose record is required before an
+  /// exam of one may be closed (`OP-008 §5`, AERB).
+  isIonising  Boolean @default(false) @map("is_ionising")
+  /// **PC-PNDT.** Obstetric ultrasound. The Pre-Conception and Pre-Natal
+  /// Diagnostic Techniques (Prohibition of Sex Selection) Act 1994 makes Form F
+  /// a statutory record and sex determination a criminal offence; §C of the
+  /// migration enforces both, and asserts that no column anywhere in `rad`
+  /// could hold a foetal sex.
+  isPcpndt    Boolean @default(false) @map("is_pcpndt")
+  /// Diagnostic reference levels for the DRL comparison in `OP-008 §3.6.2`.
+  drlCtdivolMgy Decimal? @map("drl_ctdivol_mgy") @db.Decimal(10, 3)
+  drlDlpMgycm   Decimal? @map("drl_dlp_mgycm") @db.Decimal(12, 3)
+  drlDapGycm2   Decimal? @map("drl_dap_gycm2") @db.Decimal(12, 4)
+  /// k-factor for the effective-dose estimate, by body region. Paediatric
+  /// factors are held per age band in `rad.rad_dose_k_factors`.
+  effectiveDoseKFactor Decimal? @map("effective_dose_k_factor") @db.Decimal(10, 6)
+  defaultReportTemplateKey String? @map("default_report_template_key") @db.Uuid
+  serviceKey  String? @map("service_key") @db.Uuid
+  tatRoutineMinutes Int? @map("tat_routine_minutes")
+  tatUrgentMinutes  Int? @map("tat_urgent_minutes")
+  tatStatMinutes    Int? @map("tat_stat_minutes")
+  notes       String? @db.Text
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  replacedByKey String? @map("replaced_by_key") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@index([hospitalId, modality, status, name])
+  @@map("mdm_rad_procedures")
+  @@schema("mdm")
+}
+
+/// `OP-022 §4`: the flag on the service catalogue that says a service is
+/// reported through the investigation console rather than through the LIS or
+/// the RIS — an ECG strip, a PFT trace, an endoscopy image set, an outside
+/// report being filed.
+model MdmInvestigationService {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  version     Int     @default(1)
+  code        String  @db.VarChar(32)
+  name        String  @db.VarChar(300)
+  /// → `mdm_services.record_key`.
+  serviceKey  String? @map("service_key") @db.Uuid
+  modalityGroup InvestigationModalityGroup @map("modality_group")
+  reportTemplateKey String? @map("report_template_key") @db.Uuid
+  prepInstructionKey String? @map("prep_instruction_key") @db.Uuid
+  tatReportMinutes  Int? @map("tat_report_minutes")
+  requiresSlot Boolean @default(false) @map("requires_slot")
+  /// `OP-022 §5`: residents cannot finalise a service that requires a
+  /// consultant's countersignature.
+  cosignRequired Boolean @default(false) @map("cosign_required")
+  /// A non-DICOM obstetric ultrasound still falls under PC-PNDT.
+  isPcpndt    Boolean @default(false) @map("is_pcpndt")
+  /// Dental X-ray and fluoroscopy stills are ionising and their dose is logged
+  /// in the OP-008 register (`OP-022 §5`).
+  isIonising  Boolean @default(false) @map("is_ionising")
+  /// At least one media file or a measurements form is required before sign.
+  requiresMedia Boolean @default(true) @map("requires_media")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(draft)
+  changeSetId   String? @map("change_set_id") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, effectiveFrom])
+  @@index([hospitalId, code])
+  @@map("mdm_investigation_services")
+  @@schema("mdm")
+}
+
+/// `OP-022 §4`'s `modality_group`.
+enum InvestigationModalityGroup {
+  usg_non_dicom
+  ecg
+  tmt
+  echo
+  holter
+  pft
+  audiometry
+  eeg
+  ncv
+  emg
+  endoscopy
+  colonoscopy
+  bronchoscopy
+  fundus
+  oct
+  dental_xray
+  dermatoscopy
+  clinical_photo
+  external_report
+  other
+
+  @@schema("mdm")
+}

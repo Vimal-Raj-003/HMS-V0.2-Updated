@@ -1,0 +1,641 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-008 — PACS index (schema `rad`, prefix `pacs_`)
+//
+// **Orthanc has its own database. This is not it.** `EN-008 §4` says so in its
+// heading, and `docs/prompts/phase-03 §Scope` repeats it: "PACS (EN-008):
+// study/series/instance references to Orthanc, not the pixels themselves."
+//
+// So every table here holds identifiers, counts, sizes and lifecycle state. No
+// column holds pixel data, and the only thing resembling an image is a key-image
+// *reference*. A DICOM instance is one row of about 300 bytes pointing at an
+// object that may be 20 MB; the archive stores the object, this stores the fact
+// that it exists and which study it belongs to.
+//
+// ── Why `pacs_instances` is partitioned and `pacs_series` is not ────────────
+//
+// A CT of the abdomen is 1–3 thousand instances in two or three series. At the
+// exit-gate volumes this is the second-largest table in the phase after
+// `lab.result_versions`, and it is written in bursts as a study lands. Series
+// and study counts are two orders of magnitude smaller and are read constantly
+// by the worklist, so partitioning them would cost more than it saved.
+//
+// ── Why the audit of viewing is its own partitioned table ───────────────────
+//
+// `EN-008 §5`: "every view logged". `docs/04 §6` requires PHI reads to be
+// auditable. A radiologist scrolling a study generates a row per open, and a
+// tele-radiologist's access must be reconstructible years later, so
+// `pacs_view_audit` grows daily and ages out by partition rather than by DELETE.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PacsStudyStatus {
+  scheduled
+  in_progress
+  acquired
+  incomplete
+  reported
+  archived
+  purged
+  legal_hold
+
+  @@schema("rad")
+}
+
+enum PacsStorageTier {
+  hot
+  warm
+  cold
+  offline
+
+  @@schema("rad")
+}
+
+/// How a stored study was tied to an order. `EN-008 §5`: "Study auto-links only
+/// when accession matches; fallback match creates `reconciliation_status =
+/// needs_review` (never silently attach to wrong patient)."
+enum PacsMatchBasis {
+  accession
+  study_uid
+  mwl
+  fallback
+  manual
+  unmatched
+
+  @@schema("rad")
+}
+
+enum PacsReconciliationStatus {
+  matched
+  needs_review
+  reconciled
+  rejected
+
+  @@schema("rad")
+}
+
+enum PacsViewAction {
+  view
+  download
+  export
+  annotate
+  print
+  burn
+  share
+
+  @@schema("rad")
+}
+
+/// The archive itself. On-prem, cloud, or a partner's for tele-radiology.
+model PacsServer {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  name        String  @db.VarChar(160)
+  /// Internal DICOMweb base URL. Never exposed beyond the viewer gateway
+  /// (`EN-008 §5`: "direct Orthanc ports not exposed").
+  baseUrl     String  @map("base_url") @db.VarChar(300)
+  dicomAet    String  @map("dicom_aet") @db.VarChar(16)
+  dicomPort   Int     @map("dicom_port")
+  /// `primary` | `replica` | `central` | `partner`. CHECKed.
+  role        String  @db.VarChar(16)
+  storageTierConfig Json? @map("storage_tier_config") @db.JsonB
+  /// `EN-008 §5`: "per-hospital Orthanc instance recommended; if shared, every
+  /// DICOMweb request is filtered by hospital label". This is that label.
+  tenantLabel String? @map("tenant_label") @db.VarChar(64)
+  status      String  @default("active") @db.VarChar(24)
+  lastHeartbeatAt DateTime? @map("last_heartbeat_at") @db.Timestamptz(6)
+  /// Replication lag alarm at 15 minutes (`EN-008 §5`).
+  replicationLagSeconds Int? @map("replication_lag_seconds")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  studies PacsStudy[]
+
+  @@unique([hospitalId, dicomAet], map: "pacs_servers_aet_key")
+  @@index([hospitalId, branchId, status])
+  @@map("pacs_servers")
+  @@schema("rad")
+}
+
+/// A modality as the archive knows it — the DICOM peer, not the room. The room
+/// is `rad.rad_modality_rooms`; they are joined by AE title, which is the only
+/// identity both sides share.
+model PacsModality {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  aet         String  @db.VarChar(16)
+  ip          String? @db.VarChar(64)
+  port        Int?
+  modalityType RadModality @map("modality_type")
+  roomId      String? @map("room_id") @db.Uuid
+  mwlEnabled  Boolean @default(true) @map("mwl_enabled")
+  mppsEnabled Boolean @default(true) @map("mpps_enabled")
+  storageCommit Boolean @default(false) @map("storage_commit")
+  /// `rdsr` | `header` | `ocr` | `manual` — how dose comes off this device.
+  doseCapture String  @default("manual") @map("dose_capture") @db.VarChar(16)
+  tlsEnabled  Boolean @default(false) @map("tls_enabled")
+  isActive    Boolean @default(true) @map("is_active")
+  assetRef    String? @map("asset_ref") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, aet], map: "pacs_modalities_aet_key")
+  @@index([hospitalId, branchId, isActive])
+  @@map("pacs_modalities")
+  @@schema("rad")
+}
+
+model PacsStudy {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  /// DICOM (0020,000D). Unique across the tenant.
+  studyInstanceUid String @map("study_instance_uid") @db.VarChar(64)
+  serverId    String? @map("server_id") @db.Uuid
+  /// Orthanc's own opaque id, so a DICOMweb call does not have to re-resolve
+  /// the UID on every request.
+  orthancId   String? @map("orthanc_id") @db.VarChar(64)
+  /// The MPI patient, once matched. **Nullable on purpose**: a study can arrive
+  /// before it is matched, and forcing a patient at insert is exactly how a
+  /// study gets attached to the wrong one.
+  patientId   String? @map("patient_id") @db.Uuid
+  /// The UHID as the DICOM object actually carried it, kept verbatim even after
+  /// a merge, because a reconciliation dispute is about what the tag said.
+  uhidAtAcquisition String? @map("uhid_at_acquisition") @db.VarChar(32)
+  accessionNo String? @map("accession_no") @db.VarChar(32)
+  orderItemId String? @map("order_item_id") @db.Uuid
+  examId      String? @map("exam_id") @db.Uuid
+  modality    RadModality?
+  bodyPartDicom String? @map("body_part_dicom") @db.VarChar(64)
+  studyDate   DateTime? @map("study_date") @db.Timestamptz(6)
+  description String? @db.VarChar(300)
+  seriesCount Int     @default(0) @map("series_count")
+  instanceCount Int   @default(0) @map("instance_count")
+  sizeBytes   BigInt  @default(0) @map("size_bytes")
+  status      PacsStudyStatus @default(scheduled)
+  tier        PacsStorageTier @default(hot)
+  matchedBy   PacsMatchBasis  @default(unmatched) @map("matched_by")
+  reconciliationStatus PacsReconciliationStatus @default(needs_review) @map("reconciliation_status")
+  reconciliationNote String? @map("reconciliation_note") @db.Text
+  /// Key images chosen by the radiologist, as SOP instance UIDs. References,
+  /// never pixels.
+  keyImageUids String[] @default([]) @map("key_image_uids")
+  /// `EN-008 §5`: "MLC studies flagged and require `rad.mlc.read`", and are
+  /// never purged.
+  isMlc       Boolean @default(false) @map("is_mlc")
+  legalHold   Boolean @default(false) @map("legal_hold")
+  legalHoldReason String? @map("legal_hold_reason") @db.Text
+  /// `EN-008 §5`: obstetric ultrasound studies are restricted from patient
+  /// share unless policy enables it. Snapshotted from the procedure so a master
+  /// edit cannot lift the restriction retroactively.
+  isPcpndt    Boolean @default(false) @map("is_pcpndt")
+  /// Retention, computed from `pacs_retention_policies` at archive time.
+  retainUntil DateTime? @map("retain_until") @db.Date
+  purgedAt    DateTime? @map("purged_at") @db.Timestamptz(6)
+  firstStoredAt DateTime? @map("first_stored_at") @db.Timestamptz(6)
+  lastStoredAt  DateTime? @map("last_stored_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  server PacsServer? @relation(fields: [serverId], references: [id], onDelete: Restrict)
+  series PacsSeries[]
+
+  @@unique([hospitalId, studyInstanceUid], map: "pacs_studies_uid_key")
+  @@index([hospitalId, patientId, studyDate(sort: Desc)])
+  @@index([hospitalId, accessionNo])
+  @@index([hospitalId, branchId, status, studyDate(sort: Desc)])
+  @@index([hospitalId, reconciliationStatus, createdAt(sort: Desc)])
+  @@map("pacs_studies")
+  @@schema("rad")
+}
+
+model PacsSeries {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  studyId     String  @map("study_id") @db.Uuid
+  seriesInstanceUid String @map("series_instance_uid") @db.VarChar(64)
+  seriesNumber Int?   @map("series_number")
+  orthancId   String? @map("orthanc_id") @db.VarChar(64)
+  modality    RadModality?
+  bodyPartDicom String? @map("body_part_dicom") @db.VarChar(64)
+  description String? @db.VarChar(300)
+  sopClassUid String? @map("sop_class_uid") @db.VarChar(64)
+  instanceCount Int   @default(0) @map("instance_count")
+  sizeBytes   BigInt  @default(0) @map("size_bytes")
+  /// A series a technologist marked as rejected (a mis-positioned acquisition).
+  /// Kept — the AERB repeat-rate KPI counts it — but hidden from the reading
+  /// hanging protocol.
+  isRejected  Boolean @default(false) @map("is_rejected")
+  rejectionReason String? @map("rejection_reason") @db.VarChar(200)
+  /// A dose SR or a structured report series, so the dose parser knows where to
+  /// look without walking every instance.
+  isDoseSr    Boolean @default(false) @map("is_dose_sr")
+  isStructuredReport Boolean @default(false) @map("is_structured_report")
+  seriesDate  DateTime? @map("series_date") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  study PacsStudy @relation(fields: [studyId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, seriesInstanceUid], map: "pacs_series_uid_key")
+  @@index([hospitalId, studyId, seriesNumber])
+  @@map("pacs_series")
+  @@schema("rad")
+}
+
+/// One row per DICOM object. Identifiers and sizes only.
+///
+/// Partitioned monthly on `stored_at` (`timestamptz(3)`, D-31) — a busy CT
+/// scanner produces tens of thousands of these a day and the table must age out
+/// by DROP PARTITION, not by DELETE (`docs/07 §4`).
+model PacsInstance {
+  id          String  @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  /// → `rad.pacs_series.id`. A plain uuid rather than a declared foreign key
+  /// only because this table is partitioned; the series is never deleted while
+  /// instances exist (DELETE is revoked in §D).
+  seriesId    String  @map("series_id") @db.Uuid
+  studyId     String  @map("study_id") @db.Uuid
+  sopInstanceUid String @map("sop_instance_uid") @db.VarChar(64)
+  sopClassUid String? @map("sop_class_uid") @db.VarChar(64)
+  instanceNumber Int? @map("instance_number")
+  orthancId   String? @map("orthanc_id") @db.VarChar(64)
+  sizeBytes   BigInt  @default(0) @map("size_bytes")
+  transferSyntaxUid String? @map("transfer_syntax_uid") @db.VarChar(64)
+  numberOfFrames Int? @map("number_of_frames")
+  /// True for the X-Ray Radiation Dose SR object the dose parser reads.
+  isRdsr      Boolean @default(false) @map("is_rdsr")
+  isKeyImage  Boolean @default(false) @map("is_key_image")
+
+  storedAt    DateTime @default(now()) @map("stored_at") @db.Timestamptz(3)
+  createdBy   String?  @map("created_by") @db.Uuid
+
+  @@id([id, storedAt])
+  @@unique([hospitalId, sopInstanceUid, storedAt], map: "pacs_instances_sop_key")
+  @@index([hospitalId, seriesId, instanceNumber])
+  @@index([hospitalId, studyId, storedAt])
+  @@map("pacs_instances")
+  @@schema("rad")
+}
+
+/// The modality worklist entry a scanner queries by C-FIND. `EN-035 §5`:
+/// "Cancelled or rescheduled orders must be withdrawn from MWL within 60 seconds
+/// so a patient is never scanned against a cancelled order."
+model PacsMwlEntry {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  orderItemId String  @map("order_item_id") @db.Uuid
+  accessionNo String  @map("accession_no") @db.VarChar(32)
+  studyInstanceUid String @map("study_instance_uid") @db.VarChar(64)
+  scheduledProcedureStepId String @map("scheduled_procedure_step_id") @db.VarChar(64)
+  /// The demographics as they will be published to the modality, in DICOM
+  /// format — `patient_name_dicom` is a PN-formatted string, deliberately
+  /// different from the HMS name. Snapshotted so a name edit mid-scan does not
+  /// change what the modality already read.
+  patientNameDicom String @map("patient_name_dicom") @db.VarChar(200)
+  patientIdDicom String @map("patient_id_dicom") @db.VarChar(64)
+  patientBirthDate DateTime? @map("patient_birth_date") @db.Date
+  /// The DICOM Patient's Sex tag (0010,0040) — M / F / O. This is the patient's
+  /// own recorded sex, required by the DICOM standard for every worklist entry
+  /// and present on every object a modality produces. It has nothing whatever to
+  /// do with the foetus, and the migration's PC-PNDT assertion is written to
+  /// match foetal-sex column names specifically so that this legitimate,
+  /// standard-mandated field is not caught by it.
+  patientSexDicom String? @map("patient_sex_dicom") @db.VarChar(1)
+  modalityAet String  @map("modality_aet") @db.VarChar(16)
+  modality    RadModality
+  requestedProcedureId String @map("requested_procedure_id") @db.VarChar(64)
+  requestedProcedureDescription String? @map("requested_procedure_description") @db.VarChar(300)
+  referringPhysicianName String? @map("referring_physician_name") @db.VarChar(200)
+  scheduledAt DateTime @map("scheduled_at") @db.Timestamptz(6)
+  /// `EN-008 §5`: entries expire 24 h after schedule (configurable).
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz(6)
+  /// `pending` | `queried` | `in_progress` | `completed` | `cancelled` |
+  /// `expired`. CHECKed.
+  status      String  @default("pending") @db.VarChar(24)
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(6)
+  firstQueriedAt DateTime? @map("first_queried_at") @db.Timestamptz(6)
+  queryCount  Int     @default(0) @map("query_count")
+  withdrawnAt DateTime? @map("withdrawn_at") @db.Timestamptz(6)
+  withdrawnReason String? @map("withdrawn_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, studyInstanceUid], map: "pacs_mwl_entries_study_key")
+  @@index([hospitalId, modalityAet, status, scheduledAt])
+  @@index([hospitalId, accessionNo])
+  @@map("pacs_mwl_entries")
+  @@schema("rad")
+}
+
+/// MPPS N-CREATE / N-SET. `EN-035 §5`: "MPPS drives status."
+model PacsMppsEvent {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  sopInstanceUid String @map("sop_instance_uid") @db.VarChar(64)
+  studyInstanceUid String? @map("study_instance_uid") @db.VarChar(64)
+  accessionNo String? @map("accession_no") @db.VarChar(32)
+  scheduledProcedureStepId String? @map("scheduled_procedure_step_id") @db.VarChar(64)
+  modalityAet String  @map("modality_aet") @db.VarChar(16)
+  /// `IN PROGRESS` | `COMPLETED` | `DISCONTINUED`, as the standard spells them.
+  status      String  @db.VarChar(24)
+  startedAt   DateTime? @map("started_at") @db.Timestamptz(6)
+  endedAt     DateTime? @map("ended_at") @db.Timestamptz(6)
+  discontinueReason String? @map("discontinue_reason") @db.VarChar(200)
+  performedSeries Json? @map("performed_series") @db.JsonB
+  receivedAt  DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@index([hospitalId, sopInstanceUid, receivedAt])
+  @@index([hospitalId, studyInstanceUid])
+  @@map("pacs_mpps_events")
+  @@schema("rad")
+}
+
+/// `EN-008 §3.3`: every correction to a stored study — reassignment after a
+/// mis-scan, a merge, a split, a tag fix. Append-only, with before/after, because
+/// "we moved a study to another patient" is the single most consequential
+/// operation in a PACS.
+model PacsCorrection {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  studyId     String  @map("study_id") @db.Uuid
+  /// `reassign_patient` | `merge` | `split` | `tag_fix` | `reject` |
+  /// `accession_fix`. CHECKed.
+  type        String  @db.VarChar(24)
+  before      Json?   @db.JsonB
+  after       Json?   @db.JsonB
+  reason      String  @db.Text
+  performedBy String  @map("performed_by") @db.Uuid
+  approvedBy  String? @map("approved_by") @db.Uuid
+  orthancJobId String? @map("orthanc_job_id") @db.VarChar(64)
+  at          DateTime @default(now()) @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@index([hospitalId, studyId, at])
+  @@map("pacs_corrections")
+  @@schema("rad")
+}
+
+/// `EN-008 §5`: "Viewer access only through signed short-lived tokens." The
+/// token itself is never stored — only its digest, its scope and its expiry.
+model PacsAccessToken {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  /// A staff user, or a patient reading their own study through the portal.
+  userId      String? @map("user_id") @db.Uuid
+  patientId   String? @map("patient_id") @db.Uuid
+  tokenHash   String  @map("token_hash") @db.VarChar(64)
+  studyUids   String[] @default([]) @map("study_uids")
+  /// `view` | `download`. CHECKed.
+  scope       String  @db.VarChar(16)
+  /// `care` | `break_glass` | `patient_share` | `telerad` | `audit`. CHECKed —
+  /// and `break_glass` requires a reason, which is the EN-007/EN-024 contract.
+  purpose     String  @db.VarChar(24)
+  breakGlassReason String? @map("break_glass_reason") @db.Text
+  issuedAt    DateTime @default(now()) @map("issued_at") @db.Timestamptz(6)
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz(6)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedBy   String? @map("revoked_by") @db.Uuid
+  useCount    Int     @default(0) @map("use_count")
+  maxUses     Int?    @map("max_uses")
+  issuedIp    String? @map("issued_ip") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@unique([tokenHash], map: "pacs_access_tokens_hash_key")
+  @@index([hospitalId, userId, issuedAt(sort: Desc)])
+  @@index([hospitalId, expiresAt])
+  @@map("pacs_access_tokens")
+  @@schema("rad")
+}
+
+/// Every view, download and export. Partitioned monthly on `at`
+/// (`timestamptz(3)`, D-31).
+model PacsViewAudit {
+  id          String  @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  tokenId     String? @map("token_id") @db.Uuid
+  userId      String? @map("user_id") @db.Uuid
+  patientId   String? @map("patient_id") @db.Uuid
+  studyId     String? @map("study_id") @db.Uuid
+  studyInstanceUid String? @map("study_instance_uid") @db.VarChar(64)
+  action      PacsViewAction
+  /// `care` | `break_glass` | `patient_share` | `telerad` | `audit`.
+  purpose     String? @db.VarChar(24)
+  breakGlassReason String? @map("break_glass_reason") @db.Text
+  instanceCount Int?  @map("instance_count")
+  bytesTransferred BigInt? @map("bytes_transferred")
+  ip          String? @db.VarChar(64)
+  userAgent   String? @map("user_agent") @db.VarChar(300)
+
+  at          DateTime @default(now()) @db.Timestamptz(3)
+
+  @@id([id, at])
+  @@index([hospitalId, studyId, at(sort: Desc)])
+  @@index([hospitalId, userId, at(sort: Desc)])
+  @@index([hospitalId, patientId, at(sort: Desc)])
+  @@map("pacs_view_audit")
+  @@schema("rad")
+}
+
+/// `EN-008 §3.7`: a time-boxed, OTP-protected link to a study. Consent is
+/// mandatory (`EN-008 §5`), which is a CHECK here rather than a service branch.
+model PacsShareLink {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  studyIds    String[] @default([]) @map("study_ids") @db.Uuid
+  /// → `patient.consents.id`. Mandatory: no consent, no share.
+  consentId   String  @map("consent_id") @db.Uuid
+  createdByUserId String @map("created_by_user_id") @db.Uuid
+  /// `patient` | `referrer` | `telerad` | `insurer`. CHECKed.
+  channel     String  @db.VarChar(24)
+  recipientName String? @map("recipient_name") @db.VarChar(200)
+  recipientContactMasked String? @map("recipient_contact_masked") @db.VarChar(64)
+  otpHash     String? @map("otp_hash") @db.VarChar(64)
+  linkTokenHash String @map("link_token_hash") @db.VarChar(64)
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz(6)
+  maxViews    Int     @default(10) @map("max_views")
+  views       Int     @default(0)
+  /// Downloaded JPEGs are watermarked with patient and UHID (`EN-008 §5`); the
+  /// DICOM ZIP is unaltered.
+  watermarkApplied Boolean @default(true) @map("watermark_applied")
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedBy   String? @map("revoked_by") @db.Uuid
+  revokeReason String? @map("revoke_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([linkTokenHash], map: "pacs_share_links_token_key")
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, expiresAt])
+  @@map("pacs_share_links")
+  @@schema("rad")
+}
+
+/// `EN-008 §3.7`: a CD, DVD or USB handed over the counter. Who took it, and
+/// whose signature is on the register.
+model PacsMediaIssue {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  studyIds    String[] @default([]) @map("study_ids") @db.Uuid
+  /// `cd` | `dvd` | `usb` | `iso`. CHECKed.
+  mediaType   String  @map("media_type") @db.VarChar(8)
+  issuedToName String @map("issued_to_name") @db.VarChar(200)
+  issuedToRelation String? @map("issued_to_relation") @db.VarChar(64)
+  issuedToIdProof String? @map("issued_to_id_proof") @db.VarChar(64)
+  issuedBy    String  @map("issued_by") @db.Uuid
+  issuedAt    DateTime @default(now()) @map("issued_at") @db.Timestamptz(6)
+  signatureFileId String? @map("signature_file_id") @db.Uuid
+  chargeIntentId String? @map("charge_intent_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@index([hospitalId, patientId, issuedAt(sort: Desc)])
+  @@map("pacs_media_issues")
+  @@schema("rad")
+}
+
+/// `EN-008 §3.8`: storage tiering and retention, by modality and patient class.
+model PacsRetentionPolicy {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  modality    RadModality?
+  /// `adult` | `minor` | `mlc` | `research` | `all`. CHECKed.
+  patientClass String @map("patient_class") @db.VarChar(16)
+  hotDays     Int     @map("hot_days")
+  warmDays    Int     @map("warm_days")
+  retainYears Int     @map("retain_years")
+  /// `EN-008 §5`: "minors until 18 + 3 years". Expressed as a rule the purge
+  /// planner reads, not as arithmetic buried in code.
+  minorRetainUntilAge Int? @map("minor_retain_until_age")
+  minorExtraYears Int? @map("minor_extra_years")
+  /// Never purge MLC or legal hold. A column so the policy is explicit, and a
+  /// CHECK so it cannot be set false.
+  neverPurgeMlc Boolean @default(true) @map("never_purge_mlc")
+  isActive    Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, branchId, isActive])
+  @@map("pacs_retention_policies")
+  @@schema("rad")
+}
+
+/// `EN-008 §5`: "purge requires two approvals and writes to purge log".
+model PacsPurgeRun {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  policyId    String? @map("policy_id") @db.Uuid
+  plannedAt   DateTime @map("planned_at") @db.Timestamptz(6)
+  studyCount  Int     @default(0) @map("study_count")
+  bytesFreed  BigInt  @default(0) @map("bytes_freed")
+  /// Two approvals, and the CHECK requires them to be different people.
+  approvedBy1 String? @map("approved_by_1") @db.Uuid
+  approvedAt1 DateTime? @map("approved_at_1") @db.Timestamptz(6)
+  approvedBy2 String? @map("approved_by_2") @db.Uuid
+  approvedAt2 DateTime? @map("approved_at_2") @db.Timestamptz(6)
+  /// `planned` | `approved` | `executing` | `completed` | `aborted`. CHECKed.
+  status      String  @default("planned") @db.VarChar(24)
+  executedAt  DateTime? @map("executed_at") @db.Timestamptz(6)
+  /// The study UIDs actually removed. Kept forever: the point of a purge log is
+  /// to be able to say what is gone.
+  purgedStudyUids String[] @default([]) @map("purged_study_uids")
+  abortReason String? @map("abort_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, branchId, status, plannedAt(sort: Desc)])
+  @@map("pacs_purge_runs")
+  @@schema("rad")
+}
+
+/// `EN-008 §4`: which prior studies are worth loading beside a new one.
+model PacsPriorsMapEntry {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  procedureKey String? @map("procedure_key") @db.Uuid
+  modality    RadModality?
+  bodyPartDicom String? @map("body_part_dicom") @db.VarChar(64)
+  /// The procedures and body parts that count as a relevant prior.
+  relevantProcedureKeys String[] @default([]) @map("relevant_procedure_keys") @db.Uuid
+  relevantModalities String[] @default([]) @map("relevant_modalities")
+  relevantBodyParts String[] @default([]) @map("relevant_body_parts")
+  /// Default five years (`EN-008 §5`).
+  lookbackDays Int    @default(1825) @map("lookback_days")
+  maxPriors   Int     @default(3) @map("max_priors")
+  isActive    Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, modality, isActive])
+  @@map("pacs_priors_map")
+  @@schema("rad")
+}
+
+/// `EN-008 §4`: routing — forward, compress, anonymise. The AI-routing action is
+/// declared here but has no consumer until Phase 12 (AI-007).
+model PacsRoutingRule {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  name        String  @db.VarChar(160)
+  priority    Int     @default(100)
+  /// Modality, calling AE, body part.
+  match       Json    @db.JsonB
+  /// Forward-to, compress, anonymise. Never "delete".
+  actions     Json    @db.JsonB
+  isActive    Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, isActive, priority])
+  @@map("pacs_routing_rules")
+  @@schema("rad")
+}

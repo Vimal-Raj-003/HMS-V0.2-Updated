@@ -43,5 +43,5 @@ datasource db {
   // itself would have neither, and every migration touching a trigram index
   // would fail validation for a reason that has nothing to do with the schema.
   shadowDatabaseUrl = env("DATABASE_SHADOW_URL")
-  schemas    = ["core", "mdm", "patient", "clinical", "queue", "engage", "billing", "integration", "analytics"]
+  schemas    = ["core", "mdm", "patient", "clinical", "lab", "rad", "queue", "engage", "billing", "integration", "analytics"]
 }

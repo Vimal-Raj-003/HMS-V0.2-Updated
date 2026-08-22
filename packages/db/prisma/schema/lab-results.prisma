@@ -1,0 +1,815 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-004 §3.3–3.6 — the analytical and post-analytical phases (schema `lab`)
+//
+// ── Why a result is two tables ──────────────────────────────────────────────
+//
+// `docs/prompts/phase-03 §Non-negotiables 5`: "Results are append-only and
+// versioned. An amended result creates a new version with a reason; the original
+// stays. Follow the `clinical.documents`/`document_versions` pattern Phase 2
+// established."
+//
+// So it is the same pattern, for the same reasons:
+//
+//   `lab.lab_results`          the identity — which analyte of which order
+//                              line, for which patient — plus a projection of
+//                              the head version, so a worklist does not need a
+//                              lateral join.
+//   `lab.lab_result_versions`  the values. Append-only, hash-chained, and
+//                              immutable from INSERT rather than from signature
+//                              — see §C.5 of the migration for why that line is
+//                              drawn around the measurement and not around a
+//                              status. An amendment is the next version, with a
+//                              reason; the original stays.
+//
+// The digest and the chain link are computed by the database from the row's own
+// content, exactly as `clinical.seal_document_version()` does, because a hash
+// chain whose links the writer supplies proves only that the writer can compute
+// sha256.
+//
+// ── Why both are partitioned monthly ────────────────────────────────────────
+//
+// `docs/prompts/phase-03` exit gate 8 is 20 000 results/day. `OP-004 §4` does
+// the arithmetic and reaches ~36 M rows a year. Both tables therefore partition
+// by month, and both partition keys are `timestamptz(3)` for the reason §A of
+// the Phase-2 migration gives at length (D-31): a microsecond value read into a
+// JavaScript `Date` and written back as half of a composite primary key matches
+// zero rows, silently.
+//
+// ── Why the value is typed ──────────────────────────────────────────────────
+//
+// `docs/prompts/phase-03 §Constraints`: "Result values are typed (numeric with
+// units, coded, text) — do not store everything as strings." A version therefore
+// carries `value_numeric`, `value_coded` and `value_text` and a CHECK that
+// exactly the column matching `result_type` is populated. A numeric potassium
+// stored as the string "6.8" cannot be compared against a critical bound, and a
+// critical bound that cannot fire is the defect this whole phase is about.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `OP-004 §3.3.3`: the flag printed beside the value. `critical_low` and
+/// `critical_high` are separate values rather than a boolean beside `low`/`high`
+/// because the critical-value machinery keys off the flag alone, and a boolean
+/// that has to agree with an enum is a boolean that eventually does not.
+enum LabResultFlag {
+  normal
+  low
+  high
+  critical_low
+  critical_high
+  abnormal
+  positive
+  negative
+  reactive
+  non_reactive
+  indeterminate
+
+  @@schema("lab")
+}
+
+/// The two-level release `OP-004 §3.4` describes, plus the states a result can
+/// be in before it gets there.
+enum LabResultStatus {
+  /// Entered or received, nobody has looked at it.
+  unverified
+  /// Held because the analyte's QC is not in a state that permits release.
+  /// Distinct from `unverified`: a QC hold is a quality decision, not a queue.
+  qc_hold
+  /// Held for a delta-check breach the configuration says to hold on.
+  delta_hold
+  /// Level 1, technical verification.
+  verified
+  /// Level 2, medical authorisation by a signatory. The reportable state.
+  authorised
+  /// A later version supersedes this one.
+  amended
+  cancelled
+
+  @@schema("lab")
+}
+
+/// How the value got here. `auto` is `EN-004 §3.4`'s auto-verification, and it
+/// is a first-class source because NABL requires every auto decision to be
+/// traceable to the rule set that made it.
+enum LabResultSource {
+  manual
+  analyzer
+  calculated
+  outsourced
+  imported
+  corrected
+
+  @@schema("lab")
+}
+
+/// `OP-004 §5` and `EN-031 §5`. The state of the reference ranges and of the
+/// delta rule that produced a flag, snapshotted onto the version so a report
+/// reprinted in 2031 shows the interval that was actually used.
+model LabReferenceRange {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  version     Int     @default(1)
+  /// → `mdm_lab_tests.record_key`.
+  testKey     String  @map("test_key") @db.Uuid
+  /// → `mdm_lab_test_parameters.record_key`. Null for a single-analyte test.
+  parameterKey String? @map("parameter_key") @db.Uuid
+  /// `any` | `male` | `female` | `other`. A CHECK, not an enum, so a hospital
+  /// that must record a fourth legal category can, without a migration.
+  sex         String  @default("any") @db.VarChar(16)
+  ageMinDays  Int     @default(0) @map("age_min_days")
+  ageMaxDays  Int     @default(43800) @map("age_max_days")
+  pregnancy   PregnancyStatus?
+  /// The specimen and method the interval was established on. A serum sodium
+  /// range does not transfer to plasma, and an HPLC HbA1c range does not
+  /// transfer to immunoturbidimetry.
+  specimenTypeKey String? @map("specimen_type_key") @db.Uuid
+  method      String? @db.VarChar(160)
+  unit        String? @db.VarChar(32)
+  /// The **normal** band. `OP-007`'s vitals ranges were seeded once with the
+  /// abnormal numbers in these columns; `src/seed/lab-ranges.spec.ts` exists so
+  /// that cannot happen here.
+  low         Decimal? @db.Decimal(18, 6)
+  high        Decimal? @db.Decimal(18, 6)
+  /// The **panic** bounds. Outside these, `OP-004 §3.5` fires immediately.
+  criticalLow  Decimal? @map("critical_low") @db.Decimal(18, 6)
+  criticalHigh Decimal? @map("critical_high") @db.Decimal(18, 6)
+  /// For a qualitative test: the coded value that counts as normal.
+  textNormal  String? @map("text_normal") @db.VarChar(200)
+  /// A coded result matching any of these raises the critical workflow — a
+  /// positive CBNAAT for MTB, a reactive HIV screen.
+  criticalCodedValues String[] @default([]) @map("critical_coded_values")
+  interpretationNote String? @map("interpretation_note") @db.Text
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(active)
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, testKey, parameterKey, status])
+  @@index([hospitalId, status, effectiveFrom])
+  @@map("lab_reference_ranges")
+  @@schema("lab")
+}
+
+/// `OP-004 §3.3.3` and `EN-004 §5`: "Delta check uses last final result of same
+/// test for patient within window, ignoring different specimen types."
+model LabDeltaCheckRule {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  version     Int     @default(1)
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  /// `absolute` | `percent` | `rate_per_hour`.
+  mode        String  @db.VarChar(24)
+  threshold   Decimal @db.Decimal(18, 6)
+  windowHours Decimal @map("window_hours") @db.Decimal(8, 2)
+  /// `flag` writes the delta flag and lets the result through; `hold` puts it in
+  /// `delta_hold` until a human looks. Never silently drops it.
+  action      String  @default("flag") @db.VarChar(16)
+  /// Only compare against a previous result on the same specimen type.
+  sameSpecimenOnly Boolean @default(true) @map("same_specimen_only")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(active)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, testKey, parameterKey, status])
+  @@map("lab_delta_check_rules")
+  @@schema("lab")
+}
+
+/// The identity of one measurable thing: one parameter of one order line.
+/// Partitioned monthly on `created_at`; the composite primary key is
+/// `(id, created_at)` because a partitioned table's primary key must contain
+/// every partitioning column.
+model LabResult {
+  id          String  @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  orderId     String  @map("order_id") @db.Uuid
+  orderTestId String  @map("order_test_id") @db.Uuid
+  /// Denormalised, exactly as `OP-004 §4` prescribes ("add patient_id
+  /// denormalised … for cumulative"): the cumulative report reads across years
+  /// of partitions and cannot afford a join to `lab_order_tests` for each.
+  patientId   String  @map("patient_id") @db.Uuid
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  /// LOINC of the analyte, snapshotted. The cumulative report and the ABDM
+  /// DiagnosticReport both key off it.
+  loincCode   String? @map("loinc_code") @db.VarChar(24)
+  analyteName String  @map("analyte_name") @db.VarChar(300)
+  resultType  LabResultType @default(numeric) @map("result_type")
+  /// The head of the version chain, maintained by trigger — never by a caller,
+  /// for the reason `clinical.sync_document_head()` gives.
+  currentVersion Int  @default(0) @map("current_version")
+  currentStatus  LabResultStatus @default(unverified) @map("current_status")
+  /// A projection of the head version's flag, so the "criticals outstanding"
+  /// worklist is a partial-index scan rather than a join.
+  currentFlag LabResultFlag? @map("current_flag")
+  /// True from the moment any version of this result is flagged critical, and
+  /// never cleared. `docs/DECISIONS.md D-10`: release is never withheld, so this
+  /// column is not a gate — it is the reason an alert exists.
+  everCritical Boolean @default(false) @map("ever_critical")
+  sequence    Int     @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@id([id, createdAt])
+  // The "one result per (order line, analyte)" uniqueness is NOT declared here.
+  // A unique index on a partitioned table must contain every partitioning
+  // column, so `(order_test_id, parameter_key, created_at)` is the best a
+  // constraint can do — and that permits a second row for the same analyte a
+  // millisecond later, which is precisely the duplicate it was meant to stop.
+  // `parameter_key` is also nullable for single-analyte tests, and NULLs are
+  // distinct in a plain unique index. Both are enforced by
+  // `lab.enforce_result_identity()` in §C of the migration instead, which can
+  // look across partitions and treat NULL as a value.
+  @@index([hospitalId, orderTestId])
+  @@index([hospitalId, patientId, testKey, createdAt(sort: Desc)])
+  @@index([hospitalId, branchId, currentStatus, createdAt(sort: Desc)])
+  @@map("lab_results")
+  @@schema("lab")
+}
+
+/// The values. Append-only; §D revokes UPDATE and DELETE and the trigger in §C
+/// refuses both anyway, so a bug that bypassed one still meets the other.
+model LabResultVersion {
+  id          String  @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  /// → `lab_results.id`. **Not** a declared foreign key: `lab.results` is
+  /// partitioned on `created_at`, so a foreign key would have to carry the
+  /// parent's partition key, and an amendment written in March to a result
+  /// created in January would then have to store January's timestamp in its own
+  /// March-partitioned row. The integrity is enforced by the trigger in §C,
+  /// which resolves the parent by id and refuses an orphan.
+  resultId    String  @map("result_id") @db.Uuid
+  orderTestId String  @map("order_test_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  version     Int
+  status      LabResultStatus @default(unverified)
+  source      LabResultSource @default(manual)
+
+  // ── the value, typed ──────────────────────────────────────────────────────
+  resultType  LabResultType @map("result_type")
+  valueNumeric Decimal? @map("value_numeric") @db.Decimal(18, 6)
+  /// A coded answer from a value set — "Reactive", "Growth of E. coli",
+  /// "Grade 2". `value_coded_system` names the system it came from.
+  valueCoded  String? @map("value_coded") @db.VarChar(200)
+  valueCodedSystem String? @map("value_coded_system") @db.VarChar(64)
+  /// Multi-select answers (a urine microscopy's findings).
+  valueMulti  String[] @default([]) @map("value_multi")
+  /// Narrative. Histopathology and microbiology reports live in their own
+  /// tables; this is the free-text answer of an ordinary text result.
+  valueText   String? @map("value_text") @db.Text
+  /// A censored numeric ("< 0.01", "> 1000"). The operator is separate from the
+  /// number so a trend chart can plot the bound rather than parsing a string.
+  valueOperator String? @map("value_operator") @db.VarChar(2)
+  unit        String? @db.VarChar(32)
+  decimals    Int?
+
+  // ── the interpretation, snapshotted ──────────────────────────────────────
+  flag        LabResultFlag @default(normal)
+  /// The interval actually used, copied from `lab_reference_ranges` at the
+  /// moment of interpretation. `OP-004 §5`: "report prints the range used at
+  /// that time; changing master does not alter historical reports."
+  refRangeId  String? @map("ref_range_id") @db.Uuid
+  refLow      Decimal? @map("ref_low") @db.Decimal(18, 6)
+  refHigh     Decimal? @map("ref_high") @db.Decimal(18, 6)
+  refCriticalLow  Decimal? @map("ref_critical_low") @db.Decimal(18, 6)
+  refCriticalHigh Decimal? @map("ref_critical_high") @db.Decimal(18, 6)
+  refText     String? @map("ref_text") @db.VarChar(200)
+  /// True exactly when `flag` is one of the two critical values. Redundant on
+  /// purpose and CHECKed against `flag`, because the partial index that finds
+  /// unacknowledged criticals must be on a plain boolean.
+  isCritical  Boolean @default(false) @map("is_critical")
+  deltaFlagged Boolean @default(false) @map("delta_flagged")
+  deltaPrevValue Decimal? @map("delta_prev_value") @db.Decimal(18, 6)
+  deltaPrevAt DateTime? @map("delta_prev_at") @db.Timestamptz(6)
+  deltaRuleId String? @map("delta_rule_id") @db.Uuid
+
+  // ── provenance ────────────────────────────────────────────────────────────
+  instrumentId String? @map("instrument_id") @db.Uuid
+  runId       String? @map("run_id") @db.VarChar(64)
+  /// → `integration.lab_if_messages.id`. The exact HL7/ASTM message this value
+  /// came out of, so a disputed result can be traced to the bytes on the wire.
+  rawMessageId String? @map("raw_message_id") @db.Uuid
+  instrumentFlags String[] @default([]) @map("instrument_flags")
+  dilutionFactor Decimal? @map("dilution_factor") @db.Decimal(10, 4)
+  isRerun     Boolean @default(false) @map("is_rerun")
+  rerunReason String? @map("rerun_reason") @db.Text
+  rerunOfVersion Int? @map("rerun_of_version")
+
+  // ── who decided what ──────────────────────────────────────────────────────
+  enteredBy   String? @map("entered_by") @db.Uuid
+  enteredAt   DateTime? @map("entered_at") @db.Timestamptz(6)
+  verifiedBy  String? @map("verified_by") @db.Uuid
+  verifiedAt  DateTime? @map("verified_at") @db.Timestamptz(6)
+  authorisedBy String? @map("authorised_by") @db.Uuid
+  authorisedAt DateTime? @map("authorised_at") @db.Timestamptz(6)
+  signMethod  SignMethod? @map("sign_method")
+  signerRegistrationNo String? @map("signer_registration_no") @db.VarChar(64)
+  /// `EN-004 §3.4`: an auto-verified result names the signed rule-set version
+  /// that verified it. NABL traceability, and the reason the column is a
+  /// foreign-key-shaped uuid rather than a boolean.
+  autovalDecisionId String? @map("autoval_decision_id") @db.Uuid
+  autovalRulesetVersion Int? @map("autoval_ruleset_version")
+
+  // ── quality gates in force at the moment of release ───────────────────────
+  /// The QC state of this analyte × instrument when the version was written.
+  /// Snapshotted because `EN-031 §5` makes release gating absolute, and an
+  /// assessor asks what the state was, not what it is now. `never_evaluated` is
+  /// the default of the enum for the reason the migration's §C.4 gives.
+  qcStateAtRelease LabQcState @default(never_evaluated) @map("qc_state_at_release")
+  qcLockoutId String? @map("qc_lockout_id") @db.Uuid
+  /// `EN-031 §5`'s single exception: a Director may release under an out-of-
+  /// control QC, and it is recorded in `labq_qc_actions`, reported monthly, and
+  /// named here.
+  qcOverrideActionId String? @map("qc_override_action_id") @db.Uuid
+
+  // ── the amendment trail ───────────────────────────────────────────────────
+  /// `docs/prompts/phase-03 §Non-negotiables 5`. Version 1 needs no reason;
+  /// every later version does.
+  amendmentReason String? @map("amendment_reason") @db.Text
+  cancelledReason String? @map("cancelled_reason") @db.Text
+  supersededByVersion Int? @map("superseded_by_version")
+  supersededAt DateTime? @map("superseded_at") @db.Timestamptz(6)
+  comment     String? @db.Text
+  /// The canned interpretation the pathologist picked.
+  interpretationKey String? @map("interpretation_key") @db.Uuid
+
+  // ── the chain ─────────────────────────────────────────────────────────────
+  /// Computed by the database from the row's own content. A caller cannot
+  /// present a digest that does not describe what it stored.
+  contentSha256 String @default("") @map("content_sha256") @db.VarChar(64)
+  prevSha256    String? @map("prev_sha256") @db.VarChar(64)
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(3)
+  createdBy  String?  @map("created_by") @db.Uuid
+
+  @@id([id, recordedAt])
+  @@unique([resultId, version, recordedAt], map: "lab_result_versions_version_key")
+  @@index([hospitalId, resultId, version])
+  @@index([hospitalId, orderTestId, recordedAt(sort: Desc)])
+  @@index([hospitalId, patientId, recordedAt(sort: Desc)])
+  @@index([hospitalId, instrumentId, recordedAt(sort: Desc)])
+  @@map("lab_result_versions")
+  @@schema("lab")
+}
+
+/// `OP-004 §3.3.2` microbiology. A culture is not a number: it is an organism,
+/// a growth description and a susceptibility panel, and the antibiogram that
+/// feeds IP-012 reads the panel rows, never a parsed string.
+model LabMicroResult {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  orderTestId String  @map("order_test_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  isolateNo   Int     @default(1) @map("isolate_no")
+  /// No growth is a result, and an important one. When true, every organism
+  /// column is null and the CHECK in §C says so.
+  noGrowth    Boolean @default(false) @map("no_growth")
+  growthDescription String? @map("growth_description") @db.VarChar(300)
+  organismSnomed String? @map("organism_snomed") @db.VarChar(32)
+  organismName String? @map("organism_name") @db.VarChar(300)
+  colonyCount Decimal? @map("colony_count") @db.Decimal(18, 6)
+  colonyCountUnit String? @map("colony_count_unit") @db.VarChar(32)
+  gramStain   String? @map("gram_stain") @db.VarChar(120)
+  microscopy  String? @db.Text
+  /// `EN-031`-adjacent: the breakpoint standard in force, because an S/I/R
+  /// interpretation is meaningless without one and CLSI revises annually.
+  breakpointStandard String? @map("breakpoint_standard") @db.VarChar(32)
+  breakpointYear Int? @map("breakpoint_year")
+  /// Carbapenemase, ESBL, MRSA, VRE — the flags infection control reads.
+  resistanceMarkers String[] @default([]) @map("resistance_markers")
+  isMdro      Boolean @default(false) @map("is_mdro")
+  /// IDSP notifiable (`OP-004 §5`). Set here, acted on by the public-health
+  /// register when NC-015 lands.
+  isNotifiable Boolean @default(false) @map("is_notifiable")
+  reportText  String? @map("report_text") @db.Text
+  incubationStartedAt DateTime? @map("incubation_started_at") @db.Timestamptz(6)
+  finalisedAt DateTime? @map("finalised_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  susceptibilities LabMicroSusceptibility[]
+
+  @@unique([orderTestId, isolateNo], map: "lab_micro_results_isolate_key")
+  @@index([hospitalId, orderTestId])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, organismSnomed, createdAt(sort: Desc)])
+  @@map("lab_micro_results")
+  @@schema("lab")
+}
+
+model LabMicroSusceptibility {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  microResultId String @map("micro_result_id") @db.Uuid
+  antibioticCode String @map("antibiotic_code") @db.VarChar(32)
+  antibioticName String @map("antibiotic_name") @db.VarChar(200)
+  /// One or the other, or both. A CHECK in §C requires at least one.
+  micValue    Decimal? @map("mic_value") @db.Decimal(12, 4)
+  micOperator String? @map("mic_operator") @db.VarChar(2)
+  zoneMm      Decimal? @map("zone_mm") @db.Decimal(6, 2)
+  /// `S` | `I` | `R` | `SDD` | `NS`. CHECKed.
+  interpretation String @db.VarChar(4)
+  /// Reported to the clinician, or suppressed by the cascade-reporting rule the
+  /// stewardship programme configures. Suppressed results are kept: the
+  /// antibiogram uses them even when the report does not show them.
+  isReported  Boolean @default(true) @map("is_reported")
+  suppressionReason String? @map("suppression_reason") @db.VarChar(200)
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  microResult LabMicroResult @relation(fields: [microResultId], references: [id], onDelete: Restrict)
+
+  @@unique([microResultId, antibioticCode], map: "lab_micro_susceptibilities_key")
+  @@index([hospitalId, microResultId])
+  @@map("lab_micro_susceptibilities")
+  @@schema("lab")
+}
+
+/// `OP-004 §3.3.2` histopathology and cytology: gross, blocks, slides, stains,
+/// sign-out. The narrative itself is versioned through the report chain; this is
+/// the specimen accounting a NABL assessor asks to see.
+model LabHistoResult {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  orderTestId String  @map("order_test_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  specimenDescription String? @map("specimen_description") @db.Text
+  clinicalHistory String? @map("clinical_history") @db.Text
+  grossDescription String? @map("gross_description") @db.Text
+  microscopicDescription String? @map("microscopic_description") @db.Text
+  impression  String? @db.Text
+  /// Structured synoptic reporting (a CAP protocol for a resection specimen).
+  synoptic    Json? @db.JsonB
+  snomedMorphology String? @map("snomed_morphology") @db.VarChar(32)
+  snomedTopography String? @map("snomed_topography") @db.VarChar(32)
+  icdoMorphology String? @map("icdo_morphology") @db.VarChar(32)
+  blocksCount Int?    @map("blocks_count")
+  slidesCount Int?    @map("slides_count")
+  stains      String[] @default([])
+  grossedBy   String? @map("grossed_by") @db.Uuid
+  grossedAt   DateTime? @map("grossed_at") @db.Timestamptz(6)
+  signedOutBy String? @map("signed_out_by") @db.Uuid
+  signedOutAt DateTime? @map("signed_out_at") @db.Timestamptz(6)
+  /// `docs/prompts/phase-03 §3.3`: "sign-out with images". The gross and
+  /// microscopic images live in `core.files`; these are their ids.
+  imageFileIds String[] @default([]) @map("image_file_ids") @db.Uuid
+  /// Blocks and slides are retained ten years (`OP-004 §5`).
+  blockRetentionUntil DateTime? @map("block_retention_until") @db.Date
+  slideRetentionUntil DateTime? @map("slide_retention_until") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([orderTestId], map: "lab_histo_results_order_test_key")
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@map("lab_histo_results")
+  @@schema("lab")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// THE CRITICAL VALUE LOOP  (OP-004 §3.5, docs/DECISIONS.md D-10)
+//
+// Two tables, and the split is the whole point.
+//
+//   `lab_critical_value_alerts`  the *obligation*. Raised by a database trigger
+//                                the instant a critical version is written, in
+//                                the same transaction, so it exists whether or
+//                                not any service remembered to create it. This
+//                                is what "release is never withheld" means
+//                                structurally: the result is stored and visible
+//                                and the alert is already outstanding.
+//
+//   `lab_critical_value_callbacks` the *evidence*. One row per communication
+//                                attempt. Each row must carry either a
+//                                confirmed read-back or a documented
+//                                "clinician unreachable — escalated to <tier>".
+//                                A row with neither cannot be stored: the CHECK
+//                                in §C makes it impossible, which is exactly
+//                                what `docs/prompts/phase-03 §Non-negotiables 1`
+//                                asks for.
+//
+// Authorisation of the result then requires at least one such row. Withholding
+// is never the mechanism; documentation is.
+// ═════════════════════════════════════════════════════════════════════════════
+
+enum LabCriticalAlertStatus {
+  /// Raised, nobody has spoken to a clinician yet.
+  open
+  /// A callback with read-back is on file.
+  communicated
+  /// Nobody could be reached and the ladder was climbed. A tracked exception on
+  /// the NABL KPI, not a silent bypass.
+  escalated
+  /// The ordering clinician acknowledged it in their inbox.
+  acknowledged
+  /// A later version of the result is no longer critical (a re-run corrected a
+  /// haemolysed potassium). The alert is closed with the reason, never deleted.
+  retracted
+
+  @@schema("lab")
+}
+
+enum LabNotifyMethod {
+  phone
+  in_person
+  secure_message
+  video
+  pager
+  sms
+
+  @@schema("lab")
+}
+
+model LabCriticalValueAlert {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  /// The result and the exact version that was critical. Plain uuids, not
+  /// declared foreign keys, for the partitioning reason `LabResultVersion`
+  /// gives; the trigger that creates the row has both in hand.
+  resultId    String  @map("result_id") @db.Uuid
+  resultVersionId String @map("result_version_id") @db.Uuid
+  resultVersion Int   @map("result_version")
+  orderId     String  @map("order_id") @db.Uuid
+  orderTestId String  @map("order_test_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  analyteName String  @map("analyte_name") @db.VarChar(300)
+  flag        LabResultFlag
+  valueDisplay String @map("value_display") @db.VarChar(120)
+  unit        String? @db.VarChar(32)
+  refCriticalLow  Decimal? @map("ref_critical_low") @db.Decimal(18, 6)
+  refCriticalHigh Decimal? @map("ref_critical_high") @db.Decimal(18, 6)
+  /// Written by the trigger, from `now()`. The NABL indicator is
+  /// "% criticals communicated ≤ 30 min", measured from here.
+  detectedAt  DateTime @default(now()) @map("detected_at") @db.Timestamptz(6)
+  /// `detected_at` + the configured window. An alert past this with no callback
+  /// is what the escalation ladder in EN-037 fires on.
+  dueBy       DateTime? @map("due_by") @db.Timestamptz(6)
+  status      LabCriticalAlertStatus @default(open)
+  /// How far up the ladder it went. 0 = ordering clinician only.
+  escalationLevel Int @default(0) @map("escalation_level")
+  orderingUserId String? @map("ordering_user_id") @db.Uuid
+  /// Filled when the loop closes. `acknowledged_at` here mirrors the row the
+  /// doctor's inbox writes in `clinical.result_acknowledgements`.
+  firstCommunicatedAt DateTime? @map("first_communicated_at") @db.Timestamptz(6)
+  acknowledgedBy String? @map("acknowledged_by") @db.Uuid
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  retractedReason String? @map("retracted_reason") @db.Text
+  retractedAt DateTime? @map("retracted_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  callbacks LabCriticalValueCallback[]
+
+  @@unique([resultVersionId], map: "lab_critical_value_alerts_version_key")
+  @@index([hospitalId, branchId, status, detectedAt(sort: Desc)])
+  @@index([hospitalId, orderId])
+  @@index([hospitalId, patientId, detectedAt(sort: Desc)])
+  @@map("lab_critical_value_alerts")
+  @@schema("lab")
+}
+
+/// One documented communication attempt. Append-only.
+model LabCriticalValueCallback {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  alertId     String  @map("alert_id") @db.Uuid
+  sequence    Int
+  /// Who in the lab made the call.
+  notifiedBy  String  @map("notified_by") @db.Uuid
+  notifiedByName String @map("notified_by_name") @db.VarChar(200)
+  notifiedAt  DateTime @default(now()) @map("notified_at") @db.Timestamptz(6)
+  method      LabNotifyMethod
+  /// Who was told. Null only on the `unreachable` arm — which is the point of
+  /// the arm: there was nobody to name.
+  notifiedToUserId String? @map("notified_to_user_id") @db.Uuid
+  notifiedToName String? @map("notified_to_name") @db.VarChar(200)
+  notifiedToRole String? @map("notified_to_role") @db.VarChar(64)
+  notifiedToContact String? @map("notified_to_contact") @db.VarChar(64)
+  /// **Arm one.** The clinician repeated the value back. NABL 112 and NABH IMS
+  /// both require this and not merely "informed".
+  readBackConfirmed Boolean @default(false) @map("read_back_confirmed")
+  readBackValue String? @map("read_back_value") @db.VarChar(120)
+  /// **Arm two.** Nobody could be reached, and the alert was escalated to a
+  /// named tier. `docs/DECISIONS.md D-10`: this is a tracked exception on the
+  /// NABL KPI, not a silent bypass — which is why `escalated_to_role` is
+  /// required rather than optional.
+  clinicianUnreachable Boolean @default(false) @map("clinician_unreachable")
+  escalatedToLevel Int? @map("escalated_to_level")
+  escalatedToRole String? @map("escalated_to_role") @db.VarChar(64)
+  escalatedToUserId String? @map("escalated_to_user_id") @db.Uuid
+  attemptCount Int @default(1) @map("attempt_count")
+  remarks     String? @db.Text
+  /// Seconds from `lab_critical_value_alerts.detected_at`. Stored rather than
+  /// derived because the NABL indicator is reported monthly over years of
+  /// partitions and must not re-read the alert row for each.
+  latencySeconds Int? @map("latency_seconds")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  alert LabCriticalValueAlert @relation(fields: [alertId], references: [id], onDelete: Restrict)
+
+  @@unique([alertId, sequence], map: "lab_critical_value_callbacks_seq_key")
+  @@index([hospitalId, alertId, notifiedAt])
+  @@map("lab_critical_value_callbacks")
+  @@schema("lab")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// REPORTS (OP-004 §3.6)
+//
+// Same identity/versions split as the result and as `clinical.documents`. The
+// rendered PDF is a `core.files` object; the signed, hash-chained content is a
+// `clinical.document_versions` row, because docs/03 §Shared platform-owned
+// tables says in as many words that `clinical.documents` is "extended by …
+// OP-004/OP-008 reports". Forking a second versioned-document store here would
+// mean two hash chains, two verifiers and two answers to "is this report
+// authentic".
+// ═════════════════════════════════════════════════════════════════════════════
+
+enum LabReportType {
+  interim
+  departmental
+  final
+  amended
+  cumulative
+
+  @@schema("lab")
+}
+
+enum LabReportStatus {
+  draft
+  issued
+  superseded
+  cancelled
+
+  @@schema("lab")
+}
+
+enum LabDeliveryChannel {
+  portal
+  whatsapp
+  sms
+  email
+  print
+  doctor_inbox
+  ward
+  abdm
+  referrer_portal
+  counter_handover
+
+  @@schema("lab")
+}
+
+model LabReport {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  orderId     String  @map("order_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  /// Report number = accession + version (`OP-004 §5`).
+  reportNo    String  @map("report_no") @db.VarChar(48)
+  type        LabReportType @default(final)
+  /// Set for a departmental report; null for a consolidated one.
+  discipline  LabDiscipline?
+  /// Head of the version chain, maintained by trigger.
+  currentVersion Int  @default(0) @map("current_version")
+  currentStatus  LabReportStatus @default(draft) @map("current_status")
+  /// `OP-004 §5`: the NABL logo prints only when every test on the report is in
+  /// accredited scope. Computed once at generation and stored, because the
+  /// scope changes and a reprint must look like the original.
+  nablLogoPrinted Boolean @default(false) @map("nabl_logo_printed")
+  /// `OP-004 §3.6.3`: HIV, genetic and PNDT-adjacent reports are not pushed to
+  /// WhatsApp and are readable only with `lab.result.sensitive.read`.
+  isSensitive Boolean @default(false) @map("is_sensitive")
+  containsOutsourced Boolean @default(false) @map("contains_outsourced")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  order      LabOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  versions   LabReportVersion[]
+  deliveries LabReportDelivery[]
+
+  @@unique([hospitalId, reportNo], map: "lab_reports_no_key")
+  @@index([hospitalId, orderId])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, branchId, currentStatus, createdAt(sort: Desc)])
+  @@map("lab_reports")
+  @@schema("lab")
+}
+
+model LabReportVersion {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  reportId    String  @map("report_id") @db.Uuid
+  version     Int
+  status      LabReportStatus @default(draft)
+  /// → `clinical.documents.id`. The signed content and its hash chain live
+  /// there; this row is the lab's index into it.
+  documentId  String? @map("document_id") @db.Uuid
+  documentVersion Int? @map("document_version")
+  /// The rendered PDF in `core.files`.
+  pdfFileId   String? @map("pdf_file_id") @db.Uuid
+  /// Digest of the PDF bytes, so the QR verification page can prove the file a
+  /// patient is holding is the one that was signed. The *content* chain is the
+  /// document's; this one is the artefact's.
+  pdfSha256   String? @map("pdf_sha256") @db.VarChar(64)
+  prevPdfSha256 String? @map("prev_pdf_sha256") @db.VarChar(64)
+  /// The public verification token printed as a QR code.
+  verifyToken String? @map("verify_token") @db.VarChar(64)
+  /// The authorised signatories, with the registration numbers printed.
+  signedBy    String[] @default([]) @map("signed_by") @db.Uuid
+  signatoryNames String[] @default([]) @map("signatory_names")
+  signatoryRegistrationNos String[] @default([]) @map("signatory_registration_nos")
+  signMethod  SignMethod? @map("sign_method")
+  issuedAt    DateTime? @map("issued_at") @db.Timestamptz(6)
+  /// Every version after the first is an amendment and says why (`OP-004 §3.4.3`
+  /// "Amended – supersedes report dated …").
+  amendmentReason String? @map("amendment_reason") @db.Text
+  supersedesVersion Int? @map("supersedes_version")
+  cancelledReason String? @map("cancelled_reason") @db.Text
+  /// The order lines this version covered — an interim report covers some.
+  orderTestIds String[] @default([]) @map("order_test_ids") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  report LabReport @relation(fields: [reportId], references: [id], onDelete: Restrict)
+
+  @@unique([reportId, version], map: "lab_report_versions_version_key")
+  @@index([hospitalId, reportId, version])
+  @@map("lab_report_versions")
+  @@schema("lab")
+}
+
+model LabReportDelivery {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  reportId    String  @map("report_id") @db.Uuid
+  reportVersion Int   @map("report_version")
+  channel     LabDeliveryChannel
+  recipient   String? @db.VarChar(200)
+  /// `OP-004 §3.6.2`: a counter handover records who collected it and how they
+  /// were identified — a third party needs an OTP.
+  handoverToName String? @map("handover_to_name") @db.VarChar(200)
+  handoverIdProof String? @map("handover_id_proof") @db.VarChar(64)
+  handoverOtpVerified Boolean? @map("handover_otp_verified")
+  handoverBy  String? @map("handover_by") @db.Uuid
+  status      String  @default("queued") @db.VarChar(24)
+  attemptedAt DateTime? @map("attempted_at") @db.Timestamptz(6)
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz(6)
+  failureReason String? @map("failure_reason") @db.Text
+  /// → `engage.msg_messages.id` / `core.notif_deliveries.id` where the send was
+  /// actually made, so a delivery dispute has one place to look.
+  messageRef  String? @map("message_ref") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  report LabReport @relation(fields: [reportId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, reportId, createdAt])
+  @@index([hospitalId, channel, status, createdAt(sort: Desc)])
+  @@map("lab_report_deliveries")
+  @@schema("lab")
+}

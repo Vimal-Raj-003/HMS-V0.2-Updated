@@ -48,7 +48,7 @@ async function tableDigests(): Promise<ReadonlyMap<string, string>> {
       -- invisible here while this read ('core','mdm','integration'), so a seed
       -- that rewrote 220,000 patient rows on every run would have passed.
       WHERE schemaname IN ('core', 'mdm', 'integration', 'patient', 'clinical',
-                           'queue', 'engage', 'billing')
+                           'queue', 'engage', 'billing', 'lab', 'rad')
         -- Leaf partitions are covered through their parent.
         AND tablename NOT LIKE '%\\_2%'
       ORDER BY schemaname, tablename`,
@@ -122,7 +122,13 @@ describe('seeds are idempotent', () => {
     // covers, and that coverage is a schema list somebody can shorten without
     // any test going red. Naming tables the seed actually writes means a future
     // narrowing fails here instead of quietly exempting a phase.
-    for (const table of ['patient.patients', 'clinical.appointments', 'queue.queue_tokens']) {
+    for (const table of [
+      'patient.patients',
+      'clinical.appointments',
+      'queue.queue_tokens',
+      'lab.lab_reference_ranges',
+      'rad.rad_modality_rooms',
+    ]) {
       expect(before.has(table), `${table} must be covered by the idempotency check`).toBe(true);
     }
   }, 300_000);

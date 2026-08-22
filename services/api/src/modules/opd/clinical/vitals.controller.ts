@@ -43,8 +43,17 @@ import { VitalsService, type VitalsAlertView, type VitalsDetail, type VitalsRow 
 export class VitalsController {
   constructor(@Inject(VitalsService) private readonly vitals: VitalsService) {}
 
-  /** OP-007 §6 `GET /vitals/reference-ranges` — the configured bands, read-only. */
-  @Permission('vitals.configure')
+  /**
+   * OP-007 §6 `GET /vitals/reference-ranges` — the configured bands, read-only.
+   *
+   * Gated on `vitals.record.read`, not `vitals.configure`. These bands are what
+   * turns a number into green, amber or red, so the nurse recording the
+   * observation is the endpoint's primary reader — and `vitals.configure` is a
+   * management key `nurse_opd` does not hold. Gating the bands behind it left
+   * the vitals room unable to colour anything, which is the one thing that
+   * screen exists to do. Reading a threshold is not changing one.
+   */
+  @Permission('vitals.record.read')
   @Get('reference-ranges')
   async referenceRanges(
     @Query(new ZodBody(referenceRangeQuerySchema)) query: ReferenceRangeQuery,

@@ -1,0 +1,451 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-004 — analyzer interfacing (schema `integration`, prefix `lab_`)
+//
+// `EN-004 §4` puts these tables in `integration` rather than in `lab`, and that
+// is right: an instrument driver, a raw MLLP frame and an unmatched-message
+// queue are transport concerns that EN-017 owns the shape of, not laboratory
+// records. What crosses back into `lab` is a value, and it arrives as a
+// `lab.result_versions` row carrying `raw_message_id` so the bytes are always
+// one join away.
+//
+// ── Spec contradiction, resolved here ───────────────────────────────────────
+//
+// `EN-004 §4` also lists `lab_qc_materials`, `lab_qc_lots`, `lab_qc_targets`,
+// `lab_qc_results`, `lab_qc_rule_config` and `lab_if_lockouts` in this schema,
+// while `EN-031 §4` lists the same concepts as `labq_qc_materials`,
+// `labq_qc_targets`, `labq_qc_runs`, `labq_westgard_config` and the lockout in
+// schema `lab`. They are the same tables under two names, and `docs/03 §Shared
+// platform-owned tables` forbids two owners.
+//
+// EN-031 wins: quality control is a laboratory-quality function whose records
+// are accreditation evidence retained five years, not interface plumbing, and
+// EN-031's model is the richer of the two (effective-dated targets, lot
+// changeover, per-rule Six-Sigma basis). EN-004's QC tables therefore do not
+// exist; its instruments reference `lab.labq_*` instead. Recorded in
+// `docs/DECISIONS.md`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum LabIfProtocol {
+  hl7_v2
+  astm_e1394
+  lis2_a2
+  poct1_a
+  csv
+  proprietary
+
+  @@schema("integration")
+}
+
+enum LabIfTransport {
+  tcp_server
+  tcp_client
+  serial
+  file_watch
+  http
+
+  @@schema("integration")
+}
+
+/// `EN-004 §5`: "Only `live` instruments receive orders/produce patient results;
+/// `verification` instruments write to sandbox worklists." A three-way status,
+/// not a boolean, because commissioning an analyzer takes weeks and the
+/// half-configured state is the dangerous one.
+enum LabInstrumentStatus {
+  draft
+  verification
+  live
+  maintenance
+  out_of_service
+  requalification_pending
+  retired
+
+  @@schema("integration")
+}
+
+enum LabIfDirection {
+  inbound
+  outbound
+
+  @@schema("integration")
+}
+
+enum LabIfMessageStatus {
+  received
+  parsed
+  matched
+  applied
+  acked
+  nak
+  error
+  replayed
+  buffered
+
+  @@schema("integration")
+}
+
+/// `EN-004 §4`'s error taxonomy. Every one of these is a message that must NOT
+/// be guessed at: `docs/prompts/phase-03 §Constraints` is explicit — "Unmatched
+/// analyzer results go to a queue, never auto-assigned by name similarity."
+enum LabIfErrorType {
+  unmatched_sample
+  unmapped_code
+  patient_mismatch
+  parse_error
+  duplicate
+  nak
+  qc_unassigned
+  rejected_sample
+  instrument_not_live
+  result_after_final
+
+  @@schema("integration")
+}
+
+model LabInstrument {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  code        String  @db.VarChar(32)
+  name        String  @db.VarChar(200)
+  make        String? @db.VarChar(120)
+  model       String? @db.VarChar(120)
+  serial      String? @db.VarChar(120)
+  discipline  LabDiscipline
+  departmentKey String? @map("department_key") @db.Uuid
+  benchId     String? @map("bench_id") @db.Uuid
+  /// The driver implementation the connector dispatches on. A key, not a class
+  /// name: the mapping lives in `services/integration-hub`.
+  driverKey   String  @map("driver_key") @db.VarChar(64)
+  protocol    LabIfProtocol
+  transport   LabIfTransport
+  /// Host, port, MLLP framing, COM port, baud, parity, stop bits, flow control,
+  /// watch folder. JSONB because every driver needs a different subset and a
+  /// column per field would be forty mostly-null columns.
+  connection  Json?   @db.JsonB
+  /// Bidirectional instruments query the host for a worklist; broadcast ones
+  /// take whatever is pushed.
+  hostQueryMode Boolean @default(false) @map("host_query_mode")
+  sendDemographics Boolean @default(false) @map("send_demographics")
+  encoding    String  @default("UTF-8") @db.VarChar(24)
+  timeouts    Json?   @db.JsonB
+  status      LabInstrumentStatus @default(draft)
+  lastHeartbeatAt DateTime? @map("last_heartbeat_at") @db.Timestamptz(6)
+  /// → NC-020 asset register, when Phase 9 lands.
+  assetRef    String? @map("asset_ref") @db.Uuid
+  /// `EN-004 §5`: raw messages 90 days encrypted, parsed metadata two years.
+  rawRetentionDays Int @default(90) @map("raw_retention_days")
+  /// Set while the instrument is disconnected: inbound frames are buffered
+  /// rather than dropped (`docs/prompts/phase-03` exit gate 7 — 30 minutes down,
+  /// replay with zero loss).
+  isBuffering Boolean @default(false) @map("is_buffering")
+  bufferedSince DateTime? @map("buffered_since") @db.Timestamptz(6)
+  bufferedCount Int @default(0) @map("buffered_count")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  testMaps  LabInstrumentTestMap[]
+  downtimes LabInstrumentDowntime[]
+
+  @@unique([hospitalId, branchId, code], map: "lab_instruments_code_key")
+  @@index([hospitalId, branchId, status])
+  @@index([hospitalId, discipline, status])
+  @@map("lab_instruments")
+  @@schema("integration")
+}
+
+/// `EN-004 §4`: the analyzer's own test code ↔ our test, with the unit factor
+/// and precision that make the two comparable. This is the mapping table
+/// `docs/prompts/phase-03 §3.1` calls "analyzer mappings".
+model LabInstrumentTestMap {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  /// What the analyzer sends.
+  instrumentCode String @map("instrument_code") @db.VarChar(64)
+  instrumentSampleTypeCode String? @map("instrument_sample_type_code") @db.VarChar(32)
+  /// What it means here.
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  loincCode   String? @map("loinc_code") @db.VarChar(24)
+  /// Multiply the analyzer's number by this to get our unit. Null means 1 and is
+  /// the common case; the column exists because mg/dL and mmol/L are not.
+  unitFactor  Decimal? @map("unit_factor") @db.Decimal(18, 8)
+  unitOffset  Decimal? @map("unit_offset") @db.Decimal(18, 8)
+  targetUnit  String? @map("target_unit") @db.VarChar(32)
+  precision   Int?
+  resultType  LabResultType @default(numeric) @map("result_type")
+  /// The analyzer's flag letters mapped to ours ("H" → `high`).
+  flagMap     Json?   @map("flag_map") @db.JsonB
+  dilutionRule Json?  @map("dilution_rule") @db.JsonB
+  isActive    Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  instrument LabInstrument @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+
+  // NULLS NOT DISTINCT index in §C: an instrument that does not qualify its
+  // codes by sample type sends a null there, and a plain unique index would let
+  // the same instrument code be mapped to two different tests.
+  @@index([hospitalId, testKey])
+  @@map("lab_instrument_test_maps")
+  @@schema("integration")
+}
+
+/// Every frame, in and out. Partitioned monthly on `received_at`
+/// (`timestamptz(3)`, D-31) because a busy chemistry analyzer produces one row
+/// per sample per run and this is the table that grows fastest in the phase
+/// after `lab.result_versions`.
+///
+/// `raw` is `bytea` and encrypted at rest: an HL7 ORU carries the patient's name
+/// and identifiers in PID, so the wire format is PHI (`docs/04 §5`).
+model LabIfMessage {
+  id          String  @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  direction   LabIfDirection
+  /// ORU / OML / ORM / QBP / RSP / ACK, or the ASTM record type.
+  msgType     String  @map("msg_type") @db.VarChar(16)
+  controlId   String? @map("control_id") @db.VarChar(64)
+  /// The sample the message is about, once it has been matched. Null while it
+  /// is in the error queue, which is exactly the state the queue exists for.
+  sampleId    String? @map("sample_id") @db.Uuid
+  /// The specimen identifier as it appeared on the wire, before matching. Kept
+  /// verbatim: a barcode that resolves to nothing is evidence.
+  sampleIdRaw String? @map("sample_id_raw") @db.VarChar(120)
+  raw         Bytes?
+  /// The parsed structure. Metadata retention is two years even after `raw` is
+  /// purged at 90 days (`EN-004 §5`), so a message log stays reviewable without
+  /// keeping PHI on disk for longer than the policy allows.
+  parsed      Json?   @db.JsonB
+  status      LabIfMessageStatus @default(received)
+  errorCode   String? @map("error_code") @db.VarChar(64)
+  errorText   String? @map("error_text") @db.Text
+  /// `EN-004 §5`: "Idempotency: inbound message hash + control id." A duplicate
+  /// frame replayed after a reconnect must be recognised, not re-applied.
+  contentSha256 String? @map("content_sha256") @db.VarChar(64)
+  attempts    Int     @default(0)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(6)
+  /// Set when the message was replayed from the downtime buffer rather than
+  /// received live.
+  replayedFromId String? @map("replayed_from_id") @db.Uuid
+  rawPurgedAt DateTime? @map("raw_purged_at") @db.Timestamptz(6)
+
+  receivedAt  DateTime @default(now()) @map("received_at") @db.Timestamptz(3)
+  createdBy   String?  @map("created_by") @db.Uuid
+
+  @@id([id, receivedAt])
+  @@index([hospitalId, instrumentId, receivedAt(sort: Desc)])
+  @@index([hospitalId, sampleId, receivedAt(sort: Desc)])
+  @@index([hospitalId, status, receivedAt(sort: Desc)])
+  @@map("lab_if_messages")
+  @@schema("integration")
+}
+
+/// **The unmatched queue.** `docs/prompts/phase-03 §Constraints`: "Never let a
+/// result exist without a patient identity check. Unmatched analyzer results go
+/// to a queue, never auto-assigned by name similarity."
+///
+/// `suggested_sample_id` exists so a human can be *offered* a match. Resolving
+/// one writes `resolved_by` and `resolved_at`; the CHECK in §C refuses a
+/// resolution with neither, so "it sorted itself out" is not a state.
+model LabIfErrorQueueItem {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  /// → `integration.lab_if_messages.id`. Plain uuid: the message table is
+  /// partitioned and a foreign key would have to carry its partition key.
+  messageId   String? @map("message_id") @db.Uuid
+  messageReceivedAt DateTime? @map("message_received_at") @db.Timestamptz(3)
+  type        LabIfErrorType
+  sampleIdRaw String? @map("sample_id_raw") @db.VarChar(120)
+  instrumentCodeRaw String? @map("instrument_code_raw") @db.VarChar(64)
+  /// A candidate the operator may accept. **Never applied automatically**, and
+  /// the confidence is shown rather than acted on.
+  suggestedSampleId String? @map("suggested_sample_id") @db.Uuid
+  suggestionBasis String? @map("suggestion_basis") @db.VarChar(120)
+  /// `open` | `assigned` | `rejected` | `auto_resolved`. CHECKed.
+  /// `auto_resolved` is reserved for the one safe case — a duplicate frame whose
+  /// content digest matches an already-applied message.
+  status      String  @default("open") @db.VarChar(24)
+  assignedToUserId String? @map("assigned_to_user_id") @db.Uuid
+  resolvedSampleId String? @map("resolved_sample_id") @db.Uuid
+  resolvedBy  String? @map("resolved_by") @db.Uuid
+  resolvedAt  DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolution  String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, branchId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, instrumentId, type, createdAt(sort: Desc)])
+  @@map("lab_if_error_queue")
+  @@schema("integration")
+}
+
+/// `EN-004 §4`: the worklist an instrument in host-query mode will be answered
+/// from. Short-lived by construction.
+model LabIfWorklistCacheEntry {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  sampleId    String  @map("sample_id") @db.Uuid
+  barcode     String  @db.VarChar(64)
+  /// The order as the driver will render it — test codes, dilutions, priority.
+  payload     Json    @db.JsonB
+  sentAt      DateTime? @map("sent_at") @db.Timestamptz(6)
+  ackedAt     DateTime? @map("acked_at") @db.Timestamptz(6)
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@unique([instrumentId, sampleId], map: "lab_if_worklist_cache_key")
+  @@index([hospitalId, expiresAt])
+  @@map("lab_if_worklist_cache")
+  @@schema("integration")
+}
+
+/// `EN-004 §3.4`: the auto-validation rule set. Signed, versioned, and never
+/// edited in place — every auto-verified result names the version that verified
+/// it, and NABL asks to see it.
+model LabIfAutovalRuleset {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  instrumentId String? @map("instrument_id") @db.Uuid
+  version     Int     @default(1)
+  /// The rule expression tree the evaluator interprets. `EN-004 §3.4` gives the
+  /// shape: in-range, delta pass, QC in control, no instrument flag, not STAT,
+  /// not paediatric, not critical.
+  rules       Json    @db.JsonB
+  /// `draft` | `active` | `retired`. CHECKed.
+  status      String  @default("draft") @db.VarChar(24)
+  /// `EN-004 §5`: "rule set edits require QM approval + pathologist sign".
+  /// Both, and both CHECKed against `status = 'active'`.
+  approvedBy  String? @map("approved_by") @db.Uuid
+  approvedAt  DateTime? @map("approved_at") @db.Timestamptz(6)
+  signedBy    String? @map("signed_by") @db.Uuid
+  signedAt    DateTime? @map("signed_at") @db.Timestamptz(6)
+  signMethod  SignMethod? @map("sign_method")
+  checksum    String  @db.VarChar(64)
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  decisions LabIfAutovalDecision[]
+
+  // NULLS NOT DISTINCT index in §C: `parameter_key` and `instrument_id` are
+  // both null on a test-wide rule set, and two of those would make "which rule
+  // set auto-verified this result" ambiguous.
+  @@index([hospitalId, testKey, status])
+  @@map("lab_if_autoval_rulesets")
+  @@schema("integration")
+}
+
+/// One decision per result. Append-only: `EN-004 §5` — "every auto decision
+/// recorded (NABL traceability)".
+model LabIfAutovalDecision {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  rulesetId   String  @map("ruleset_id") @db.Uuid
+  rulesetVersion Int  @map("ruleset_version")
+  /// → `lab.results.id` / `lab.result_versions.id`. Plain uuids: both are
+  /// partitioned.
+  resultId    String  @map("result_id") @db.Uuid
+  resultVersionId String? @map("result_version_id") @db.Uuid
+  /// `auto_verified` | `auto_final` | `exception`. CHECKed.
+  outcome     String  @db.VarChar(24)
+  /// Which rules refused. Empty on an auto-verify, non-empty on an exception —
+  /// and the CHECK in §C requires that correspondence, because "it went to a
+  /// human and we do not know why" is not traceability.
+  failedRules Json?   @map("failed_rules") @db.JsonB
+  evaluatedAt DateTime @default(now()) @map("evaluated_at") @db.Timestamptz(6)
+  evaluationMs Int?   @map("evaluation_ms")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  ruleset LabIfAutovalRuleset @relation(fields: [rulesetId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, resultId])
+  @@index([hospitalId, outcome, evaluatedAt(sort: Desc)])
+  @@map("lab_if_autoval_decisions")
+  @@schema("integration")
+}
+
+/// `EN-004 §3.7`: "Downtime auto-start after `heartbeat_miss × 3` (default
+/// 3 min); auto-end at reconnect." The uptime KPI reads from here, and so does
+/// the instrument-status dashboard.
+model LabInstrumentDowntime {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  /// `comm` | `breakdown` | `pm` | `reagent` | `other`. CHECKed.
+  type        String  @db.VarChar(24)
+  /// `auto` | `manual`. An auto-detected outage that a human later reclassifies
+  /// keeps both facts.
+  source      String  @default("auto") @db.VarChar(16)
+  reason      String? @db.Text
+  startAt     DateTime @map("start_at") @db.Timestamptz(6)
+  endAt       DateTime? @map("end_at") @db.Timestamptz(6)
+  /// How many frames were buffered while it was down, and how many replayed.
+  /// Exit gate 7 is exactly the assertion that these two are equal.
+  bufferedCount Int @default(0) @map("buffered_count")
+  replayedCount Int @default(0) @map("replayed_count")
+  lostCount   Int @default(0) @map("lost_count")
+  ticketRef   String? @map("ticket_ref") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  instrument LabInstrument @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, instrumentId, startAt(sort: Desc)])
+  @@map("lab_instrument_downtime")
+  @@schema("integration")
+}
+
+/// `EN-004 §4`: the interface verification a new or reconfigured instrument
+/// needs before it may go `live` — n samples compared, discrepancies counted,
+/// somebody's name on it.
+model LabInterfaceVerification {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  performedAt DateTime @map("performed_at") @db.Timestamptz(6)
+  samplesCompared Int @map("samples_compared")
+  discrepancies Int  @default(0)
+  notes       String? @db.Text
+  approvedBy  String? @map("approved_by") @db.Uuid
+  approvedAt  DateTime? @map("approved_at") @db.Timestamptz(6)
+  documentId  String? @map("document_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, instrumentId, performedAt(sort: Desc)])
+  @@map("lab_interface_verifications")
+  @@schema("integration")
+}

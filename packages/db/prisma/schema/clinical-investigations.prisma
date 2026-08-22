@@ -1,0 +1,342 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-022 — the investigation console (schema `clinical`)
+//
+// Everything that is neither a lab analyzer nor a DICOM modality: an ECG strip,
+// a PFT trace, an endoscopy image set, a TMT report, an outside report being
+// filed into the chart.
+//
+// `OP-022 §4` heads its data model "schema `clinical` / `rad` shared", which is
+// ambiguous. It lands in `clinical` because none of it is imaging in the DICOM
+// sense — an ECG strip is a clinical document with a picture attached, and a
+// dental X-ray that happens to be ionising records its dose in OP-008's register
+// (`OP-022 §5`) rather than duplicating one. The accession series is shared with
+// OP-008 exactly as the spec says.
+//
+// The report follows the same identity/versions split as the lab and radiology
+// reports and files into `clinical.documents`, so there is one hash chain, one
+// verifier and one answer to "is this report authentic".
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum InvestigationStudyStatus {
+  ordered
+  scheduled
+  checked_in
+  in_progress
+  awaiting_report
+  reported
+  cancelled
+
+  @@schema("clinical")
+}
+
+enum InvestigationReportStatus {
+  draft
+  draft_for_cosign
+  final
+  amended
+  cancelled
+
+  @@schema("clinical")
+}
+
+enum InvestigationMediaKind {
+  dicom
+  jpeg
+  png
+  tiff
+  pdf
+  video
+  audio
+  waveform
+  other
+
+  @@schema("clinical")
+}
+
+enum InvestigationMediaSource {
+  upload
+  watch_folder
+  capture
+  dicom
+  device_gateway
+  external
+
+  @@schema("clinical")
+}
+
+model InvestigationStudy {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  /// → `clinical.orders.id` / `clinical.order_items.id`.
+  clinicalOrderId String? @map("clinical_order_id") @db.Uuid
+  orderItemId String? @map("order_item_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  visitId     String? @map("visit_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+  /// Numbering series `ACC`, shared with OP-008 (`OP-022 §5`).
+  accessionNo String  @map("accession_no") @db.VarChar(32)
+  /// → `mdm.mdm_investigation_services.record_key`, with the name snapshotted.
+  serviceKey  String  @map("service_key") @db.Uuid
+  serviceName String  @map("service_name") @db.VarChar(300)
+  modalityGroup InvestigationModalityGroup @map("modality_group")
+  priority    LabPriority @default(routine)
+  status      InvestigationStudyStatus @default(ordered)
+  /// The capture device, from NC-020 when it lands.
+  deviceRef   String? @map("device_ref") @db.Uuid
+  technicianUserId String? @map("technician_user_id") @db.Uuid
+  reporterUserId String? @map("reporter_user_id") @db.Uuid
+  scheduledAt DateTime? @map("scheduled_at") @db.Timestamptz(6)
+  checkedInAt DateTime? @map("checked_in_at") @db.Timestamptz(6)
+  performedAt DateTime? @map("performed_at") @db.Timestamptz(6)
+  /// `OP-022 §5`: "Identity verification (scan/2-identifier) before capture."
+  identityVerified Boolean @default(false) @map("identity_verified")
+  identityMethod String? @map("identity_method") @db.VarChar(64)
+  techniqueNotes String? @map("technique_notes") @db.Text
+  /// → `clinical.form_responses.id`, where the structured measurements live.
+  measurementsFormResponseId String? @map("measurements_form_response_id") @db.Uuid
+  repeatFlag  Boolean @default(false) @map("repeat_flag")
+  repeatReason String? @map("repeat_reason") @db.Text
+  qcNotes     String? @map("qc_notes") @db.Text
+  tatDueAt    DateTime? @map("tat_due_at") @db.Timestamptz(6)
+  /// Snapshotted from the service master: PC-PNDT and ionising obligations
+  /// cannot be lifted retroactively by editing the master.
+  isPcpndt    Boolean @default(false) @map("is_pcpndt")
+  isIonising  Boolean @default(false) @map("is_ionising")
+  /// → `rad.rad_dose_records.id` when the study was ionising (`OP-022 §5`).
+  doseRecordRef String? @map("dose_record_ref") @db.Uuid
+  cancelReason String? @map("cancel_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  media   InvestigationMedia[]
+  reports InvestigationReport[]
+
+  @@unique([hospitalId, accessionNo], map: "investigation_studies_accession_key")
+  @@index([hospitalId, branchId, status, priority, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, clinicalOrderId])
+  @@index([hospitalId, status, tatDueAt])
+  @@map("investigation_studies")
+  @@schema("clinical")
+}
+
+/// `OP-022 §5`: "Originals immutable; annotations separate; detach/move requires
+/// reason & audit; deletion soft only." The object itself is in S3/MinIO through
+/// `core.files`; this row is the index and the provenance.
+model InvestigationMedia {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  studyId     String  @map("study_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  kind        InvestigationMediaKind
+  /// → `core.files.id`. The original, never rewritten.
+  fileId      String  @map("file_id") @db.Uuid
+  thumbnailFileId String? @map("thumbnail_file_id") @db.Uuid
+  transcodeFileId String? @map("transcode_file_id") @db.Uuid
+  mimeType    String  @map("mime_type") @db.VarChar(120)
+  sizeBytes   BigInt  @default(0) @map("size_bytes")
+  durationSeconds Decimal? @map("duration_seconds") @db.Decimal(10, 2)
+  sequenceNo  Int     @default(0) @map("sequence_no")
+  source      InvestigationMediaSource @default(upload)
+  /// When the capture happened to be DICOM after all (a dental sensor), the
+  /// object lives in Orthanc and these point at it.
+  sopInstanceUid String? @map("sop_instance_uid") @db.VarChar(64)
+  orthancStudyId String? @map("orthanc_study_id") @db.VarChar(64)
+  uploadedBy  String? @map("uploaded_by") @db.Uuid
+  uploadedAt  DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+  /// `OP-022 §5`: "orphan uploads quarantined for matching (24 h) then flagged."
+  /// A quarantined object has no study yet — which is why `study_id` on a
+  /// quarantined row points at a per-branch holding study rather than being
+  /// null, so RLS and retention still reach it.
+  isQuarantined Boolean @default(false) @map("is_quarantined")
+  quarantineUntil DateTime? @map("quarantine_until") @db.Timestamptz(6)
+  /// Soft delete only, with a reason. Clinical media is never hard-deleted.
+  detachedAt  DateTime? @map("detached_at") @db.Timestamptz(6)
+  detachReason String? @map("detach_reason") @db.Text
+  detachedBy  String? @map("detached_by") @db.Uuid
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  deleteReason String? @map("delete_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  study       InvestigationStudy @relation(fields: [studyId], references: [id], onDelete: Restrict)
+  annotations InvestigationAnnotation[]
+
+  @@index([hospitalId, studyId, sequenceNo])
+  @@index([hospitalId, patientId, uploadedAt(sort: Desc)])
+  @@index([hospitalId, isQuarantined, quarantineUntil])
+  @@map("investigation_media")
+  @@schema("clinical")
+}
+
+/// Annotations live apart from the original, which is the whole reason the
+/// original can be called immutable.
+model InvestigationAnnotation {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  mediaId     String  @map("media_id") @db.Uuid
+  version     Int     @default(1)
+  /// Shapes and measurements, in the viewer's own coordinate space.
+  data        Json    @db.JsonB
+  authorUserId String @map("author_user_id") @db.Uuid
+  at          DateTime @default(now()) @db.Timestamptz(6)
+  supersededByVersion Int? @map("superseded_by_version")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  media InvestigationMedia @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+
+  @@unique([mediaId, version], map: "investigation_annotations_version_key")
+  @@index([hospitalId, mediaId, at])
+  @@map("investigation_annotations")
+  @@schema("clinical")
+}
+
+model InvestigationReport {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  studyId     String  @map("study_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  /// Numbering series `INV_RPT` (`OP-022 §5`).
+  reportNo    String  @map("report_no") @db.VarChar(48)
+  currentVersion Int  @default(0) @map("current_version")
+  currentStatus  InvestigationReportStatus @default(draft) @map("current_status")
+  cosignRequired Boolean @default(false) @map("cosign_required")
+  /// The highest criticality any version carried. Never cleared.
+  everCritical Boolean @default(false) @map("ever_critical")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  study      InvestigationStudy @relation(fields: [studyId], references: [id], onDelete: Restrict)
+  versions   InvestigationReportVersion[]
+  deliveries InvestigationReportDelivery[]
+
+  @@unique([hospitalId, reportNo], map: "investigation_reports_no_key")
+  @@unique([studyId], map: "investigation_reports_study_key")
+  @@index([hospitalId, branchId, currentStatus, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@map("investigation_reports")
+  @@schema("clinical")
+}
+
+model InvestigationReportVersion {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  reportId    String  @map("report_id") @db.Uuid
+  version     Int
+  status      InvestigationReportStatus @default(draft)
+  templateKey String? @map("template_key") @db.Uuid
+  body        Json    @db.JsonB
+  impression  String? @db.Text
+  critical    Boolean @default(false)
+  /// `OP-022 §5`: "critical flag → notification recorded before final (or within
+  /// 15 min after with ack)". The record is a `rad.rad_critical_findings`-shaped
+  /// obligation; rather than a third parallel table, an investigation critical
+  /// finding is filed as a `clinical.result_acknowledgements` row with
+  /// `result_kind = 'investigation_report'` and this column names it.
+  criticalAckRef String? @map("critical_ack_ref") @db.Uuid
+  authorUserId String @map("author_user_id") @db.Uuid
+  /// `OP-022 §5`: residents cannot finalise a `cosign_required` service. The
+  /// consultant's edits are tracked, and a discrepancy is graded.
+  cosignerUserId String? @map("cosigner_user_id") @db.Uuid
+  cosignedAt  DateTime? @map("cosigned_at") @db.Timestamptz(6)
+  cosignChanges Json?  @map("cosign_changes") @db.JsonB
+  /// `none` | `minor` | `major`. CHECKed.
+  discrepancy String? @db.VarChar(16)
+  signedBy    String? @map("signed_by") @db.Uuid
+  signedAt    DateTime? @map("signed_at") @db.Timestamptz(6)
+  signMethod  SignMethod? @map("sign_method")
+  signerRegistrationNo String? @map("signer_registration_no") @db.VarChar(64)
+  /// PC-PNDT: a flagged service's report carries the Form F reference, and the
+  /// keyword validator that refuses sex-revealing text records its verdict here.
+  formFRef    String? @map("form_f_ref") @db.Uuid
+  pcpndtTextCheckPassed Boolean? @map("pcpndt_text_check_passed")
+  pcpndtOverrideBy String? @map("pcpndt_override_by") @db.Uuid
+  pcpndtOverrideReason String? @map("pcpndt_override_reason") @db.Text
+  documentId  String? @map("document_id") @db.Uuid
+  documentVersion Int? @map("document_version")
+  pdfFileId   String? @map("pdf_file_id") @db.Uuid
+  verifyToken String? @map("verify_token") @db.VarChar(64)
+  contentSha256 String @default("") @map("content_sha256") @db.VarChar(64)
+  prevSha256  String? @map("prev_sha256") @db.VarChar(64)
+  amendmentReason String? @map("amendment_reason") @db.Text
+  cancelledReason String? @map("cancelled_reason") @db.Text
+  supersededByVersion Int? @map("superseded_by_version")
+  supersededAt DateTime? @map("superseded_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  report InvestigationReport @relation(fields: [reportId], references: [id], onDelete: Restrict)
+
+  @@unique([reportId, version], map: "investigation_report_versions_version_key")
+  @@index([hospitalId, reportId, version])
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@map("investigation_report_versions")
+  @@schema("clinical")
+}
+
+model InvestigationReportDelivery {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  reportId    String  @map("report_id") @db.Uuid
+  reportVersion Int   @map("report_version")
+  channel     LabDeliveryChannel
+  recipient   String? @db.VarChar(200)
+  status      String  @default("queued") @db.VarChar(24)
+  attemptedAt DateTime? @map("attempted_at") @db.Timestamptz(6)
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz(6)
+  failureReason String? @map("failure_reason") @db.Text
+  messageRef  String? @map("message_ref") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  report InvestigationReport @relation(fields: [reportId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, reportId, createdAt])
+  @@map("investigation_report_deliveries")
+  @@schema("clinical")
+}
+
+/// `OP-022 §4`: the little agent that watches a device's export folder and posts
+/// what appears. Its heartbeat is how an unattended ECG cart is known to be dead.
+model InvestigationWatchFolderAgent {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  name        String  @db.VarChar(160)
+  deviceRef   String? @map("device_ref") @db.Uuid
+  host        String? @db.VarChar(160)
+  folder      String  @db.VarChar(300)
+  /// How a filename maps to a patient/accession. Never a fuzzy name match:
+  /// `docs/prompts/phase-03 §Constraints` bans that for analyzer results and the
+  /// reasoning is identical here.
+  mappingRule Json?   @map("mapping_rule") @db.JsonB
+  lastSeenAt  DateTime? @map("last_seen_at") @db.Timestamptz(6)
+  isActive    Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, branchId, name], map: "investigation_watch_folder_agents_key")
+  @@index([hospitalId, isActive, lastSeenAt])
+  @@map("investigation_watch_folder_agents")
+  @@schema("clinical")
+}

@@ -1,0 +1,718 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-031 — lab quality: IQC, Westgard, EQA, calibration, competency
+// (schema `lab`, prefix `labq_`)
+//
+// ── The state that is not a boolean ─────────────────────────────────────────
+//
+// `docs/prompts/phase-03 §Non-negotiables 3`: "Westgard violations block release
+// (exit gate 4). A QC state that permits release must be distinguishable from
+// one that has never been evaluated — the same class of defect as Phase 1's
+// allergy statement. `unknown` is not `passed`."
+//
+// Phase 1 met this in `patient.patients.allergy_statement`, where zero allergy
+// rows meant three different things and the system treated all three as "no
+// allergies". Phase 2 met it again in `clinical.encounters.dosing_weight_source`,
+// where a null weight had to be distinguishable from a weight of zero.
+//
+// Here it is `lab.labq_analyte_qc_state`, one row per analyte × instrument,
+// whose `state` column has **no value that means "fine, probably"**:
+//
+//   never_evaluated   the default. No QC has ever run for this pairing. Release
+//                     is NOT permitted — this is the arm the defect class is
+//                     about, and it is the DEFAULT so that a pairing nobody
+//                     configured fails closed.
+//   in_control        the only unconditionally releasable state.
+//   warning           a 1-2s or another warning-action rule fired. Releasable —
+//                     `EN-031 §5` is explicit that using 1-2s as a rejection
+//                     rule is a classic false-rejection error — but flagged.
+//   out_of_control    a rejection rule fired. Release blocked.
+//   overdue           the scheduled QC was missed beyond its grace window.
+//                     `EN-031 §4` (`block_release_on_miss`) makes this block.
+//   suspended         instrument out of service, requalification pending, lot
+//                     expired, or the analyte suspended after an unsatisfactory
+//                     EQA. Release blocked.
+//
+// The predicate is a single SQL function, `lab.qc_permits_release(state)`, so
+// there is exactly one place that decides — and the migration asserts, at
+// migration time, that it answers `false` for `never_evaluated`. A future edit
+// that adds a seventh state and forgets to classify it fails there rather than
+// releasing patient results against QC nobody ever ran.
+//
+// ── What is deferred ────────────────────────────────────────────────────────
+//
+// `EN-031` also specifies `labq_checklist_items` (NABL 112 clause mapping),
+// `labq_indicators`, `labq_nonconformities`, `labq_environment_logs` and
+// `labq_instrument_qualifications`. Those are the accreditation *evidence
+// system*, they hang off NC-015 (CAPA) and NC-020 (assets) which do not exist
+// until Phase 9, and none of them gates a result. They are listed in
+// `docs/PROGRESS.md` as Phase-9 work rather than modelled here against modules
+// that are not built — `CLAUDE.md §0.1`: do not invent data.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The release gate. Read `lab.qc_permits_release()` in the migration, not this
+/// comment, for what each value costs — but note the two properties that make
+/// this enum the fix for the defect class:
+///
+///   * `never_evaluated` is the DEFAULT, so an unconfigured pairing fails closed.
+///   * there is no value meaning "unknown but probably fine".
+enum LabQcState {
+  never_evaluated
+  in_control
+  warning
+  out_of_control
+  overdue
+  suspended
+
+  @@schema("lab")
+}
+
+enum LabQcLevel {
+  l1
+  l2
+  l3
+  l4
+  other
+
+  @@schema("lab")
+}
+
+/// `EN-031 §4`'s `labq_westgard_config.rule_code`. The full multi-rule set, so a
+/// laboratory can choose per analyte with the Six-Sigma calculation in front of
+/// it rather than switching everything on and drowning in false rejections.
+enum LabWestgardRule {
+  r_1_2s
+  r_1_3s
+  r_2_2s
+  r_R_4s
+  r_4_1s
+  r_10x
+  r_8x
+  r_12x
+  r_7T
+  r_2of3_2s
+  r_3_1s
+  r_6x
+  r_9x
+
+  @@schema("lab")
+}
+
+enum LabWestgardAction {
+  warning
+  reject
+
+  @@schema("lab")
+}
+
+enum LabQcRunStatus {
+  in_control
+  warning
+  out_of_control
+  void
+
+  @@schema("lab")
+}
+
+enum LabQcEntryMode {
+  interface
+  manual
+
+  @@schema("lab")
+}
+
+/// `EN-031 §5`: "QC results cannot be deleted; a mistaken entry is voided with a
+/// reason and remains visible on the chart as a voided point."
+///
+/// Partitioned monthly on `run_at`, which is `timestamptz(3)` — same D-31
+/// reasoning as every other partition key in this phase.
+model LabQcRun {
+  id          String  @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  /// → `mdm_lab_tests.record_key` of the analyte under control.
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  qcMaterialId String @map("qc_material_id") @db.Uuid
+  level       LabQcLevel
+  targetId    String? @map("target_id") @db.Uuid
+  value       Decimal @db.Decimal(18, 6)
+  unit        String? @db.VarChar(32)
+  /// (value − mean) / sd, against the target in force at `run_at`. Stored, not
+  /// derived: the target is effective-dated and a Levey-Jennings chart redrawn
+  /// after a target change must still show the z-scores that were computed.
+  zScore      Decimal? @map("z_score") @db.Decimal(12, 6)
+  targetMean  Decimal? @map("target_mean") @db.Decimal(18, 6)
+  targetSd    Decimal? @map("target_sd") @db.Decimal(18, 6)
+  runNo       Int?    @map("run_no")
+  sequenceNo  Int?    @map("sequence_no")
+  shift       String? @db.VarChar(24)
+  operatorId  String? @map("operator_id") @db.Uuid
+  entryMode   LabQcEntryMode @default(manual) @map("entry_mode")
+  reagentLot  String? @map("reagent_lot") @db.VarChar(64)
+  calibrationId String? @map("calibration_id") @db.Uuid
+  status      LabQcRunStatus @default(in_control)
+  /// The rules that actually fired, as their enum labels. An array rather than a
+  /// child table because a Levey-Jennings point is read whole, always.
+  violatedRules String[] @default([]) @map("violated_rules")
+  /// Whether any fired rule had action `reject`. Redundant against
+  /// `violated_rules` on purpose, CHECKed against `status`, and indexed —
+  /// because "is this analyte blocked right now" must be an index probe.
+  hasRejection Boolean @default(false) @map("has_rejection")
+  /// `EN-031 §5`: never deleted. Voided, with a reason, still on the chart.
+  voidedBy    String? @map("voided_by") @db.Uuid
+  voidedAt    DateTime? @map("voided_at") @db.Timestamptz(6)
+  voidReason  String? @map("void_reason") @db.Text
+  comment     String? @db.Text
+
+  runAt       DateTime @default(now()) @map("run_at") @db.Timestamptz(3)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String?  @map("created_by") @db.Uuid
+
+  @@id([id, runAt])
+  @@index([hospitalId, testKey, instrumentId, runAt(sort: Desc)])
+  @@index([hospitalId, status, runAt(sort: Desc)])
+  @@index([hospitalId, qcMaterialId, runAt(sort: Desc)])
+  @@map("labq_qc_runs")
+  @@schema("lab")
+}
+
+/// **The release gate, as a row.** One per analyte × instrument, whose default
+/// is `never_evaluated`.
+///
+/// A row can be absent, and absence means the same thing as `never_evaluated` —
+/// which is why `lab.qc_state_for()` in the migration returns `never_evaluated`
+/// for a missing row rather than null. There is no reading of this table under
+/// which "no information" becomes "release permitted".
+model LabAnalyteQcState {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  state       LabQcState @default(never_evaluated)
+  /// Null exactly when `state = 'never_evaluated'`. CHECKed in both directions,
+  /// so a state claiming to have been evaluated always names when.
+  lastEvaluatedAt DateTime? @map("last_evaluated_at") @db.Timestamptz(6)
+  lastRunId   String? @map("last_run_id") @db.Uuid
+  lastRunAt   DateTime? @map("last_run_at") @db.Timestamptz(6)
+  /// The moment the next scheduled QC is due. Past it plus the grace window and
+  /// the state becomes `overdue`.
+  nextDueAt   DateTime? @map("next_due_at") @db.Timestamptz(6)
+  /// The reason a non-releasing state was entered, for the technician who has to
+  /// fix it.
+  reason      String? @db.Text
+  activeLockoutId String? @map("active_lockout_id") @db.Uuid
+  /// How many patient results are held behind this state right now. Maintained
+  /// by the service; a number on a dashboard, never a gate.
+  heldResultCount Int @default(0) @map("held_result_count")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  // Uniqueness is a hand-written NULLS NOT DISTINCT index in §C: `parameter_key`
+  // is null for a single-analyte test, and a plain unique index would let a
+  // second "no parameter" row exist — two QC states for one analyte, and no
+  // rule for which one gates release.
+  @@index([hospitalId, branchId, state])
+  @@index([hospitalId, nextDueAt])
+  @@map("labq_analyte_qc_state")
+  @@schema("lab")
+}
+
+/// The lockout an out-of-control run produces. `EN-004 §5`: "lockout scope =
+/// analyte × instrument; unlock only after passing QC and corrective action
+/// note; held patient results released to review queue."
+model LabQcLockout {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  /// The run that caused it, and the rules it broke.
+  qcRunId     String? @map("qc_run_id") @db.Uuid
+  violatedRules String[] @default([]) @map("violated_rules")
+  reason      String  @db.Text
+  lockedAt    DateTime @default(now()) @map("locked_at") @db.Timestamptz(6)
+  lockedBy    String? @map("locked_by") @db.Uuid
+  /// Unlocking needs three things at once, enforced by CHECK: a corrective
+  /// action on file, a passing QC run, and a person. Two of the three is how a
+  /// lockout gets cleared by clicking.
+  unlockedAt  DateTime? @map("unlocked_at") @db.Timestamptz(6)
+  unlockedBy  String? @map("unlocked_by") @db.Uuid
+  unlockQcRunId String? @map("unlock_qc_run_id") @db.Uuid
+  correctiveActionId String? @map("corrective_action_id") @db.Uuid
+  heldResultCount Int @default(0) @map("held_result_count")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, instrumentId, testKey, lockedAt(sort: Desc)])
+  @@map("labq_qc_lockouts")
+  @@schema("lab")
+}
+
+/// `EN-031 §3.3`: the documented cause and action that clears a lockout. Also
+/// the single lawful route around the release gate — a Director authorisation,
+/// recorded, audited and reported monthly.
+model LabQcAction {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  qcRunId     String? @map("qc_run_id") @db.Uuid
+  lockoutId   String? @map("lockout_id") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  testKey     String  @map("test_key") @db.Uuid
+  causeCode   String  @map("cause_code") @db.VarChar(64)
+  causeNote   String? @map("cause_note") @db.Text
+  actionCode  String  @map("action_code") @db.VarChar(64)
+  actionNote  String? @map("action_note") @db.Text
+  repeatQcRunId String? @map("repeat_qc_run_id") @db.Uuid
+  /// `none` | `retest_all` | `retest_selected` | `released_with_authorisation`.
+  /// The last of those is `EN-031 §5`'s only exception to absolute gating, and
+  /// the CHECK in §C requires an authoriser and a reason for it.
+  patientImpact String @map("patient_impact") @db.VarChar(32)
+  affectedResultCount Int @default(0) @map("affected_result_count")
+  authorisedBy String? @map("authorised_by") @db.Uuid
+  authorisedAt DateTime? @map("authorised_at") @db.Timestamptz(6)
+  authorisationReason String? @map("authorisation_reason") @db.Text
+  /// → NC-015 CAPA, when Phase 9 lands.
+  capaRef     String? @map("capa_ref") @db.Uuid
+  closedAt    DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, instrumentId, testKey, createdAt(sort: Desc)])
+  @@index([hospitalId, patientImpact, createdAt(sort: Desc)])
+  @@map("labq_qc_actions")
+  @@schema("lab")
+}
+
+/// `EN-031 §4`: control material, by lot and level.
+model LabQcMaterial {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  manufacturer String? @db.VarChar(200)
+  product     String  @db.VarChar(200)
+  lotNo       String  @map("lot_no") @db.VarChar(64)
+  level       LabQcLevel
+  matrix      String? @db.VarChar(120)
+  receivedOn  DateTime? @map("received_on") @db.Date
+  expiryDate  DateTime  @map("expiry_date") @db.Date
+  openedOn    DateTime? @map("opened_on") @db.Date
+  openStabilityDays Int? @map("open_stability_days")
+  storageTempC Decimal? @map("storage_temp_c") @db.Decimal(5, 2)
+  /// `active` | `quarantine` | `expired` | `exhausted`. CHECKed.
+  status      String  @default("active") @db.VarChar(24)
+  coaFileId   String? @map("coa_file_id") @db.Uuid
+  /// `EN-031 §5`: "Lot changeover requires parallel testing (≥10 paired runs)
+  /// with a documented comparison before the new lot becomes active."
+  parallelRunsCompleted Int @default(0) @map("parallel_runs_completed")
+  parallelComparisonFileId String? @map("parallel_comparison_file_id") @db.Uuid
+  replacesMaterialId String? @map("replaces_material_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  targets LabQcTarget[]
+
+  @@unique([hospitalId, product, lotNo, level], map: "labq_qc_materials_lot_key")
+  @@index([hospitalId, status, expiryDate])
+  @@map("labq_qc_materials")
+  @@schema("lab")
+}
+
+/// `EN-031 §5`: "QC targets from the manufacturer insert are provisional;
+/// laboratory-derived mean/SD from ≥20 runs over ≥20 days must replace them and
+/// require Director approval. Targets are effective-dated and never edited in
+/// place."
+model LabQcTarget {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  qcMaterialId String @map("qc_material_id") @db.Uuid
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  unit        String? @db.VarChar(32)
+  /// `insert` | `lab_derived` | `peer_group`. CHECKed.
+  source      String  @db.VarChar(24)
+  mean        Decimal @db.Decimal(18, 6)
+  sd          Decimal @db.Decimal(18, 6)
+  cvPercent   Decimal? @map("cv_percent") @db.Decimal(8, 4)
+  nRuns       Int?    @map("n_runs")
+  /// Total allowable error, for the Six-Sigma figure `EN-031 §5` wants shown to
+  /// whoever chooses the rule set.
+  teaPercent  Decimal? @map("tea_percent") @db.Decimal(8, 4)
+  sigma       Decimal? @db.Decimal(8, 4)
+  approvedBy  String? @map("approved_by") @db.Uuid
+  approvedAt  DateTime? @map("approved_at") @db.Timestamptz(6)
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  qcMaterial LabQcMaterial @relation(fields: [qcMaterialId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, testKey, instrumentId, effectiveFrom(sort: Desc)])
+  @@map("labq_qc_targets")
+  @@schema("lab")
+}
+
+/// `EN-031 §4`: how often QC must run, and whether missing it blocks release.
+model LabQcSchedule {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  levels      Int     @default(2)
+  /// `per_shift` | `per_run` | `every_n_samples` | `daily` | `after_calibration`
+  /// | `after_maintenance`. CHECKed.
+  frequency   String  @db.VarChar(32)
+  nSamples    Int?    @map("n_samples")
+  shifts      String[] @default([])
+  graceMinutes Int    @default(60) @map("grace_minutes")
+  /// `EN-031 §4`. When true, a missed run past the grace window puts the analyte
+  /// into `overdue`, which `lab.qc_permits_release()` refuses.
+  blockReleaseOnMiss Boolean @default(true) @map("block_release_on_miss")
+  isActive    Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  // NULLS NOT DISTINCT index in §C — same reason as `labq_analyte_qc_state`.
+  @@index([hospitalId, branchId, isActive])
+  @@map("labq_qc_schedules")
+  @@schema("lab")
+}
+
+/// Which Westgard rules are in force, and what each one does. One row per rule
+/// per scope.
+///
+/// The CHECK in §C encodes `EN-031 §5` directly: **`1-2s` may never carry the
+/// `reject` action.** Configuring it as a rejection rule is the textbook
+/// false-rejection error — at two standard deviations roughly one run in twenty
+/// fails by chance, and a laboratory that repeats one run in twenty stops
+/// believing its own QC.
+model LabWestgardConfig {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  /// Null on either means "every one" — the hospital-wide default row.
+  testKey     String? @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  instrumentId String? @map("instrument_id") @db.Uuid
+  ruleCode    LabWestgardRule @map("rule_code")
+  /// N and R as the rule notation uses them (4 of 4-1s, 4 of R-4s).
+  n           Int?
+  r           Int?
+  action      LabWestgardAction
+  enabled     Boolean @default(true)
+  /// The Six-Sigma basis shown to whoever chose this rule set.
+  teaPercent  Decimal? @map("tea_percent") @db.Decimal(8, 4)
+  sigmaSource String? @map("sigma_source") @db.VarChar(64)
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, testKey, instrumentId, enabled])
+  @@map("labq_westgard_config")
+  @@schema("lab")
+}
+
+/// `EN-031 §3.4`: external quality assessment / proficiency testing.
+model LabEqaProgramme {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  providerCode String @map("provider_code") @db.VarChar(64)
+  providerName String @map("provider_name") @db.VarChar(200)
+  discipline  LabDiscipline
+  participantCode String? @map("participant_code") @db.VarChar(64)
+  /// The analytes enrolled, as `mdm_lab_tests.record_key[]`.
+  testKeys    String[] @default([]) @map("test_keys") @db.Uuid
+  cycleCalendar Json? @map("cycle_calendar") @db.JsonB
+  feeAmount   Decimal? @map("fee_amount") @db.Decimal(14, 2)
+  currency    String  @default("INR") @db.Char(3)
+  enrolledFrom DateTime? @map("enrolled_from") @db.Date
+  enrolledTo   DateTime? @map("enrolled_to") @db.Date
+  status      String  @default("active") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  cycles LabEqaCycle[]
+
+  @@index([hospitalId, discipline, status])
+  @@map("labq_eqa_programmes")
+  @@schema("lab")
+}
+
+model LabEqaCycle {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  programmeId String  @map("programme_id") @db.Uuid
+  cycleCode   String  @map("cycle_code") @db.VarChar(64)
+  sampleReceivedOn DateTime? @map("sample_received_on") @db.Date
+  sampleCondition String? @map("sample_condition") @db.VarChar(120)
+  testDueDate DateTime? @map("test_due_date") @db.Date
+  submissionDeadline DateTime? @map("submission_deadline") @db.Date
+  testedOn    DateTime? @map("tested_on") @db.Date
+  /// `EN-031 §5`: "EQA samples must be run by routine staff on routine runs —
+  /// the system records operator/instrument and flags a mismatch if a
+  /// non-routine operator is used."
+  operatorId  String? @map("operator_id") @db.Uuid
+  instrumentId String? @map("instrument_id") @db.Uuid
+  routineOperatorMismatch Boolean @default(false) @map("routine_operator_mismatch")
+  submittedOn DateTime? @map("submitted_on") @db.Date
+  submittedBy String? @map("submitted_by") @db.Uuid
+  reportReceivedOn DateTime? @map("report_received_on") @db.Date
+  reportFileId String? @map("report_file_id") @db.Uuid
+  /// `pending` | `tested` | `submitted` | `reported` | `missed`. CHECKed.
+  status      String  @default("pending") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  programme LabEqaProgramme @relation(fields: [programmeId], references: [id], onDelete: Restrict)
+  results   LabEqaResult[]
+
+  @@unique([programmeId, cycleCode], map: "labq_eqa_cycles_code_key")
+  @@index([hospitalId, status, submissionDeadline])
+  @@map("labq_eqa_cycles")
+  @@schema("lab")
+}
+
+model LabEqaResult {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  cycleId     String  @map("cycle_id") @db.Uuid
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  ourValue    Decimal? @map("our_value") @db.Decimal(18, 6)
+  unit        String? @db.VarChar(32)
+  peerMean    Decimal? @map("peer_mean") @db.Decimal(18, 6)
+  peerSd      Decimal? @map("peer_sd") @db.Decimal(18, 6)
+  zScore      Decimal? @map("z_score") @db.Decimal(12, 6)
+  sdi         Decimal? @db.Decimal(12, 6)
+  deviationPercent Decimal? @map("deviation_percent") @db.Decimal(10, 4)
+  /// `satisfactory` | `questionable` | `unsatisfactory`. CHECKed.
+  performance String? @db.VarChar(24)
+  providerComment String? @map("provider_comment") @db.Text
+  /// `EN-031 §5`: |Z| > 3, or two consecutive |Z| > 2, forces a non-conformity.
+  /// The NC-015 CAPA record arrives in Phase 9; this is the reference.
+  capaRef     String? @map("capa_ref") @db.Uuid
+  /// The Director's decision to suspend the test from reporting, which is what
+  /// puts the analyte into `suspended` in `labq_analyte_qc_state`.
+  suspendedFromReporting Boolean @default(false) @map("suspended_from_reporting")
+  suspendedBy String? @map("suspended_by") @db.Uuid
+  suspendedAt DateTime? @map("suspended_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  cycle LabEqaCycle @relation(fields: [cycleId], references: [id], onDelete: Restrict)
+
+  // NULLS NOT DISTINCT index in §C — `parameter_key` is null for a
+  // single-analyte test.
+  @@index([hospitalId, testKey, createdAt(sort: Desc)])
+  @@map("labq_eqa_results")
+  @@schema("lab")
+}
+
+/// `EN-031 §3.5`: calibration, with the next-due date the release gate reads.
+model LabCalibration {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  instrumentId String @map("instrument_id") @db.Uuid
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  calibratorLot String? @map("calibrator_lot") @db.VarChar(64)
+  calibratorExpiry DateTime? @map("calibrator_expiry") @db.Date
+  calibratedAt DateTime @map("calibrated_at") @db.Timestamptz(6)
+  operatorId  String? @map("operator_id") @db.Uuid
+  /// `pass` | `fail`. CHECKed.
+  result      String  @db.VarChar(16)
+  values      Json?   @db.JsonB
+  verificationQcRunId String? @map("verification_qc_run_id") @db.Uuid
+  nextDueAt   DateTime? @map("next_due_at") @db.Timestamptz(6)
+  traceabilityRef String? @map("traceability_ref") @db.VarChar(200)
+  certificateFileId String? @map("certificate_file_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, instrumentId, testKey, calibratedAt(sort: Desc)])
+  @@index([hospitalId, nextDueAt])
+  @@map("labq_calibrations")
+  @@schema("lab")
+}
+
+/// `EN-031 §5`: "a technician whose competency for an analyte/instrument has
+/// expired cannot enter or verify results for it".
+model LabCompetency {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  userId      String  @map("user_id") @db.Uuid
+  /// → NC-010 employee, when HR lands. Null until then; `user_id` is the
+  /// identity that actually gates a keystroke.
+  employeeRef String? @map("employee_ref") @db.Uuid
+  testKey     String? @map("test_key") @db.Uuid
+  discipline  LabDiscipline?
+  instrumentId String? @map("instrument_id") @db.Uuid
+  /// `training` | `direct_observation` | `result_monitoring` | `blind_sample` |
+  /// `problem_solving` | `maintenance_troubleshooting`. CHECKed.
+  element     String  @db.VarChar(48)
+  assessedOn  DateTime @map("assessed_on") @db.Date
+  assessorId  String? @map("assessor_id") @db.Uuid
+  /// `competent` | `needs_retraining`. CHECKed.
+  outcome     String  @db.VarChar(24)
+  evidenceFileId String? @map("evidence_file_id") @db.Uuid
+  validUntil  DateTime? @map("valid_until") @db.Date
+  /// The authorisation flag itself. A competency record that is not an
+  /// authorisation does not gate anything; one that is, does.
+  authorised  Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, userId, validUntil])
+  @@index([hospitalId, testKey, authorised])
+  @@map("labq_competencies")
+  @@schema("lab")
+}
+
+/// `EN-031 §3.5`: the method validation/verification an accredited test needs
+/// before it may be made orderable.
+model LabMethodValidation {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  instrumentId String? @map("instrument_id") @db.Uuid
+  /// `validation` | `verification` | `revalidation`. CHECKed.
+  type        String  @db.VarChar(24)
+  plan        Json?   @db.JsonB
+  /// Precision, bias, linearity, LoD, interference, carryover, stability,
+  /// reference interval, uncertainty — each with its raw-data reference and a
+  /// pass/fail. JSONB because the study set differs by analyte and a hospital
+  /// authors the acceptance criteria.
+  studies     Json?   @db.JsonB
+  /// `draft` | `in_progress` | `completed` | `approved` | `rejected`. CHECKed.
+  status      String  @default("draft") @db.VarChar(24)
+  reportFileId String? @map("report_file_id") @db.Uuid
+  approvedBy  String? @map("approved_by") @db.Uuid
+  approvedAt  DateTime? @map("approved_at") @db.Timestamptz(6)
+  effectiveFrom DateTime? @map("effective_from") @db.Timestamptz(6)
+  /// `EN-031 §5`: measurement uncertainty for every quantitative in-scope test,
+  /// recomputed at least annually or after any method or calibrator change.
+  uncertaintyU Decimal? @map("uncertainty_u") @db.Decimal(18, 6)
+  uncertaintyK Decimal? @map("uncertainty_k") @db.Decimal(8, 4)
+  uncertaintyExpanded Decimal? @map("uncertainty_expanded") @db.Decimal(18, 6)
+  uncertaintyComputedAt DateTime? @map("uncertainty_computed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, testKey, status])
+  @@map("labq_method_validations")
+  @@schema("lab")
+}
+
+/// `EN-031 §4`: the accreditation certificate itself, and the tests inside its
+/// scope. Small, and the reason the NABL logo can be printed lawfully.
+model LabAccreditation {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  /// `nabl` | `cap` | `jci_lab` | `other`. CHECKed.
+  body        String  @db.VarChar(24)
+  certificateNo String @map("certificate_no") @db.VarChar(64)
+  disciplines String[] @default([])
+  validFrom   DateTime @map("valid_from") @db.Date
+  validTo     DateTime @map("valid_to") @db.Date
+  scopeStatus String? @map("scope_status") @db.VarChar(32)
+  surveillanceDue DateTime? @map("surveillance_due") @db.Date
+  contactPerson String? @map("contact_person") @db.VarChar(200)
+  certificateFileId String? @map("certificate_file_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  scopeTests LabScopeTest[]
+
+  @@unique([hospitalId, branchId, body, certificateNo], map: "labq_accreditation_key")
+  @@index([hospitalId, validTo])
+  @@map("labq_accreditation")
+  @@schema("lab")
+}
+
+model LabScopeTest {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  accreditationId String @map("accreditation_id") @db.Uuid
+  testKey     String  @map("test_key") @db.Uuid
+  parameterKey String? @map("parameter_key") @db.Uuid
+  method      String? @db.VarChar(160)
+  instrumentId String? @map("instrument_id") @db.Uuid
+  measurementRange String? @map("measurement_range") @db.VarChar(120)
+  uncertaintyU Decimal? @map("uncertainty_u") @db.Decimal(18, 6)
+  uncertaintyK Decimal? @map("uncertainty_k") @db.Decimal(8, 4)
+  traceabilityRef String? @map("traceability_ref") @db.VarChar(200)
+  inScope     Boolean @default(true) @map("in_scope")
+  addedOn     DateTime? @map("added_on") @db.Date
+  removedOn   DateTime? @map("removed_on") @db.Date
+  methodValidationId String? @map("method_validation_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  accreditation LabAccreditation @relation(fields: [accreditationId], references: [id], onDelete: Restrict)
+
+  // NULLS NOT DISTINCT index in §C — `parameter_key` is null for a
+  // single-analyte test.
+  @@index([hospitalId, testKey, inScope])
+  @@map("labq_scope_tests")
+  @@schema("lab")
+}

@@ -1,0 +1,1022 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-008 — radiology: orders, scheduling, the exam, dose, reports (schema `rad`)
+//
+// `EN-035 §5` draws the line this file sits on: "if it touches an order, a
+// schedule, a worklist, a report or a dose, it belongs to OP-008. If it touches
+// pixels, DICOM objects, archives or viewers, it belongs to EN-008." So the
+// technologist's record of performing an exam is here (`rad_exams`); the DICOM
+// index of what came out of the modality is in `rad-pacs.prisma`
+// (`pacs_studies`). They are joined by `study_instance_uid` and by
+// `accession_no`, both generated here, never by the modality (`EN-035 §5`).
+//
+// `OP-008 §4` calls the technologist record `studies`. `EN-035 §4` calls it
+// `rad_exams` and reserves `pacs_studies` for the archive index. This file uses
+// EN-035's names, because one system cannot have two tables called "study" that
+// mean different things — recorded as a spec contradiction in `docs/DECISIONS.md`.
+//
+// ── PC-PNDT ─────────────────────────────────────────────────────────────────
+//
+// The Pre-Conception and Pre-Natal Diagnostic Techniques (Prohibition of Sex
+// Selection) Act 1994 makes Form F a statutory record for every obstetric
+// ultrasound and makes communicating foetal sex a criminal offence carrying
+// imprisonment. `docs/prompts/phase-03 §Non-negotiables 4` is therefore not a
+// preference and neither is the enforcement:
+//
+//   * `rad.rad_form_f` holds the Form F fields, and its CHECK requires the whole
+//     statutory set — no partial Form F can be stored.
+//   * a trigger refuses to complete an exam, or to sign a report, for a
+//     procedure flagged `is_pcpndt` without one.
+//   * §C of the migration asserts, by reading `information_schema`, that **no
+//     column anywhere in `rad`, `lab` or the investigation tables has a name
+//     that could hold a foetal sex**, and fails the migration if one appears.
+//     The absence of the column is the guarantee; the assertion is what keeps it
+//     true after a future phase adds a table.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum RadOrderSource {
+  opd
+  er
+  ip
+  icu
+  ot
+  walkin
+  external
+  health_checkup
+  portal
+
+  @@schema("rad")
+}
+
+enum RadPriority {
+  routine
+  urgent
+  stat
+  portable_stat
+
+  @@schema("rad")
+}
+
+enum RadOrderStatus {
+  placed
+  on_hold_payment
+  on_hold_preauth
+  on_hold_safety
+  scheduled
+  arrived
+  in_progress
+  acquired
+  awaiting_report
+  preliminary
+  reported
+  amended
+  cancelled
+  rejected
+
+  @@schema("rad")
+}
+
+enum RadExamStatus {
+  scheduled
+  arrived
+  in_progress
+  completed
+  discontinued
+  cancelled
+
+  @@schema("rad")
+}
+
+enum RadReportStatus {
+  draft
+  draft_for_cosign
+  preliminary
+  final
+  amended
+  cancelled
+
+  @@schema("rad")
+}
+
+/// `OP-008 §3.5`: the severity ladder. `critical` and `urgent` both demand
+/// documented communication; `incidental` produces a tracked follow-up.
+enum RadFindingLevel {
+  none
+  incidental
+  urgent
+  critical
+
+  @@schema("rad")
+}
+
+enum RadRoomStatus {
+  active
+  down
+  maintenance
+  decommissioned
+
+  @@schema("rad")
+}
+
+/// `OP-008 §4` `modality_rooms`: the physical station, its DICOM identity and
+/// its AERB licence. A room whose licence has expired or whose QA is overdue is
+/// blocked for scheduling (`OP-008 §5`), which is why the dates are columns and
+/// not a note in an asset system that does not exist yet.
+model RadModalityRoom {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  code        String  @db.VarChar(32)
+  name        String  @db.VarChar(160)
+  modality    RadModality
+  /// The DICOM Application Entity title the modality announces itself as. This
+  /// is the key an MWL C-FIND is filtered by.
+  aeTitle     String  @map("ae_title") @db.VarChar(16)
+  host        String? @db.VarChar(120)
+  port        Int?
+  roomKey     String? @map("room_key") @db.Uuid
+  isPortable  Boolean @default(false) @map("is_portable")
+  status      RadRoomStatus @default(active)
+  /// AERB e-LORA licence. `OP-008 §5`: an expired licence blocks scheduling,
+  /// overridable only by the Radiation Safety Officer with a reason.
+  aerbLicenceNo String? @map("aerb_licence_no") @db.VarChar(64)
+  aerbLicenceValidTo DateTime? @map("aerb_licence_valid_to") @db.Date
+  qaDueAt     DateTime? @map("qa_due_at") @db.Date
+  rsoUserId   String? @map("rso_user_id") @db.Uuid
+  schedulingBlocked Boolean @default(false) @map("scheduling_blocked")
+  schedulingBlockReason String? @map("scheduling_block_reason") @db.Text
+  schedulingOverrideBy String? @map("scheduling_override_by") @db.Uuid
+  schedulingOverrideReason String? @map("scheduling_override_reason") @db.Text
+  /// **PC-PNDT registration of the ultrasound machine.** Printed on every
+  /// obstetric ultrasound report; an unregistered machine may not perform one.
+  pcpndtRegistrationNo String? @map("pcpndt_registration_no") @db.VarChar(64)
+  pcpndtRegistrationValidTo DateTime? @map("pcpndt_registration_valid_to") @db.Date
+  slotDurationMinutes Int? @map("slot_duration_minutes")
+  assetRef    String? @map("asset_ref") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  exams        RadExam[]
+  appointments RadAppointment[]
+
+  @@unique([hospitalId, branchId, code], map: "rad_modality_rooms_code_key")
+  @@unique([hospitalId, aeTitle], map: "rad_modality_rooms_ae_key")
+  @@index([hospitalId, branchId, modality, status])
+  @@map("rad_modality_rooms")
+  @@schema("rad")
+}
+
+model RadOrder {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  /// Numbering series `RAD_ACC`, per branch per FY. `EN-035 §3.1`: "the single
+  /// join key across HMS, MWL and PACS", and generated by the HMS, never by the
+  /// modality.
+  accessionNo String  @map("accession_no") @db.VarChar(32)
+  patientId   String  @map("patient_id") @db.Uuid
+  visitId     String? @map("visit_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+  erVisitId   String? @map("er_visit_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+  clinicalOrderId String? @map("clinical_order_id") @db.Uuid
+  source      RadOrderSource @default(opd)
+  orderingUserId String? @map("ordering_user_id") @db.Uuid
+  orderingPractitionerKey String? @map("ordering_practitioner_key") @db.Uuid
+  externalReferrer String? @map("external_referrer") @db.VarChar(300)
+  priority    RadPriority @default(routine)
+  status      RadOrderStatus @default(placed)
+  billingStatus OrderBillingStatus @default(pending) @map("billing_status")
+  /// `OP-008 §5`: "Clinical indication mandatory." A CHECK, because an imaging
+  /// request with no question is an exposure with no justification, and AERB
+  /// asks for the justification.
+  clinicalIndication String @map("clinical_indication") @db.Text
+  questionsToAnswer String? @map("questions_to_answer") @db.Text
+  icdCodes    String[] @default([]) @map("icd_codes")
+  isMlc       Boolean @default(false) @map("is_mlc")
+  transportMode String? @map("transport_mode") @db.VarChar(32)
+  isolation   String? @db.VarChar(64)
+
+  // ── the safety screen (OP-008 §3.1.2), typed rather than a jsonb blob ─────
+  /// Typed because every one of these gates something. `OP-008 §4` models it as
+  /// `safety_screen jsonb`; a hard stop that reads a JSON key is a hard stop one
+  /// typo away from not firing.
+  pregnancyStatus PregnancyStatus? @map("pregnancy_status")
+  lmpDate     DateTime? @map("lmp_date") @db.Date
+  pregnancyCheckedBy String? @map("pregnancy_checked_by") @db.Uuid
+  pregnancyCheckedAt DateTime? @map("pregnancy_checked_at") @db.Timestamptz(6)
+  /// The justification an ionising study on a possibly-pregnant patient needs,
+  /// and the consent taken for it.
+  radiationJustification String? @map("radiation_justification") @db.Text
+  pregnancyConsentDocId String? @map("pregnancy_consent_doc_id") @db.Uuid
+  /// Contrast safety. eGFR pulled from OP-004 within 30 days, or ordered.
+  contrastRequired Boolean @default(false) @map("contrast_required")
+  egfr        Decimal? @db.Decimal(6, 2)
+  egfrAt      DateTime? @map("egfr_at") @db.Timestamptz(6)
+  contrastAllergyKnown Boolean @default(false) @map("contrast_allergy_known")
+  premedProtocolKey String? @map("premed_protocol_key") @db.Uuid
+  premedOrderedAt DateTime? @map("premed_ordered_at") @db.Timestamptz(6)
+  metforminHoldAdvised Boolean @default(false) @map("metformin_hold_advised")
+  contrastApprovedBy String? @map("contrast_approved_by") @db.Uuid
+  contrastApprovalReason String? @map("contrast_approval_reason") @db.Text
+  /// MRI safety questionnaire. JSONB for the answers, a boolean for the fact
+  /// that it was completed, and a separate flag for an unsafe implant so the
+  /// block does not depend on parsing.
+  mriSafetyCompleted Boolean @default(false) @map("mri_safety_completed")
+  mriSafetyAnswers Json? @map("mri_safety_answers") @db.JsonB
+  mriUnsafeImplant Boolean @default(false) @map("mri_unsafe_implant")
+  mriOverrideBy String? @map("mri_override_by") @db.Uuid
+  mriOverrideReason String? @map("mri_override_reason") @db.Text
+  sedationRequired Boolean @default(false) @map("sedation_required")
+  consentDocIds String[] @default([]) @map("consent_doc_ids") @db.Uuid
+  preauthRef  String? @map("preauth_ref") @db.Uuid
+
+  orderedAt   DateTime @default(now()) @map("ordered_at") @db.Timestamptz(6)
+  tatDueAt    DateTime? @map("tat_due_at") @db.Timestamptz(6)
+  cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelReason String? @map("cancel_reason") @db.Text
+  idempotencyKey String? @map("idempotency_key") @db.VarChar(128)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  items  RadOrderItem[]
+  events RadOrderEvent[]
+
+  @@unique([hospitalId, accessionNo], map: "rad_orders_accession_key")
+  @@index([hospitalId, branchId, status, priority, orderedAt(sort: Desc)])
+  @@index([hospitalId, patientId, orderedAt(sort: Desc)])
+  @@index([hospitalId, clinicalOrderId])
+  @@map("rad_orders")
+  @@schema("rad")
+}
+
+/// One procedure on an order. `EN-035 §3.1`: the Study Instance UID is generated
+/// **here, at scheduling**, not by the modality — "it makes reconciliation
+/// deterministic when a modality mis-types a patient name".
+model RadOrderItem {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  orderId     String  @map("order_id") @db.Uuid
+  lineNo      Int     @map("line_no")
+  orderItemRef String? @map("order_item_ref") @db.Uuid
+  procedureKey String @map("procedure_key") @db.Uuid
+  procedureCode String @map("procedure_code") @db.VarChar(32)
+  procedureName String @map("procedure_name") @db.VarChar(300)
+  modality    RadModality
+  bodyPartDicom String? @map("body_part_dicom") @db.VarChar(64)
+  laterality  Laterality @default(not_applicable)
+  contrast    Boolean @default(false)
+  views       String[] @default([])
+  status      RadOrderStatus @default(placed)
+  /// DICOM (0020,000D). Unique across the hospital by construction.
+  studyInstanceUid String? @map("study_instance_uid") @db.VarChar(64)
+  /// DICOM MWL (0040,0009).
+  scheduledProcedureStepId String? @map("scheduled_procedure_step_id") @db.VarChar(64)
+  /// Snapshotted from `mdm_rad_procedures` so a master edit cannot retroactively
+  /// remove the Form F obligation from a study that was performed under it.
+  isPcpndt    Boolean @default(false) @map("is_pcpndt")
+  isIonising  Boolean @default(false) @map("is_ionising")
+  priceSnapshot Decimal? @map("price_snapshot") @db.Decimal(14, 2)
+  currency    String  @default("INR") @db.Char(3)
+  chargeIntentId String? @map("charge_intent_id") @db.Uuid
+  tatDueAt    DateTime? @map("tat_due_at") @db.Timestamptz(6)
+  cancelReason String? @map("cancel_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  order        RadOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  exams        RadExam[]
+  appointments RadAppointment[]
+  reports      RadReport[]
+  formF        RadFormF?
+
+  @@unique([orderId, lineNo], map: "rad_order_items_line_key")
+  @@unique([hospitalId, studyInstanceUid], map: "rad_order_items_study_uid_key")
+  @@index([hospitalId, orderId])
+  @@index([hospitalId, procedureKey, status])
+  @@index([hospitalId, status, tatDueAt])
+  @@map("rad_order_items")
+  @@schema("rad")
+}
+
+/// Append-only status history — `docs/03 §Table rules`.
+model RadOrderEvent {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  orderId     String  @map("order_id") @db.Uuid
+  orderItemId String? @map("order_item_id") @db.Uuid
+  examId      String? @map("exam_id") @db.Uuid
+  fromStatus  String? @map("from_status") @db.VarChar(32)
+  toStatus    String  @map("to_status") @db.VarChar(32)
+  reason      String? @db.Text
+  /// `EN-035 §5`: "MPPS drives status; manual status changes are the exception
+  /// and are audited with a reason." This column is how the exception is
+  /// visible, and the CHECK requires a reason when it is true.
+  isManualOverride Boolean @default(false) @map("is_manual_override")
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  actorRole   String? @map("actor_role") @db.VarChar(64)
+  at          DateTime @default(now()) @db.Timestamptz(6)
+
+  order RadOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, orderId, at])
+  @@index([hospitalId, orderItemId, at])
+  @@map("rad_order_events")
+  @@schema("rad")
+}
+
+model RadAppointment {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  orderItemId String  @map("order_item_id") @db.Uuid
+  roomId      String  @map("room_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  startAt     DateTime @map("start_at") @db.Timestamptz(6)
+  endAt       DateTime @map("end_at") @db.Timestamptz(6)
+  status      String  @default("booked") @db.VarChar(24)
+  prepSentAt  DateTime? @map("prep_sent_at") @db.Timestamptz(6)
+  reminderSentAt DateTime? @map("reminder_sent_at") @db.Timestamptz(6)
+  arrivedAt   DateTime? @map("arrived_at") @db.Timestamptz(6)
+  noShow      Boolean @default(false) @map("no_show")
+  rescheduledFromId String? @map("rescheduled_from_id") @db.Uuid
+  cancelReason String? @map("cancel_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  orderItem RadOrderItem    @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  room      RadModalityRoom @relation(fields: [roomId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, roomId, startAt])
+  @@index([hospitalId, branchId, status, startAt])
+  @@index([hospitalId, patientId, startAt(sort: Desc)])
+  @@map("rad_appointments")
+  @@schema("rad")
+}
+
+/// The technologist's record of performing the exam. `EN-035 §4`'s `rad_exams`.
+model RadExam {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  orderItemId String  @map("order_item_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  roomId      String? @map("room_id") @db.Uuid
+  studyInstanceUid String? @map("study_instance_uid") @db.VarChar(64)
+  accessionNo String  @map("accession_no") @db.VarChar(32)
+  modality    RadModality
+  status      RadExamStatus @default(scheduled)
+  technicianUserId String? @map("technician_user_id") @db.Uuid
+  protocolName String? @map("protocol_name") @db.VarChar(200)
+  /// The two-identifier check at the modality, same shape as the phlebotomy one.
+  identityVerified Boolean @default(false) @map("identity_verified")
+  identityMethod String? @map("identity_method") @db.VarChar(64)
+  safetyChecklistCompleted Boolean @default(false) @map("safety_checklist_completed")
+  startedAt   DateTime? @map("started_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  discontinuedReason String? @map("discontinued_reason") @db.Text
+  /// `OP-008 §3.3.2`: repeats with reason, for the AERB repeat-rate KPI. The
+  /// detail is in `rad_repeat_reject_events`; this is the count the worklist
+  /// shows.
+  repeatCount Int     @default(0) @map("repeat_count")
+  technologistNotes String? @map("technologist_notes") @db.Text
+  /// `EN-035 §5`: "A modality may not acquire against an ad-hoc patient except
+  /// in a declared emergency ('trauma unknown' workflow), which creates a
+  /// placeholder order that must be reconciled within 24 hours."
+  isEmergencyPlaceholder Boolean @default(false) @map("is_emergency_placeholder")
+  reconciliationDueAt DateTime? @map("reconciliation_due_at") @db.Timestamptz(6)
+  reconciledAt DateTime? @map("reconciled_at") @db.Timestamptz(6)
+  reconciledBy String? @map("reconciled_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  orderItem RadOrderItem     @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  room      RadModalityRoom? @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  repeats   RadRepeatRejectEvent[]
+  contrast  RadContrastEvent[]
+  doses     RadDoseRecord[]
+
+  @@unique([orderItemId], map: "rad_exams_order_item_key")
+  @@index([hospitalId, branchId, status, startedAt(sort: Desc)])
+  @@index([hospitalId, patientId, startedAt(sort: Desc)])
+  @@index([hospitalId, roomId, startedAt(sort: Desc)])
+  @@map("rad_exams")
+  @@schema("rad")
+}
+
+/// `OP-008 §3.3.2` and `§5`: "Repeat exposures logged with reason (AERB QA);
+/// repeat rate KPI by technician/room."
+model RadRepeatRejectEvent {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  examId      String  @map("exam_id") @db.Uuid
+  /// `repeat` | `reject`. A repeat re-exposes the patient; a reject discards an
+  /// image without one. The dose consequence differs, so the distinction is not
+  /// cosmetic.
+  kind        String  @db.VarChar(16)
+  /// `positioning` | `exposure` | `motion` | `artefact` | `equipment` |
+  /// `patient` | `other`. CHECKed.
+  reasonCode  String  @map("reason_code") @db.VarChar(32)
+  reasonNote  String? @map("reason_note") @db.Text
+  viewName    String? @map("view_name") @db.VarChar(120)
+  technicianUserId String? @map("technician_user_id") @db.Uuid
+  at          DateTime @default(now()) @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  exam RadExam @relation(fields: [examId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, examId, at])
+  @@index([hospitalId, technicianUserId, at(sort: Desc)])
+  @@map("rad_repeat_reject_events")
+  @@schema("rad")
+}
+
+/// `OP-008 §3.3.2`: contrast agent, volume, lot, route, injector, and any
+/// reaction. The lot number is the column a recall depends on.
+model RadContrastEvent {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  examId      String  @map("exam_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  agentName   String  @map("agent_name") @db.VarChar(200)
+  /// → `mdm_drugs.record_key` / NC-006 item, when the pharmacy master carries it.
+  agentKey    String? @map("agent_key") @db.Uuid
+  volumeMl    Decimal? @map("volume_ml") @db.Decimal(8, 2)
+  concentration String? @db.VarChar(64)
+  lotNo       String? @map("lot_no") @db.VarChar(64)
+  expiryDate  DateTime? @map("expiry_date") @db.Date
+  route       String? @db.VarChar(32)
+  injectorName String? @map("injector_name") @db.VarChar(120)
+  flowRateMlS Decimal? @map("flow_rate_ml_s") @db.Decimal(6, 2)
+  administeredBy String? @map("administered_by") @db.Uuid
+  administeredAt DateTime @map("administered_at") @db.Timestamptz(6)
+  /// A reaction becomes a `patient.allergies` row and an NC-015 incident. Both
+  /// references are recorded so the loop is auditable from either end.
+  reactionObserved Boolean @default(false) @map("reaction_observed")
+  reactionSeverity String? @map("reaction_severity") @db.VarChar(32)
+  reactionDescription String? @map("reaction_description") @db.Text
+  allergyRecordId String? @map("allergy_record_id") @db.Uuid
+  incidentRef String? @map("incident_ref") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  exam RadExam @relation(fields: [examId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, examId])
+  @@index([hospitalId, patientId, administeredAt(sort: Desc)])
+  @@index([hospitalId, lotNo])
+  @@map("rad_contrast_events")
+  @@schema("rad")
+}
+
+/// `OP-008 §3.6` and `§5`: "every ionising study must have a dose record
+/// (RDSR/header/manual) before order closes". `docs/prompts/phase-03 §3.5` says
+/// the same: RDSR where available, manual otherwise, with cumulative per-patient
+/// dose and a DRL comparison.
+model RadDoseRecord {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  examId      String  @map("exam_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  studyInstanceUid String? @map("study_instance_uid") @db.VarChar(64)
+  modality    RadModality
+  protocolName String? @map("protocol_name") @db.VarChar(200)
+  ctdivolMgy  Decimal? @map("ctdivol_mgy") @db.Decimal(12, 4)
+  dlpMgycm    Decimal? @map("dlp_mgycm") @db.Decimal(14, 4)
+  dapGycm2    Decimal? @map("dap_gycm2") @db.Decimal(14, 6)
+  kvp         Decimal? @db.Decimal(8, 2)
+  mas         Decimal? @db.Decimal(10, 3)
+  exposureCount Int?  @map("exposure_count")
+  fluoroTimeS Decimal? @map("fluoro_time_s") @db.Decimal(10, 2)
+  /// The estimate, and the factor it was computed with. Both, because the
+  /// factor is revised and a dose register must remain reproducible.
+  effectiveDoseMsv Decimal? @map("effective_dose_msv") @db.Decimal(12, 5)
+  kFactorUsed Decimal? @map("k_factor_used") @db.Decimal(10, 6)
+  /// `rdsr` | `header` | `mpps` | `ocr` | `manual`. CHECKed. `manual` is
+  /// legitimate — `EN-035 §5`: "a modality without RDSR requires a documented
+  /// manual-entry procedure (AERB expectation)" — but it is recorded as such.
+  source      String  @db.VarChar(16)
+  rdsrInstanceUid String? @map("rdsr_instance_uid") @db.VarChar(64)
+  enteredBy   String? @map("entered_by") @db.Uuid
+  /// DRL comparison against `mdm_rad_procedures`. `drl_exceeded` is stored
+  /// because the DRL itself is revised and an outlier report must stay stable.
+  drlCtdivolMgy Decimal? @map("drl_ctdivol_mgy") @db.Decimal(12, 4)
+  drlDlpMgycm Decimal? @map("drl_dlp_mgycm") @db.Decimal(14, 4)
+  drlExceeded Boolean @default(false) @map("drl_exceeded")
+  recordedAt  DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  exam RadExam @relation(fields: [examId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, recordedAt(sort: Desc)])
+  @@index([hospitalId, examId])
+  @@index([hospitalId, branchId, drlExceeded, recordedAt(sort: Desc)])
+  @@map("rad_dose_records")
+  @@schema("rad")
+}
+
+/// `OP-008 §4`'s `patient_dose_summary`, a read model. `docs/03 §Performance
+/// rules`: a dashboard never aggregates a transactional table live, and the
+/// ordering screen shows "this patient had 4 CTs in 6 months" on every CT order.
+model RadPatientDoseSummary {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  cumulativeMsvLifetime Decimal @default(0) @map("cumulative_msv_lifetime") @db.Decimal(14, 5)
+  msv12m      Decimal @default(0) @map("msv_12m") @db.Decimal(14, 5)
+  ctCount12m  Int     @default(0) @map("ct_count_12m")
+  studyCount12m Int   @default(0) @map("study_count_12m")
+  lastStudyAt DateTime? @map("last_study_at") @db.Timestamptz(6)
+  /// `OP-008 §3.6.2`: > 100 mSv in 12 months alerts the radiologist and the RSO.
+  thresholdBreached Boolean @default(false) @map("threshold_breached")
+  thresholdBreachedAt DateTime? @map("threshold_breached_at") @db.Timestamptz(6)
+  refreshedAt DateTime @default(now()) @map("refreshed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, patientId], map: "rad_patient_dose_summary_key")
+  @@index([hospitalId, thresholdBreached])
+  @@map("rad_patient_dose_summary")
+  @@schema("rad")
+}
+
+/// `OP-008 §3.6.1`: k-factors by body region and age band, so a paediatric
+/// effective dose is not computed with an adult conversion factor.
+model RadDoseKFactor {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  modality    RadModality
+  bodyRegion  String  @map("body_region") @db.VarChar(64)
+  ageMinDays  Int     @default(0) @map("age_min_days")
+  ageMaxDays  Int     @default(43800) @map("age_max_days")
+  /// mSv per mGy·cm for CT DLP, mSv per Gy·cm² for DAP. The unit is named so
+  /// the arithmetic is checkable.
+  kFactor     Decimal @map("k_factor") @db.Decimal(12, 8)
+  kFactorUnit String  @map("k_factor_unit") @db.VarChar(32)
+  sourceReference String? @map("source_reference") @db.VarChar(300)
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status      MdmRecordStatus @default(active)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, modality, bodyRegion, status])
+  @@map("rad_dose_k_factors")
+  @@schema("rad")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// REPORTS
+// ═════════════════════════════════════════════════════════════════════════════
+
+model RadReport {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  orderItemId String  @map("order_item_id") @db.Uuid
+  examId      String? @map("exam_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  accessionNo String  @map("accession_no") @db.VarChar(32)
+  studyInstanceUid String? @map("study_instance_uid") @db.VarChar(64)
+  currentVersion Int  @default(0) @map("current_version")
+  currentStatus  RadReportStatus @default(draft) @map("current_status")
+  /// The highest finding level any version has carried. Never cleared: a
+  /// critical finding that a later amendment downgrades still happened, and the
+  /// communication record must still be reachable from the report.
+  highestFindingLevel RadFindingLevel @default(none) @map("highest_finding_level")
+  /// `EN-035 §5`: "A report may not be finalised for a study whose images are
+  /// not in the archive (except for outside-study reads, which are explicitly
+  /// flagged)."
+  isOutsideStudyRead Boolean @default(false) @map("is_outside_study_read")
+  /// A teleradiology read. The external radiologist's identity and registration
+  /// number appear on the signed report (`EN-035 §5`).
+  isTeleradiology Boolean @default(false) @map("is_teleradiology")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  orderItem RadOrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  versions  RadReportVersion[]
+  findings  RadCriticalFinding[]
+  reviews   RadPeerReview[]
+
+  @@unique([orderItemId], map: "rad_reports_order_item_key")
+  @@index([hospitalId, branchId, currentStatus, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@map("rad_reports")
+  @@schema("rad")
+}
+
+/// Append-only, hash-chained, immutable after signing — the same four mechanisms
+/// `clinical.document_versions` uses, and for the same reason.
+model RadReportVersion {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  reportId    String  @map("report_id") @db.Uuid
+  version     Int
+  status      RadReportStatus @default(draft)
+  templateKey String? @map("template_key") @db.Uuid
+  /// The structured sections. JSONB because the template defines them and a
+  /// mammography BI-RADS report and a CT head trauma report share no columns.
+  content     Json    @db.JsonB
+  /// The two narrative fields every template has, kept as columns so the search
+  /// index and the timeline snippet do not have to reach into JSONB.
+  findingsText String? @map("findings_text") @db.Text
+  impressionText String? @map("impression_text") @db.Text
+  recommendations String? @db.Text
+  /// Coded severity systems, as columns because the follow-up tracker queries
+  /// them. Never free text.
+  biRads      String? @map("bi_rads") @db.VarChar(8)
+  tiRads      String? @map("ti_rads") @db.VarChar(8)
+  liRads      String? @map("li_rads") @db.VarChar(8)
+  pirads      String? @db.VarChar(8)
+  findingLevel RadFindingLevel @default(none) @map("finding_level")
+  /// Key images and measurements imported from the DICOM SR.
+  keyImageRefs String[] @default([]) @map("key_image_refs")
+  measurements Json?   @db.JsonB
+  /// `OP-008 §3.4.2`: resident drafts, consultant co-signs.
+  authorUserId String? @map("author_user_id") @db.Uuid
+  authorRegistrationNo String? @map("author_registration_no") @db.VarChar(64)
+  cosignerUserId String? @map("cosigner_user_id") @db.Uuid
+  cosignedAt  DateTime? @map("cosigned_at") @db.Timestamptz(6)
+  cosignChanges Json?  @map("cosign_changes") @db.JsonB
+  signedBy    String? @map("signed_by") @db.Uuid
+  signedAt    DateTime? @map("signed_at") @db.Timestamptz(6)
+  signMethod  SignMethod? @map("sign_method")
+  /// `OP-008 §5`: "Reports signed only by radiologists with valid registration
+  /// (and PC-PNDT reg for USG)." Both numbers travel with the version.
+  signerRegistrationNo String? @map("signer_registration_no") @db.VarChar(64)
+  signerPcpndtRegistrationNo String? @map("signer_pcpndt_registration_no") @db.VarChar(64)
+  /// → `clinical.documents` / `core.files`, and the DICOM SR pushed back to the
+  /// archive so an external viewer sees the report beside the images.
+  documentId  String? @map("document_id") @db.Uuid
+  documentVersion Int? @map("document_version")
+  pdfFileId   String? @map("pdf_file_id") @db.Uuid
+  srInstanceUid String? @map("sr_instance_uid") @db.VarChar(64)
+  dictationAudioFileId String? @map("dictation_audio_file_id") @db.Uuid
+  verifyToken String? @map("verify_token") @db.VarChar(64)
+  /// Computed by the database from the content. Never accepted from a caller.
+  contentSha256 String @default("") @map("content_sha256") @db.VarChar(64)
+  prevSha256  String? @map("prev_sha256") @db.VarChar(64)
+  amendmentReason String? @map("amendment_reason") @db.Text
+  cancelledReason String? @map("cancelled_reason") @db.Text
+  supersededByVersion Int? @map("superseded_by_version")
+  supersededAt DateTime? @map("superseded_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  report RadReport @relation(fields: [reportId], references: [id], onDelete: Restrict)
+
+  @@unique([reportId, version], map: "rad_report_versions_version_key")
+  @@index([hospitalId, reportId, version])
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@map("rad_report_versions")
+  @@schema("rad")
+}
+
+/// The radiology twin of `lab_critical_value_alerts`. Same two-table shape, same
+/// evidence rule: `OP-008 §5` — "Critical findings require documented
+/// communication with read-back before (or within 60 min after) sign; the report
+/// cannot be marked 'communicated' without a name."
+model RadCriticalFinding {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  reportId    String  @map("report_id") @db.Uuid
+  reportVersion Int   @map("report_version")
+  orderItemId String  @map("order_item_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  level       RadFindingLevel
+  findingText String  @map("finding_text") @db.Text
+  detectedBy  String? @map("detected_by") @db.Uuid
+  detectedAt  DateTime @default(now()) @map("detected_at") @db.Timestamptz(6)
+  dueBy       DateTime? @map("due_by") @db.Timestamptz(6)
+  /// Same vocabulary as the lab alert, so one escalation engine serves both.
+  status      LabCriticalAlertStatus @default(open)
+  escalationLevel Int @default(0) @map("escalation_level")
+  orderingUserId String? @map("ordering_user_id") @db.Uuid
+  firstCommunicatedAt DateTime? @map("first_communicated_at") @db.Timestamptz(6)
+  acknowledgedBy String? @map("acknowledged_by") @db.Uuid
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  retractedReason String? @map("retracted_reason") @db.Text
+  retractedAt DateTime? @map("retracted_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  report    RadReport @relation(fields: [reportId], references: [id], onDelete: Restrict)
+  callbacks RadCriticalCallback[]
+
+  @@index([hospitalId, branchId, status, detectedAt(sort: Desc)])
+  @@index([hospitalId, patientId, detectedAt(sort: Desc)])
+  @@index([hospitalId, reportId])
+  @@map("rad_critical_findings")
+  @@schema("rad")
+}
+
+/// One documented communication attempt. Same CHECK as the lab callback:
+/// a confirmed read-back, or a documented "unreachable — escalated". Never both,
+/// never neither.
+model RadCriticalCallback {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  findingId   String  @map("finding_id") @db.Uuid
+  sequence    Int
+  notifiedBy  String  @map("notified_by") @db.Uuid
+  notifiedByName String @map("notified_by_name") @db.VarChar(200)
+  notifiedAt  DateTime @default(now()) @map("notified_at") @db.Timestamptz(6)
+  method      LabNotifyMethod
+  notifiedToUserId String? @map("notified_to_user_id") @db.Uuid
+  notifiedToName String? @map("notified_to_name") @db.VarChar(200)
+  notifiedToRole String? @map("notified_to_role") @db.VarChar(64)
+  notifiedToContact String? @map("notified_to_contact") @db.VarChar(64)
+  readBackConfirmed Boolean @default(false) @map("read_back_confirmed")
+  readBackValue String? @map("read_back_value") @db.VarChar(300)
+  clinicianUnreachable Boolean @default(false) @map("clinician_unreachable")
+  escalatedToLevel Int? @map("escalated_to_level")
+  escalatedToRole String? @map("escalated_to_role") @db.VarChar(64)
+  escalatedToUserId String? @map("escalated_to_user_id") @db.Uuid
+  attemptCount Int @default(1) @map("attempt_count")
+  remarks     String? @db.Text
+  latencySeconds Int? @map("latency_seconds")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  finding RadCriticalFinding @relation(fields: [findingId], references: [id], onDelete: Restrict)
+
+  @@unique([findingId, sequence], map: "rad_critical_callbacks_seq_key")
+  @@index([hospitalId, findingId, notifiedAt])
+  @@map("rad_critical_callbacks")
+  @@schema("rad")
+}
+
+/// `OP-008 §3.5.1`: an incidental finding produces a recommendation somebody has
+/// to chase — the Fleischner follow-up for a lung nodule is the canonical case,
+/// and losing it is a well-documented way to miss a cancer.
+model RadFollowUpRecommendation {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  reportId    String  @map("report_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  recommendation String @db.Text
+  guidelineRef String? @map("guideline_ref") @db.VarChar(160)
+  suggestedProcedureKey String? @map("suggested_procedure_key") @db.Uuid
+  dueAt       DateTime? @map("due_at") @db.Timestamptz(6)
+  /// `open` | `scheduled` | `completed` | `declined` | `lost_to_followup`.
+  status      String  @default("open") @db.VarChar(24)
+  closedByOrderId String? @map("closed_by_order_id") @db.Uuid
+  closedAt    DateTime? @map("closed_at") @db.Timestamptz(6)
+  closeReason String? @map("close_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, branchId, status, dueAt])
+  @@index([hospitalId, patientId, dueAt])
+  @@map("rad_follow_up_recommendations")
+  @@schema("rad")
+}
+
+/// `OP-008 §3.4.5`: RADPEER-style peer review, and the preliminary-versus-final
+/// discrepancy that feeds it.
+model RadPeerReview {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  reportId    String  @map("report_id") @db.Uuid
+  reviewerUserId String @map("reviewer_user_id") @db.Uuid
+  /// 1 (concur) … 3 (significant discrepancy). CHECKed to that range.
+  score       Int
+  /// `none` | `minor` | `major`. CHECKed.
+  discrepancyType String @map("discrepancy_type") @db.VarChar(16)
+  /// True when the review compares a preliminary read against the final one,
+  /// which is the discrepancy tracking `OP-008 §3.4.5` asks for by name.
+  isPrelimFinalComparison Boolean @default(false) @map("is_prelim_final_comparison")
+  prelimVersion Int? @map("prelim_version")
+  finalVersion  Int? @map("final_version")
+  comment     String? @db.Text
+  /// The sampling that selected it, so the QA programme can show its method.
+  samplingBasis String? @map("sampling_basis") @db.VarChar(64)
+  reviewedAt  DateTime @default(now()) @map("reviewed_at") @db.Timestamptz(6)
+  incidentRef String? @map("incident_ref") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  report RadReport @relation(fields: [reportId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, reportId])
+  @@index([hospitalId, branchId, reviewedAt(sort: Desc)])
+  @@map("rad_peer_reviews")
+  @@schema("rad")
+}
+
+/// `OP-008 §3.4.6` / `EN-035 §5`: an external radiologist reading under a
+/// time-boxed, audited share. The DPDP processor relationship is a fact about
+/// the partner, and the registration number that will print on the report is a
+/// fact about the reader.
+model RadTeleradiologyAssignment {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  orderItemId String  @map("order_item_id") @db.Uuid
+  examId      String? @map("exam_id") @db.Uuid
+  /// Either an internal user reading from home, or a partner organisation.
+  radiologistUserId String? @map("radiologist_user_id") @db.Uuid
+  partnerName String? @map("partner_name") @db.VarChar(200)
+  partnerRadiologistName String? @map("partner_radiologist_name") @db.VarChar(200)
+  partnerRegistrationNo String? @map("partner_registration_no") @db.VarChar(64)
+  partnerDpaSignedAt DateTime? @map("partner_dpa_signed_at") @db.Date
+  slaClass    String? @map("sla_class") @db.VarChar(32)
+  assignedAt  DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  dueAt       DateTime? @map("due_at") @db.Timestamptz(6)
+  pushedAt    DateTime? @map("pushed_at") @db.Timestamptz(6)
+  reportReceivedAt DateTime? @map("report_received_at") @db.Timestamptz(6)
+  status      String  @default("assigned") @db.VarChar(24)
+  /// → `rad.pacs_share_links.id`, the time-boxed access that let them see it.
+  shareLinkId String? @map("share_link_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, branchId, status, dueAt])
+  @@index([hospitalId, orderItemId])
+  @@map("rad_teleradiology_assignments")
+  @@schema("rad")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PC-PNDT FORM F
+//
+// The statutory record. Every column below is a field the printed Form F has,
+// and the CHECK in §C requires the whole set — a Form F missing the declaration
+// of the pregnant woman is not a Form F, it is a draft, and the Act does not
+// recognise drafts.
+//
+// What is deliberately absent, and asserted absent by the migration, is any
+// field that could record the sex of the foetus. Section 5 and Section 6 of the
+// Act make communicating it an offence punishable with imprisonment for the
+// doctor and the person who sought it. There is no configuration under which
+// this product stores it, because there is no column.
+// ═════════════════════════════════════════════════════════════════════════════
+
+model RadFormF {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  orderItemId String  @map("order_item_id") @db.Uuid
+  examId      String? @map("exam_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  /// Serial number in the facility's Form F register, per the Rules.
+  formSerialNo String @map("form_serial_no") @db.VarChar(32)
+
+  // ── the facility and the machine ──────────────────────────────────────────
+  /// Registration of the Genetic Clinic / Ultrasound Clinic / Imaging Centre
+  /// under the Act, and of the machine it was performed on.
+  facilityRegistrationNo String @map("facility_registration_no") @db.VarChar(64)
+  machineRegistrationNo  String @map("machine_registration_no") @db.VarChar(64)
+
+  // ── the woman ─────────────────────────────────────────────────────────────
+  patientName String  @map("patient_name") @db.VarChar(300)
+  patientAgeYears Int @map("patient_age_years")
+  husbandOrFatherName String @map("husband_or_father_name") @db.VarChar(300)
+  fullAddress String  @map("full_address") @db.Text
+  /// The Act requires an identity document reference on the form.
+  identityDocumentType String @map("identity_document_type") @db.VarChar(64)
+  identityDocumentRefMasked String @map("identity_document_ref_masked") @db.VarChar(64)
+  /// Obstetric history: gravida, para, living children, previous abortions,
+  /// gestational age. These are clinical facts the form asks for; none of them
+  /// is a sex.
+  gravida     Int?
+  para        Int?
+  livingChildren Int? @map("living_children")
+  previousAbortions Int? @map("previous_abortions")
+  gestationalAgeWeeks Decimal? @map("gestational_age_weeks") @db.Decimal(5, 2)
+  lastMenstrualPeriod DateTime? @map("last_menstrual_period") @db.Date
+
+  // ── the referral and the indication ───────────────────────────────────────
+  referringDoctorName String @map("referring_doctor_name") @db.VarChar(300)
+  referringDoctorRegistrationNo String? @map("referring_doctor_registration_no") @db.VarChar(64)
+  /// The indication, chosen from the list the Form prescribes. Coded, so the
+  /// monthly return can be produced without reading free text, and CHECKed
+  /// non-empty because "routine" is not an indication the Act accepts.
+  indicationCodes String[] @map("indication_codes")
+  indicationOther String? @map("indication_other") @db.Text
+  proceduresPerformed String[] @map("procedures_performed")
+
+  // ── the declarations ──────────────────────────────────────────────────────
+  /// The pregnant woman declares she does not want to know the sex of the
+  /// foetus. Both declarations are mandatory before the study may be completed.
+  womanDeclarationSigned Boolean @default(false) @map("woman_declaration_signed")
+  womanDeclarationDocId String? @map("woman_declaration_doc_id") @db.Uuid
+  womanDeclarationAt DateTime? @map("woman_declaration_at") @db.Timestamptz(6)
+  /// The doctor declares he/she has not detected or disclosed it.
+  doctorDeclarationSigned Boolean @default(false) @map("doctor_declaration_signed")
+  doctorDeclarationDocId String? @map("doctor_declaration_doc_id") @db.Uuid
+  doctorDeclarationAt DateTime? @map("doctor_declaration_at") @db.Timestamptz(6)
+  performedByUserId String @map("performed_by_user_id") @db.Uuid
+  performedByName String @map("performed_by_name") @db.VarChar(300)
+  performedByRegistrationNo String @map("performed_by_registration_no") @db.VarChar(64)
+  performedAt DateTime @map("performed_at") @db.Timestamptz(6)
+
+  // ── the return ────────────────────────────────────────────────────────────
+  /// Which monthly return this form was reported in. `OP-008 §5`: Form F is
+  /// retained two years by the Rules and five by policy.
+  returnMonth Int  @map("return_month")
+  returnYear  Int  @map("return_year")
+  monthlyReturnId String? @map("monthly_return_id") @db.Uuid
+  retentionUntil DateTime? @map("retention_until") @db.Date
+  /// The scanned, signed original.
+  scannedFormFileId String? @map("scanned_form_file_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  orderItem RadOrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+
+  @@unique([orderItemId], map: "rad_form_f_order_item_key")
+  @@unique([hospitalId, formSerialNo], map: "rad_form_f_serial_key")
+  @@index([hospitalId, branchId, returnYear, returnMonth])
+  @@index([hospitalId, patientId, performedAt(sort: Desc)])
+  @@map("rad_form_f")
+  @@schema("rad")
+}
+
+/// The monthly return submitted to the Appropriate Authority. One row per
+/// facility per month; the forms point at it.
+model RadFormFMonthlyReturn {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  returnMonth Int     @map("return_month")
+  returnYear  Int     @map("return_year")
+  facilityRegistrationNo String @map("facility_registration_no") @db.VarChar(64)
+  formCount   Int     @default(0) @map("form_count")
+  /// `draft` | `submitted` | `acknowledged`. CHECKed.
+  status      String  @default("draft") @db.VarChar(24)
+  submittedBy String? @map("submitted_by") @db.Uuid
+  submittedAt DateTime? @map("submitted_at") @db.Timestamptz(6)
+  submittedToAuthority String? @map("submitted_to_authority") @db.VarChar(300)
+  acknowledgementRef String? @map("acknowledgement_ref") @db.VarChar(120)
+  acknowledgementFileId String? @map("acknowledgement_file_id") @db.Uuid
+  exportFileId String? @map("export_file_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, branchId, returnYear, returnMonth], map: "rad_form_f_monthly_returns_key")
+  @@index([hospitalId, status])
+  @@map("rad_form_f_monthly_returns")
+  @@schema("rad")
+}

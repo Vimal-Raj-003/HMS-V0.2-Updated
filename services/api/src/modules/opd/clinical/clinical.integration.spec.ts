@@ -1461,19 +1461,29 @@ describe('the vitals room and doctor queue meet', () => {
     expect(events).toEqual(['vitals.recheck.requested']);
   });
 
-  it('exposes the configured bands to whoever may configure them, and to nobody else', async () => {
-    const allowed = await call({
-      method: 'GET',
-      url: '/api/v1/vitals/reference-ranges?limit=100',
-      token: nurseA.token,
-    });
-    expect(allowed.statusCode).toBe(200);
-    expect(allowed.json<{ items: unknown[] }>().items.length).toBe(RANGES.length);
+  /**
+   * The bands are what turn a number into green, amber or red, so everyone who
+   * reads a vital needs them — the nurse recording it most of all. They were
+   * gated on `vitals.configure`, a management key `nurse_opd` does not hold,
+   * which left the vitals room unable to colour anything. Reading a threshold
+   * is not changing one, so the gate is `vitals.record.read`.
+   */
+  it('exposes the configured bands to everyone who reads a vital, and to nobody else', async () => {
+    for (const actor of [nurseA, doctorA]) {
+      const allowed = await call({
+        method: 'GET',
+        url: '/api/v1/vitals/reference-ranges?limit=100',
+        token: actor.token,
+      });
+      expect(allowed.statusCode, `${actor.username} must be able to read the bands`).toBe(200);
+      expect(allowed.json<{ items: unknown[] }>().items.length).toBe(RANGES.length);
+    }
 
+    // A clerk records no vitals and reads none, so the bands are not theirs.
     const denied = await call({
       method: 'GET',
       url: '/api/v1/vitals/reference-ranges',
-      token: doctorA.token,
+      token: clerkA.token,
     });
     expect(denied.statusCode).toBe(403);
   });

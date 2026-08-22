@@ -1,0 +1,708 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-004 §3.1–3.2 — the pre-analytical phase (schema `lab`)
+//
+// The path an order takes before anybody measures anything: reception,
+// accessioning, label printing, collection with two identifiers, transport,
+// receipt, and — the part this file exists for — **rejection**.
+//
+// `lab.lab_orders` does not replace `clinical.orders`. Phase 2 built CPOE and
+// left `order_items.fulfilment_module` / `fulfilment_ref` for exactly this: a
+// lab order is the LIS's own record of fulfilling one or more CPOE lines, with
+// its own accession number, its own status vocabulary and its own timestamps.
+// `lab_order_tests.order_item_id` points back at the line that caused it.
+//
+// ── Why rejection is modelled the way it is ──────────────────────────────────
+//
+// `docs/prompts/phase-03` exit gate 3 and `OP-004 §3.2.3` require three things
+// of a rejected sample, and each is a constraint here rather than a service
+// branch:
+//
+//   1. It carries a coded reason — `CHECK ((status = 'rejected') = (rejection_reason_key IS NOT NULL))`,
+//      in both directions, so a reason cannot be attached to a sample that was
+//      never rejected either.
+//   2. It carries an attribution — who rejected it and when.
+//   3. The recollection is traceable to the original order — `recollection_of_sample_id`
+//      plus a trigger that refuses a recollection naming a sample from a
+//      different order, because a recollection that lands on the wrong order is
+//      a result on the wrong patient's report.
+//
+// And a fourth, in §C.5 of the migration: a rejected sample can never carry a
+// result. `EN-004 §5` says results arriving for one go to the error queue; the
+// trigger makes that the only possible outcome rather than the intended one.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum LabOrderSource {
+  opd
+  er
+  ip
+  icu
+  health_checkup
+  walkin
+  portal
+  home_collection
+  camp
+  /// A specimen sent to us by another facility for testing.
+  referred_in
+  standing_order
+
+  @@schema("lab")
+}
+
+enum LabPriority {
+  routine
+  urgent
+  stat
+
+  @@schema("lab")
+}
+
+enum LabOrderStatus {
+  placed
+  on_hold_payment
+  awaiting_collection
+  collected
+  received
+  in_progress
+  partially_reported
+  reported
+  cancelled
+
+  @@schema("lab")
+}
+
+enum LabOrderTestStatus {
+  pending
+  collected
+  received
+  in_progress
+  resulted
+  verified
+  authorised
+  rejected
+  recollection_requested
+  cancelled
+  outsourced
+
+  @@schema("lab")
+}
+
+enum LabSampleStatus {
+  pending
+  collected
+  dispatched
+  received
+  accessioned
+  in_process
+  rejected
+  consumed
+  stored
+  disposed
+
+  @@schema("lab")
+}
+
+enum LabCollectionSite {
+  opd_collection_room
+  ward
+  icu
+  er
+  ot
+  home
+  camp
+  external
+  other
+
+  @@schema("lab")
+}
+
+/// `OP-004 §3.2.2`: "condition on receipt". Distinct from the rejection reason —
+/// a sample can arrive haemolysed and still be acceptable for a test that
+/// tolerates it, which is precisely why the two are different columns.
+enum LabSampleCondition {
+  satisfactory
+  haemolysed
+  lipaemic
+  icteric
+  clotted
+  insufficient
+  leaked
+  unlabelled
+  mislabelled
+  wrong_container
+  delayed
+  temperature_excursion
+  contaminated
+
+  @@schema("lab")
+}
+
+enum LabCustodyAction {
+  collected
+  sealed
+  handed_over
+  received
+  transported
+  stored
+  retrieved
+  aliquoted
+  released
+  disposed
+
+  @@schema("lab")
+}
+
+/// The LIS's record of fulfilling one or more CPOE lines. One accession number,
+/// one patient, one episode.
+model LabOrder {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  /// Numbering series `LAB_ACC`, per branch per FY (`OP-004 §5`). Non-null from
+  /// the moment the order exists — a lab order without an accession number
+  /// cannot be labelled, and an unlabelled specimen is the one thing the whole
+  /// pre-analytical phase exists to prevent.
+  accessionNo String  @map("accession_no") @db.VarChar(32)
+  patientId   String  @map("patient_id") @db.Uuid
+  visitId     String? @map("visit_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+  erVisitId   String? @map("er_visit_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+  /// → `clinical.orders.id`. Null for a walk-in registered directly at the lab
+  /// with an outside prescription (`OP-004 §3.1.1`), which is a real workflow
+  /// and not a data-quality failure.
+  clinicalOrderId String? @map("clinical_order_id") @db.Uuid
+  source      LabOrderSource @default(opd)
+  orderingUserId String? @map("ordering_user_id") @db.Uuid
+  orderingPractitionerKey String? @map("ordering_practitioner_key") @db.Uuid
+  /// The outside doctor or facility named on a walk-in prescription.
+  referringFacility String? @map("referring_facility") @db.VarChar(300)
+  referringDoctorName String? @map("referring_doctor_name") @db.VarChar(200)
+  priority    LabPriority @default(routine)
+  status      LabOrderStatus @default(placed)
+  billingStatus OrderBillingStatus @default(pending) @map("billing_status")
+  clinicalNotes String? @map("clinical_notes") @db.Text
+  /// Medico-legal. Drives chain-of-custody on every sample of this order.
+  isMlc       Boolean @default(false) @map("is_mlc")
+  mlcRef      String? @map("mlc_ref") @db.VarChar(64)
+  /// `OP-004 §3.8`: the TAT clock. `stat` starts at order, `routine` at receipt,
+  /// configurable per hospital and declared here so a report can be audited
+  /// against the rule that was in force.
+  orderedAt   DateTime @default(now()) @map("ordered_at") @db.Timestamptz(6)
+  expectedReportAt DateTime? @map("expected_report_at") @db.Timestamptz(6)
+  firstReportedAt  DateTime? @map("first_reported_at") @db.Timestamptz(6)
+  finalReportedAt  DateTime? @map("final_reported_at") @db.Timestamptz(6)
+  cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelReason String? @map("cancel_reason") @db.Text
+  idempotencyKey String? @map("idempotency_key") @db.VarChar(128)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  tests    LabOrderTest[]
+  samples  LabSample[]
+  events   LabOrderEvent[]
+  reports  LabReport[]
+
+  @@unique([hospitalId, accessionNo], map: "lab_orders_accession_key")
+  @@index([hospitalId, branchId, status, orderedAt(sort: Desc)])
+  @@index([hospitalId, patientId, orderedAt(sort: Desc)])
+  @@index([hospitalId, branchId, priority, status, orderedAt])
+  @@index([hospitalId, clinicalOrderId])
+  @@map("lab_orders")
+  @@schema("lab")
+}
+
+/// One orderable test on one order. A panel has been expanded by the time these
+/// rows exist; `parent_order_test_id` records which panel or which reflex rule
+/// produced a child line.
+model LabOrderTest {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  orderId     String  @map("order_id") @db.Uuid
+  lineNo      Int     @map("line_no")
+  /// → `clinical.order_items.id`, the CPOE line this fulfils. Null for a
+  /// walk-in, an add-on or a reflex test, none of which the doctor ordered.
+  orderItemId String? @map("order_item_id") @db.Uuid
+  /// → `mdm_lab_tests.record_key`, plus the name and code as they stood when
+  /// the order was placed. A master edit must not rewrite a printed report.
+  testKey     String  @map("test_key") @db.Uuid
+  testCode    String  @map("test_code") @db.VarChar(32)
+  testName    String  @map("test_name") @db.VarChar(300)
+  loincCode   String? @map("loinc_code") @db.VarChar(24)
+  discipline  LabDiscipline
+  /// The sample this test is performed on. Null until collection; several tests
+  /// share one sample, which is the whole point of the order of draw.
+  sampleId    String? @map("sample_id") @db.Uuid
+  priority    LabPriority @default(routine)
+  status      LabOrderTestStatus @default(pending)
+  isAddon     Boolean @default(false) @map("is_addon")
+  isReflex    Boolean @default(false) @map("is_reflex")
+  parentOrderTestId String? @map("parent_order_test_id") @db.Uuid
+  /// Panel expansion: which panel record this line came out of.
+  panelKey    String? @map("panel_key") @db.Uuid
+  isOutsourced Boolean @default(false) @map("is_outsourced")
+  outsourceDispatchId String? @map("outsource_dispatch_id") @db.Uuid
+  referralLabId String? @map("referral_lab_id") @db.Uuid
+  /// **Recollection.** When a sample is rejected, the replacement line names the
+  /// line it replaces. Together with `lab_samples.recollection_of_sample_id`
+  /// this is what makes a recollection traceable to the original order rather
+  /// than a new order that happens to be for the same tests.
+  recollectionOfOrderTestId String? @map("recollection_of_order_test_id") @db.Uuid
+  recollectionRequestedAt DateTime? @map("recollection_requested_at") @db.Timestamptz(6)
+  /// Zero-charge by rule (`OP-004 §5`: "sample rejection triggers recollection
+  /// order at zero charge"). Stored, not derived, because the billing decision
+  /// must survive a later change to the rule.
+  isChargeable Boolean @default(true) @map("is_chargeable")
+  tatDueAt    DateTime? @map("tat_due_at") @db.Timestamptz(6)
+  /// The TAT clock's declared start, so an SLA report can be reproduced.
+  tatClockStartsAt DateTime? @map("tat_clock_starts_at") @db.Timestamptz(6)
+  resultedAt  DateTime? @map("resulted_at") @db.Timestamptz(6)
+  verifiedAt  DateTime? @map("verified_at") @db.Timestamptz(6)
+  authorisedAt DateTime? @map("authorised_at") @db.Timestamptz(6)
+  cancelReason String? @map("cancel_reason") @db.Text
+  chargeIntentId String? @map("charge_intent_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  order   LabOrder   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  sample  LabSample? @relation(fields: [sampleId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, lineNo], map: "lab_order_tests_line_key")
+  @@index([hospitalId, orderId])
+  @@index([hospitalId, sampleId])
+  @@index([hospitalId, testKey, status])
+  @@index([hospitalId, status, tatDueAt])
+  @@index([hospitalId, recollectionOfOrderTestId])
+  @@map("lab_order_tests")
+  @@schema("lab")
+}
+
+/// `docs/03 §Table rules`: "Every order/bill/result table has `status` +
+/// `status_history` with actor & timestamp." Append-only — §D revokes UPDATE and
+/// DELETE.
+model LabOrderEvent {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  orderId     String  @map("order_id") @db.Uuid
+  orderTestId String? @map("order_test_id") @db.Uuid
+  sampleId    String? @map("sample_id") @db.Uuid
+  fromStatus  String? @map("from_status") @db.VarChar(32)
+  toStatus    String  @map("to_status") @db.VarChar(32)
+  reason      String? @db.Text
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  actorRole   String? @map("actor_role") @db.VarChar(64)
+  at          DateTime @default(now()) @db.Timestamptz(6)
+
+  order LabOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, orderId, at])
+  @@index([hospitalId, sampleId, at])
+  @@map("lab_order_events")
+  @@schema("lab")
+}
+
+/// The physical specimen. One row per container.
+model LabSample {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  orderId     String  @map("order_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  /// Numbering series `SAMPLE`, per department (`OP-004 §5`).
+  sampleNo    String  @map("sample_no") @db.VarChar(32)
+  /// The Code128/2D payload actually printed. Unique per hospital: a scanner
+  /// that resolves one barcode to two specimens is worse than no scanner.
+  barcode     String  @db.VarChar(64)
+  containerSeq Int    @default(1) @map("container_seq")
+  specimenTypeKey String  @map("specimen_type_key") @db.Uuid
+  specimenTypeName String @map("specimen_type_name") @db.VarChar(160)
+  containerKey String? @map("container_key") @db.Uuid
+  containerName String? @map("container_name") @db.VarChar(160)
+  capColour   String? @map("cap_colour") @db.VarChar(32)
+  status      LabSampleStatus @default(pending)
+
+  // ── collection ────────────────────────────────────────────────────────────
+  collectedBy String? @map("collected_by") @db.Uuid
+  collectedAt DateTime? @map("collected_at") @db.Timestamptz(6)
+  collectionSite LabCollectionSite? @map("collection_site")
+  collectionRoundId String? @map("collection_round_id") @db.Uuid
+  fasting     Boolean?
+  fastingHours Decimal? @map("fasting_hours") @db.Decimal(5, 2)
+  /// **The two-identifier check.** `OP-004 §5`: "Patient identity 2-identifier
+  /// confirmation at collection; label must be scanned to mark collected (no
+  /// manual 'collected' without scan unless printer failure override,
+  /// audited)." Three columns and not one boolean, because the override is the
+  /// interesting case and it has to name a reason and a person.
+  patientScanVerified   Boolean @default(false) @map("patient_scan_verified")
+  containerScanVerified Boolean @default(false) @map("container_scan_verified")
+  identityOverrideReason String? @map("identity_override_reason") @db.Text
+  identityOverrideBy     String? @map("identity_override_by") @db.Uuid
+  drawAttempts Int? @map("draw_attempts")
+  drawSite    String? @map("draw_site") @db.VarChar(120)
+
+  // ── transport & receipt ───────────────────────────────────────────────────
+  transportBatchId String? @map("transport_batch_id") @db.Uuid
+  dispatchedAt DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  receivedBy  String? @map("received_by") @db.Uuid
+  receivedAt  DateTime? @map("received_at") @db.Timestamptz(6)
+  conditionOnReceipt LabSampleCondition? @map("condition_on_receipt")
+  receiptTempC Decimal? @map("receipt_temp_c") @db.Decimal(5, 2)
+  accessionedAt DateTime? @map("accessioned_at") @db.Timestamptz(6)
+  accessionedBy String? @map("accessioned_by") @db.Uuid
+
+  // ── rejection ─────────────────────────────────────────────────────────────
+  /// → `lab.rejection_reasons.record_key`. Never free text: `OP-004 §3.2.3`
+  /// makes the rejection rate a NABL indicator, and an indicator computed over
+  /// free text is a word cloud.
+  rejectionReasonKey String? @map("rejection_reason_key") @db.Uuid
+  rejectionReasonCode String? @map("rejection_reason_code") @db.VarChar(32)
+  rejectionNote String? @map("rejection_note") @db.Text
+  rejectedBy  String? @map("rejected_by") @db.Uuid
+  rejectedAt  DateTime? @map("rejected_at") @db.Timestamptz(6)
+  /// The sample this one replaces. A recollection must name it, and the trigger
+  /// in §C refuses one that names a sample from a different order.
+  recollectionOfSampleId String? @map("recollection_of_sample_id") @db.Uuid
+
+  // ── storage, retention, custody ───────────────────────────────────────────
+  storageLocation String? @map("storage_location") @db.VarChar(120)
+  retentionUntil DateTime? @map("retention_until") @db.Timestamptz(6)
+  disposedAt  DateTime? @map("disposed_at") @db.Timestamptz(6)
+  disposalBatchRef String? @map("disposal_batch_ref") @db.VarChar(64)
+  /// Medico-legal, drug-of-abuse, alcohol in an MLC. Every hand-over is a row
+  /// in `lab_sample_custody_events`, and the trigger in §C refuses to move a
+  /// chain-of-custody sample whose last event does not hand it to the receiver.
+  isChainOfCustody Boolean @default(false) @map("is_chain_of_custody")
+  sealNo      String? @map("seal_no") @db.VarChar(64)
+  /// An aliquot's parent. Aliquots inherit chain of custody.
+  parentSampleId String? @map("parent_sample_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  order   LabOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  tests   LabOrderTest[]
+  labels  LabSampleLabel[]
+  custody LabSampleCustodyEvent[]
+
+  @@unique([hospitalId, barcode], map: "lab_samples_barcode_key")
+  @@unique([hospitalId, sampleNo], map: "lab_samples_no_key")
+  @@index([hospitalId, orderId])
+  @@index([hospitalId, branchId, status, collectedAt(sort: Desc)])
+  @@index([hospitalId, patientId, collectedAt(sort: Desc)])
+  @@index([hospitalId, recollectionOfSampleId])
+  @@index([hospitalId, transportBatchId])
+  @@map("lab_samples")
+  @@schema("lab")
+}
+
+/// Every label ever printed for a specimen, including reprints. `EN-013 §3`
+/// treats a reprint as an audited event, because two labels bearing the same
+/// accession in circulation is how a specimen ends up on the wrong bench.
+model LabSampleLabel {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  sampleId    String  @map("sample_id") @db.Uuid
+  /// → `core.bc_label_issued.id` where the barcode module issued it.
+  labelIssueId String? @map("label_issue_id") @db.Uuid
+  barcode     String  @db.VarChar(64)
+  symbology   String  @default("code128") @db.VarChar(24)
+  copyNo      Int     @default(1) @map("copy_no")
+  isReprint   Boolean @default(false) @map("is_reprint")
+  reprintReason String? @map("reprint_reason") @db.Text
+  printerId   String? @map("printer_id") @db.Uuid
+  printedBy   String? @map("printed_by") @db.Uuid
+  printedAt   DateTime @default(now()) @map("printed_at") @db.Timestamptz(6)
+
+  sample LabSample @relation(fields: [sampleId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, sampleId, printedAt])
+  @@map("lab_sample_labels")
+  @@schema("lab")
+}
+
+/// `OP-004 §3.2.4`: the chain of custody for medico-legal specimens. Append-only.
+model LabSampleCustodyEvent {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  sampleId    String  @map("sample_id") @db.Uuid
+  sequence    Int
+  action      LabCustodyAction
+  fromUserId  String? @map("from_user_id") @db.Uuid
+  fromName    String? @map("from_name") @db.VarChar(200)
+  toUserId    String? @map("to_user_id") @db.Uuid
+  toName      String? @map("to_name") @db.VarChar(200)
+  sealNo      String? @map("seal_no") @db.VarChar(64)
+  sealIntact  Boolean? @map("seal_intact")
+  locationName String? @map("location_name") @db.VarChar(160)
+  signatureFileId String? @map("signature_file_id") @db.Uuid
+  remarks     String? @db.Text
+  at          DateTime @default(now()) @db.Timestamptz(6)
+
+  sample LabSample @relation(fields: [sampleId], references: [id], onDelete: Restrict)
+
+  @@unique([sampleId, sequence], map: "lab_sample_custody_events_seq_key")
+  @@index([hospitalId, sampleId, at])
+  @@map("lab_sample_custody_events")
+  @@schema("lab")
+}
+
+/// `OP-004 §3.2.2`: the courier or pneumatic-tube manifest. The transport-time
+/// KPI and the cold-chain excursion both read from here.
+model LabTransportBatch {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  manifestNo  String  @map("manifest_no") @db.VarChar(32)
+  fromLocation String @map("from_location") @db.VarChar(160)
+  toLocation  String  @map("to_location") @db.VarChar(160)
+  courierName String? @map("courier_name") @db.VarChar(200)
+  courierContact String? @map("courier_contact") @db.VarChar(32)
+  mode        String? @db.VarChar(32)
+  sampleCount Int     @default(0) @map("sample_count")
+  dispatchedBy String? @map("dispatched_by") @db.Uuid
+  dispatchedAt DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  receivedBy  String? @map("received_by") @db.Uuid
+  receivedAt  DateTime? @map("received_at") @db.Timestamptz(6)
+  tempOnDispatchC Decimal? @map("temp_on_dispatch_c") @db.Decimal(5, 2)
+  tempOnReceiptC  Decimal? @map("temp_on_receipt_c") @db.Decimal(5, 2)
+  remarks     String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, manifestNo], map: "lab_transport_batches_manifest_key")
+  @@index([hospitalId, branchId, dispatchedAt(sort: Desc)])
+  @@map("lab_transport_batches")
+  @@schema("lab")
+}
+
+/// `OP-004 §3.2.3` + `§5`: the NABL rejection list, configurable per hospital.
+/// A lookup table and not an enum, because a hospital adds "sample received
+/// after pneumatic-tube failure" and that is its business, not the product's.
+model LabRejectionReason {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  version     Int     @default(1)
+  code        String  @db.VarChar(32)
+  label       String  @db.VarChar(200)
+  /// The NABL 112 pre-analytical rejection category this maps to, for the
+  /// quality indicator.
+  nablCategory String? @map("nabl_category") @db.VarChar(64)
+  discipline  LabDiscipline?
+  /// Whether rejecting for this reason automatically raises a recollection
+  /// request. Almost always true; a duplicate order is the exception.
+  requiresRecollection Boolean @default(true) @map("requires_recollection")
+  /// The recollection is free. `OP-004 §5`.
+  recollectionChargeable Boolean @default(false) @map("recollection_chargeable")
+  notifyPatient Boolean @default(true) @map("notify_patient")
+  notifyOrderingDoctor Boolean @default(true) @map("notify_ordering_doctor")
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(active)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, status, sortOrder])
+  @@index([hospitalId, code])
+  @@map("lab_rejection_reasons")
+  @@schema("lab")
+}
+
+/// `OP-004 §3.8` and `docs/prompts/phase-03 §3.1`: TAT targets per test and
+/// priority, with the clock-start rule NABL requires a laboratory to declare.
+model LabTatTarget {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String? @map("branch_id") @db.Uuid
+  version     Int     @default(1)
+  /// Null matches every test in the discipline — the default row.
+  testKey     String? @map("test_key") @db.Uuid
+  discipline  LabDiscipline?
+  priority    LabPriority
+  source      LabOrderSource?
+  targetMinutes Int  @map("target_minutes")
+  /// `OP-004 §5`: "STAT clock starts at order; routine at receipt
+  /// (configurable, NABL requires define)".
+  clockStart  LabTatClockStart @default(receipt) @map("clock_start")
+  /// The SLA breach threshold as a fraction — an amber at 80 % of target.
+  warnAtPercent Int  @default(80) @map("warn_at_percent")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(active)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, branchId, status, priority])
+  @@index([hospitalId, testKey, priority])
+  @@map("lab_tat_targets")
+  @@schema("lab")
+}
+
+enum LabTatClockStart {
+  order
+  collection
+  receipt
+  accession
+
+  @@schema("lab")
+}
+
+/// `OP-004 §3.3.5`: the partner laboratory a test is sent to.
+model LabReferralLab {
+  id          String  @id @db.Uuid
+  recordKey   String  @map("record_key") @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  version     Int     @default(1)
+  code        String  @db.VarChar(32)
+  name        String  @db.VarChar(300)
+  contactName String? @map("contact_name") @db.VarChar(200)
+  contactPhone String? @map("contact_phone") @db.VarChar(32)
+  contactEmail String? @map("contact_email") @db.VarChar(200)
+  address     String? @db.Text
+  /// Printed on the report next to the outsourced result (`OP-004 §5`).
+  accreditationBody String? @map("accreditation_body") @db.VarChar(64)
+  accreditationNo   String? @map("accreditation_no") @db.VarChar(64)
+  accreditationValidTo DateTime? @map("accreditation_valid_to") @db.Date
+  /// How results come back: a portal login, an SFTP drop, an HL7 feed, an API.
+  resultChannel String? @map("result_channel") @db.VarChar(32)
+  /// → `integration.ihub_connectors.id` when the channel is automated.
+  connectorId String? @map("connector_id") @db.Uuid
+  defaultTatHours Decimal? @map("default_tat_hours") @db.Decimal(8, 2)
+  manifestFormat String? @map("manifest_format") @db.VarChar(32)
+  /// `EN-035`-style processor obligations: a referral lab is a DPDP processor.
+  dpaSignedAt DateTime? @map("dpa_signed_at") @db.Date
+  isActive    Boolean @default(true) @map("is_active")
+
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime? @map("effective_to") @db.Timestamptz(6)
+  status        MdmRecordStatus @default(active)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  dispatches LabOutsourceDispatch[]
+
+  @@unique([recordKey, version])
+  @@index([hospitalId, status, name])
+  @@map("lab_referral_labs")
+  @@schema("lab")
+}
+
+model LabOutsourceDispatch {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  referralLabId String @map("referral_lab_id") @db.Uuid
+  manifestNo  String  @map("manifest_no") @db.VarChar(32)
+  sampleCount Int     @default(0) @map("sample_count")
+  testCount   Int     @default(0) @map("test_count")
+  courierName String? @map("courier_name") @db.VarChar(200)
+  courierAwb  String? @map("courier_awb") @db.VarChar(64)
+  dispatchedBy String? @map("dispatched_by") @db.Uuid
+  dispatchedAt DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  expectedBy  DateTime? @map("expected_by") @db.Timestamptz(6)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  resultsReceivedAt DateTime? @map("results_received_at") @db.Timestamptz(6)
+  status      String  @default("draft") @db.VarChar(24)
+  /// The cost the partner charges, against which OP-005 margin is reported.
+  partnerCost Decimal? @map("partner_cost") @db.Decimal(14, 2)
+  currency    String  @default("INR") @db.Char(3)
+  remarks     String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  referralLab LabReferralLab @relation(fields: [referralLabId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, manifestNo], map: "lab_outsource_dispatches_manifest_key")
+  @@index([hospitalId, referralLabId, dispatchedAt(sort: Desc)])
+  @@map("lab_outsource_dispatches")
+  @@schema("lab")
+}
+
+/// `docs/prompts/phase-03 §3.3`: "bench worklists by sub-department and
+/// instrument". The worklist itself is a query; this is the bench it is grouped
+/// by, and the place a hospital says which instruments sit on it.
+model LabBench {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  code        String  @db.VarChar(32)
+  name        String  @db.VarChar(160)
+  discipline  LabDiscipline
+  departmentKey String? @map("department_key") @db.Uuid
+  roomKey     String? @map("room_key") @db.Uuid
+  /// `integration.lab_instruments.id[]`. An array rather than a join table
+  /// because a bench has three analyzers, not three hundred, and the list is
+  /// read whole on every worklist load.
+  instrumentIds String[] @default([]) @map("instrument_ids") @db.Uuid
+  isActive    Boolean @default(true) @map("is_active")
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, branchId, code], map: "lab_benches_code_key")
+  @@index([hospitalId, branchId, discipline, isActive])
+  @@map("lab_benches")
+  @@schema("lab")
+}
+
+/// `OP-004 §3.2.5`: the home/ward collection round a phlebotomist is sent on.
+model LabCollectionRound {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  roundNo     String  @map("round_no") @db.VarChar(32)
+  roundDate   DateTime @map("round_date") @db.Date
+  site        LabCollectionSite
+  phlebotomistUserId String? @map("phlebotomist_user_id") @db.Uuid
+  plannedStartAt DateTime? @map("planned_start_at") @db.Timestamptz(6)
+  startedAt   DateTime? @map("started_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  stopCount   Int     @default(0) @map("stop_count")
+  collectedCount Int  @default(0) @map("collected_count")
+  status      String  @default("planned") @db.VarChar(24)
+  remarks     String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, roundNo], map: "lab_collection_rounds_no_key")
+  @@index([hospitalId, branchId, roundDate, status])
+  @@map("lab_collection_rounds")
+  @@schema("lab")
+}
