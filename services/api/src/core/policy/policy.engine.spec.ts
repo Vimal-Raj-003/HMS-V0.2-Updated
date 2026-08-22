@@ -485,3 +485,47 @@ describe('decision trace', () => {
     );
   });
 });
+
+/**
+ * A `requiresSecondPerson` key is denied unless the engine is handed a
+ * co-signer, and `PolicyService` had no way to hand it one — so paying a
+ * refund, voiding a receipt and prescribing a Schedule X drug denied every
+ * caller, including the person entitled to do it. Two modules met that
+ * separately and each worked around it locally.
+ *
+ * These assertions pin the engine half of the contract `PolicyService.assert`'s
+ * `options.secondPersonUserId` now satisfies.
+ */
+describe('a second-person key needs a second person', () => {
+  it('refuses when no co-signer is supplied', () => {
+    const d = evaluate({ permission: SECOND_PERSON, context: ctx(), resource: resource() });
+    expect(d.allowed).toBe(false);
+    if (!d.allowed) expect(d.reason).toBe('second_person_required');
+  });
+
+  it('refuses a co-signer who is the actor', () => {
+    // Self-countersigning defeats the whole control while looking satisfied.
+    const context = ctx();
+    const d = evaluate({
+      permission: SECOND_PERSON,
+      context,
+      resource: resource(),
+      secondPersonUserId: context.userId,
+    });
+    expect(d.allowed).toBe(false);
+    if (!d.allowed) expect(d.reason).toBe('second_person_required');
+  });
+
+  it('allows a different co-signer, and says the obligation was met', () => {
+    const d = evaluate({
+      permission: SECOND_PERSON,
+      context: ctx(),
+      resource: resource(),
+      secondPersonUserId: '00000000-0000-7000-8000-0000000000ff',
+    });
+    expect(d.allowed, JSON.stringify(d)).toBe(true);
+    if (d.allowed) {
+      expect(d.obligations.map((o) => o.kind)).toContain('require_second_person');
+    }
+  });
+});

@@ -20,14 +20,48 @@ import { evaluate } from './policy.engine.js';
  * So the handler asks again for the second key. It runs the same engine, against
  * the same freshly-resolved context, and produces the same problem types — this
  * is not a parallel authorisation path, it is the same one called twice.
+ *
+ * **Second-person actions can only be asserted here.** A key marked
+ * `requiresSecondPerson` — paying a refund, voiding a receipt, prescribing a
+ * Schedule X drug, clearing a CDSS hard stop — is denied by the engine unless it
+ * is handed a co-signer who is a *different* user. A route decorator has nobody
+ * to hand it, because the co-signer is established by the request body, so a
+ * route carrying such a key denies every caller including the one entitled to
+ * act. Two modules hit that and each worked around it locally; `options.onBehalf`
+ * is the shared way through, and it is deliberately a separate argument rather
+ * than part of `resource`, so a caller cannot supply one by accident.
  */
+export interface AssertOptions {
+  /**
+   * The co-signer for a `requiresSecondPerson` key. Must be a different, active
+   * user who holds the same key themselves — the caller establishes that (by
+   * authenticating them) before asking; this only carries the identity.
+   */
+  readonly secondPersonUserId?: string;
+}
+
 @Injectable()
 export class PolicyService {
   constructor(@Inject(AuthService) private readonly auth: AuthService) {}
 
-  async assert(permission: string, resource: Omit<Partial<PolicyResource>, 'type'> = {}): Promise<void> {
+  async assert(
+    permission: string,
+    resource: Omit<Partial<PolicyResource>, 'type'> = {},
+    options: AssertOptions = {},
+  ): Promise<void> {
     const ctx = getContext();
     if (ctx.userId === null || ctx.hospitalId === null) throw AppError.unauthenticated();
+
+    // The engine refuses a co-signer identical to the actor, but catching it
+    // here names the problem: "you cannot countersign your own action" is
+    // actionable, where a bare permission denial sends somebody looking at
+    // their roles.
+    if (options.secondPersonUserId !== undefined && options.secondPersonUserId === ctx.userId) {
+      throw new AppError(
+        ProblemType.PERMISSION_DENIED,
+        'A second, different authorised user must confirm this action — you cannot countersign your own.',
+      );
+    }
 
     const policyContext = await this.auth.resolvePolicyContext({
       userId: ctx.userId,
@@ -48,6 +82,7 @@ export class PolicyService {
       resource: { type: 'route', hospitalId: ctx.hospitalId, branchId: ctx.branchId, ...resource },
       reason: ctx.reason,
       ip: ctx.ip,
+      ...(options.secondPersonUserId === undefined ? {} : { secondPersonUserId: options.secondPersonUserId }),
     });
 
     if (decision.allowed) return;
