@@ -2492,6 +2492,23 @@ const visitEvents: readonly EventDefinition[] = [
     { containsPhi: true, retentionDays: 400 },
   ),
   ev(
+    'visit.transferred',
+    'op_visit',
+    'OP-001',
+    'A visit was moved to another doctor or department. Distinct from `queue.token.transferred`, which moves the patient in a queue: this changes who the consultation is with, so OP-005 re-derives the consultation fee (a different doctor may have a different tariff) and OP-002 moves the visit off one doctor worklist and onto another. Carries both sides because a consumer that learns only the destination cannot tell what it is replacing.',
+    z.object({
+      visitId: uuid,
+      patientId: uuid,
+      fromDoctorId: uuid,
+      toDoctorId: uuid,
+      fromDepartmentId: uuid.nullable(),
+      toDepartmentId: uuid.nullable(),
+      reason: z.string(),
+      transferredBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 400 },
+  ),
+  ev(
     'visit.closed',
     'op_visit',
     'OP-001',
