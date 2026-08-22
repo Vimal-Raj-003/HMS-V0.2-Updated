@@ -110,8 +110,11 @@ describe('permission catalogue', () => {
 
   it('fails loudly, naming the caller, when a module uses an unregistered key', () => {
     // EN-007 §3.3.1: "modules cannot use unregistered keys (lint + runtime check)".
-    expect(() => assertRegisteredPermission('lab.result.validate', 'LabController.validate')).toThrow(
-      /Unregistered permission key "lab\.result\.validate" used by LabController\.validate/,
+    // The key here is deliberately one no spec will ever declare. The earlier
+    // version used `lab.result.validate`, which Phase 3 then registered — an
+    // assertion that a real key is unregistered is an assertion with a fuse in it.
+    expect(() => assertRegisteredPermission('lab.result.telekinesis', 'LabController.validate')).toThrow(
+      /Unregistered permission key "lab\.result\.telekinesis" used by LabController\.validate/,
     );
   });
 

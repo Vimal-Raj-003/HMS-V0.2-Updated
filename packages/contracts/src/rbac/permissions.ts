@@ -66,7 +66,27 @@ export type PermissionAction =
   | 'announce'
   | 'reconcile'
   | 'fleet'
-  | 'admin';
+  | 'admin'
+  // Phase 3 — the verbs the diagnostics specs actually use.
+  | 'label'
+  | 'collect'
+  | 'receive'
+  | 'enter'
+  | 'amend'
+  | 'record'
+  | 'generate'
+  | 'deliver'
+  | 'complete'
+  | 'unlock'
+  | 'void'
+  | 'grant'
+  | 'resolve'
+  | 'ingest'
+  | 'view'
+  | 'annotate'
+  | 'upload'
+  | 'share'
+  | 'cosign';
 
 /** docs/05 §Model: "Data classes: PHI, financial, HR, operational." */
 export type DataClass = 'phi' | 'financial' | 'hr' | 'operational' | 'security' | 'commercial';
@@ -3383,6 +3403,1056 @@ const OP019 = group('OP-019', 2, [
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Phase 3 — Diagnostics (LIS, analyzer interfacing, lab quality, RIS, PACS,
+// investigation console)
+//
+// Keys come from the §12 Permissions section of OP-004, EN-004, EN-031, OP-008,
+// EN-008 and OP-022. EN-035 §12 declares no keys of its own ("Relevant keys live
+// in their owning modules"), so where its prose uses a different spelling for
+// somebody else's key (`rad.exam.perform`, `pacs.study.view`, `pacs.mwl.manage`)
+// the owning module's spelling is the one registered — a second spelling would
+// be a second authorisation decision for the same action.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** OP-004 — Laboratory Information System. */
+const OP004 = group('OP-004', 3, [
+  p(
+    'lab.order.create',
+    'lab_order',
+    'create',
+    'phi',
+    'medium',
+    'Raise a laboratory order, including a walk-in order taken at the front desk.',
+  ),
+  p(
+    'lab.order.list',
+    'lab_order',
+    'list',
+    'phi',
+    'low',
+    'List laboratory orders and the reception worklist.',
+    {
+      phiRead: true,
+    },
+  ),
+  p('lab.order.read', 'lab_order', 'read', 'phi', 'low', 'Open one laboratory order and its test lines.', {
+    phiRead: true,
+  }),
+  p(
+    'lab.order.addon',
+    'lab_order',
+    'create',
+    'phi',
+    'medium',
+    'Add a test to an order whose sample is already in the laboratory, within the sample stability window.',
+  ),
+  p(
+    'lab.order.cancel',
+    'lab_order',
+    'cancel',
+    'phi',
+    'medium',
+    'Cancel an order or a test line. OP-004 §5 reverses the charge only before a result exists, so the reason is the audit trail.',
+    { requiresReason: true },
+  ),
+
+  p(
+    'lab.sample.label',
+    'lab_sample',
+    'label',
+    'phi',
+    'low',
+    'Print and reprint barcode sample labels with container guidance (EN-013).',
+  ),
+  p(
+    'lab.sample.collect',
+    'lab_sample',
+    'collect',
+    'phi',
+    'medium',
+    'Confirm collection after the two-identifier check. OP-004 §5 forbids a manual "collected" without a scan except under an audited printer-failure override.',
+  ),
+  p(
+    'lab.sample.reject',
+    'lab_sample',
+    'reject',
+    'phi',
+    'medium',
+    'Reject a sample against a coded reason, which triggers a zero-charge recollection order and notifies the ward and the patient.',
+    { requiresReason: true },
+  ),
+  p(
+    'lab.sample.receive',
+    'lab_sample',
+    'receive',
+    'phi',
+    'medium',
+    'Receive and accession a sample at the laboratory, starting the routine TAT clock.',
+  ),
+  p(
+    'lab.sample.custody',
+    'lab_sample_custody',
+    'record',
+    'phi',
+    'high',
+    'Record a chain-of-custody handover for a medico-legal sample. Each link names both people and survives into evidence.',
+    { requiresReason: true, phiRead: true },
+  ),
+  p(
+    'lab.sample.update',
+    'lab_sample',
+    'update',
+    'phi',
+    'medium',
+    'Correct sample attributes and resend the sample to an instrument worklist (EN-004 §12).',
+    { requiresReason: true },
+  ),
+
+  p(
+    'lab.result.enter',
+    'lab_result',
+    'enter',
+    'phi',
+    'medium',
+    'Enter or edit an unverified result at the bench. Segregated from validation: docs/05 requires enterer ≠ validator.',
+  ),
+  p(
+    'lab.result.verify',
+    'lab_result',
+    'verify',
+    'phi',
+    'medium',
+    'Technical verification — the first of OP-004 §5’s two levels. The service additionally refuses to let a user verify their own entry.',
+  ),
+  p(
+    'lab.result.validate',
+    'lab_result',
+    'validate',
+    'phi',
+    'high',
+    'Clinical authorisation of a result, which releases it. For a critical result OP-004 §5 and D-10 require the documented read-back, or a documented "clinician unreachable — escalated" entry, first.',
+  ),
+  p(
+    'lab.result.amend',
+    'lab_result',
+    'amend',
+    'phi',
+    'high',
+    'Amend an authorised result. Never an overwrite: a new version is written and everyone already notified is re-notified.',
+    { requiresReason: true },
+  ),
+  p('lab.result.read', 'lab_result', 'read', 'phi', 'medium', 'Read laboratory results for a patient.', {
+    phiRead: true,
+  }),
+  p(
+    'lab.result.sensitive.read',
+    'lab_result_sensitive',
+    'read',
+    'phi',
+    'critical',
+    'Read results the hospital has flagged confidential — HIV, other serology, genetic and molecular tests. OP-004 §5 restricts these, bars them from SMS/WhatsApp and attaches a counselling flag; the treating clinician receives this key only as an explicit, named grant.',
+    { sensitiveGrant: true, requiresReason: true, requiresStepUp: true, phiRead: true },
+  ),
+
+  p(
+    'lab.critical.notify',
+    'lab_critical_value',
+    'notify',
+    'phi',
+    'critical',
+    'Raise a critical-value alert and record the call-back — who called whom, when, and whether read-back was confirmed. EN-040 §5 exempts it from every licence check: a hospital in arrears still gets its panic-value loop.',
+    { clinicalSafetyExempt: true, phiRead: true },
+  ),
+  p(
+    'lab.critical.read',
+    'lab_critical_value',
+    'read',
+    'phi',
+    'high',
+    'See the critical-value alert and its acknowledgement state. Exempt from licence gating for the same reason as `lab.critical.notify` — an alert nobody can open is not an alert.',
+    { clinicalSafetyExempt: true, phiRead: true },
+  ),
+
+  p(
+    'lab.report.generate',
+    'lab_report',
+    'generate',
+    'phi',
+    'medium',
+    'Produce the branded report PDF with its QR verification block, including cumulative and serial reports.',
+  ),
+  p('lab.report.print', 'lab_report', 'print', 'phi', 'medium', 'Print a laboratory report at a counter.', {
+    phiRead: true,
+  }),
+  p(
+    'lab.report.deliver',
+    'lab_report',
+    'deliver',
+    'phi',
+    'medium',
+    'Hand over or send a report — portal, WhatsApp, email, counter — and record the delivery evidence.',
+    { phiRead: true },
+  ),
+  p(
+    'lab.report.export',
+    'lab_report',
+    'export',
+    'phi',
+    'high',
+    'Export laboratory reports in bulk. PHI leaves the building, so docs/05 §Data classes makes it an audited, reasoned action.',
+    { requiresReason: true, requiresStepUp: true, phiRead: true },
+  ),
+  p(
+    'lab.report.read',
+    'lab_report',
+    'read',
+    'phi',
+    'low',
+    'Read released laboratory reports and the TAT / rejection KPIs built from them.',
+    { phiRead: true },
+  ),
+
+  p(
+    'lab.outsource.manage',
+    'lab_outsource',
+    'manage',
+    'operational',
+    'medium',
+    'Configure referral laboratories and dispatch, track and receive outsourced tests. The partner’s NABL scope decides whether the hospital logo may appear on the report.',
+  ),
+  p(
+    'lab.master.configure',
+    'lab_master',
+    'configure',
+    'operational',
+    'high',
+    'Maintain the test catalogue, panels, specimen types, reference ranges, critical limits, delta rules and TAT targets. Ranges are effective-dated, so a change never rewrites a historical report.',
+    { requiresReason: true },
+  ),
+]);
+
+/**
+ * EN-004 — Lab machine integration.
+ *
+ * EN-004 §12 decomposes quality control into `configure | record | read | unlock`
+ * where OP-004 §12 writes the coarser `lab.qc.manage|read`. The decomposition is
+ * registered and the coarse form is not: two keys meaning the same thing would be
+ * two authorisation decisions for one action, and the bench (`record`) and the
+ * quality manager (`configure`, `unlock`) are exactly the split that matters.
+ */
+const EN004 = group('EN-004', 3, [
+  p(
+    'lab.instrument.manage',
+    'lab_instrument',
+    'manage',
+    'operational',
+    'high',
+    'Onboard and maintain analyzers: instrument master, test mapping, lifecycle (verification → live → out of service).',
+  ),
+  p(
+    'lab.instrument.downtime.record',
+    'lab_instrument_downtime',
+    'record',
+    'operational',
+    'low',
+    'Open and close an analyzer downtime window so the uptime KPI and the "analyzer down" board note are true.',
+  ),
+  p(
+    'lab.interface.errors.resolve',
+    'lab_if_error',
+    'resolve',
+    'phi',
+    'high',
+    'Work the interface error queue — unmatched, unmapped and patient-mismatch results. EN-004 §5 forbids matching by name similarity, so resolution is always an explicit human assignment.',
+    { requiresReason: true, phiRead: true },
+  ),
+  p(
+    'lab.autoval.configure',
+    'lab_autoval_ruleset',
+    'configure',
+    'operational',
+    'high',
+    'Author an auto-validation rule set. EN-004 §5 keeps STAT, ICU, paediatric, critical, delta and QC-hold results off the automatic path unless explicitly configured.',
+    { requiresReason: true },
+  ),
+  p(
+    'lab.autoval.approve',
+    'lab_autoval_ruleset',
+    'approve',
+    'operational',
+    'high',
+    'Quality-manager approval of an auto-validation rule set before it can be signed into service.',
+  ),
+  p(
+    'lab.autoval.sign',
+    'lab_autoval_ruleset',
+    'sign',
+    'operational',
+    'critical',
+    'Pathologist signature that puts an auto-validation rule set live. EN-004 §5 requires the approver and the signatory to be different people.',
+    { sensitiveGrant: true, requiresStepUp: true },
+  ),
+  p(
+    'lab.qc.configure',
+    'lab_qc',
+    'configure',
+    'operational',
+    'high',
+    'Configure instrument QC: control lots, targets, schedules and the Westgard rule set per analyte.',
+  ),
+  p('lab.qc.record', 'lab_qc', 'record', 'operational', 'low', 'Record a QC run result at the bench.'),
+  p(
+    'lab.qc.read',
+    'lab_qc',
+    'read',
+    'operational',
+    'low',
+    'Read QC state, Levey-Jennings charts and lockouts for an analyte and instrument.',
+  ),
+  p(
+    'lab.qc.unlock',
+    'lab_qc_lockout',
+    'unlock',
+    'operational',
+    'high',
+    'Lift an analyte × instrument lockout after passing QC and a recorded corrective action. Releasing patient results past an out-of-control run is a different key — `labq.qc.release_override`.',
+    { requiresReason: true },
+  ),
+  p(
+    'integration.lab.configure',
+    'lab_interface',
+    'configure',
+    'operational',
+    'high',
+    'Configure analyzer drivers, MLLP/ASTM endpoints, middleware routing and LOINC mapping.',
+    { sensitiveGrant: true },
+  ),
+  p(
+    'integration.lab.read',
+    'lab_interface',
+    'read',
+    'operational',
+    'low',
+    'Read the interface message log metadata, instrument status board and uptime dashboard.',
+  ),
+  p(
+    'integration.lab.raw.read',
+    'lab_interface_raw',
+    'read',
+    'phi',
+    'high',
+    'Open the raw HL7/ASTM message body. The wire format carries patient identifiers, so every open writes a PHI-read audit row.',
+    { requiresReason: true, phiRead: true },
+  ),
+  p(
+    'integration.lab.replay',
+    'lab_interface',
+    'replay',
+    'phi',
+    'high',
+    'Replay buffered or failed analyzer messages after downtime. Idempotency is by message hash and control id, so a replay cannot double-post a result.',
+    { requiresReason: true },
+  ),
+  p(
+    'integration.lab.send',
+    'lab_interface',
+    'send',
+    'operational',
+    'medium',
+    'Push an order worklist to an analyzer. Held by the interface service account, not by a person.',
+  ),
+  p(
+    'integration.lab.ingest',
+    'lab_interface',
+    'ingest',
+    'phi',
+    'medium',
+    'Accept an inbound analyzer result message. Held by a paired instrument or gateway token, never by a person (OP-004 §12).',
+  ),
+]);
+
+/**
+ * EN-031 — NABL integration / lab quality.
+ *
+ * `labq.*` is the accreditation management system: control materials, EQA,
+ * method validation, competency, environment, non-conformity and the audit pack.
+ * `lab.qc.*` (EN-004) is the day-to-day gate at the bench. They meet at one
+ * place — an out-of-control analyte blocks release, and `labq.qc.release_override`
+ * is the only lawful way past it.
+ */
+const EN031 = group('EN-031', 3, [
+  p(
+    'labq.qc.read',
+    'labq_qc',
+    'read',
+    'operational',
+    'low',
+    'Read QC runs, Levey-Jennings charts, lot boundaries and out-of-control state.',
+  ),
+  p(
+    'labq.qc.enter',
+    'labq_qc_run',
+    'enter',
+    'operational',
+    'low',
+    'Enter a QC run result. EN-031 §5 forbids deletion — a mistaken entry is voided, with a reason, and stays visible on the chart.',
+  ),
+  p(
+    'labq.qc.manage',
+    'labq_qc',
+    'manage',
+    'operational',
+    'high',
+    'Maintain control materials, lots, schedules, Westgard configuration and lot-changeover parallel testing.',
+  ),
+  p(
+    'labq.qc.approve',
+    'labq_qc_target',
+    'approve',
+    'operational',
+    'high',
+    'Approve laboratory-derived QC targets, which replace the manufacturer’s provisional values after ≥20 runs over ≥20 days. Director-level; the bench that produced the runs does not approve them.',
+    { sensitiveGrant: true },
+  ),
+  p(
+    'labq.qc.void',
+    'labq_qc_run',
+    'void',
+    'operational',
+    'medium',
+    'Void a mistaken QC point. The point remains on the chart marked void — EN-031 §5 allows no deletion.',
+    { requiresReason: true },
+  ),
+  p(
+    'labq.qc.action',
+    'labq_qc_action',
+    'record',
+    'operational',
+    'medium',
+    'Record the corrective action and root cause for an out-of-control run, and the impact assessment on patient results already released.',
+    { requiresReason: true },
+  ),
+  p(
+    'labq.qc.release_override',
+    'labq_qc_release',
+    'override',
+    'phi',
+    'critical',
+    'Authorise release of patient results for an analyte that is out of control or has a missed QC schedule. EN-031 §5 makes this the single lawful exception to the release gate: Lab Director only, recorded in the QC action log with a reason, audited, and reported to management every month.',
+    { sensitiveGrant: true, requiresReason: true, requiresStepUp: true },
+  ),
+  p(
+    'labq.eqa.manage',
+    'labq_eqa',
+    'manage',
+    'operational',
+    'medium',
+    'Enrol in EQA/PT programmes, record cycles, submit results and track Z-scores. An in-scope analyte with no enrolment is a blocking readiness gap.',
+  ),
+  p(
+    'labq.validation.manage',
+    'labq_method_validation',
+    'manage',
+    'operational',
+    'medium',
+    'Run and document method validation or verification, including precision, trueness, linearity and measurement uncertainty.',
+  ),
+  p(
+    'labq.validation.approve',
+    'labq_method_validation',
+    'approve',
+    'operational',
+    'high',
+    'Director approval of a method validation, which is what makes a test orderable as an accredited test in OP-004.',
+    { sensitiveGrant: true },
+  ),
+  p(
+    'labq.equipment.manage',
+    'labq_equipment',
+    'manage',
+    'operational',
+    'medium',
+    'Record instrument calibration, qualification and requalification after repair, relocation or software upgrade.',
+  ),
+  p(
+    'labq.environment.manage',
+    'labq_environment',
+    'manage',
+    'operational',
+    'low',
+    'Log temperature, humidity and storage monitoring, and close an excursion with its impact assessment on stored materials.',
+  ),
+  p(
+    'labq.competency.manage',
+    'labq_competency',
+    'manage',
+    'hr',
+    'high',
+    'Maintain competency and training records. An expired competency withdraws a technician’s authority to enter or verify results for that analyte, so this key changes who may touch a patient result.',
+    { sensitiveGrant: true },
+  ),
+  p(
+    'labq.checklist.manage',
+    'labq_checklist',
+    'manage',
+    'operational',
+    'medium',
+    'Maintain the ISO 15189 / NABL 112 clause checklist and its evidence links.',
+  ),
+  p(
+    'labq.accreditation.manage',
+    'labq_accreditation',
+    'manage',
+    'operational',
+    'high',
+    'Maintain the accreditation scope — certificate, validity, and which tests are in scope. Scope decides whether the NABL logo may appear on a report.',
+  ),
+  p(
+    'labq.indicator.review',
+    'labq_indicator',
+    'review',
+    'operational',
+    'low',
+    'Review the quality indicators — TAT, rejection rate, repeat rate, critical-value communication — against their targets.',
+  ),
+  p(
+    'labq.nc.manage',
+    'labq_nonconformity',
+    'manage',
+    'operational',
+    'medium',
+    'Raise, investigate and close non-conformities with root cause, CAPA and effectiveness verification.',
+  ),
+  p(
+    'labq.review.sign',
+    'labq_review',
+    'sign',
+    'operational',
+    'high',
+    'Sign the monthly QC, indicator and management reviews. EN-031 §5: an unsigned month is a gap in the evidence, not a formality.',
+    { requiresStepUp: true },
+  ),
+  p(
+    'labq.auditpack.generate',
+    'labq_auditpack',
+    'generate',
+    'operational',
+    'medium',
+    'Generate the audit-readiness pack for an assessment window.',
+  ),
+  p(
+    'labq.assessor.grant',
+    'labq_assessor',
+    'grant',
+    'security',
+    'high',
+    'Create the time-boxed, read-only assessor account. EN-031 §5 caps it at 14 days by default, scopes it to quality data and audits every access.',
+    { sensitiveGrant: true, requiresReason: true },
+  ),
+  p(
+    'labq.report.read',
+    'labq_report',
+    'read',
+    'operational',
+    'low',
+    'Read the quality dashboards, readiness status and accreditation evidence.',
+  ),
+]);
+
+/** OP-008 — Radiology & imaging: orders, schedule, exams, dose, reports. */
+const OP008 = group('OP-008', 3, [
+  p(
+    'rad.order.create',
+    'rad_order',
+    'create',
+    'phi',
+    'medium',
+    'Raise an imaging order with its clinical indication. OP-008 §5 makes the indication mandatory — an unjustified exposure is an AERB finding.',
+  ),
+  p('rad.order.read', 'rad_order', 'read', 'phi', 'low', 'Open one imaging order and its procedure lines.', {
+    phiRead: true,
+  }),
+  p('rad.order.list', 'rad_order', 'list', 'phi', 'low', 'List imaging orders and the radiology worklist.', {
+    phiRead: true,
+  }),
+  p(
+    'rad.order.update',
+    'rad_order',
+    'update',
+    'phi',
+    'medium',
+    'Update an order: protocol, contrast decision, pregnancy and safety screening, laterality correction.',
+  ),
+  p(
+    'rad.order.cancel',
+    'rad_order',
+    'cancel',
+    'phi',
+    'medium',
+    'Cancel an imaging order. OP-008 §5 requires approval for cancellation after acquisition, because the exposure already happened.',
+    { requiresReason: true },
+  ),
+  p(
+    'rad.schedule.manage',
+    'rad_appointment',
+    'manage',
+    'operational',
+    'medium',
+    'Book, move and cancel modality slots, and issue the preparation instructions that go to the patient.',
+  ),
+  p(
+    'rad.study.complete',
+    'rad_exam',
+    'complete',
+    'phi',
+    'medium',
+    'Technologist acquisition workflow: exam started and completed, retakes with reason, contrast administered. EN-035 §12 calls the same action `rad.exam.perform`; this is the registered spelling.',
+  ),
+  p(
+    'rad.study.reconcile',
+    'rad_study',
+    'reconcile',
+    'phi',
+    'high',
+    'Attach an unmatched or manually-entered study to the right patient and accession. EN-008 §5 forbids silent matching, so this is always a named human decision; EN-008 §12 calls the same action `rad.pacs.reconcile`.',
+    { requiresReason: true, phiRead: true },
+  ),
+  p(
+    'rad.dose.record',
+    'rad_dose',
+    'record',
+    'phi',
+    'medium',
+    'Record radiation dose from RDSR, DICOM header or manual entry. OP-008 §5 will not close an ionising order without one.',
+  ),
+  p(
+    'rad.dose.read',
+    'rad_dose',
+    'read',
+    'phi',
+    'low',
+    'Read per-study and cumulative patient dose, DRL comparison and the AERB dose register.',
+    { phiRead: true },
+  ),
+  p(
+    'rad.report.create',
+    'rad_report',
+    'create',
+    'phi',
+    'medium',
+    'Draft a radiology report against a structured template. Drafting is not signing — a resident stops here.',
+  ),
+  p(
+    'rad.report.preliminary',
+    'rad_report_preliminary',
+    'publish',
+    'phi',
+    'high',
+    'Issue a preliminary read, visibly flagged as preliminary. The final report overrides it and the pair stays in the version history.',
+  ),
+  p(
+    'rad.report.sign',
+    'rad_report',
+    'sign',
+    'phi',
+    'high',
+    'Sign a radiology report. OP-008 §5 admits only radiologists with a valid registration — and a valid PC-PNDT registration for obstetric ultrasound. The technologist who performed the exam never holds this.',
+    { requiresStepUp: true },
+  ),
+  p(
+    'rad.report.amend',
+    'rad_report',
+    'amend',
+    'phi',
+    'high',
+    'Amend or append to a signed report. A new immutable version, never an edit, and everyone already notified is re-notified.',
+    { requiresReason: true },
+  ),
+  p(
+    'rad.report.deliver',
+    'rad_report',
+    'deliver',
+    'phi',
+    'medium',
+    'Deliver a report to the portal, referring doctor, WhatsApp or email, and record the delivery evidence.',
+    { phiRead: true },
+  ),
+  p('rad.report.print', 'rad_report', 'print', 'phi', 'medium', 'Print a radiology report at a counter.', {
+    phiRead: true,
+  }),
+  p(
+    'rad.report.read',
+    'rad_report',
+    'read',
+    'phi',
+    'low',
+    'Read radiology reports and the TAT, repeat-rate and utilisation KPIs built from them.',
+    { phiRead: true },
+  ),
+  p(
+    'rad.critical.notify',
+    'rad_critical_finding',
+    'notify',
+    'phi',
+    'critical',
+    'Raise a critical or significant imaging finding and record the read-back call-back. EN-040 §5 exempts it from every licence check — the same rule that protects the lab panic-value loop protects this one.',
+    { clinicalSafetyExempt: true, phiRead: true },
+  ),
+  p(
+    'rad.critical.read',
+    'rad_critical_finding',
+    'read',
+    'phi',
+    'high',
+    'See the critical-finding alert and whether it has been acknowledged. Exempt from licence gating: an alert nobody can open is not an alert.',
+    { clinicalSafetyExempt: true, phiRead: true },
+  ),
+  p(
+    'rad.peer_review.create',
+    'rad_peer_review',
+    'create',
+    'phi',
+    'medium',
+    'Record a peer review or QA sampling score against another radiologist’s report.',
+  ),
+  p(
+    'rad.peer_review.read',
+    'rad_peer_review',
+    'read',
+    'phi',
+    'medium',
+    'Read peer-review outcomes and discrepancy rates.',
+    { phiRead: true },
+  ),
+  p(
+    'rad.pnpdt.manage',
+    'rad_form_f',
+    'manage',
+    'phi',
+    'critical',
+    'Complete and sign the PC-PNDT Form F register and its monthly returns. This is criminal law, not paperwork: the Act makes the recording clinician personally liable, and no field anywhere in the product records foetal sex.',
+    { sensitiveGrant: true, requiresReason: true, requiresStepUp: true, phiRead: true },
+  ),
+  p(
+    'rad.configure',
+    'rad_configuration',
+    'configure',
+    'operational',
+    'high',
+    'Configure modality rooms, AERB licences, QA due dates, dose k-factors and DRL thresholds. An expired licence blocks the room for scheduling.',
+  ),
+  p(
+    'integration.rad.mpps',
+    'rad_mpps',
+    'ingest',
+    'phi',
+    'medium',
+    'Accept a Modality Performed Procedure Step message, which moves an exam to in-progress or completed without a technologist keystroke. Held by a device token.',
+  ),
+  p(
+    'integration.rad.study',
+    'rad_study_feed',
+    'ingest',
+    'phi',
+    'medium',
+    'Accept a study-availability notification from the archive. Held by a device or service token, never by a person.',
+  ),
+]);
+
+/**
+ * EN-008 — PACS integration & DICOM viewer.
+ *
+ * Two of these keys carry a scope the catalogue cannot express, so it is stated
+ * here and enforced by ABAC (`packages/contracts/src/rbac/abac.ts`), not by the
+ * key: `rad.image.view` is care-team-scoped with break-glass on a recorded
+ * reason, and `rad.telerad.read` is assigned-studies-only for an external
+ * partner. Holding the key is necessary and never sufficient.
+ */
+const EN008 = group('EN-008', 3, [
+  p(
+    'rad.mwl.manage',
+    'rad_mwl',
+    'manage',
+    'phi',
+    'medium',
+    'Publish, refresh and remove modality worklist entries. OP-008 §12 names the same key; EN-035 §2 puts MWL publication in EN-008, which is why it is registered here.',
+  ),
+  p(
+    'rad.mwl.read',
+    'rad_mwl',
+    'read',
+    'phi',
+    'low',
+    'Read the modality worklist as served to the scanners, for troubleshooting a modality that shows no patients.',
+    { phiRead: true },
+  ),
+  p(
+    'rad.study.read',
+    'rad_study',
+    'read',
+    'phi',
+    'low',
+    'List and open study metadata. Care-team scoped by ABAC; break-glass outside the care team requires a recorded reason.',
+    { phiRead: true },
+  ),
+  p(
+    'rad.image.view',
+    'rad_image',
+    'view',
+    'phi',
+    'high',
+    'Open images in the viewer. Scope is enforced by ABAC, not by this key: care-team-only by default, break-glass on a recorded reason, and every view is written to the PACS access audit (EN-008 §5).',
+    { phiRead: true },
+  ),
+  p(
+    'rad.image.annotate',
+    'rad_image',
+    'annotate',
+    'phi',
+    'medium',
+    'Add measurements, key images and annotations. Originals are immutable — annotations are stored beside the pixels, never in them.',
+  ),
+  p(
+    'rad.image.upload',
+    'rad_image',
+    'upload',
+    'phi',
+    'medium',
+    'Import outside images or push acquired images into the archive.',
+  ),
+  p(
+    'rad.image.share',
+    'rad_image',
+    'share',
+    'phi',
+    'high',
+    'Create an expiring, OTP-protected share link for a study. EN-008 §5 requires patient or guardian consent, caps the link at 7 days and 10 views by default, and makes it revocable.',
+    { requiresReason: true, phiRead: true },
+  ),
+  p(
+    'rad.image.export',
+    'rad_image',
+    'export',
+    'phi',
+    'high',
+    'Export a study as a DICOM ZIP or burn it to CD/DVD. Images leave the building, so the recipient, the ID proof and the reason are all recorded.',
+    { requiresReason: true, requiresStepUp: true, phiRead: true },
+  ),
+  p(
+    'rad.telerad.manage',
+    'rad_teleradiology',
+    'manage',
+    'phi',
+    'high',
+    'Configure tele-radiology partners and assign studies out for reading, with the SLA clock that comes with it.',
+    { sensitiveGrant: true },
+  ),
+  p(
+    'rad.telerad.read',
+    'rad_teleradiology',
+    'read',
+    'phi',
+    'high',
+    'External radiologist access to studies assigned for reading. ABAC restricts it to assigned studies only, with MFA and an optional IP allowlist (EN-008 §5); the key alone grants nothing.',
+    { phiRead: true },
+  ),
+  p(
+    'rad.pacs.configure',
+    'pacs_server',
+    'configure',
+    'operational',
+    'high',
+    'Configure the archive: AE titles, modality registrations, storage tiers, routing rules and replication.',
+    { sensitiveGrant: true },
+  ),
+  p(
+    'rad.pacs.read',
+    'pacs_server',
+    'read',
+    'operational',
+    'low',
+    'Read archive health: modality status, storage tiers, replication lag and purge history.',
+  ),
+  p(
+    'rad.pacs.retention',
+    'pacs_retention',
+    'manage',
+    'operational',
+    'critical',
+    'Set image retention policy and approve a purge run. EN-008 §5 requires two approvals, never purges medico-legal or legal-hold studies, and keeps minors until 18 + 3 years. Purged pixels do not come back.',
+    { sensitiveGrant: true, requiresSecondPerson: true, requiresReason: true, requiresStepUp: true },
+  ),
+  p(
+    'rad.ai.read',
+    'rad_ai_result',
+    'read',
+    'phi',
+    'medium',
+    'Read AI triage output attached to a study. EN-008 §5 makes it advisory and marks it `AI-preliminary`; no report is ever auto-finalised from it.',
+    { phiRead: true },
+  ),
+  p(
+    'rad.mlc.read',
+    'rad_mlc_study',
+    'read',
+    'phi',
+    'high',
+    'Open a study flagged medico-legal. EN-008 §5 puts MLC studies behind their own key so that access to them is a deliberate, separately auditable grant.',
+    { requiresReason: true, phiRead: true },
+  ),
+]);
+
+/** OP-022 — Investigation report console: ECG, endoscopy, PFT and outside reports. */
+const OP022 = group('OP-022', 3, [
+  p(
+    'invest.worklist.read',
+    'investigation_worklist',
+    'read',
+    'phi',
+    'low',
+    'Read the investigation worklist for a service, room or station.',
+    { phiRead: true },
+  ),
+  p(
+    'invest.schedule.manage',
+    'investigation_schedule',
+    'manage',
+    'operational',
+    'medium',
+    'Schedule, check in and reschedule investigation studies.',
+  ),
+  p(
+    'invest.study.manage',
+    'investigation_study',
+    'manage',
+    'phi',
+    'medium',
+    'Run the study: start, complete, abandon with reason, and record the identity verification that preceded it.',
+  ),
+  p(
+    'invest.media.create',
+    'investigation_media',
+    'create',
+    'phi',
+    'medium',
+    'Upload strips, images, traces and outside PDFs against a study. OP-022 §5 quarantines an orphan upload rather than guessing whose it is.',
+  ),
+  p(
+    'invest.media.read',
+    'investigation_media',
+    'read',
+    'phi',
+    'low',
+    'View investigation media through short-lived presigned URLs.',
+    { phiRead: true },
+  ),
+  p(
+    'invest.media.manage',
+    'investigation_media',
+    'manage',
+    'phi',
+    'high',
+    'Detach or move media between studies. Originals are never deleted — the move is versioned and reasoned.',
+    { requiresReason: true },
+  ),
+  p(
+    'invest.media.annotate',
+    'investigation_media',
+    'annotate',
+    'phi',
+    'medium',
+    'Annotate and measure on media without altering the original.',
+  ),
+  p(
+    'invest.media.export',
+    'investigation_media',
+    'export',
+    'phi',
+    'high',
+    'Export investigation media. Exports are watermarked and audited.',
+    { requiresReason: true, phiRead: true },
+  ),
+  p(
+    'invest.report.create',
+    'investigation_report',
+    'create',
+    'phi',
+    'medium',
+    'Draft an investigation report from a template.',
+  ),
+  p(
+    'invest.report.update',
+    'investigation_report',
+    'update',
+    'phi',
+    'medium',
+    'Edit an unsigned investigation report draft.',
+  ),
+  p(
+    'invest.report.read',
+    'investigation_report',
+    'read',
+    'phi',
+    'low',
+    'Read investigation reports and the TAT and co-sign KPIs built from them.',
+    { phiRead: true },
+  ),
+  p(
+    'invest.report.sign',
+    'investigation_report',
+    'sign',
+    'phi',
+    'high',
+    'Sign and release an investigation report. OP-022 §5 blocks the signature on a service marked `cosign_required` unless the signer is the consultant.',
+    { requiresStepUp: true },
+  ),
+  p(
+    'invest.report.cosign',
+    'investigation_report',
+    'cosign',
+    'phi',
+    'high',
+    'Consultant co-signature that finalises a resident’s report. This is the key a resident does not hold, which is what makes co-sign mean anything.',
+    { requiresStepUp: true },
+  ),
+  p(
+    'invest.report.amend',
+    'investigation_report',
+    'amend',
+    'phi',
+    'high',
+    'Amend a signed investigation report as a new version, with the reason on the version.',
+    { requiresReason: true },
+  ),
+  p(
+    'invest.report.critical',
+    'investigation_report_critical',
+    'notify',
+    'phi',
+    'critical',
+    'Flag a critical investigation finding and record the communication. Same escalation loop and the same EN-040 §5 exemption as the lab and radiology critical paths — a licence state may never silence it.',
+    { clinicalSafetyExempt: true, phiRead: true },
+  ),
+  p(
+    'invest.report.deliver',
+    'investigation_report',
+    'deliver',
+    'phi',
+    'medium',
+    'Release a report to the portal, the referrer or print, subject to the hospital’s release policy.',
+    { phiRead: true },
+  ),
+  p(
+    'invest.configure',
+    'investigation_service',
+    'configure',
+    'operational',
+    'high',
+    'Configure investigation services: templates, co-sign requirement, PC-PNDT flag, TAT thresholds and release policy.',
+  ),
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // The registry
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -3418,6 +4488,14 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...EN029,
   ...NC003,
   ...OP019,
+
+  // Phase 3
+  ...OP004,
+  ...EN004,
+  ...EN031,
+  ...OP008,
+  ...EN008,
+  ...OP022,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));
@@ -3584,5 +4662,49 @@ export const SEGREGATION_OF_DUTIES_RULES: readonly SodRule[] = Object.freeze([
     mode: 'warn',
     reason:
       'Resolving a deficiency means the content was supplied; waiving means it never will be. The same hand doing both turns the completeness indicator into self-assessment (NC-003 §12).',
+  },
+
+  // Phase 3
+  {
+    permA: 'lab.result.enter',
+    permB: 'lab.result.validate',
+    mode: 'block',
+    reason:
+      'docs/05 §Segregation of duties: "result enterer ≠ validator". OP-004 §5 makes release two-level, and a bench that authorises its own numbers has one level.',
+  },
+  {
+    permA: 'labq.qc.enter',
+    permB: 'labq.qc.release_override',
+    mode: 'block',
+    reason:
+      'Whoever runs the QC must not be the person who authorises release past their own out-of-control run — EN-031 §5 reserves the override for the Lab Director and reports it monthly.',
+  },
+  {
+    permA: 'labq.qc.enter',
+    permB: 'labq.qc.approve',
+    mode: 'block',
+    reason:
+      'EN-031 §5 replaces the manufacturer’s provisional targets with laboratory-derived ones from the bench’s own runs; the Director approves them, not the bench that produced them.',
+  },
+  {
+    permA: 'rad.study.complete',
+    permB: 'rad.report.sign',
+    mode: 'block',
+    reason:
+      'A technologist does not sign a radiology report. OP-008 §5 admits only a registered radiologist, and the person who chose the exposure is not an independent reader of it.',
+  },
+  {
+    permA: 'lab.autoval.configure',
+    permB: 'lab.autoval.sign',
+    mode: 'block',
+    reason:
+      'EN-004 §5: "rule set edits require QM approval + pathologist sign". One hand authoring and signing an auto-validation rule set means results are released automatically on nobody’s independent judgement.',
+  },
+  {
+    permA: 'invest.report.create',
+    permB: 'invest.report.cosign',
+    mode: 'warn',
+    reason:
+      'A consultant legitimately drafts their own reports and co-signs a resident’s, so this cannot block — but OP-022 §5 requires the co-signature to come from someone other than the author, which the service enforces per report.',
   },
 ]);

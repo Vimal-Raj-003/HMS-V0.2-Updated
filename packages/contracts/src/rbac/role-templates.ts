@@ -379,6 +379,274 @@ const MRD_DESK = [
   'mrd.configure',
 ] as const;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 3 bundles — Diagnostics
+//
+// Built the way MRD_DESK and VITALS_RECORDER are: the grant is made once and
+// composed, so "who may authorise a result" or "who may sign a radiology
+// report" is one line to read rather than thirty literals to diff.
+//
+// The separations these bundles encode come from docs/05 §Segregation of duties
+// and the §5 rules of OP-004, OP-008, EN-004 and EN-031, and are asserted in
+// `phase3-grants.spec.ts`:
+//   • the bench enters and technically verifies; only the pathologist authorises;
+//   • whoever runs QC never authorises release past their own out-of-control run;
+//   • the technologist who made the exposure never signs the report;
+//   • a resident drafts and never finalises anything that needs a co-signature.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What any clinician needs to see what came back. Read-only: no order is placed
+ * and no result is changed from here.
+ *
+ * `rad.image.view` and `rad.study.read` are care-team-scoped by ABAC, not by the
+ * key — holding them is necessary and never sufficient (EN-008 §5).
+ */
+const DIAGNOSTIC_RESULTS_READER = [
+  'lab.order.list',
+  'lab.order.read',
+  'lab.result.read',
+  'lab.report.read',
+  'lab.critical.read',
+  'rad.order.read',
+  'rad.order.list',
+  'rad.study.read',
+  'rad.image.view',
+  'rad.report.read',
+  'rad.critical.read',
+  'rad.dose.read',
+  'invest.report.read',
+  'invest.media.read',
+] as const;
+
+/** The ordering clinician's full diagnostics surface. Cancellation carries a reason. */
+const DIAGNOSTIC_ORDERING = [
+  ...DIAGNOSTIC_RESULTS_READER,
+  'lab.order.create',
+  'lab.order.addon',
+  'lab.order.cancel',
+  'rad.order.create',
+  'rad.order.cancel',
+] as const;
+
+/**
+ * A ward or OPD nurse's diagnostics surface: see the order, see the result, see
+ * the critical alert. Sample collection is deliberately not here — OP-004 §12
+ * gives `lab.sample.*` to the phlebotomy role, and a hospital that draws bloods
+ * on the ward grants it to its nursing clone explicitly rather than by default.
+ */
+const WARD_DIAGNOSTICS = [
+  'lab.order.list',
+  'lab.order.read',
+  'lab.result.read',
+  'lab.report.read',
+  'lab.critical.read',
+  'rad.order.read',
+  'rad.order.list',
+  'rad.report.read',
+  'rad.critical.read',
+  'invest.report.read',
+] as const;
+
+/** The front desk: raise a walk-in order, book a slot, hand a report over. No results. */
+const DIAGNOSTIC_FRONT_DESK = [
+  'lab.order.create',
+  'lab.order.list',
+  'lab.order.read',
+  'lab.report.print',
+  'lab.report.deliver',
+  'rad.order.create',
+  'rad.order.read',
+  'rad.order.list',
+  'rad.schedule.manage',
+  'invest.schedule.manage',
+] as const;
+
+/** Phlebotomy: the pre-analytical loop, from label to accession. */
+const LAB_COLLECTION = [
+  'lab.order.list',
+  'lab.order.read',
+  'lab.sample.label',
+  'lab.sample.collect',
+  'lab.sample.reject',
+  'lab.sample.receive',
+  'lab.sample.custody',
+] as const;
+
+/**
+ * The bench. Enters and technically verifies; never authorises.
+ *
+ * `lab.result.validate` is absent by construction (docs/05: enterer ≠ validator),
+ * and so are `labq.qc.approve` and `labq.qc.release_override` — the technician
+ * who ran the control is the last person who should decide that results may go
+ * out despite it (EN-031 §5).
+ */
+const LAB_BENCH = [
+  ...LAB_COLLECTION,
+  'lab.sample.update',
+  'lab.result.enter',
+  'lab.result.verify',
+  'lab.result.read',
+  'lab.report.read',
+  'lab.critical.read',
+  'lab.outsource.manage',
+  'lab.qc.read',
+  'lab.qc.record',
+  'lab.instrument.downtime.record',
+  'lab.interface.errors.resolve',
+  'integration.lab.read',
+  'labq.qc.read',
+  'labq.qc.enter',
+  'labq.qc.action',
+] as const;
+
+/**
+ * The pathologist / Lab Director: authorisation, the critical-value loop, and
+ * the Director-only decisions EN-031 §5 reserves — QC target approval, method
+ * validation approval, the monthly review signature and the release override.
+ */
+const LAB_VALIDATION = [
+  'lab.order.list',
+  'lab.order.read',
+  'lab.result.read',
+  'lab.result.validate',
+  'lab.result.amend',
+  'lab.result.sensitive.read',
+  'lab.critical.notify',
+  'lab.critical.read',
+  'lab.report.generate',
+  'lab.report.print',
+  'lab.report.deliver',
+  'lab.report.read',
+  'lab.master.configure',
+  'lab.qc.read',
+  'lab.qc.unlock',
+  'lab.autoval.sign',
+  'labq.qc.read',
+  'labq.qc.approve',
+  'labq.qc.release_override',
+  'labq.validation.approve',
+  'labq.competency.manage',
+  'labq.review.sign',
+  'labq.indicator.review',
+  'labq.report.read',
+] as const;
+
+/**
+ * The Lab Quality Manager: the accreditation system and the rules the bench
+ * runs under. Authors auto-validation rule sets but never signs them into
+ * service (EN-004 §5), and never enters a QC run.
+ */
+const LAB_QUALITY = [
+  'lab.order.list',
+  'lab.order.read',
+  'lab.report.read',
+  'lab.master.configure',
+  'lab.outsource.manage',
+  'lab.instrument.manage',
+  'lab.qc.read',
+  'lab.qc.configure',
+  'lab.qc.unlock',
+  'lab.autoval.configure',
+  'lab.autoval.approve',
+  'integration.lab.read',
+  'integration.lab.configure',
+  'labq.qc.read',
+  'labq.qc.manage',
+  'labq.qc.void',
+  'labq.qc.action',
+  'labq.eqa.manage',
+  'labq.validation.manage',
+  'labq.equipment.manage',
+  'labq.environment.manage',
+  'labq.checklist.manage',
+  'labq.accreditation.manage',
+  'labq.indicator.review',
+  'labq.nc.manage',
+  'labq.auditpack.generate',
+  'labq.report.read',
+] as const;
+
+/**
+ * The radiographer's console. Holds `rad.study.complete`, and therefore may
+ * never hold `rad.report.sign` — OP-008 §5 admits only a registered radiologist,
+ * and the person who chose the exposure is not an independent reader of it.
+ */
+const RADIOLOGY_MODALITY = [
+  'rad.order.read',
+  'rad.order.list',
+  'rad.order.update',
+  'rad.schedule.manage',
+  'rad.mwl.manage',
+  'rad.mwl.read',
+  'rad.study.read',
+  'rad.study.complete',
+  'rad.study.reconcile',
+  'rad.dose.record',
+  'rad.image.view',
+  'rad.image.upload',
+] as const;
+
+/**
+ * The reading room. Adds to `DIAGNOSTIC_RESULTS_READER`, which already carries
+ * the read-only half.
+ *
+ * `rad.telerad.read` sits here because docs/05 fixes the template set at 64 rows
+ * and none of them is "external tele-radiologist": a hospital clones the
+ * radiologist template for a partner account, and ABAC narrows it to assigned
+ * studies only (EN-008 §5).
+ */
+const RADIOLOGY_READING = [
+  'rad.order.update',
+  'rad.mwl.read',
+  'rad.image.annotate',
+  'rad.image.share',
+  'rad.report.create',
+  'rad.report.preliminary',
+  'rad.report.sign',
+  'rad.report.amend',
+  'rad.report.deliver',
+  'rad.report.print',
+  'rad.critical.notify',
+  'rad.peer_review.create',
+  'rad.peer_review.read',
+  'rad.pnpdt.manage',
+  'rad.mlc.read',
+  'rad.ai.read',
+  'rad.telerad.manage',
+  'rad.telerad.read',
+] as const;
+
+/** The investigation console technician: run the study, capture the media, annotate. */
+const INVESTIGATION_TECH = [
+  'invest.worklist.read',
+  'invest.schedule.manage',
+  'invest.study.manage',
+  'invest.media.create',
+  'invest.media.read',
+  'invest.media.annotate',
+] as const;
+
+/**
+ * The reporting doctor on the investigation console. `invest.report.cosign` is
+ * here and deliberately absent from the resident grant — a co-signature that the
+ * author can supply is not a co-signature (OP-022 §5).
+ */
+const INVESTIGATION_REPORTER = [
+  'invest.worklist.read',
+  'invest.media.read',
+  'invest.media.manage',
+  'invest.media.annotate',
+  'invest.report.create',
+  'invest.report.update',
+  'invest.report.read',
+  'invest.report.sign',
+  'invest.report.cosign',
+  'invest.report.amend',
+  'invest.report.critical',
+  'invest.report.deliver',
+] as const;
+
 // ── the 64 templates ─────────────────────────────────────────────────────────
 
 const templates: readonly RoleTemplate[] = [
@@ -427,6 +695,12 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'admin-console',
     permissions: [
+      'labq.assessor.grant',
+      'rad.pacs.retention',
+      'rad.configure',
+      'rad.telerad.manage',
+      'invest.configure',
+
       'schedule.publish',
       'queue.config.manage',
       'queue.overview.read',
@@ -581,6 +855,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      ...DIAGNOSTIC_RESULTS_READER,
+      'rad.peer_review.read',
+      'rad.mlc.read',
+      'labq.report.read',
+
       'consent.override.review',
       'consent.template.approve',
       'patient.record.export',
@@ -656,6 +935,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'department-dashboard',
     permissions: [
+      ...DIAGNOSTIC_ORDERING,
+
       'appointment.overbook',
       'schedule.publish',
       'consent.override.review',
@@ -689,6 +970,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'doctor-opd',
     permissions: [
+      ...DIAGNOSTIC_ORDERING,
+      ...INVESTIGATION_REPORTER,
+
       ...PATIENT_READ,
       'schedule.configure',
       ...QUEUE_CALLER,
@@ -717,6 +1001,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...DIAGNOSTIC_ORDERING,
+
       ...DOCTOR_CLINICAL,
       'rx.schedule_x.prescribe',
       ...BASE_CLINICAL,
@@ -737,6 +1023,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...DIAGNOSTIC_ORDERING,
+      'rad.mlc.read',
+
       'consent.emergency_override',
       'patient.record.create_override',
 
@@ -768,6 +1057,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...DIAGNOSTIC_ORDERING,
+
       ...DOCTOR_CLINICAL,
       'rx.schedule_x.prescribe',
       ...BASE_CLINICAL,
@@ -788,6 +1079,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'anaesthesia-worklist',
     permissions: [
+      ...DIAGNOSTIC_ORDERING,
+
       ...DOCTOR_CLINICAL,
       'rx.schedule_x.prescribe',
       ...BASE_CLINICAL,
@@ -807,6 +1100,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'icu-board',
     permissions: [
+      ...DIAGNOSTIC_ORDERING,
+
       ...DOCTOR_CLINICAL,
       'rx.schedule_x.prescribe',
       ...BASE_CLINICAL,
@@ -827,6 +1122,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'radiology-reading',
     permissions: [
+      ...DIAGNOSTIC_RESULTS_READER,
+      ...RADIOLOGY_READING,
+      ...INVESTIGATION_REPORTER,
+
       ...DIAGNOSTIC_CLINICIAN,
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
@@ -846,6 +1145,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'lab-validation',
     permissions: [
+      ...LAB_VALIDATION,
+
       ...DIAGNOSTIC_CLINICIAN,
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
@@ -868,7 +1169,18 @@ const templates: readonly RoleTemplate[] = [
     homeWorkspace: 'doctor-opd',
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
-    permissions: [...RESIDENT_CLINICAL, ...BASE_CLINICAL],
+    permissions: [
+      ...DIAGNOSTIC_RESULTS_READER,
+      'lab.order.create',
+      'rad.order.create',
+      'rad.report.create',
+      'rad.report.preliminary',
+      'invest.worklist.read',
+      'invest.report.create',
+      'invest.report.update',
+      ...RESIDENT_CLINICAL,
+      ...BASE_CLINICAL,
+    ],
     abacDefaults: { careTeamOnly: true, ownDepartmentOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -882,7 +1194,18 @@ const templates: readonly RoleTemplate[] = [
       'External clinician with read access to the patients they referred, through the referral portal.',
     category: 'external',
     homeWorkspace: 'referral-portal',
-    permissions: ['org.read', 'mdm.read', 'tpl.form.read', 'tpl.response.read', 'org.patient.locate'],
+    permissions: [
+      'rad.study.read',
+      'rad.image.view',
+      'rad.report.read',
+      'lab.report.read',
+      'invest.report.read',
+      'org.read',
+      'mdm.read',
+      'tpl.form.read',
+      'tpl.response.read',
+      'org.patient.locate',
+    ],
     abacDefaults: { ownPatientsOnly: true, dataClassMasks: ['aadhaar', 'address'] },
     mfaMandatory: true,
     sensitiveGrant: false,
@@ -896,6 +1219,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      ...WARD_DIAGNOSTICS,
+
       ...PATIENT_READ,
       ...QUEUE_CALLER,
       'visit.list',
@@ -933,6 +1258,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...WARD_DIAGNOSTICS,
+
       ...VITALS_RECORDER,
       ...CDSS_SAFETY_FLOOR,
       'opd.encounter.read',
@@ -958,6 +1285,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'icu-flowsheet',
     permissions: [
+      ...WARD_DIAGNOSTICS,
+
       ...VITALS_RECORDER,
       ...CDSS_SAFETY_FLOOR,
       'opd.encounter.read',
@@ -983,6 +1312,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'triage-board',
     permissions: [
+      ...WARD_DIAGNOSTICS,
+
       'receipt.collect.night',
 
       ...VITALS_RECORDER,
@@ -1038,6 +1369,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-command-centre',
     permissions: [
+      ...WARD_DIAGNOSTICS,
+
       'queue.token.manage',
       'patient.record.create_override',
 
@@ -1094,6 +1427,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'registration',
     permissions: [
+      ...DIAGNOSTIC_FRONT_DESK,
+
       ...PATIENT_DESK,
       ...APPOINTMENT_DESK,
       ...VISIT_DESK,
@@ -1298,7 +1633,7 @@ const templates: readonly RoleTemplate[] = [
     description: 'Bench worklist and result entry. Deliberately cannot validate — that is the pathologist.',
     category: 'diagnostics',
     homeWorkspace: 'lab-bench',
-    permissions: [...BASE_CLINICAL, ...LABEL_PRINTER, 'barcode.verify.sample'],
+    permissions: [...LAB_BENCH, ...BASE_CLINICAL, ...LABEL_PRINTER, 'barcode.verify.sample'],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -1311,7 +1646,7 @@ const templates: readonly RoleTemplate[] = [
     description: 'Collection list, sample collection, rejection and label printing.',
     category: 'diagnostics',
     homeWorkspace: 'lab-collection',
-    permissions: [...BASE_CLINICAL, ...LABEL_PRINTER, 'barcode.verify.sample'],
+    permissions: [...LAB_COLLECTION, ...BASE_CLINICAL, ...LABEL_PRINTER, 'barcode.verify.sample'],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -1325,6 +1660,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'lab-qc',
     permissions: [
+      ...LAB_QUALITY,
+
       ...BASE_CLINICAL,
       'mdm.lab.propose',
       'mdm.lab.approve',
@@ -1343,7 +1680,7 @@ const templates: readonly RoleTemplate[] = [
     description: 'Modality worklist, scheduling and acquisition status.',
     category: 'diagnostics',
     homeWorkspace: 'radiology-modality',
-    permissions: [...BASE_CLINICAL, ...LABEL_PRINTER],
+    permissions: [...RADIOLOGY_MODALITY, ...INVESTIGATION_TECH, ...BASE_CLINICAL, ...LABEL_PRINTER],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -1436,6 +1773,15 @@ const templates: readonly RoleTemplate[] = [
     category: 'records',
     homeWorkspace: 'mrd-queue',
     permissions: [
+      'lab.report.read',
+      'lab.report.export',
+      'rad.report.read',
+      'rad.image.share',
+      'rad.image.export',
+      'rad.mlc.read',
+      'invest.report.read',
+      'invest.media.export',
+
       'abdm.abha.delink',
       'consent.template.manage',
 
@@ -1568,6 +1914,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'hr',
     permissions: [
+      'labq.competency.manage',
+
       ...BASE_STAFF,
       ...APPROVER,
       'wf.decide.bulk',
@@ -1594,6 +1942,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'facilities',
     homeWorkspace: 'biomedical',
     permissions: [
+      'labq.equipment.manage',
+      'lab.instrument.downtime.record',
+      'rad.configure',
+      'rad.dose.read',
+
       ...BASE_STAFF,
       'barcode.scan',
       ...LABEL_PRINTER,
@@ -1694,6 +2047,14 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'quality',
     permissions: [
+      'lab.report.read',
+      'labq.checklist.manage',
+      'labq.accreditation.manage',
+      'labq.indicator.review',
+      'labq.nc.manage',
+      'labq.auditpack.generate',
+      'labq.report.read',
+
       'consent.report.read',
       'consent.template.manage',
 
@@ -1763,6 +2124,16 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'it-console',
     permissions: [
+      'lab.instrument.manage',
+      'integration.lab.configure',
+      'integration.lab.read',
+      'integration.lab.raw.read',
+      'integration.lab.replay',
+      'rad.pacs.configure',
+      'rad.pacs.read',
+      'rad.pacs.retention',
+      'rad.mwl.read',
+
       'messaging.message.read',
       'abdm.registry.manage',
 
@@ -1925,6 +2296,18 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'audit-workspace',
     permissions: [
+      'lab.order.list',
+      'lab.order.read',
+      'lab.report.read',
+      'lab.qc.read',
+      'labq.qc.read',
+      'labq.report.read',
+      'rad.report.read',
+      'rad.dose.read',
+      'rad.pacs.read',
+      'integration.lab.read',
+      'invest.report.read',
+
       ...PATIENT_READ,
       'appointment.list',
       'visit.list',
@@ -2064,6 +2447,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'device',
     homeWorkspace: 'device-display',
     permissions: [
+      'integration.lab.ingest',
+      'integration.lab.send',
+      'integration.rad.mpps',
+      'integration.rad.study',
+
       'kiosk.checkin',
       'queue.token.issue',
       'queue.board.read',
