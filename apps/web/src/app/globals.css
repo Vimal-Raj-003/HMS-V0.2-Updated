@@ -2,3 +2,16 @@
 /* The three themes from docs/06 as CSS custom properties — light is the default
    for clinical work, dark is for TV/queue boards and admin analytics. */
 @import '@vims/ui/tokens.css';
+
+/* Tailwind v4 auto-detects sources from the importing project only, so every
+   utility that appears solely inside the design system was being dropped from
+   the compiled stylesheet — a class survived if and only if some file under
+   `apps/web/src` happened to use it too.
+
+   That is not a cosmetic gap. `DialogContent` centres itself with `position:
+   fixed` plus `top-1/2 left-1/2 -translate-x-1/2`; without those three
+   utilities the panel keeps its static-flow position at the end of <body>,
+   below the fold, unreachable by scrolling. Every dialog in the application was
+   mispositioned, and the app looked correct in review because the markup was.
+   Transitions lost `duration-fast` the same way. */
+@source "../../../../packages/ui/src";
