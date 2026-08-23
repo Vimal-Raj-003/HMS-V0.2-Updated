@@ -70,20 +70,82 @@ export const DEFAULT_ESCALATION_LADDER: readonly EscalationTier[] = Object.freez
   { level: 2, minutesFromDetection: 20, notifyRole: 'medical_superintendent' },
 ]);
 
+/**
+ * The two queues that carry this shape.
+ *
+ * `rad.rad_critical_findings` is not merely similar to
+ * `lab.lab_critical_value_alerts` — it uses the *same* status enum
+ * (`lab."LabCriticalAlertStatus"`), the same `due_by` / `escalation_level` /
+ * `first_communicated_at` columns, the same `communicated_pairing` CHECK and the
+ * same partial index. Two copies of this job would be two places to get "never
+ * close an alert" wrong, and the second copy is the one nobody mutation-tests.
+ *
+ * **The SQL fragments here are literals in this file and never caller input.**
+ * `table` and `detailSql` are interpolated into the query, so a queue assembled
+ * from user data would be an injection. The exported constants below are the
+ * only ones that exist; `CriticalQueue` is deliberately not built from anything
+ * dynamic.
+ */
+export interface CriticalQueue {
+  /** Schema-qualified table. A literal, never derived from input. */
+  readonly table: string;
+  /** `core.outbox_events.aggregate`. */
+  readonly aggregate: string;
+  readonly eventType: string;
+  /** A jsonb expression over `a` carrying the table-specific fields. Literal. */
+  readonly detailSql: string;
+  readonly ladder: readonly EscalationTier[];
+}
+
+export const LAB_CRITICAL_QUEUE: CriticalQueue = Object.freeze({
+  table: 'lab.lab_critical_value_alerts',
+  aggregate: 'lab_critical_value',
+  eventType: 'lab.critical.escalated',
+  detailSql: `jsonb_build_object(
+      'resultId', a.result_id,
+      'orderId', a.order_id,
+      'analyteName', a.analyte_name,
+      'value', a.value_display,
+      'unit', a.unit,
+      'flag', a.flag::text
+    )`,
+  ladder: DEFAULT_ESCALATION_LADDER,
+});
+
+/**
+ * Radiology carries no numeric value, so the finding text is the payload. It is
+ * PHI in the most direct way -- free text a radiologist wrote about a patient --
+ * which is why the outbox row is written `contains_phi = true` for both queues
+ * and why nothing here is logged.
+ */
+export const RAD_CRITICAL_QUEUE: CriticalQueue = Object.freeze({
+  table: 'rad.rad_critical_findings',
+  aggregate: 'rad_critical_finding',
+  eventType: 'rad.critical.escalated',
+  detailSql: `jsonb_build_object(
+      'reportId', a.report_id,
+      'orderItemId', a.order_item_id,
+      'level', a.level::text,
+      'finding', a.finding_text
+    )`,
+  ladder: DEFAULT_ESCALATION_LADDER,
+});
+
+export const CRITICAL_QUEUES: readonly CriticalQueue[] = Object.freeze([
+  LAB_CRITICAL_QUEUE,
+  RAD_CRITICAL_QUEUE,
+]);
+
 export interface EscalationOptions {
   readonly batchSize?: number;
+  /** Overrides the queue's own ladder. Tests use it; production does not. */
   readonly ladder?: readonly EscalationTier[];
-  /**
-   * The event written to the outbox. Passed in rather than hardcoded so the
-   * caller — which owns the contract — decides, and so a test can assert the
-   * row without depending on the registry.
-   */
-  readonly eventType?: string;
   /** Injected so a test can drive the clock instead of sleeping. */
   readonly now?: () => Date;
 }
 
 export interface EscalationResult {
+  readonly queue: string;
   readonly escalated: number;
   /** Overdue but already at the top tier: still open, deliberately not climbed. */
   readonly atTopTier: number;
@@ -93,25 +155,22 @@ interface OverdueRow {
   id: string;
   hospital_id: string;
   branch_id: string;
-  result_id: string;
-  order_id: string;
   patient_id: string;
-  analyte_name: string;
-  value_display: string;
-  unit: string | null;
   ordering_user_id: string | null;
   escalation_level: number;
   detected_at: Date;
   minutes_overdue: number;
+  /** The queue's `detailSql`, already shaped by PostgreSQL. */
+  detail: Record<string, unknown>;
 }
 
 export async function escalateOverdueCriticalValues(
   pool: Pool,
+  queue: CriticalQueue,
   options: EscalationOptions = {},
 ): Promise<EscalationResult> {
   const batchSize = options.batchSize ?? 100;
-  const ladder = options.ladder ?? DEFAULT_ESCALATION_LADDER;
-  const eventType = options.eventType ?? 'lab.critical.escalated';
+  const ladder = options.ladder ?? queue.ladder;
   const now = options.now ?? (() => new Date());
 
   const client = await pool.connect();
@@ -125,11 +184,11 @@ export async function escalateOverdueCriticalValues(
     // closed, and escalating one would page a superintendent about a result the
     // laboratory has already withdrawn.
     const overdue = await client.query<OverdueRow>(
-      `SELECT a.id, a.hospital_id, a.branch_id, a.result_id, a.order_id, a.patient_id,
-              a.analyte_name, a.value_display, a.unit, a.ordering_user_id,
+      `SELECT a.id, a.hospital_id, a.branch_id, a.patient_id, a.ordering_user_id,
               a.escalation_level, a.detected_at,
-              floor(EXTRACT(EPOCH FROM ($1::timestamptz - a.due_by)) / 60)::int AS minutes_overdue
-         FROM lab.lab_critical_value_alerts a
+              floor(EXTRACT(EPOCH FROM ($1::timestamptz - a.due_by)) / 60)::int AS minutes_overdue,
+              ${queue.detailSql} AS detail
+         FROM ${queue.table} a
         WHERE a.status IN ('open', 'communicated', 'escalated')
           AND a.due_by IS NOT NULL
           AND a.due_by <= $1::timestamptz
@@ -169,7 +228,7 @@ export async function escalateOverdueCriticalValues(
       // and only climbs the ladder. Level says how far up we have shouted;
       // status says whether anyone answered.
       await client.query(
-        `UPDATE lab.lab_critical_value_alerts
+        `UPDATE ${queue.table}
             SET escalation_level = $2,
                 status = CASE
                            WHEN first_communicated_at IS NOT NULL THEN 'escalated'::lab."LabCriticalAlertStatus"
@@ -189,22 +248,18 @@ export async function escalateOverdueCriticalValues(
         `INSERT INTO core.outbox_events
            (id, hospital_id, branch_id, aggregate, aggregate_id, event_type, schema_version,
             payload, contains_phi, actor_type, correlation_id, occurred_at, retention_days)
-         VALUES (gen_random_uuid(), $1, $2, 'lab_critical_value', $3, $4, 1,
+         VALUES (gen_random_uuid(), $1, $2, $7, $3, $4, 1,
                  $5::jsonb, true, 'system', $6, now(), 2555)`,
         [
           alert.hospital_id,
           alert.branch_id,
           alert.id,
-          eventType,
+          queue.eventType,
           JSON.stringify({
+            ...alert.detail,
             alertId: alert.id,
-            resultId: alert.result_id,
-            orderId: alert.order_id,
             patientId: alert.patient_id,
             orderingDoctorUserId: alert.ordering_user_id,
-            analyteName: alert.analyte_name,
-            value: alert.value_display,
-            unit: alert.unit,
             escalationLevel: next.level,
             notifyRole: next.notifyRole,
             minutesFromDetection: next.minutesFromDetection,
@@ -212,6 +267,7 @@ export async function escalateOverdueCriticalValues(
             detectedAt: alert.detected_at.toISOString(),
           }),
           `crit-esc-${alert.id}-${String(next.level)}`,
+          queue.aggregate,
         ],
       );
 
@@ -226,5 +282,5 @@ export async function escalateOverdueCriticalValues(
     client.release();
   }
 
-  return { escalated, atTopTier };
+  return { queue: queue.table, escalated, atTopTier };
 }
