@@ -14,7 +14,33 @@ export const PUBLIC_KEY = 'vims:public';
  * that: no route may invent one either.
  */
 export function Permission(key: string): CustomDecorator<string> {
-  assertRegisteredPermission(key, 'route decorator');
+  const definition = assertRegisteredPermission(key, 'route decorator');
+
+  // A `requiresSecondPerson` key on a route is a route that refuses everybody,
+  // forever.
+  //
+  // The policy engine denies such a key unless `secondPersonUserId` is supplied,
+  // and `PolicyGuard` calls `evaluate()` without one — a decorator has no way to
+  // reach into a request body and find the co-signer. So the route does not
+  // become "harder to use": it becomes impossible to use, for every user,
+  // including the hospital administrator, and it looks correct in review.
+  //
+  // Both existing second-person flows (`cash/cosign.service.ts`,
+  // `radiology/pacs.controller.ts`) already avoid this by decorating with the
+  // lesser precondition key the actor genuinely needs and asserting the real
+  // authority inside the service with the co-signer attached. That pattern is
+  // fine; the trap is that nothing stopped the *next* module from decorating
+  // directly and shipping a dead route. Now something does, at module load,
+  // before the process starts.
+  if (definition.requiresSecondPerson === true) {
+    throw new Error(
+      `Permission "${key}" is flagged requiresSecondPerson and cannot be used as a route decorator: ` +
+        `PolicyGuard evaluates it without a co-signer, so the route would deny every user unconditionally. ` +
+        `Decorate the route with the precondition key the actor holds, and assert "${key}" inside the ` +
+        `service with the co-signer attached (see services/api/src/modules/frontoffice/cash/cosign.service.ts).`,
+    );
+  }
+
   return SetMetadata(PERMISSION_KEY, key);
 }
 
