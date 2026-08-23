@@ -62,6 +62,10 @@ jobs:
         run: node scripts/check-alert-runbooks.mjs
       - name: No hex colour literals outside the token layer
         run: node scripts/check-hex-literals.mjs
+      - name: Every route declares a permission key
+        # phase-00 §0.3. PolicyGuard refuses an unguarded route at request time;
+        # this finds it before it ships, which is the point of deny-by-default.
+        run: node scripts/check-permission-keys.mjs
       - name: Every package with source declares its gate scripts
         # Guards the `if [ -d src ]` fallbacks introduced in D-21: once a package
         # has source, its build/typecheck must be real. Without this check a

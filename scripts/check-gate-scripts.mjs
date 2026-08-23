@@ -41,6 +41,26 @@ for (const root of roots) {
   }
 }
 
+/**
+ * Every `node scripts/*.mjs` the root manifest names must exist.
+ *
+ * Three did not: `boundaries:check`, `permissions:check` and `specs:check`
+ * pointed at files nobody had written. Nothing was red, because CI calls the
+ * scripts by path and never called those three -- so the entries sat in
+ * `package.json` reading as enforcement while enforcing nothing. That is worse
+ * than an absent entry: somebody checking "are module boundaries verified?"
+ * finds a line that says yes.
+ */
+const rootScripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts ?? {};
+for (const [name, command] of Object.entries(rootScripts)) {
+  for (const match of String(command).matchAll(/node\s+(scripts\/[\w.-]+\.mjs)/g)) {
+    const target = match[1];
+    if (!existsSync(target)) {
+      problems.push(`root package.json: "${name}" runs ${target}, which does not exist`);
+    }
+  }
+}
+
 if (problems.length > 0) {
   process.stdout.write('Gate-script check failed:\n');
   for (const p of problems) process.stdout.write(`  - ${p}\n`);

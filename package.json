@@ -34,10 +34,8 @@
     "infra:down": "docker compose -f infra/docker/docker-compose.dev.yml down",
     "infra:logs": "docker compose -f infra/docker/docker-compose.dev.yml logs -f",
     "infra:nuke": "docker compose -f infra/docker/docker-compose.dev.yml down -v",
-    "boundaries:check": "node scripts/check-module-boundaries.mjs",
     "permissions:check": "node scripts/check-permission-keys.mjs",
     "tokens:check": "node scripts/check-hex-literals.mjs",
-    "specs:check": "node scripts/check-table-ownership.mjs",
     "prepare": "husky || true"
   },
   "devDependencies": {
