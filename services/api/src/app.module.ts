@@ -53,6 +53,13 @@ import {
   PRESCRIBING_CONTROLLERS,
   PRESCRIBING_PROVIDERS,
 } from './modules/opd/prescribing/prescribing.module.js';
+// Phase 3 (OP-004, OP-005, EN-031, EN-032). Same spread-not-import treatment as
+// Phase 1 and 2, for the same reason: one `pg.Pool`, one guard chain.
+import { LAB_CONTROLLERS, LAB_PROVIDERS } from './modules/diagnostics/lab/lab.module.js';
+import {
+  RADIOLOGY_CONTROLLERS,
+  RADIOLOGY_PROVIDERS,
+} from './modules/diagnostics/radiology/radiology.module.js';
 import { CashController } from './modules/frontoffice/cash/cash.controller.js';
 import { CoSignService } from './modules/frontoffice/cash/cosign.service.js';
 import { PaymentsService } from './modules/frontoffice/cash/payments.service.js';
@@ -107,6 +114,9 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     // Phase 2 — vitals, encounters, prescribing and CDSS.
     ...CLINICAL_CONTROLLERS,
     ...PRESCRIBING_CONTROLLERS,
+    // Phase 3 — laboratory, radiology, PACS and the investigation console.
+    ...LAB_CONTROLLERS,
+    ...RADIOLOGY_CONTROLLERS,
   ],
   providers: [
     { provide: ENV, useFactory: () => loadEnv() },
@@ -146,6 +156,8 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     // keeps one instance rather than relying on the token collapsing.
     ...CLINICAL_PROVIDERS.filter((provider) => provider !== NumberingService),
     ...PRESCRIBING_PROVIDERS.filter((provider) => provider !== NumberingService),
+    ...LAB_PROVIDERS.filter((provider) => provider !== NumberingService),
+    ...RADIOLOGY_PROVIDERS.filter((provider) => provider !== NumberingService),
     { provide: APP_FILTER, useClass: ProblemFilter },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: TenantGuard },

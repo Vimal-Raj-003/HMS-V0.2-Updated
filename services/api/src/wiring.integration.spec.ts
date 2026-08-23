@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from './app.module.js';
 
 /**
- * Does the application actually serve the Phase 1 routes?
+ * Does the application actually serve the routes it defines?
  *
  * `tsc` proves the module graph type-checks and the unit suites prove each
  * service works in isolation. Neither proves Nest can resolve the graph at
@@ -66,14 +66,14 @@ afterAll(async () => {
   await pg?.stop();
 });
 
-describe('Phase 1 wiring', () => {
+describe('API wiring', () => {
   /**
    * Asserted by calling the routes, not by reading Fastify's route tree: the
    * radix tree splits shared prefixes, so `/appointments` prints as `a` ->
    * `ppointments` and a substring check on it fails while the route is mounted
    * perfectly. A 404 means not mounted; 401/403 means mounted and closed.
    */
-  const PHASE_1_ROUTES = [
+  const MOUNTED_ROUTES = [
     ['GET', '/api/v1/patients'],
     ['POST', '/api/v1/patients'],
     ['GET', '/api/v1/patients/dedupe'],
@@ -114,11 +114,40 @@ describe('Phase 1 wiring', () => {
     ['GET', '/api/v1/cdss/alerts'],
     ['POST', '/api/v1/orders'],
     ['GET', '/api/v1/orders'],
+    // Phase 3 — laboratory. One route per controller at minimum, because a
+    // controller is the unit that goes missing: `LAB_CONTROLLERS` is a list,
+    // and dropping one entry from it takes seven routes down together.
+    ['GET', '/api/v1/lab/catalogue/tests'],
+    ['POST', '/api/v1/lab/orders'],
+    ['GET', '/api/v1/lab/orders'],
+    ['GET', '/api/v1/lab/samples/NOSUCHBARCODE'],
+    ['POST', '/api/v1/lab/samples/NOSUCHBARCODE/collect'],
+    ['GET', '/api/v1/lab/worklists/bench'],
+    ['POST', '/api/v1/lab/results'],
+    ['POST', '/api/v1/lab/results/authorise'],
+    ['GET', '/api/v1/lab/critical-values'],
+    ['POST', '/api/v1/lab/critical-values/00000000-0000-7000-8000-000000000000/acknowledge'],
+    ['GET', '/api/v1/lab/qc/state'],
+    ['POST', '/api/v1/lab/qc/runs'],
+    ['POST', '/api/v1/lab/reports/00000000-0000-7000-8000-000000000000/generate'],
+    // Phase 3 — radiology, PACS and the investigation console.
+    ['POST', '/api/v1/rad/orders'],
+    ['GET', '/api/v1/rad/orders'],
+    ['GET', '/api/v1/rad/exams/00000000-0000-7000-8000-000000000000'],
+    ['GET', '/api/v1/rad/patients/00000000-0000-7000-8000-000000000000/dose-summary'],
+    ['GET', '/api/v1/rad/reading-worklist'],
+    ['POST', '/api/v1/rad/reports'],
+    ['GET', '/api/v1/rad/critical-findings'],
+    ['GET', '/api/v1/pacs/studies'],
+    ['POST', '/api/v1/pacs/studies/ingest'],
+    ['GET', '/api/v1/pacs/reconciliation'],
+    ['GET', '/api/v1/investigations/worklist'],
+    ['POST', '/api/v1/investigations/studies'],
   ] as const;
 
-  it('mounts every Phase 1 route', async () => {
+  it('mounts every route the built phases define', async () => {
     const missing: string[] = [];
-    for (const [method, url] of PHASE_1_ROUTES) {
+    for (const [method, url] of MOUNTED_ROUTES) {
       const res = await app.inject({ method, url });
       if (res.statusCode === 404) missing.push(`${method} ${url}`);
     }
@@ -127,17 +156,17 @@ describe('Phase 1 wiring', () => {
 
   /**
    * The guards are global and ordered, so an anonymous request must be refused
-   * before it reaches a handler. A 200 here would mean a Phase 1 route escaped
-   * the guard chain -- patient data served to anyone who asks.
+   * before it reaches a handler. A 200 here would mean a route escaped the
+   * guard chain -- patient data served to anyone who asks.
    */
-  it('closes every Phase 1 route to anonymous callers', async () => {
+  it('closes every route to anonymous callers', async () => {
     const open: string[] = [];
-    for (const [method, url] of PHASE_1_ROUTES) {
+    for (const [method, url] of MOUNTED_ROUTES) {
       const res = await app.inject({ method, url });
       if (res.statusCode !== 401 && res.statusCode !== 403) {
         open.push(`${method} ${url} -> ${String(res.statusCode)}`);
       }
     }
-    expect(open, 'Phase 1 routes reachable without authentication').toEqual([]);
+    expect(open, 'routes reachable without authentication').toEqual([]);
   });
 });
