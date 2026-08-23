@@ -166,5 +166,37 @@ export default tseslint.config(
     rules: { 'no-console': 'off' },
   },
 
+  // ---- perf/*.k6.js: load scripts, linted but not type-checked ------------------
+  // k6 scripts execute in k6's own Goja runtime, not Node. They import `k6/http`
+  // and `k6/metrics`, which resolve to nothing here, and they belong to no
+  // package's tsconfig — so `projectService: true` reports
+  // "was not found by the project service" and the file cannot be linted at all.
+  //
+  // `perf/patient-search.k6.js` has been in the tree unlintable since Phase 1.
+  // `pnpm lint` is `turbo run lint`, which runs each package's own `eslint src`,
+  // and `perf/` is in no package — so CI never saw it and was never red. Only the
+  // pre-commit hook, which lints staged files by path, ever tried, and it blocked
+  // the commit of a legitimate file. Same shape as the Helm templates that could
+  // never satisfy prettier: a gate that cannot pass on correct input.
+  //
+  // Type-aware rules are dropped, not the whole file: unused variables, `eqeqeq`
+  // and the injection-safety selectors still apply, and those are the ones worth
+  // having on a script that talks to a live API.
+  {
+    files: ['perf/**/*.js'],
+    languageOptions: {
+      // `projectService` is set in the unrestricted block above, so it applies
+      // here too and must be switched off explicitly — spreading
+      // `disableTypeChecked` turns off the *rules* but leaves the parser still
+      // demanding a tsconfig that will never contain this file.
+      parserOptions: { projectService: false, project: false },
+      globals: { __ENV: 'readonly', __VU: 'readonly', __ITER: 'readonly', console: 'readonly' },
+    },
+    // A k6 script's console output *is* its run log — the run metadata k6 prints
+    // above the summary. It is not a server writing PHI to stdout, which is what
+    // the repo-wide ban exists to prevent.
+    rules: { ...tseslint.configs.disableTypeChecked.rules, 'no-console': 'off' },
+  },
+
   prettierConfig,
 );
