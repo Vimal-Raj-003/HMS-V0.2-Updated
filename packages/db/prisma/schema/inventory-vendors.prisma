@@ -1,0 +1,435 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-021 §4 — the vendor master (schema `inventory`, prefix `vnd_`)
+//
+// A vendor is a *financial counterparty*, which is why so much of this file is
+// identity and compliance rather than commerce: GSTIN and PAN, the drug licence
+// that makes it lawful to buy a Schedule H drug from them at all, the MSME
+// status that changes the payment deadline, and the blacklist that must survive
+// the person who set it.
+//
+// Three shapes are deliberate:
+//
+//  • **PAN and bank account are encrypted at rest** (`docs/04 §4`, NC-021 §4:
+//    "PAN/bank encrypted (pgcrypto)"). The columns here are `bytea`; the
+//    plaintext never lands in a column, and the masked form a screen shows is a
+//    separate, deliberately lossy column.
+//  • **The rate contract is effective-dated per line**, not per contract. A
+//    contract runs a year and its prices change inside it; a PO priced from a
+//    contract must reproduce the rate in force on its own date.
+//  • **Blacklisting is an event, not a flag.** `vnd_actions` holds the notice,
+//    the response, the committee decision and the scope, because "why is this
+//    vendor blocked" is a question asked months later by somebody who was not
+//    in the room. The flag on `vnd_vendors` is the projection.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum VndStatus {
+  draft
+  pending_approval
+  approved
+  hold
+  watch_list
+  blacklisted
+  inactive
+
+  @@schema("inventory")
+}
+
+enum VndType {
+  manufacturer
+  distributor
+  stockist
+  importer
+  service_provider
+  consignment
+  contractor
+  transporter
+  other
+
+  @@schema("inventory")
+}
+
+enum VndMsmeClass {
+  micro
+  small
+  medium
+  none
+
+  @@schema("inventory")
+}
+
+enum VndGstType {
+  regular
+  composition
+  unregistered
+  sez
+  overseas
+  government
+
+  @@schema("inventory")
+}
+
+enum VndRiskRating {
+  low
+  medium
+  high
+
+  @@schema("inventory")
+}
+
+enum VndActionKind {
+  watch_list
+  hold
+  blacklist
+  revoke
+  show_cause
+  improvement_notice
+  reinstate
+
+  @@schema("inventory")
+}
+
+enum VndContractStatus {
+  draft
+  pending_approval
+  active
+  expiring
+  expired
+  terminated
+
+  @@schema("inventory")
+}
+
+model VndVendor {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  /// EN-041: a group may share one vendor master across hospitals. Null when
+  /// the vendor is this hospital's alone.
+  groupId       String? @map("group_id") @db.Uuid
+  vendorCode    String  @map("vendor_code") @db.VarChar(32)
+  legalName     String  @map("legal_name") @db.VarChar(300)
+  tradeName     String? @map("trade_name") @db.VarChar(300)
+  vendorType    VndType @map("vendor_type")
+  /// Free-tag categories the sourcing screen filters by ("drugs", "implants").
+  categories    String[] @default([])
+  /// **Encrypted.** pgcrypto ciphertext; `pan_masked` is what a screen renders.
+  panEncrypted  Bytes?  @map("pan_encrypted")
+  panMasked     String? @map("pan_masked") @db.VarChar(16)
+  panVerifiedAt DateTime? @map("pan_verified_at") @db.Timestamptz(6)
+  tan           String? @db.VarChar(16)
+  msmeNo        String? @map("msme_no") @db.VarChar(32)
+  msmeClass     VndMsmeClass @default(none) @map("msme_class")
+  msmeValidUntil DateTime? @map("msme_valid_until") @db.Date
+  gstType       VndGstType @default(regular) @map("gst_type")
+  einvoiceApplicable Boolean @default(false) @map("einvoice_applicable")
+  /// Drug licence (Form 20B/21B) — without a valid one, `inventory.enforce_
+  /// vendor_drug_licence()` refuses a GRN line for a scheduled drug.
+  drugLicenceNo String? @map("drug_licence_no") @db.VarChar(64)
+  drugLicenceValidTo DateTime? @map("drug_licence_valid_to") @db.Date
+  contacts      Json    @default("[]")
+  addresses     Json    @default("[]")
+  /// Bank details; account numbers encrypted, IFSC and masked tail in clear.
+  banksEncrypted Bytes? @map("banks_encrypted")
+  banksMasked   Json    @default("[]") @map("banks_masked")
+  tdsSection    String? @map("tds_section") @db.VarChar(16)
+  tdsRateOverride Decimal? @map("tds_rate_override") @db.Decimal(5, 2)
+  creditDays    Int     @default(30) @map("credit_days")
+  paymentMode   String? @map("payment_mode") @db.VarChar(24)
+  /// Companies Act related-party disclosure. A PO to a related party needs the
+  /// extra approval rung; the flag is what the approval matrix keys on.
+  relatedParty  Boolean @default(false) @map("related_party")
+  relatedPartyDetails String? @map("related_party_details") @db.Text
+  riskRating    VndRiskRating @default(medium) @map("risk_rating")
+  status        VndStatus @default(draft)
+  statusReason  String? @map("status_reason") @db.Text
+  blacklistedUntil DateTime? @map("blacklisted_until") @db.Date
+  /// NC-021 §4: the published score for the latest closed period. The history
+  /// is `vnd_score_periods`; this is the projection the buyer sees.
+  lastScore     Decimal? @map("last_score") @db.Decimal(5, 2)
+  ratingGrade   String? @map("rating_grade") @db.Char(1)
+  /// Median days between PO acknowledgement and full receipt, refreshed by the
+  /// scoring job. The reorder engine uses it when the item has no lead time.
+  leadTimeDaysAvg Int? @map("lead_time_days_avg")
+  kycRefreshedAt DateTime? @map("kyc_refreshed_at") @db.Timestamptz(6)
+  portalEnabled Boolean @default(false) @map("portal_enabled")
+  apLedgerCode  String? @map("ap_ledger_code") @db.VarChar(32)
+  notes         String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  gstins        VndGstin[]
+  documents     VndDocument[]
+  itemMap       VndItemMap[]
+  rateContracts VndRateContract[]
+  scorePeriods  VndScorePeriod[]
+  actions       VndAction[]
+
+  @@unique([hospitalId, vendorCode])
+  @@index([hospitalId, status])
+  @@index([hospitalId, vendorType, status])
+  @@index([groupId])
+  @@map("vnd_vendors")
+  @@schema("inventory")
+}
+
+/// One GSTIN per state the vendor supplies from. `is_primary` is the one a PO
+/// defaults to; the place of supply decides which is actually used.
+model VndGstin {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  vendorId    String  @map("vendor_id") @db.Uuid
+  gstin       String  @db.VarChar(15)
+  stateCode   String  @map("state_code") @db.VarChar(2)
+  legalNameGstn String? @map("legal_name_gstn") @db.VarChar(300)
+  status      String  @default("active") @db.VarChar(16)
+  verifiedAt  DateTime? @map("verified_at") @db.Timestamptz(6)
+  /// GSTR-1/3B filing recency from the GSTN API. A supplier who has stopped
+  /// filing is why input credit is later denied, so it is a purchasing signal.
+  filingStatus Json   @default("{}") @map("filing_status")
+  isPrimary   Boolean @default(false) @map("is_primary")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  vendor VndVendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, gstin])
+  @@index([hospitalId, vendorId])
+  @@map("vnd_gstins")
+  @@schema("inventory")
+}
+
+/// Licences and certificates, with their expiry. The renewal reminder job and
+/// the GRN-time licence check both read this table.
+model VndDocument {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  vendorId    String  @map("vendor_id") @db.Uuid
+  docType     String  @map("doc_type") @db.VarChar(48)
+  number      String? @db.VarChar(96)
+  issuer      String? @db.VarChar(200)
+  validFrom   DateTime? @map("valid_from") @db.Date
+  validUntil  DateTime? @map("valid_until") @db.Date
+  fileId      String? @map("file_id") @db.Uuid
+  verifiedBy  String? @map("verified_by") @db.Uuid
+  status      String  @default("valid") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  vendor VndVendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, vendorId, docType])
+  @@index([hospitalId, validUntil])
+  @@map("vnd_documents")
+  @@schema("inventory")
+}
+
+/// What this vendor supplies, at what lead time and pack.
+model VndItemMap {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  vendorId      String  @map("vendor_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  vendorItemCode String? @map("vendor_item_code") @db.VarChar(64)
+  brand         String? @db.VarChar(200)
+  preferredRank Int     @default(1) @map("preferred_rank")
+  leadTimeDays  Int?    @map("lead_time_days")
+  /// Minimum order quantity, in the vendor's own pack UoM.
+  moq           Decimal? @db.Decimal(18, 4)
+  moqUomId      String? @map("moq_uom_id") @db.Uuid
+  lastPrice     Decimal? @map("last_price") @db.Decimal(14, 2)
+  lastPoDate    DateTime? @map("last_po_date") @db.Date
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  vendor VndVendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+
+  @@unique([vendorId, itemId])
+  @@index([hospitalId, itemId, active, preferredRank])
+  @@map("vnd_item_map")
+  @@schema("inventory")
+}
+
+model VndRateContract {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  vendorId      String  @map("vendor_id") @db.Uuid
+  contractNo    String  @map("contract_no") @db.VarChar(48)
+  title         String  @db.VarChar(300)
+  source        String  @default("rfq") @db.VarChar(24)
+  validFrom     DateTime @map("valid_from") @db.Date
+  validTo       DateTime @map("valid_to") @db.Date
+  maxValue      Decimal? @map("max_value") @db.Decimal(14, 2)
+  currency      String  @default("INR") @db.Char(3)
+  deliverySlaDays Int?  @map("delivery_sla_days")
+  /// Percentage of shelf life that must remain at receipt. The GRN check takes
+  /// the stricter of this and `items.min_shelf_life_days`.
+  minShelfLifePct Decimal? @map("min_shelf_life_pct") @db.Decimal(5, 2)
+  penaltyTerms  String? @map("penalty_terms") @db.Text
+  splitSharePct Decimal? @map("split_share_pct") @db.Decimal(5, 2)
+  documentFileId String? @map("document_file_id") @db.Uuid
+  status        VndContractStatus @default(draft)
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  previousId    String? @map("previous_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  vendor VndVendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  lines  VndRateContractLine[]
+
+  @@unique([hospitalId, contractNo])
+  @@index([hospitalId, vendorId, status])
+  @@index([hospitalId, validTo])
+  @@map("vnd_rate_contracts")
+  @@schema("inventory")
+}
+
+/// A contracted rate, effective-dated inside the contract's own window.
+///
+/// The EXCLUDE constraint is on (contract, item, period) rather than on
+/// (vendor, item, period): two contracts with the same vendor for the same item
+/// is a real and lawful situation (a bulk contract and an emergency one), and
+/// the PO names which contract it priced from.
+model VndRateContractLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  contractId    String  @map("contract_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  /// The UoM the rate is quoted in, and the rate per one of them.
+  uomId         String  @map("uom_id") @db.Uuid
+  rate          Decimal @db.Decimal(14, 2)
+  currency      String  @default("INR") @db.Char(3)
+  discountPct   Decimal @default(0) @map("discount_pct") @db.Decimal(5, 2)
+  /// Free quantity per scheme ("10 + 1"), expressed in the same UoM.
+  freeQtyPerUnit Decimal @default(0) @map("free_qty_per_unit") @db.Decimal(18, 6)
+  hsnCode       String? @map("hsn_code") @db.VarChar(16)
+  moq           Decimal? @db.Decimal(18, 4)
+  validFrom     DateTime @map("valid_from") @db.Date
+  validTo       DateTime? @map("valid_to") @db.Date
+  utilisedQty   Decimal @default(0) @map("utilised_qty") @db.Decimal(18, 4)
+  utilisedValue Decimal @default(0) @map("utilised_value") @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  contract VndRateContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, contractId, itemId])
+  @@index([hospitalId, itemId, validFrom])
+  @@map("vnd_rate_contract_lines")
+  @@schema("inventory")
+}
+
+/// One scored period per vendor. The metrics are stored as computed, not
+/// recomputed on read: a score published to a vendor and later silently
+/// restated by a changed weighting is a dispute, not a report.
+model VndScorePeriod {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  vendorId    String  @map("vendor_id") @db.Uuid
+  period      String  @db.VarChar(10)
+  metrics     Json    @default("{}")
+  weightsVersion Int  @default(1) @map("weights_version")
+  score       Decimal @db.Decimal(5, 2)
+  grade       String  @db.Char(1)
+  computedAt  DateTime @map("computed_at") @db.Timestamptz(6)
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(6)
+  vendorAckAt DateTime? @map("vendor_ack_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  vendor VndVendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+
+  @@unique([vendorId, period])
+  @@index([hospitalId, period])
+  @@map("vnd_score_periods")
+  @@schema("inventory")
+}
+
+/// The raw performance facts the score is computed from — one row per GRN
+/// line, service call, complaint or audit finding.
+///
+/// **Partitioned monthly on `occurred_at`.** NC-021 §4 says so, and the volume
+/// says why: every GRN line writes one, so it grows with receipts rather than
+/// with vendors.
+model VndEvent {
+  id          String  @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  vendorId    String  @map("vendor_id") @db.Uuid
+  source      String  @db.VarChar(24)
+  refId       String? @map("ref_id") @db.Uuid
+  metric      String  @db.VarChar(48)
+  value       Decimal @db.Decimal(18, 6)
+  /// The period the metric belongs to, which is not always the month it was
+  /// recorded in — a late GRN scores against the month it was due.
+  period      String  @db.VarChar(10)
+  detail      Json    @default("{}")
+  occurredAt  DateTime @map("occurred_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@id([id, occurredAt])
+  @@index([hospitalId, vendorId, occurredAt])
+  @@index([hospitalId, period, metric])
+  @@map("vnd_events")
+  @@schema("inventory")
+}
+
+/// A disciplinary action against a vendor, with its paper trail.
+model VndAction {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  vendorId      String  @map("vendor_id") @db.Uuid
+  action        VndActionKind
+  reasonCategory String @map("reason_category") @db.VarChar(48)
+  reason        String  @db.Text
+  evidence      Json    @default("[]")
+  noticeSentAt  DateTime? @map("notice_sent_at") @db.Timestamptz(6)
+  responseDueAt DateTime? @map("response_due_at") @db.Timestamptz(6)
+  vendorResponse Json?  @map("vendor_response")
+  committeeDecision Json? @map("committee_decision")
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  /// branch | hospital | group — how far the block reaches.
+  scope         String  @default("hospital") @db.VarChar(16)
+  approvalInstanceId String? @map("approval_instance_id") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  status        String  @default("open") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  vendor VndVendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, vendorId, effectiveFrom])
+  @@index([hospitalId, status])
+  @@map("vnd_actions")
+  @@schema("inventory")
+}

@@ -85,6 +85,17 @@ export const PARTITIONED_TABLES: readonly PartitionedTable[] = Object.freeze([
   Object.freeze({ schema: 'integration', table: 'lab_if_messages' }),
   Object.freeze({ schema: 'rad', table: 'pacs_instances' }),
   Object.freeze({ schema: 'rad', table: 'pacs_view_audit' }),
+
+  // 20260824120000_phase4_pharmacy_stores.
+  //
+  // `stock_ledger` is the one that matters most: it is append-only by trigger
+  // *and* by revoked grant, so it only ever grows, and it takes a row for every
+  // receipt, issue, return, transfer, adjustment, consumption, wastage and
+  // expiry write-off in the hospital. A month of it that cannot be detached is a
+  // month that cannot be dropped in under a second (`docs/07 §4`).
+  Object.freeze({ schema: 'inventory', table: 'stock_ledger' }),
+  Object.freeze({ schema: 'inventory', table: 'temp_readings' }),
+  Object.freeze({ schema: 'inventory', table: 'vnd_events' }),
 ]);
 
 export interface PartitionMaintenanceOptions {

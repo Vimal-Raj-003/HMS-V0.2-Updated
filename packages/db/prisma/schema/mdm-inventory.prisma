@@ -1,0 +1,255 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-027 — the supply-chain masters Phase 4 consumes (schema `mdm`)
+//
+// NC-006 §4 puts `items`, `stores`, batches and the ledger in `inventory`. What
+// lands here is only what is *master data by EN-027's definition*: a set of
+// codes several modules read, versioned and effective-dated, owned by the
+// masters committee rather than by the store.
+//
+//   mdm_uoms                units of measure, with a dimension
+//   mdm_item_categories     the category tree items hang off
+//   mdm_manufacturers       who made it (distinct from who sold it — NC-021)
+//   mdm_hsn_codes           HSN/SAC, and
+//   mdm_gst_rates           the rate in force for one, effective-dated
+//   mdm_dpco_ceilings       the NPPA notified ceiling for a scheduled formulation
+//
+// **Why the GST rate is not a column on the item.** A GST rate change is a
+// gazette notification with a date; a bill raised before it must reproduce the
+// old rate for ever. Storing the rate on the item would rewrite history on the
+// day the master is edited. So the item names an HSN, the HSN has a rate
+// *history*, and every document snapshots the rate it used. Same argument, same
+// shape, for the DPCO ceiling — `CLAUDE.md §4`, `phase-04 §Constraints`:
+// "price changes are effective-dated, never retroactive".
+//
+// **Why UoM has a dimension.** `phase-04 §Constraints`: "Every quantity has a
+// UoM. Any arithmetic mixing UoMs without conversion is a bug." The per-item
+// conversion factors live on `inventory.item_uoms`, but a factor is only
+// meaningful between UoMs of the same dimension — a strip is 10 tablets
+// (count → count), and no factor turns millilitres into tablets. The dimension
+// is what lets the migration refuse that pairing outright rather than trusting
+// whoever typed the factor.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// What a unit measures. A conversion factor between two UoMs of different
+/// dimensions is not a conversion, it is a data-entry error, and
+/// `inventory.enforce_item_uom()` refuses it.
+enum MdmUomDimension {
+  /// Discrete things: tablets, capsules, vials, ampoules, pieces, sets.
+  count
+  mass
+  volume
+  length
+  area
+  /// Dose-equivalents that are not SI: international units.
+  activity
+
+  @@schema("mdm")
+}
+
+/// Where a pack sits in the strip → box → case ladder `phase-04 §4.1` names.
+/// `base` is the unit stock is kept, issued and valued in; every other level
+/// converts down to it. Generic names rather than pharmacy ones because the
+/// same ladder holds a strip of tablets, an inner box of syringes and a shipper
+/// of IV fluids: `inner` = strip, `outer` = box, `shipper` = case.
+enum MdmPackLevel {
+  base
+  inner
+  outer
+  shipper
+
+  @@schema("mdm")
+}
+
+/// Unit of measure. Global rows (`hospital_id` null) ship with the product;
+/// a hospital adds its own without a release.
+model MdmUom {
+  id          String  @id @db.Uuid
+  /// Null = product-shipped, readable by every tenant. See the tenant-key
+  /// exception list in the migration's §B.
+  hospitalId  String? @map("hospital_id") @db.Uuid
+  code        String  @db.VarChar(16)
+  name        String  @db.VarChar(96)
+  dimension   MdmUomDimension
+  /// The SI-ish anchor for its dimension (`mg` for mass, `ml` for volume,
+  /// `nos` for count). Only one per (hospital, dimension) — asserted by a
+  /// partial unique index in the migration.
+  isDimensionBase Boolean @default(false) @map("is_dimension_base")
+  /// Factor to that anchor, for the dimensional conversions that ARE global
+  /// (1 g = 1000 mg). Per-*item* pack conversions never use this column.
+  factorToDimensionBase Decimal @default(1) @map("factor_to_dimension_base") @db.Decimal(20, 8)
+  /// Decimal places a quantity in this unit may legitimately carry. Tablets are
+  /// halved, not thirded; millilitres go to 0.01.
+  decimalPlaces Int @default(2) @map("decimal_places")
+  ucumCode    String? @map("ucum_code") @db.VarChar(24)
+  sortOrder   Int     @default(0) @map("sort_order")
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, active, dimension])
+  @@index([hospitalId, code])
+  @@map("mdm_uoms")
+  @@schema("mdm")
+}
+
+/// The item category tree. `path` is an ltree (`drugs.antibiotics.cephalosporin`)
+/// so ABC/VED reporting can roll up by subtree in one query instead of a
+/// recursive CTE per report.
+model MdmItemCategory {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  code         String  @db.VarChar(32)
+  name         String  @db.VarChar(160)
+  parentId     String? @map("parent_id") @db.Uuid
+  /// Materialised as `ltree` by the migration; Prisma has no ltree type.
+  path         String  @db.VarChar(512)
+  /// Which expense head consumption in this category posts to (NC-008 §4).
+  expenseHead  String? @map("expense_head") @db.VarChar(48)
+  /// Default GST treatment for a new item in this category — a convenience the
+  /// item may override, never a substitute for the item's own HSN.
+  defaultHsnCode String? @map("default_hsn_code") @db.VarChar(16)
+  sortOrder    Int     @default(0) @map("sort_order")
+  active       Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  parent   MdmItemCategory?  @relation("MdmItemCategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children MdmItemCategory[] @relation("MdmItemCategoryTree")
+
+  @@unique([hospitalId, code])
+  @@index([hospitalId, parentId])
+  @@index([hospitalId, active])
+  @@map("mdm_item_categories")
+  @@schema("mdm")
+}
+
+/// The manufacturer. Deliberately not the vendor: the same syringe is made by
+/// one company and supplied by four, a recall names the manufacturer's batch,
+/// and a vendor blacklist must not remove a manufacturer's traceability.
+model MdmManufacturer {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(200)
+  country       String? @db.VarChar(2)
+  /// CDSCO manufacturing licence, where the hospital records one.
+  licenceNo     String? @map("licence_no") @db.VarChar(64)
+  licenceValidTo DateTime? @map("licence_valid_to") @db.Date
+  /// GS1 company prefix, so a scanned GTIN can be attributed without a lookup.
+  gs1Prefix     String? @map("gs1_prefix") @db.VarChar(12)
+  isBlacklisted Boolean @default(false) @map("is_blacklisted")
+  blacklistReason String? @map("blacklist_reason") @db.Text
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, code])
+  @@index([hospitalId, active, name])
+  @@map("mdm_manufacturers")
+  @@schema("mdm")
+}
+
+/// HSN (goods) / SAC (services) code. The identity a GST rate hangs off.
+model MdmHsnCode {
+  id          String  @id @db.Uuid
+  hospitalId  String? @map("hospital_id") @db.Uuid
+  code        String  @db.VarChar(16)
+  description String  @db.VarChar(300)
+  isService   Boolean @default(false) @map("is_service")
+  /// Chapter/heading, for the GSTR-1 HSN summary.
+  chapter     String? @db.VarChar(8)
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  rates MdmGstRate[]
+
+  @@index([hospitalId, code])
+  @@index([hospitalId, active])
+  @@map("mdm_hsn_codes")
+  @@schema("mdm")
+}
+
+/// The GST rate in force for an HSN over a date range.
+///
+/// `cgst + sgst = igst` is a CHECK in the migration, not a convention: an
+/// intra-state bill splits the same total two ways and an inter-state bill does
+/// not, so a row where they disagree produces two different tax totals for the
+/// same sale depending on where the customer lives.
+///
+/// A btree_gist EXCLUDE constraint makes overlapping periods for one HSN
+/// impossible — otherwise "the rate on 2026-08-23" has two answers and the one
+/// you get depends on the plan.
+model MdmGstRate {
+  id          String  @id @db.Uuid
+  hospitalId  String? @map("hospital_id") @db.Uuid
+  hsnCodeId   String  @map("hsn_code_id") @db.Uuid
+  cgstRate    Decimal @map("cgst_rate") @db.Decimal(5, 2)
+  sgstRate    Decimal @map("sgst_rate") @db.Decimal(5, 2)
+  igstRate    Decimal @map("igst_rate") @db.Decimal(5, 2)
+  cessRate    Decimal @default(0) @map("cess_rate") @db.Decimal(5, 2)
+  /// Nil-rated and exempt are not the same as zero — one appears in GSTR-1 as a
+  /// nil-rated supply and the other as an exempt one.
+  isExempt    Boolean @default(false) @map("is_exempt")
+  isNilRated  Boolean @default(false) @map("is_nil_rated")
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  notificationRef String? @map("notification_ref") @db.VarChar(160)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  hsnCode MdmHsnCode @relation(fields: [hsnCodeId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, hsnCodeId, effectiveFrom])
+  @@map("mdm_gst_rates")
+  @@schema("mdm")
+}
+
+/// DPCO 2013 / NPPA ceiling price for a scheduled formulation, effective-dated.
+///
+/// `mdm_drugs.dpco_ceiling_price` (Phase 2) is the *current* figure the
+/// prescriber's screen shows. This is the history, and it is what a batch MRP is
+/// checked against — because the question a drug inspector asks is "was this
+/// batch, sold on that date, within the ceiling then", not "is it within the
+/// ceiling now".
+model MdmDpcoCeiling {
+  id            String  @id @db.Uuid
+  hospitalId    String? @map("hospital_id") @db.Uuid
+  /// → `mdm.mdm_drugs.record_key`. Nullable so a hospital can notify a ceiling
+  /// against a formulation it has not yet added to its formulary.
+  drugKey       String? @map("drug_key") @db.Uuid
+  /// The NPPA's own wording, kept verbatim: it is what the notification names.
+  formulation   String  @db.VarChar(300)
+  packDescription String? @map("pack_description") @db.VarChar(200)
+  ceilingPrice  Decimal @map("ceiling_price") @db.Decimal(14, 2)
+  currency      String  @default("INR") @db.Char(3)
+  /// Retail price per the notification's own unit ("per tablet", "per ml").
+  perUnit       String  @map("per_unit") @db.VarChar(48)
+  notificationNo String? @map("notification_no") @db.VarChar(120)
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, drugKey, effectiveFrom])
+  @@map("mdm_dpco_ceilings")
+  @@schema("mdm")
+}

@@ -1,0 +1,724 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-006 §4 — how stock moves between stores (schema `inventory`)
+//
+// Every document here is a *reason* for ledger rows; none of them holds a
+// balance. That separation is the whole design: a screen showing "issued 40,
+// received 38" reads two documents, and the two stock positions it implies come
+// from the ledger, so a discrepancy is visible rather than reconciled away.
+//
+// Three states earn their complexity:
+//
+//   • **In transit.** An inter-store transfer leaves the sending store's balance
+//     immediately and arrives in the receiving store's only on receipt. Between
+//     the two it is on nobody's shelf and on somebody's books, which is what
+//     `stock_balances.qty_in_transit_in` is for.
+//   • **Partial.** An indent may be part-issued, an issue part-received. Every
+//     line carries requested / approved / issued / received, and the document
+//     status is derived from the lines, never typed.
+//   • **Variance.** A cycle count produces a number that differs from the
+//     system. That difference is not an edit to a balance; it is an adjustment
+//     document that needs approval and writes its own ledger rows.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum InvIndentType {
+  regular
+  par_topup
+  emergency
+  scheduled
+
+  @@schema("inventory")
+}
+
+enum InvIndentStatus {
+  draft
+  submitted
+  pending_approval
+  approved
+  partially_approved
+  picking
+  issued
+  partially_issued
+  received
+  closed
+  rejected
+  cancelled
+
+  @@schema("inventory")
+}
+
+enum InvIssueStatus {
+  draft
+  issued
+  in_transit
+  received
+  partially_received
+  discrepancy
+  closed
+  cancelled
+
+  @@schema("inventory")
+}
+
+enum InvTransferStatus {
+  requested
+  pending_approval
+  approved
+  dispatched
+  in_transit
+  received
+  partially_received
+  closed
+  cancelled
+
+  @@schema("inventory")
+}
+
+enum InvAdjustmentType {
+  plus
+  minus
+  writeoff_expiry
+  writeoff_damage
+  writeoff_recall
+  repack
+  opening
+  donation
+  sample
+  count_variance
+
+  @@schema("inventory")
+}
+
+enum InvAdjustmentStatus {
+  draft
+  pending_approval
+  approved
+  posted
+  rejected
+  cancelled
+
+  @@schema("inventory")
+}
+
+enum InvCountType {
+  cycle
+  full
+  narcotic
+  par
+  spot
+
+  @@schema("inventory")
+}
+
+enum InvCountStatus {
+  planned
+  in_progress
+  counted
+  recount
+  variance_review
+  approved
+  posted
+  cancelled
+
+  @@schema("inventory")
+}
+
+enum InvQuarantineReason {
+  recall
+  quality
+  temperature_excursion
+  expiry
+  complaint
+  regulatory_hold
+  damage
+
+  @@schema("inventory")
+}
+
+/// A store asking another store for stock. Not a purchase indent — that is
+/// `pur_indents`, which asks the *outside world*.
+model InvStoreIndent {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  indentNo      String  @map("indent_no") @db.VarChar(48)
+  fromStoreId   String  @map("from_store_id") @db.Uuid
+  toStoreId     String  @map("to_store_id") @db.Uuid
+  indentType    InvIndentType @default(regular) @map("indent_type")
+  status        InvIndentStatus @default(draft)
+  requiredBy    DateTime? @map("required_by") @db.Date
+  justification String? @db.Text
+  approvalInstanceId String? @map("approval_instance_id") @db.Uuid
+  requestedBy   String? @map("requested_by") @db.Uuid
+  submittedAt   DateTime? @map("submitted_at") @db.Timestamptz(6)
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  rejectedReason String? @map("rejected_reason") @db.Text
+  closedAt      DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines InvStoreIndentLine[]
+
+  @@unique([hospitalId, indentNo])
+  @@index([hospitalId, branchId, status, createdAt])
+  @@index([hospitalId, toStoreId, status])
+  @@index([hospitalId, fromStoreId, status])
+  @@map("store_indents")
+  @@schema("inventory")
+}
+
+model InvStoreIndentLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  indentId      String  @map("indent_id") @db.Uuid
+  lineNo        Int     @map("line_no")
+  itemId        String  @map("item_id") @db.Uuid
+  uomId         String  @map("uom_id") @db.Uuid
+  qtyEntered    Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase       Decimal @map("qty_base") @db.Decimal(18, 4)
+  qtyApprovedBase Decimal? @map("qty_approved_base") @db.Decimal(18, 4)
+  qtyIssuedBase Decimal @default(0) @map("qty_issued_base") @db.Decimal(18, 4)
+  qtyReceivedBase Decimal @default(0) @map("qty_received_base") @db.Decimal(18, 4)
+  /// What the requesting store had when it asked. Kept so a reviewer can see
+  /// whether the request was reasonable at the time, not at review time.
+  stockOnHandSnapshot Decimal? @map("stock_on_hand_snapshot") @db.Decimal(18, 4)
+  remarks       String? @db.Text
+  status        String  @default("pending") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  indent InvStoreIndent @relation(fields: [indentId], references: [id], onDelete: Restrict)
+
+  @@unique([indentId, lineNo])
+  @@index([hospitalId, indentId])
+  @@index([hospitalId, itemId])
+  @@map("store_indent_lines")
+  @@schema("inventory")
+}
+
+/// The picking instruction. FEFO batches are *suggested* here and the scan is
+/// what confirms them — an override is recorded with a reason rather than
+/// forbidden, because a suggested batch that is physically at the back of the
+/// shelf is a real situation and a picker who cannot record it will pick the
+/// wrong one silently.
+model InvPickList {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  storeId     String  @map("store_id") @db.Uuid
+  refType     String  @map("ref_type") @db.VarChar(24)
+  refId       String  @map("ref_id") @db.Uuid
+  status      String  @default("open") @db.VarChar(24)
+  assignedTo  String? @map("assigned_to") @db.Uuid
+  startedAt   DateTime? @map("started_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  lines InvPickListLine[]
+
+  @@index([hospitalId, storeId, status])
+  @@index([hospitalId, refType, refId])
+  @@map("pick_lists")
+  @@schema("inventory")
+}
+
+model InvPickListLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  pickListId    String  @map("pick_list_id") @db.Uuid
+  lineNo        Int     @map("line_no")
+  itemId        String  @map("item_id") @db.Uuid
+  suggestedBatchId String? @map("suggested_batch_id") @db.Uuid
+  suggestedLocationId String? @map("suggested_location_id") @db.Uuid
+  pickedBatchId String? @map("picked_batch_id") @db.Uuid
+  qtyToPickBase Decimal @map("qty_to_pick_base") @db.Decimal(18, 4)
+  qtyPickedBase Decimal @default(0) @map("qty_picked_base") @db.Decimal(18, 4)
+  scanned       Boolean @default(false)
+  /// Non-null exactly when `picked_batch_id` differs from the suggestion — a
+  /// CHECK, so a FEFO override cannot be undocumented.
+  overrideReason String? @map("override_reason") @db.Text
+  pickedBy      String? @map("picked_by") @db.Uuid
+  pickedAt      DateTime? @map("picked_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  pickList InvPickList @relation(fields: [pickListId], references: [id], onDelete: Restrict)
+
+  @@unique([pickListId, lineNo])
+  @@index([hospitalId, pickListId])
+  @@map("pick_list_lines")
+  @@schema("inventory")
+}
+
+/// Stock leaving one store for another inside the same branch.
+model InvIssue {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  issueNo     String  @map("issue_no") @db.VarChar(48)
+  indentId    String? @map("indent_id") @db.Uuid
+  fromStoreId String  @map("from_store_id") @db.Uuid
+  toStoreId   String  @map("to_store_id") @db.Uuid
+  status      InvIssueStatus @default(draft)
+  issuedBy    String? @map("issued_by") @db.Uuid
+  issuedAt    DateTime? @map("issued_at") @db.Timestamptz(6)
+  receivedBy  String? @map("received_by") @db.Uuid
+  receivedAt  DateTime? @map("received_at") @db.Timestamptz(6)
+  gatePassNo  String? @map("gate_pass_no") @db.VarChar(48)
+  remarks     String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines InvIssueLine[]
+
+  @@unique([hospitalId, issueNo])
+  @@index([hospitalId, branchId, status, createdAt])
+  @@index([hospitalId, fromStoreId, issuedAt])
+  @@index([hospitalId, toStoreId, status])
+  @@index([hospitalId, indentId])
+  @@map("issues")
+  @@schema("inventory")
+}
+
+model InvIssueLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  issueId       String  @map("issue_id") @db.Uuid
+  lineNo        Int     @map("line_no")
+  indentLineId  String? @map("indent_line_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  batchId       String? @map("batch_id") @db.Uuid
+  uomId         String  @map("uom_id") @db.Uuid
+  qtyEntered    Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase       Decimal @map("qty_base") @db.Decimal(18, 4)
+  qtyReceivedBase Decimal @default(0) @map("qty_received_base") @db.Decimal(18, 4)
+  unitCost      Decimal? @map("unit_cost") @db.Decimal(14, 4)
+  value         Decimal? @db.Decimal(14, 2)
+  discrepancyReason String? @map("discrepancy_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  issue InvIssue @relation(fields: [issueId], references: [id], onDelete: Restrict)
+
+  @@unique([issueId, lineNo])
+  @@index([hospitalId, issueId])
+  @@index([hospitalId, itemId, batchId])
+  @@map("issue_lines")
+  @@schema("inventory")
+}
+
+/// Stock moving between branches — which is a supply of goods under GST and
+/// therefore needs a tax invoice and, above the threshold, an e-way bill.
+model InvTransfer {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  transferNo    String  @map("transfer_no") @db.VarChar(48)
+  fromBranchId  String  @map("from_branch_id") @db.Uuid
+  toBranchId    String  @map("to_branch_id") @db.Uuid
+  fromStoreId   String  @map("from_store_id") @db.Uuid
+  toStoreId     String  @map("to_store_id") @db.Uuid
+  status        InvTransferStatus @default(requested)
+  approvalInstanceId String? @map("approval_instance_id") @db.Uuid
+  gatePassNo    String? @map("gate_pass_no") @db.VarChar(48)
+  taxInvoiceNo  String? @map("tax_invoice_no") @db.VarChar(48)
+  ewayBillNo    String? @map("eway_bill_no") @db.VarChar(24)
+  dispatchedAt  DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  receivedAt    DateTime? @map("received_at") @db.Timestamptz(6)
+  totalValue    Decimal? @map("total_value") @db.Decimal(14, 2)
+  remarks       String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines InvTransferLine[]
+
+  @@unique([hospitalId, transferNo])
+  @@index([hospitalId, status, createdAt])
+  @@index([hospitalId, fromStoreId, status])
+  @@index([hospitalId, toStoreId, status])
+  @@map("transfers")
+  @@schema("inventory")
+}
+
+model InvTransferLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  transferId    String  @map("transfer_id") @db.Uuid
+  lineNo        Int     @map("line_no")
+  itemId        String  @map("item_id") @db.Uuid
+  batchId       String? @map("batch_id") @db.Uuid
+  uomId         String  @map("uom_id") @db.Uuid
+  qtyEntered    Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase       Decimal @map("qty_base") @db.Decimal(18, 4)
+  qtyReceivedBase Decimal @default(0) @map("qty_received_base") @db.Decimal(18, 4)
+  unitCost      Decimal? @map("unit_cost") @db.Decimal(14, 4)
+  taxableValue  Decimal? @map("taxable_value") @db.Decimal(14, 2)
+  gstRate       Decimal? @map("gst_rate") @db.Decimal(5, 2)
+  hsnCode       String? @map("hsn_code") @db.VarChar(16)
+  discrepancyReason String? @map("discrepancy_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  transfer InvTransfer @relation(fields: [transferId], references: [id], onDelete: Restrict)
+
+  @@unique([transferId, lineNo])
+  @@index([hospitalId, transferId])
+  @@index([hospitalId, itemId, batchId])
+  @@map("transfer_lines")
+  @@schema("inventory")
+}
+
+/// Stock coming back up the tree — a ward returning what it did not use.
+/// The condition on each line decides whether it re-enters saleable stock or
+/// goes to quarantine, and that decision is inspected, not assumed.
+model InvReturnToStore {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  returnNo    String  @map("return_no") @db.VarChar(48)
+  fromStoreId String  @map("from_store_id") @db.Uuid
+  toStoreId   String  @map("to_store_id") @db.Uuid
+  reason      String  @db.VarChar(48)
+  status      String  @default("draft") @db.VarChar(24)
+  inspectedBy String? @map("inspected_by") @db.Uuid
+  inspectedAt DateTime? @map("inspected_at") @db.Timestamptz(6)
+  remarks     String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines InvReturnToStoreLine[]
+
+  @@unique([hospitalId, returnNo])
+  @@index([hospitalId, branchId, status, createdAt])
+  @@index([hospitalId, fromStoreId])
+  @@map("returns_to_store")
+  @@schema("inventory")
+}
+
+model InvReturnToStoreLine {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  returnId    String  @map("return_id") @db.Uuid
+  lineNo      Int     @map("line_no")
+  itemId      String  @map("item_id") @db.Uuid
+  batchId     String? @map("batch_id") @db.Uuid
+  uomId       String  @map("uom_id") @db.Uuid
+  qtyEntered  Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase     Decimal @map("qty_base") @db.Decimal(18, 4)
+  /// good → restock; damaged / opened / temperature_broken → quarantine.
+  condition   String  @default("good") @db.VarChar(24)
+  restock     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  ret InvReturnToStore @relation(fields: [returnId], references: [id], onDelete: Restrict)
+
+  @@unique([returnId, lineNo])
+  @@index([hospitalId, returnId])
+  @@map("return_to_store_lines")
+  @@schema("inventory")
+}
+
+/// The only lawful way a balance changes without a physical movement, and it
+/// needs an approval. `phase-04` exit gate 4: "a deliberate mismatch raises an
+/// alert and cannot be silently adjusted" — which is why posting is a state
+/// this document reaches after approval, not a side effect of saving it.
+model InvAdjustment {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  storeId       String  @map("store_id") @db.Uuid
+  adjustmentNo  String  @map("adjustment_no") @db.VarChar(48)
+  adjustmentType InvAdjustmentType @map("adjustment_type")
+  reasonCode    String  @map("reason_code") @db.VarChar(48)
+  reason        String  @db.Text
+  status        InvAdjustmentStatus @default(draft)
+  approvalInstanceId String? @map("approval_instance_id") @db.Uuid
+  requestedBy   String? @map("requested_by") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  postedAt      DateTime? @map("posted_at") @db.Timestamptz(6)
+  totalValue    Decimal? @map("total_value") @db.Decimal(14, 2)
+  countPlanId   String? @map("count_plan_id") @db.Uuid
+  /// NC-016: expired drugs are bio-medical waste and leave under a manifest.
+  bmwDisposalRef String? @map("bmw_disposal_ref") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines InvAdjustmentLine[]
+
+  @@unique([hospitalId, adjustmentNo])
+  @@index([hospitalId, branchId, status, createdAt])
+  @@index([hospitalId, storeId, adjustmentType])
+  @@index([hospitalId, countPlanId])
+  @@map("adjustments")
+  @@schema("inventory")
+}
+
+model InvAdjustmentLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  adjustmentId  String  @map("adjustment_id") @db.Uuid
+  lineNo        Int     @map("line_no")
+  itemId        String  @map("item_id") @db.Uuid
+  batchId       String? @map("batch_id") @db.Uuid
+  serialId      String? @map("serial_id") @db.Uuid
+  uomId         String  @map("uom_id") @db.Uuid
+  /// Signed, in the entered UoM; `qty_base` is the same sign in base units.
+  qtyEntered    Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase       Decimal @map("qty_base") @db.Decimal(18, 4)
+  unitCost      Decimal? @map("unit_cost") @db.Decimal(14, 4)
+  value         Decimal? @db.Decimal(14, 2)
+  lineReason    String? @map("line_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  adjustment InvAdjustment @relation(fields: [adjustmentId], references: [id], onDelete: Restrict)
+
+  @@unique([adjustmentId, lineNo])
+  @@index([hospitalId, adjustmentId])
+  @@index([hospitalId, itemId, batchId])
+  @@map("adjustment_lines")
+  @@schema("inventory")
+}
+
+/// A batch put beyond use pending a decision. The `pending` decision is what
+/// blocks issue; a released batch carries the evidence of who released it.
+model InvQuarantine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  batchId       String  @map("batch_id") @db.Uuid
+  /// all_stores | store — a recall is hospital-wide, a damaged carton is not.
+  scope         String  @default("all_stores") @db.VarChar(16)
+  storeId       String? @map("store_id") @db.Uuid
+  reason        InvQuarantineReason
+  sourceRefType String? @map("source_ref_type") @db.VarChar(24)
+  sourceRefId   String? @map("source_ref_id") @db.Uuid
+  startedAt     DateTime @map("started_at") @db.Timestamptz(6)
+  releasedAt    DateTime? @map("released_at") @db.Timestamptz(6)
+  decision      String  @default("pending") @db.VarChar(24)
+  decidedBy     String? @map("decided_by") @db.Uuid
+  decisionNote  String? @map("decision_note") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, batchId, decision])
+  @@index([hospitalId, decision, startedAt])
+  @@map("quarantines")
+  @@schema("inventory")
+}
+
+/// A planned physical count. `blind` hides the system quantity from the counter,
+/// which is the only kind of count whose variance means anything.
+model InvCountPlan {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  storeId       String  @map("store_id") @db.Uuid
+  countNo       String  @map("count_no") @db.VarChar(48)
+  countType     InvCountType @map("count_type")
+  scope         Json    @default("{}")
+  scheduledFor  DateTime @map("scheduled_for") @db.Date
+  /// Freeze movements in the counted scope while counting, so the variance is
+  /// a variance and not a race.
+  freezeMovements Boolean @default(true) @map("freeze_movements")
+  blind         Boolean @default(true)
+  status        InvCountStatus @default(planned)
+  varianceValue Decimal? @map("variance_value") @db.Decimal(14, 2)
+  approvalInstanceId String? @map("approval_instance_id") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  adjustmentId  String? @map("adjustment_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  sheets InvCountSheet[]
+
+  @@unique([hospitalId, countNo])
+  @@index([hospitalId, storeId, status, scheduledFor])
+  @@map("count_plans")
+  @@schema("inventory")
+}
+
+model InvCountSheet {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  planId      String  @map("plan_id") @db.Uuid
+  locationId  String? @map("location_id") @db.Uuid
+  assignedTo  String? @map("assigned_to") @db.Uuid
+  /// A narcotic count is signed by two people (`phase-04 §4.4`); the second
+  /// signature is mandatory when the plan's type is `narcotic`.
+  secondCounterId String? @map("second_counter_id") @db.Uuid
+  status      String  @default("open") @db.VarChar(24)
+  countedAt   DateTime? @map("counted_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  plan  InvCountPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  lines InvCountLine[]
+
+  @@index([hospitalId, planId, status])
+  @@map("count_sheets")
+  @@schema("inventory")
+}
+
+model InvCountLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  sheetId       String  @map("sheet_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  batchId       String? @map("batch_id") @db.Uuid
+  uomId         String  @map("uom_id") @db.Uuid
+  /// The system position at the moment the sheet was frozen. Snapshotted, not
+  /// read live, or the variance moves while it is being reviewed.
+  systemQtyBase Decimal @map("system_qty_base") @db.Decimal(18, 4)
+  countedEntered Decimal? @map("counted_entered") @db.Decimal(18, 4)
+  countedQtyBase Decimal? @map("counted_qty_base") @db.Decimal(18, 4)
+  recountQtyBase Decimal? @map("recount_qty_base") @db.Decimal(18, 4)
+  varianceQtyBase Decimal? @map("variance_qty_base") @db.Decimal(18, 4)
+  varianceValue Decimal? @map("variance_value") @db.Decimal(14, 2)
+  reason        String? @db.Text
+  countedBy     String? @map("counted_by") @db.Uuid
+  countedAt     DateTime? @map("counted_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  sheet InvCountSheet @relation(fields: [sheetId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, sheetId])
+  @@index([hospitalId, itemId, batchId])
+  @@map("count_lines")
+  @@schema("inventory")
+}
+
+/// What the reorder run proposed, and what became of it. Kept rather than
+/// recomputed so "why did we buy 400 of these in March" has an answer.
+model InvReorderSuggestion {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  storeId       String  @map("store_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  runAt         DateTime @map("run_at") @db.Timestamptz(6)
+  availableBase Decimal @map("available_base") @db.Decimal(18, 4)
+  onOrderBase   Decimal @default(0) @map("on_order_base") @db.Decimal(18, 4)
+  reorderLevel  Decimal? @map("reorder_level") @db.Decimal(18, 4)
+  suggestedQtyBase Decimal @map("suggested_qty_base") @db.Decimal(18, 4)
+  method        String  @default("fixed") @db.VarChar(24)
+  /// purchase_indent | store_indent | ignored | pending
+  convertedTo   String  @default("pending") @map("converted_to") @db.VarChar(24)
+  convertedRefId String? @map("converted_ref_id") @db.Uuid
+  decidedBy     String? @map("decided_by") @db.Uuid
+  decidedAt     DateTime? @map("decided_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, storeId, runAt])
+  @@index([hospitalId, convertedTo, runAt])
+  @@map("reorder_suggestions")
+  @@schema("inventory")
+}
+
+/// A closed valuation period. Once closed, the ledger for that month is what
+/// the accounts were posted from and must stay reproducible.
+model InvValuationPeriod {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  period        String  @db.VarChar(7)
+  method        InvValuationMethod
+  status        String  @default("open") @db.VarChar(16)
+  closingValueByStore Json @default("{}") @map("closing_value_by_store")
+  totalClosingValue Decimal? @map("total_closing_value") @db.Decimal(14, 2)
+  journalBatchRef String? @map("journal_batch_ref") @db.VarChar(64)
+  closedBy      String? @map("closed_by") @db.Uuid
+  closedAt      DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  snapshots InvValuationSnapshot[]
+
+  @@unique([hospitalId, branchId, period])
+  @@index([hospitalId, status])
+  @@map("valuation_periods")
+  @@schema("inventory")
+}
+
+model InvValuationSnapshot {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  periodId    String  @map("period_id") @db.Uuid
+  storeId     String  @map("store_id") @db.Uuid
+  itemId      String  @map("item_id") @db.Uuid
+  batchId     String? @map("batch_id") @db.Uuid
+  qtyBase     Decimal @map("qty_base") @db.Decimal(18, 4)
+  unitCost    Decimal @map("unit_cost") @db.Decimal(14, 4)
+  value       Decimal @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  period InvValuationPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, periodId, storeId])
+  @@map("valuation_snapshots")
+  @@schema("inventory")
+}

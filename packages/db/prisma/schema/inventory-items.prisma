@@ -1,0 +1,409 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-006 §4 — the item master and its conversion ladder (schema `inventory`)
+//
+// One row in `inventory.items` is one *stock-keeping identity*: the thing that
+// is received, batched, counted, valued, issued and dispensed. It is not the
+// same object as `mdm.mdm_drugs`, which is the *prescribable formulation* — a
+// doctor prescribes "Paracetamol 500 mg tablet, oral" and a pharmacist hands
+// over a strip of a particular brand from a particular batch. `items.drug_key`
+// joins the two, and it is nullable because most of this master is gauze,
+// cannulae, reagents, implants and stationery, which no doctor prescribes.
+//
+// ── The UoM ladder, and why it is a table ───────────────────────────────────
+//
+// `phase-04 §Constraints`: "Every quantity has a UoM. Any arithmetic mixing
+// UoMs without conversion is a bug." Three decisions follow from taking that
+// literally rather than as advice:
+//
+//  1. **The item declares one base UoM** and every quantity that is ever added,
+//     subtracted or compared is expressed in it (`qty_base`). `sum(qty_base)`
+//     is meaningful without knowing anything about the rows summed. There is no
+//     column anywhere in this phase that adds two quantities in different units.
+//  2. **The factors are per item, not global.** A strip is 10 tablets for one
+//     brand and 15 for another; a box is 10 strips here and 20 there. A global
+//     "STRIP = 10 TAB" would be wrong for most of the master and silently right
+//     for enough of it to ship.
+//  3. **The database recomputes `qty_base`, it does not trust it.**
+//     `inventory.enforce_qty_uom()` is attached to every table that carries a
+//     (item, uom, qty_entered, qty_base) quadruple: it looks the factor up and
+//     refuses the row if the arithmetic disagrees. An application that forgets
+//     to convert cannot write a wrong number; it gets an error naming the item.
+//
+// The conversions themselves are proved in `packages/contracts/src/primitives/
+// uom.ts` and its property test, which is where the round-trip and
+// monotonicity laws live.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// What kind of thing this is. Drives which register it appears in, whether an
+/// expiry is mandatory, and which expense head consumption posts to.
+enum InvItemType {
+  drug
+  consumable
+  surgical
+  implant
+  reagent
+  /// Blood bags, tubing, filters — consumables governed by their own SOPs.
+  blood_component_consumable
+  linen
+  stationery
+  housekeeping
+  engineering
+  it_consumable
+  food
+  /// A consumable spare for a capital asset (NC-002/NC-020).
+  asset_spare
+  instrument
+  other
+
+  @@schema("inventory")
+}
+
+/// How individual units are told apart. `phase-04 §4.5` requires implants to
+/// carry a serial/UDI; a paracetamol tablet carries a batch and nothing more.
+enum InvTracking {
+  none
+  batch
+  batch_expiry
+  serial
+  /// GS1 UDI: DI + PI (lot, serial, expiry). Implants and high-risk devices.
+  udi
+
+  @@schema("inventory")
+}
+
+enum InvStorageCondition {
+  ambient
+  cool_below_25
+  cold_2_8
+  frozen_minus_20
+  deep_frozen_minus_70
+  protect_from_light
+  protect_from_moisture
+  flammable_cabinet
+  controlled_substance_safe
+
+  @@schema("inventory")
+}
+
+/// ABC by value, VED by criticality, FSN by movement. Three independent axes;
+/// `EN` is the "not classified yet" state and is deliberately distinguishable
+/// from a classification of `c`/`d`/`n`, because "we have not looked" is not the
+/// same statement as "we looked and it is cheap".
+enum InvAbcClass {
+  a
+  b
+  c
+  unclassified
+
+  @@schema("inventory")
+}
+
+enum InvVedClass {
+  vital
+  essential
+  desirable
+  unclassified
+
+  @@schema("inventory")
+}
+
+enum InvFsnClass {
+  fast
+  slow
+  non_moving
+  unclassified
+
+  @@schema("inventory")
+}
+
+enum InvMasterStatus {
+  draft
+  pending_approval
+  active
+  inactive
+  blocked
+
+  @@schema("inventory")
+}
+
+/// The stock-keeping identity.
+model InvItem {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(300)
+  /// Printed on the shelf label and the dispensing label; may differ from
+  /// `name`, which is the purchasing description.
+  shortName     String? @map("short_name") @db.VarChar(120)
+  genericName   String? @map("generic_name") @db.VarChar(300)
+  /// → `mdm.mdm_drugs.record_key`. Null for everything that is not a drug.
+  drugKey       String? @map("drug_key") @db.Uuid
+  /// → `mdm.mdm_drug_brands.record_key`, when this item is a specific brand.
+  drugBrandKey  String? @map("drug_brand_key") @db.Uuid
+  categoryId    String  @map("category_id") @db.Uuid
+  itemType      InvItemType @map("item_type")
+  manufacturerId String? @map("manufacturer_id") @db.Uuid
+
+  // ── the conversion ladder ────────────────────────────────────────────────
+  /// The unit stock is kept, valued and reported in. Every `qty_base` in this
+  /// phase is in this unit. Changing it after the first ledger row exists is
+  /// refused by `inventory.refuse_base_uom_change()` — the historic quantities
+  /// would silently change meaning.
+  baseUomId     String  @map("base_uom_id") @db.Uuid
+  /// Defaults for the three screens that enter a quantity. They must exist in
+  /// `item_uoms` for this item; a trigger checks it.
+  purchaseUomId String? @map("purchase_uom_id") @db.Uuid
+  issueUomId    String? @map("issue_uom_id") @db.Uuid
+  dispenseUomId String? @map("dispense_uom_id") @db.Uuid
+
+  // ── tax ──────────────────────────────────────────────────────────────────
+  /// → `mdm.mdm_hsn_codes.id`. The *rate* is never stored here; it is looked up
+  /// from `mdm_gst_rates` by document date and snapshotted onto the document.
+  hsnCodeId     String? @map("hsn_code_id") @db.Uuid
+  hsnCode       String? @map("hsn_code") @db.VarChar(16)
+
+  // ── regulatory ───────────────────────────────────────────────────────────
+  /// Copied from `mdm_drugs.schedule` at creation and re-asserted on edit, so a
+  /// dispensing refusal does not depend on a join to a master that may be
+  /// mid-version. `MdmDrugSchedule` lives in `mdm`; cross-schema enums are
+  /// legal in PostgreSQL and Prisma.
+  schedule      MdmDrugSchedule @default(otc)
+  isNarcotic    Boolean @default(false) @map("is_narcotic")
+  /// DPCO-scheduled formulation: `inventory.enforce_dpco_ceiling()` refuses a
+  /// batch MRP above the ceiling in force on the batch's receipt date.
+  dpcoScheduled Boolean @default(false) @map("dpco_scheduled")
+  isHighAlert   Boolean @default(false) @map("is_high_alert")
+  isLasa        Boolean @default(false) @map("is_lasa")
+  /// Cold chain and the rest. `temp_zone_required` is what makes an excursion
+  /// actionable — an item with no requirement cannot have an excursion.
+  storageCondition InvStorageCondition @default(ambient) @map("storage_condition")
+  tempZoneRequired Boolean @default(false) @map("temp_zone_required")
+  /// Refuse a GRN whose batch has less shelf life left than this. NC-005 §4
+  /// carries the same figure on the rate contract; the stricter of the two wins.
+  minShelfLifeDays Int? @map("min_shelf_life_days")
+
+  // ── behaviour ────────────────────────────────────────────────────────────
+  tracking      InvTracking @default(batch_expiry)
+  isConsignmentAllowed Boolean @default(false) @map("is_consignment_allowed")
+  isCapital     Boolean @default(false) @map("is_capital")
+  isReturnable  Boolean @default(true) @map("is_returnable")
+  isBillable    Boolean @default(true) @map("is_billable")
+  /// → `mdm.mdm_services.record_key`, when consuming this item raises a charge.
+  billableServiceKey String? @map("billable_service_key") @db.Uuid
+  /// `phase-04 §4.6`: consumption posts to a cost centre; this is the fallback
+  /// when the consuming store has no mapping of its own.
+  defaultExpenseHead String? @map("default_expense_head") @db.VarChar(48)
+
+  // ── planning ─────────────────────────────────────────────────────────────
+  /// Hospital-wide defaults. Per-store overrides live in `item_store_params`,
+  /// which is where the reorder engine actually reads from.
+  abcClass      InvAbcClass @default(unclassified) @map("abc_class")
+  vedClass      InvVedClass @default(unclassified) @map("ved_class")
+  fsnClass      InvFsnClass @default(unclassified) @map("fsn_class")
+  shelfLifeDays Int?    @map("shelf_life_days")
+  leadTimeDays  Int?    @map("lead_time_days")
+
+  imageFileId   String? @map("image_file_id") @db.Uuid
+  msdsFileId    String? @map("msds_file_id") @db.Uuid
+  notes         String? @db.Text
+  status        InvMasterStatus @default(draft)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  uoms        InvItemUom[]
+  barcodes    InvItemBarcode[]
+  prices      InvItemPrice[]
+  storeParams InvItemStoreParam[]
+  batches     InvItemBatch[]
+
+  @@unique([hospitalId, code])
+  @@index([hospitalId, categoryId, status])
+  @@index([hospitalId, status, itemType])
+  @@index([hospitalId, drugKey])
+  @@index([hospitalId, manufacturerId])
+  @@index([hospitalId, schedule, status])
+  @@index([hospitalId, hsnCodeId])
+  @@map("items")
+  @@schema("inventory")
+}
+
+/// One rung of one item's conversion ladder.
+///
+/// Exactly one row per item has `is_base` and `factor_to_base = 1`; a partial
+/// unique index enforces the first half and a CHECK the second. Every other row
+/// declares how many base units the pack holds — 10 for a strip of ten tablets,
+/// 100 for a box of ten strips. Factors compose by multiplication only, so a
+/// caller never needs to know the ladder's shape: it needs one number.
+model InvItemUom {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  itemId       String  @map("item_id") @db.Uuid
+  uomId        String  @map("uom_id") @db.Uuid
+  packLevel    MdmPackLevel @default(base) @map("pack_level")
+  /// How many BASE units one of this UoM contains. Always > 0; always exactly 1
+  /// for the base row. `numeric(20,8)` because a "per 5 ml" syrup dose is
+  /// 0.2 bottles and rounding that at two places loses a dose per bottle.
+  factorToBase Decimal @map("factor_to_base") @db.Decimal(20, 8)
+  isBase       Boolean @default(false) @map("is_base")
+  isPurchaseDefault Boolean @default(false) @map("is_purchase_default")
+  isIssueDefault    Boolean @default(false) @map("is_issue_default")
+  isDispenseDefault Boolean @default(false) @map("is_dispense_default")
+  /// The pack's own barcode, when it has one distinct from the item's.
+  gtin         String? @db.VarChar(20)
+  active       Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  item InvItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([itemId, uomId])
+  @@index([hospitalId, itemId, active])
+  @@map("item_uoms")
+  @@schema("inventory")
+}
+
+/// EN-013 §4: the scan surface. One item may carry many codes — the
+/// manufacturer's GTIN-13 on the strip, a GTIN-14 on the shipper, a
+/// GS1 DataMatrix carrying batch and expiry, and a hospital-printed internal
+/// code for repacked items.
+model InvItemBarcode {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  itemId     String  @map("item_id") @db.Uuid
+  /// The pack the code identifies, so a scanned shipper resolves to the right
+  /// quantity without a second question.
+  itemUomId  String? @map("item_uom_id") @db.Uuid
+  symbology  String  @default("gs1_datamatrix") @db.VarChar(32)
+  /// GTIN, EAN-13, internal code, or the AI(01) of a GS1 element string.
+  value      String  @db.VarChar(64)
+  /// True when the code carries AI(10)/AI(17) so a scan supplies batch and
+  /// expiry and the pharmacist never types them.
+  carriesBatchExpiry Boolean @default(false) @map("carries_batch_expiry")
+  isPrimary  Boolean @default(false) @map("is_primary")
+  active     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  item InvItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, value])
+  @@index([hospitalId, itemId, active])
+  @@map("item_barcodes")
+  @@schema("inventory")
+}
+
+/// Generic ↔ brand, and the substitution policy between them.
+///
+/// `phase-04 §4.4`: "generic substitution under policy with prescriber approval
+/// when required". The policy is data: `requires_prescriber_approval` is what
+/// `pharmacy.substitution_requests` reads, and `is_preferred` is what the
+/// dispensing screen sorts by.
+model InvItemSubstitute {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  substituteItemId String @map("substitute_item_id") @db.Uuid
+  /// therapeutic = same molecule; brand = same molecule different brand;
+  /// class = same class, different molecule (never auto-substitutable).
+  kind          String  @default("brand") @db.VarChar(24)
+  isPreferred   Boolean @default(false) @map("is_preferred")
+  /// False only for a like-for-like brand swap the hospital has pre-approved.
+  requiresPrescriberApproval Boolean @default(true) @map("requires_prescriber_approval")
+  /// Base units of the substitute equivalent to one base unit of the item.
+  equivalenceFactor Decimal @default(1) @map("equivalence_factor") @db.Decimal(20, 8)
+  note          String? @db.Text
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([itemId, substituteItemId])
+  @@index([hospitalId, itemId, active])
+  @@map("item_substitutes")
+  @@schema("inventory")
+}
+
+/// The selling price of an item, effective-dated.
+///
+/// `phase-04 §Constraints`: "price changes are effective-dated, never
+/// retroactive." Three things carry that:
+///   • an EXCLUDE constraint so two rows cannot cover the same day;
+///   • `inventory.refuse_retroactive_price()`, which rejects an INSERT whose
+///     `effective_from` is in the past and any UPDATE to a period that has
+///     started — a price is superseded by a new row, not edited;
+///   • every document snapshots the price it charged, so a later notification
+///     cannot restate a bill that was already printed.
+///
+/// MRP lives on the *batch*, not here: it is printed on the pack and differs
+/// between two batches of the same item on the same shelf.
+model InvItemPrice {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  /// Null = the hospital-wide price. A branch row overrides it.
+  branchId      String? @map("branch_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  /// Which price this is. `sale` is the counter price; `procurement_estimate`
+  /// is what the indent screen values a request at.
+  priceKind     String  @default("sale") @map("price_kind") @db.VarChar(24)
+  /// Price per BASE unit. Not per pack — a pack price divided by a factor that
+  /// later changes is a different number.
+  unitPrice     Decimal @map("unit_price") @db.Decimal(14, 2)
+  currency      String  @default("INR") @db.Char(3)
+  /// Discount ceiling for this item, as a percentage. The billing module treats
+  /// it as a hard bound, not a default.
+  maxDiscountPct Decimal @default(0) @map("max_discount_pct") @db.Decimal(5, 2)
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  reason        String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  item InvItem @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, itemId, priceKind, effectiveFrom])
+  @@index([hospitalId, branchId, itemId])
+  @@map("item_prices")
+  @@schema("inventory")
+}
+
+/// Which expense head an item's consumption posts to (NC-008 §4). Item-level
+/// beats category-level; the category default is on `mdm_item_categories`.
+model InvItemExpenseHead {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  itemId        String? @map("item_id") @db.Uuid
+  categoryId    String? @map("category_id") @db.Uuid
+  expenseHead   String  @map("expense_head") @db.VarChar(48)
+  /// → `finance.cost_centres` GL mapping is on the cost centre; this is the
+  /// account the expense hits, resolved at posting time in Phase 9.
+  glAccountCode String? @map("gl_account_code") @db.VarChar(32)
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, itemId])
+  @@index([hospitalId, categoryId])
+  @@map("item_expense_heads")
+  @@schema("inventory")
+}

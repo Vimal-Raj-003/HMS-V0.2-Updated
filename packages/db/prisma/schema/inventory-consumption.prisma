@@ -1,0 +1,332 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-008 §4 — consumption and cost centres
+//   `finance.cost_centres`, `finance.cost_centre_mappings`
+//   `inventory.cons_*`
+//
+// **Why `finance` exists now.** NC-008 §4 puts cost centres in schema `finance`
+// and Phase 9 owns the rest of that schema (GL, AP, AR). Creating the schema
+// with three tables here rather than duplicating cost centres in `inventory` is
+// the cheaper mistake: a cost centre is referenced by stores, departments,
+// consumption, budgets and eventually every journal, and two tables both called
+// "the cost centre" is the kind of fork `docs/03 §Shared platform-owned tables`
+// exists to prevent.
+//
+// **Consumption is reversible, never editable.** `cons_entries.status` moves
+// posted → reversed and a reversal is its own entry naming the original. The
+// ledger rows it wrote stay; the compensating ones are new. Same rule as the
+// ledger itself, for the same reason: the gauze was opened or it was not.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum FinCostCentreType {
+  revenue
+  service
+  overhead
+
+  @@schema("finance")
+}
+
+enum FinAllocationBasis {
+  none
+  bed_days
+  sqft
+  headcount
+  tests
+  weight_kg
+  patient_days
+  manual
+
+  @@schema("finance")
+}
+
+enum ConsEntryType {
+  patient
+  department_general
+  /// Derived from a billed service through a bill of materials, rather than
+  /// scanned at the point of use.
+  derived
+  kit
+  bom_on_billing
+  return
+
+  @@schema("inventory")
+}
+
+enum ConsEntryStatus {
+  posted
+  reversed
+
+  @@schema("inventory")
+}
+
+enum ConsBillingStatus {
+  pending
+  billed
+  included_in_package
+  non_payable
+  not_billable
+  reversed
+
+  @@schema("inventory")
+}
+
+model FinCostCentre {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(200)
+  parentId      String? @map("parent_id") @db.Uuid
+  centreType    FinCostCentreType @map("centre_type")
+  departmentKey String? @map("department_key") @db.Uuid
+  ownerUserId   String? @map("owner_user_id") @db.Uuid
+  /// expense head → GL account. Read by Phase 9; carried here so a Phase-4
+  /// consumption posting already knows where it will land.
+  glExpenseMap  Json    @default("{}") @map("gl_expense_map")
+  allocationBasis FinAllocationBasis @default(none) @map("allocation_basis")
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int      @default(0)
+
+  parent   FinCostCentre?  @relation("FinCostCentreTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children FinCostCentre[] @relation("FinCostCentreTree")
+  mappings FinCostCentreMapping[]
+
+  @@unique([hospitalId, code])
+  @@index([hospitalId, branchId, active])
+  @@index([hospitalId, parentId])
+  @@map("cost_centres")
+  @@schema("finance")
+}
+
+/// Which cost centre an entity belongs to, effective-dated. A store moves
+/// between cost centres at a reorganisation and last year's consumption must
+/// still report against last year's centre.
+model FinCostCentreMapping {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  costCentreId  String  @map("cost_centre_id") @db.Uuid
+  /// store | department | ward | ot | machine | employee | service
+  entityType    String  @map("entity_type") @db.VarChar(24)
+  entityId      String  @map("entity_id") @db.Uuid
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  costCentre FinCostCentre @relation(fields: [costCentreId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, entityType, entityId, effectiveFrom])
+  @@index([hospitalId, costCentreId])
+  @@map("cost_centre_mappings")
+  @@schema("finance")
+}
+
+model ConsEntry {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  entryNo       String  @map("entry_no") @db.VarChar(48)
+  storeId       String  @map("store_id") @db.Uuid
+  costCentreId  String? @map("cost_centre_id") @db.Uuid
+  departmentKey String? @map("department_key") @db.Uuid
+  entryType     ConsEntryType @map("entry_type")
+  patientId     String? @map("patient_id") @db.Uuid
+  encounterId   String? @map("encounter_id") @db.Uuid
+  caseRefType   String? @map("case_ref_type") @db.VarChar(24)
+  caseRefId     String? @map("case_ref_id") @db.Uuid
+  performedBy   String? @map("performed_by") @db.Uuid
+  recordedBy    String? @map("recorded_by") @db.Uuid
+  recordedAt    DateTime @map("recorded_at") @db.Timestamptz(6)
+  source        String  @default("manual_scan") @db.VarChar(24)
+  status        ConsEntryStatus @default(posted)
+  reversalOf    String? @map("reversal_of") @db.Uuid
+  reversalReason String? @map("reversal_reason") @db.Text
+  totalValue    Decimal? @map("total_value") @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines ConsEntryLine[]
+
+  @@unique([hospitalId, entryNo])
+  @@index([hospitalId, costCentreId, recordedAt])
+  @@index([hospitalId, patientId, encounterId])
+  @@index([hospitalId, storeId, recordedAt])
+  @@index([hospitalId, status, recordedAt])
+  @@map("cons_entries")
+  @@schema("inventory")
+}
+
+model ConsEntryLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  entryId       String  @map("entry_id") @db.Uuid
+  lineNo        Int     @map("line_no")
+  itemId        String  @map("item_id") @db.Uuid
+  batchId       String? @map("batch_id") @db.Uuid
+  serialId      String? @map("serial_id") @db.Uuid
+  uomId         String  @map("uom_id") @db.Uuid
+  qtyEntered    Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase       Decimal @map("qty_base") @db.Decimal(18, 4)
+  unitCost      Decimal? @map("unit_cost") @db.Decimal(14, 4)
+  value         Decimal? @db.Decimal(14, 2)
+  isBillable    Boolean @default(false) @map("is_billable")
+  billingStatus ConsBillingStatus @default(pending) @map("billing_status")
+  chargeIntentId String? @map("charge_intent_id") @db.Uuid
+  tariffSnapshot Json?  @map("tariff_snapshot")
+  kitId         String? @map("kit_id") @db.Uuid
+  ledgerId      String? @map("ledger_id") @db.Uuid
+  expenseHead   String? @map("expense_head") @db.VarChar(48)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  entry ConsEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
+
+  @@unique([entryId, lineNo])
+  @@index([hospitalId, entryId])
+  @@index([hospitalId, itemId, batchId])
+  @@index([hospitalId, billingStatus])
+  @@map("cons_entry_lines")
+  @@schema("inventory")
+}
+
+/// A named bundle consumed as one act — a dressing tray, a cannulation set.
+model ConsKit {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  code        String  @db.VarChar(32)
+  name        String  @db.VarChar(200)
+  serviceKey  String? @map("service_key") @db.Uuid
+  storeScope  String[] @default([]) @map("store_scope") @db.Uuid
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  lines ConsKitLine[]
+
+  @@unique([hospitalId, code])
+  @@index([hospitalId, active])
+  @@map("cons_kits")
+  @@schema("inventory")
+}
+
+model ConsKitLine {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  kitId       String  @map("kit_id") @db.Uuid
+  itemId      String  @map("item_id") @db.Uuid
+  uomId       String  @map("uom_id") @db.Uuid
+  qtyEntered  Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase     Decimal @map("qty_base") @db.Decimal(18, 4)
+  isOptional  Boolean @default(false) @map("is_optional")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  kit ConsKit @relation(fields: [kitId], references: [id], onDelete: Restrict)
+
+  @@unique([kitId, itemId])
+  @@index([hospitalId, kitId])
+  @@map("cons_kit_lines")
+  @@schema("inventory")
+}
+
+/// Bill of materials for a billable service — what gets auto-deducted when the
+/// service is billed (`phase-04 §4.6`, "auto-deduction on billing").
+model ConsServiceBom {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  serviceKey  String  @map("service_key") @db.Uuid
+  itemId      String  @map("item_id") @db.Uuid
+  uomId       String  @map("uom_id") @db.Uuid
+  qtyEntered  Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase     Decimal @map("qty_base") @db.Decimal(18, 4)
+  /// The store the deduction comes out of. Null = the performing department's.
+  storeId     String? @map("store_id") @db.Uuid
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  effectiveTo DateTime? @map("effective_to") @db.Date
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, serviceKey, effectiveFrom])
+  @@index([hospitalId, itemId])
+  @@map("cons_service_boms")
+  @@schema("inventory")
+}
+
+/// A mirror of the NC-022 budget line, kept here so a variance alert can fire
+/// in Phase 4 without waiting for Phase 9. Phase 9 replaces the source, not the
+/// shape.
+model ConsBudget {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  costCentreId  String  @map("cost_centre_id") @db.Uuid
+  period        String  @db.VarChar(10)
+  expenseHead   String  @map("expense_head") @db.VarChar(48)
+  budgetValue   Decimal @map("budget_value") @db.Decimal(14, 2)
+  revisedValue  Decimal? @map("revised_value") @db.Decimal(14, 2)
+  /// Percentage of budget at which the alert fires. 0 disables it.
+  alertThresholdPct Decimal @default(90) @map("alert_threshold_pct") @db.Decimal(5, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@unique([hospitalId, costCentreId, period, expenseHead])
+  @@index([hospitalId, period])
+  @@map("cons_budgets")
+  @@schema("inventory")
+}
+
+model ConsVarianceAlert {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  costCentreId  String  @map("cost_centre_id") @db.Uuid
+  period        String  @db.VarChar(10)
+  expenseHead   String  @map("expense_head") @db.VarChar(48)
+  actualValue   Decimal @map("actual_value") @db.Decimal(14, 2)
+  budgetValue   Decimal @map("budget_value") @db.Decimal(14, 2)
+  deviationPct  Decimal @map("deviation_pct") @db.Decimal(7, 2)
+  thresholdPct  Decimal @map("threshold_pct") @db.Decimal(5, 2)
+  status        String  @default("open") @db.VarChar(24)
+  explanation   String? @db.Text
+  explainedBy   String? @map("explained_by") @db.Uuid
+  explainedAt   DateTime? @map("explained_at") @db.Timestamptz(6)
+  raisedAt      DateTime @map("raised_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, costCentreId, period])
+  @@index([hospitalId, status, raisedAt])
+  @@map("cons_variance_alerts")
+  @@schema("inventory")
+}

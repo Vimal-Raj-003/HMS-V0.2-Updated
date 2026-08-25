@@ -1,0 +1,515 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-007 §4 — consignment and implants (schema `inventory`, prefix `csn_`)
+//
+// Consignment stock is on our shelf and on the vendor's books. Getting that
+// wrong in either direction is expensive: valuing it as ours overstates the
+// balance sheet by the price of an orthopaedic set, and failing to record its
+// use means the vendor invoices for an implant nobody can find a patient for.
+//
+// So the separation is structural, not a flag on a report:
+//
+//   • `item_batches.is_consignment` and `stock_balances.is_consignment` mark it
+//     everywhere it appears, and the valuation job excludes it by that column.
+//   • Usage is the *billable event* and the *purchase trigger* at once. One
+//     `csn_usages` row names the patient, the surgeon, the serial and the
+//     agreement price, and it is what raises the auto-PO. `phase-04` exit gate 7
+//     is exactly that chain.
+//   • A usage is never deleted. A mistaken scan is reversed by a row that names
+//     what it reverses — the implant was in the patient or it was not, and an
+//     UPDATE that makes it never have happened is not a correction.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum CsnAgreementStatus {
+  draft
+  pending_approval
+  active
+  expiring
+  expired
+  terminated
+
+  @@schema("inventory")
+}
+
+enum CsnInvoicingCycle {
+  per_usage
+  weekly
+  fortnightly
+  monthly
+
+  @@schema("inventory")
+}
+
+enum CsnUsageStatus {
+  used
+  wasted
+  reversed
+
+  @@schema("inventory")
+}
+
+enum CsnLiability {
+  hospital
+  vendor
+  pending
+
+  @@schema("inventory")
+}
+
+enum CsnReconStatus {
+  draft
+  matching
+  disputed
+  agreed
+  signed
+
+  @@schema("inventory")
+}
+
+model CsnAgreement {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  vendorId      String  @map("vendor_id") @db.Uuid
+  agreementNo   String  @map("agreement_no") @db.VarChar(48)
+  startDate     DateTime @map("start_date") @db.Date
+  endDate       DateTime @map("end_date") @db.Date
+  invoicingCycle CsnInvoicingCycle @default(per_usage) @map("invoicing_cycle")
+  paymentTermsDays Int  @default(45) @map("payment_terms_days")
+  /// How many days before expiry the return-to-vendor is raised automatically.
+  expiryReturnDaysBefore Int @default(90) @map("expiry_return_days_before")
+  /// Who pays for a wasted implant. `case_by_case` forces the liability field
+  /// on the usage to be decided rather than defaulted.
+  wastagePolicy String  @default("case_by_case") @map("wastage_policy") @db.VarChar(24)
+  lossPolicy    String  @default("case_by_case") @map("loss_policy") @db.VarChar(24)
+  replenishmentSlaDays Int @default(3) @map("replenishment_sla_days")
+  storageLocationIds String[] @default([]) @map("storage_location_ids") @db.Uuid
+  vendorReps    Json    @default("[]") @map("vendor_reps")
+  documentFileId String? @map("document_file_id") @db.Uuid
+  status        CsnAgreementStatus @default(draft)
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  items    CsnAgreementItem[]
+  receipts CsnReceipt[]
+
+  @@unique([hospitalId, agreementNo])
+  @@index([hospitalId, vendorId, status])
+  @@index([hospitalId, endDate])
+  @@map("csn_agreements")
+  @@schema("inventory")
+}
+
+/// The agreed price for one item, effective-dated inside the agreement.
+/// The usage snapshots the price it found here, because a monthly
+/// reconciliation statement is compared against what was agreed on the day of
+/// surgery, not what is agreed now.
+model CsnAgreementItem {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  agreementId   String  @map("agreement_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  vendorItemCode String? @map("vendor_item_code") @db.VarChar(64)
+  udiDi         String? @map("udi_di") @db.VarChar(32)
+  gtin          String? @db.VarChar(20)
+  vendorPrice   Decimal @map("vendor_price") @db.Decimal(14, 2)
+  currency      String  @default("INR") @db.Char(3)
+  mrp           Decimal? @db.Decimal(14, 2)
+  gstRate       Decimal @default(0) @map("gst_rate") @db.Decimal(5, 2)
+  minStockBase  Decimal @default(0) @map("min_stock_base") @db.Decimal(18, 4)
+  kitTemplateId String? @map("kit_template_id") @db.Uuid
+  replacementPolicy String? @map("replacement_policy") @db.VarChar(48)
+  priceValidFrom DateTime @map("price_valid_from") @db.Date
+  priceValidTo  DateTime? @map("price_valid_to") @db.Date
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  agreement CsnAgreement @relation(fields: [agreementId], references: [id], onDelete: Restrict)
+
+  @@unique([agreementId, itemId, priceValidFrom])
+  @@index([hospitalId, itemId, priceValidFrom])
+  @@map("csn_agreement_items")
+  @@schema("inventory")
+}
+
+/// A named set ("PFN A2 set") the vendor leaves in the OT.
+model CsnKitTemplate {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  vendorId    String  @map("vendor_id") @db.Uuid
+  name        String  @db.VarChar(200)
+  speciality  String? @db.VarChar(96)
+  lines       Json    @default("[]")
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  kits CsnKit[]
+
+  @@index([hospitalId, vendorId, active])
+  @@map("csn_kit_templates")
+  @@schema("inventory")
+}
+
+/// A physical set, with where it is. `loaner_in` is the one that catches people
+/// out: a set brought in for one case and taken away again is still stock we
+/// are accountable for while it is here.
+model CsnKit {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  kitTemplateId String? @map("kit_template_id") @db.Uuid
+  vendorId      String  @map("vendor_id") @db.Uuid
+  kitCode       String  @map("kit_code") @db.VarChar(48)
+  locationId    String? @map("location_id") @db.Uuid
+  status        String  @default("in_hospital") @db.VarChar(24)
+  lastCountAt   DateTime? @map("last_count_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  template CsnKitTemplate? @relation(fields: [kitTemplateId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, kitCode])
+  @@index([hospitalId, vendorId, status])
+  @@map("csn_kits")
+  @@schema("inventory")
+}
+
+model CsnReceipt {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  receiptNo   String  @map("receipt_no") @db.VarChar(48)
+  agreementId String  @map("agreement_id") @db.Uuid
+  vendorId    String  @map("vendor_id") @db.Uuid
+  storeId     String  @map("store_id") @db.Uuid
+  challanNo   String? @map("challan_no") @db.VarChar(64)
+  challanDate DateTime? @map("challan_date") @db.Date
+  kitId       String? @map("kit_id") @db.Uuid
+  receivedBy  String? @map("received_by") @db.Uuid
+  receivedAt  DateTime @map("received_at") @db.Timestamptz(6)
+  status      String  @default("draft") @db.VarChar(24)
+  portalAckAt DateTime? @map("portal_ack_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  agreement CsnAgreement @relation(fields: [agreementId], references: [id], onDelete: Restrict)
+  lines     CsnReceiptLine[]
+
+  @@unique([hospitalId, receiptNo])
+  @@index([hospitalId, vendorId, receivedAt])
+  @@index([hospitalId, storeId, status])
+  @@map("csn_receipts")
+  @@schema("inventory")
+}
+
+model CsnReceiptLine {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  receiptId   String  @map("receipt_id") @db.Uuid
+  lineNo      Int     @map("line_no")
+  itemId      String  @map("item_id") @db.Uuid
+  batchId     String? @map("batch_id") @db.Uuid
+  serialId    String? @map("serial_id") @db.Uuid
+  gtin        String? @db.VarChar(20)
+  lotNo       String? @map("lot_no") @db.VarChar(64)
+  expiryDate  DateTime? @map("expiry_date") @db.Date
+  uomId       String  @map("uom_id") @db.Uuid
+  qtyEntered  Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase     Decimal @map("qty_base") @db.Decimal(18, 4)
+  vendorPriceSnapshot Decimal @map("vendor_price_snapshot") @db.Decimal(14, 2)
+  sterile     Boolean @default(true)
+  condition   String  @default("good") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  receipt CsnReceipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+
+  @@unique([receiptId, lineNo])
+  @@index([hospitalId, receiptId])
+  @@index([hospitalId, itemId, batchId])
+  @@map("csn_receipt_lines")
+  @@schema("inventory")
+}
+
+/// The implant went in. The busiest row in this module and the one everything
+/// else hangs off — billing, the auto-PO, the vendor statement, and TR-003's
+/// patient-implant register.
+model CsnUsage {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  usageNo       String  @map("usage_no") @db.VarChar(48)
+  agreementId   String  @map("agreement_id") @db.Uuid
+  vendorId      String  @map("vendor_id") @db.Uuid
+  storeId       String  @map("store_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  batchId       String? @map("batch_id") @db.Uuid
+  serialId      String? @map("serial_id") @db.Uuid
+  uomId         String  @map("uom_id") @db.Uuid
+  qtyEntered    Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase       Decimal @map("qty_base") @db.Decimal(18, 4)
+  patientId     String? @map("patient_id") @db.Uuid
+  encounterId   String? @map("encounter_id") @db.Uuid
+  procedureRefType String? @map("procedure_ref_type") @db.VarChar(24)
+  procedureRefId String? @map("procedure_ref_id") @db.Uuid
+  surgeonUserId String? @map("surgeon_user_id") @db.Uuid
+  scannedBy     String? @map("scanned_by") @db.Uuid
+  scannedAt     DateTime @map("scanned_at") @db.Timestamptz(6)
+  /// Laterality and site, because an implant register that cannot say which
+  /// knee is not a register.
+  side          String? @db.VarChar(16)
+  site          String? @db.VarChar(96)
+  status        CsnUsageStatus @default(used)
+  wasteReason   String? @map("waste_reason") @db.Text
+  wasteLiability CsnLiability @default(pending) @map("waste_liability")
+  /// → TR-003 patient-implant register (Phase 6). Null until that module exists.
+  implantUsageRef String? @map("implant_usage_ref") @db.Uuid
+  chargeIntentId String? @map("charge_intent_id") @db.Uuid
+  billedAmount  Decimal? @map("billed_amount") @db.Decimal(14, 2)
+  vendorPriceSnapshot Decimal @map("vendor_price_snapshot") @db.Decimal(14, 2)
+  payerCapApplied Decimal? @map("payer_cap_applied") @db.Decimal(14, 2)
+  autoPoId      String? @map("auto_po_id") @db.Uuid
+  autoPoLineId  String? @map("auto_po_line_id") @db.Uuid
+  autoGrnId     String? @map("auto_grn_id") @db.Uuid
+  stickerFileId String? @map("sticker_file_id") @db.Uuid
+  manualEntry   Boolean @default(false) @map("manual_entry")
+  approvedBy    String? @map("approved_by") @db.Uuid
+  /// A reversal names what it reverses and why. Both together or neither — a
+  /// CHECK, so a reversal cannot be a status change with no explanation.
+  reversalOf    String? @map("reversal_of") @db.Uuid
+  reversedReason String? @map("reversed_reason") @db.Text
+  ledgerId      String? @map("ledger_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@unique([hospitalId, usageNo])
+  @@index([hospitalId, vendorId, scannedAt])
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, batchId])
+  @@index([hospitalId, autoPoId])
+  @@index([hospitalId, status, scannedAt])
+  @@map("csn_usages")
+  @@schema("inventory")
+}
+
+/// The batch of usages one auto-PO covers, per the agreement's invoicing cycle.
+model CsnAutoPoBatch {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  vendorId    String  @map("vendor_id") @db.Uuid
+  agreementId String  @map("agreement_id") @db.Uuid
+  cyclePeriod String  @map("cycle_period") @db.VarChar(16)
+  poId        String? @map("po_id") @db.Uuid
+  grnId       String? @map("grn_id") @db.Uuid
+  linesCount  Int     @default(0) @map("lines_count")
+  value       Decimal @default(0) @db.Decimal(14, 2)
+  status      String  @default("open") @db.VarChar(24)
+  closedAt    DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, vendorId, agreementId, cyclePeriod])
+  @@index([hospitalId, status])
+  @@map("csn_auto_po_batches")
+  @@schema("inventory")
+}
+
+model CsnReturn {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  returnNo      String  @map("return_no") @db.VarChar(48)
+  vendorId      String  @map("vendor_id") @db.Uuid
+  agreementId   String? @map("agreement_id") @db.Uuid
+  storeId       String  @map("store_id") @db.Uuid
+  reason        String  @db.VarChar(32)
+  status        String  @default("proposed") @db.VarChar(24)
+  autoGenerated Boolean @default(false) @map("auto_generated")
+  dispatchedAt  DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  vendorAckAt   DateTime? @map("vendor_ack_at") @db.Timestamptz(6)
+  replacementReceiptId String? @map("replacement_receipt_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines CsnReturnLine[]
+
+  @@unique([hospitalId, returnNo])
+  @@index([hospitalId, vendorId, status])
+  @@map("csn_returns")
+  @@schema("inventory")
+}
+
+model CsnReturnLine {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  returnId    String  @map("return_id") @db.Uuid
+  lineNo      Int     @map("line_no")
+  itemId      String  @map("item_id") @db.Uuid
+  batchId     String? @map("batch_id") @db.Uuid
+  serialId    String? @map("serial_id") @db.Uuid
+  uomId       String  @map("uom_id") @db.Uuid
+  qtyEntered  Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase     Decimal @map("qty_base") @db.Decimal(18, 4)
+  expiryDate  DateTime? @map("expiry_date") @db.Date
+  value       Decimal? @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  ret CsnReturn @relation(fields: [returnId], references: [id], onDelete: Restrict)
+
+  @@unique([returnId, lineNo])
+  @@index([hospitalId, returnId])
+  @@map("csn_return_lines")
+  @@schema("inventory")
+}
+
+/// The monthly statement, ours beside theirs. `phase-04` exit gate 7 ends here.
+model CsnReconciliation {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  vendorId      String  @map("vendor_id") @db.Uuid
+  agreementId   String? @map("agreement_id") @db.Uuid
+  period        String  @db.VarChar(10)
+  /// opening / receipts / usage / wastage / returns / closing, as we compute it.
+  systemStatement Json  @map("system_statement")
+  vendorStatement Json? @map("vendor_statement")
+  vendorStatementFileId String? @map("vendor_statement_file_id") @db.Uuid
+  status        CsnReconStatus @default(draft)
+  differenceValue Decimal? @map("difference_value") @db.Decimal(14, 2)
+  hospitalSignedBy String? @map("hospital_signed_by") @db.Uuid
+  hospitalSignedAt DateTime? @map("hospital_signed_at") @db.Timestamptz(6)
+  vendorSignedBy String? @map("vendor_signed_by") @db.VarChar(200)
+  vendorSignedAt DateTime? @map("vendor_signed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines CsnReconciliationLine[]
+
+  @@unique([hospitalId, vendorId, period])
+  @@index([hospitalId, status, period])
+  @@map("csn_reconciliations")
+  @@schema("inventory")
+}
+
+model CsnReconciliationLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  reconciliationId String @map("reconciliation_id") @db.Uuid
+  itemId        String? @map("item_id") @db.Uuid
+  batchId       String? @map("batch_id") @db.Uuid
+  serialNo      String? @map("serial_no") @db.VarChar(96)
+  /// both | hospital_only | vendor_only — where the line came from, which is
+  /// the first thing a disputed statement needs to say.
+  source        String  @default("both") @db.VarChar(16)
+  systemQtyBase Decimal @default(0) @map("system_qty_base") @db.Decimal(18, 4)
+  vendorQty     Decimal @default(0) @map("vendor_qty") @db.Decimal(18, 4)
+  systemPrice   Decimal? @map("system_price") @db.Decimal(14, 2)
+  vendorPrice   Decimal? @map("vendor_price") @db.Decimal(14, 2)
+  difference    Decimal @default(0) @db.Decimal(14, 2)
+  resolution    String  @default("pending") @db.VarChar(32)
+  resolvedBy    String? @map("resolved_by") @db.Uuid
+  resolvedAt    DateTime? @map("resolved_at") @db.Timestamptz(6)
+  notes         String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  reconciliation CsnReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, reconciliationId, resolution])
+  @@map("csn_reconciliation_lines")
+  @@schema("inventory")
+}
+
+/// A physical count of consignment stock, usually with the vendor's rep present.
+model CsnCount {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  vendorId    String? @map("vendor_id") @db.Uuid
+  storeId     String  @map("store_id") @db.Uuid
+  locationId  String? @map("location_id") @db.Uuid
+  scheduledAt DateTime @map("scheduled_at") @db.Timestamptz(6)
+  countedAt   DateTime? @map("counted_at") @db.Timestamptz(6)
+  status      String  @default("planned") @db.VarChar(24)
+  checklist   Json    @default("{}")
+  signedByHospital String? @map("signed_by_hospital") @db.Uuid
+  signedByVendor String? @map("signed_by_vendor") @db.VarChar(200)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  lines CsnCountLine[]
+
+  @@index([hospitalId, vendorId, scheduledAt])
+  @@map("csn_counts")
+  @@schema("inventory")
+}
+
+model CsnCountLine {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  countId     String  @map("count_id") @db.Uuid
+  itemId      String  @map("item_id") @db.Uuid
+  batchId     String? @map("batch_id") @db.Uuid
+  serialId    String? @map("serial_id") @db.Uuid
+  expectedQtyBase Decimal @map("expected_qty_base") @db.Decimal(18, 4)
+  countedQtyBase Decimal? @map("counted_qty_base") @db.Decimal(18, 4)
+  varianceQtyBase Decimal? @map("variance_qty_base") @db.Decimal(18, 4)
+  resolution  String  @default("pending") @db.VarChar(32)
+  notes       String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  count CsnCount @relation(fields: [countId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, countId])
+  @@map("csn_count_lines")
+  @@schema("inventory")
+}

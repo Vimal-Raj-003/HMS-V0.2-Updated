@@ -1,0 +1,874 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-005 §4 — purchase to pay (schema `inventory`, prefix `pur_`)
+//
+// indent → RFQ → quotation → comparative → PO → GRN → invoice → 3-way match.
+// `phase-04` exit gate 1 walks that whole chain and requires a quantity
+// mismatch to be *caught by the match and queued as an exception* rather than
+// argued about later. Three shapes make that possible:
+//
+//  • **The PO is versioned and its versions are immutable.** An amendment
+//    writes a new version and a `pur_po_amendments` row saying what moved and
+//    why; the vendor's copy of version 2 stays reproducible after version 3
+//    exists. `UNIQUE (hospital_id, po_no, version)` and a trigger that refuses
+//    to touch a superseded version carry it.
+//  • **The GRN records three quantities, not one** — received, accepted and
+//    rejected — because a partial receipt with a rejection is the ordinary
+//    case, not the exception, and a single `qty` column forces the truth into
+//    a remarks field.
+//  • **The match is a stored decision, not a query.** `pur_invoice_match_lines`
+//    holds the three-way comparison per line and `match_status` on the invoice
+//    is derived from them by trigger against the tolerances in `pur_settings`.
+//    An exception queue is then `WHERE match_status <> 'matched'`, which is one
+//    index, and the reason a line failed is a column rather than a recomputation
+//    that may disagree with what the buyer saw.
+//
+// Budget checking (NC-022) is a Phase-9 module; `budget_line_ref` is the hook
+// `phase-04 §4.3` asks to be left, and nothing in this phase reads it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PurUrgency {
+  routine
+  urgent
+  emergency
+
+  @@schema("inventory")
+}
+
+enum PurIndentStatus {
+  draft
+  submitted
+  pending_approval
+  approved
+  partially_approved
+  rejected
+  converted
+  fulfilled_from_stock
+  cancelled
+
+  @@schema("inventory")
+}
+
+enum PurIndentSource {
+  manual
+  auto_reorder
+  consignment
+  project
+  emergency
+
+  @@schema("inventory")
+}
+
+enum PurRfqStatus {
+  draft
+  sent
+  closed
+  awarded
+  cancelled
+
+  @@schema("inventory")
+}
+
+enum PurQuotationStatus {
+  received
+  revised
+  rejected
+  selected
+  expired
+
+  @@schema("inventory")
+}
+
+enum PurPoStatus {
+  draft
+  pending_approval
+  approved
+  sent
+  acknowledged
+  partially_received
+  received
+  short_closed
+  cancelled
+  amended
+
+  @@schema("inventory")
+}
+
+enum PurPoType {
+  standard
+  blanket
+  rate_contract
+  emergency
+  capital
+  consignment_replenishment
+  service
+
+  @@schema("inventory")
+}
+
+enum PurGrnStatus {
+  draft
+  qc_pending
+  accepted
+  partially_accepted
+  rejected
+  cancelled
+
+  @@schema("inventory")
+}
+
+enum PurRejectReason {
+  damaged
+  short_supply
+  near_expiry
+  wrong_item
+  quality_fail
+  excess
+  no_coa
+  temperature_breach
+  other
+
+  @@schema("inventory")
+}
+
+/// The 3-way match verdict. `pending` is not `matched`, and the exception queue
+/// is everything that is neither.
+enum PurMatchStatus {
+  pending
+  matched
+  qty_mismatch
+  price_mismatch
+  tax_mismatch
+  no_grn
+  duplicate
+  disputed
+  approved_for_payment
+  posted
+
+  @@schema("inventory")
+}
+
+/// A department asking to buy from outside.
+model PurIndent {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  indentNo      String  @map("indent_no") @db.VarChar(48)
+  storeId       String  @map("store_id") @db.Uuid
+  departmentKey String? @map("department_key") @db.Uuid
+  costCentreId  String? @map("cost_centre_id") @db.Uuid
+  /// NC-022 hook. Left deliberately un-enforced in Phase 4.
+  budgetLineRef String? @map("budget_line_ref") @db.VarChar(64)
+  urgency       PurUrgency @default(routine)
+  requiredBy    DateTime? @map("required_by") @db.Date
+  justification String? @db.Text
+  status        PurIndentStatus @default(draft)
+  source        PurIndentSource @default(manual)
+  approvalInstanceId String? @map("approval_instance_id") @db.Uuid
+  requestedBy   String? @map("requested_by") @db.Uuid
+  submittedAt   DateTime? @map("submitted_at") @db.Timestamptz(6)
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  rejectedReason String? @map("rejected_reason") @db.Text
+  estimatedValue Decimal? @map("estimated_value") @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines PurIndentLine[]
+
+  @@unique([hospitalId, indentNo])
+  @@index([hospitalId, branchId, status, createdAt])
+  @@index([hospitalId, storeId, status])
+  @@index([hospitalId, source, status])
+  @@map("pur_indents")
+  @@schema("inventory")
+}
+
+model PurIndentLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  indentId      String  @map("indent_id") @db.Uuid
+  lineNo        Int     @map("line_no")
+  itemId        String  @map("item_id") @db.Uuid
+  uomId         String  @map("uom_id") @db.Uuid
+  qtyEntered    Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase       Decimal @map("qty_base") @db.Decimal(18, 4)
+  qtyApprovedBase Decimal? @map("qty_approved_base") @db.Decimal(18, 4)
+  qtyOrderedBase Decimal @default(0) @map("qty_ordered_base") @db.Decimal(18, 4)
+  qtyReceivedBase Decimal @default(0) @map("qty_received_base") @db.Decimal(18, 4)
+  stockOnHandSnapshot Decimal? @map("stock_on_hand_snapshot") @db.Decimal(18, 4)
+  avgConsumptionSnapshot Decimal? @map("avg_consumption_snapshot") @db.Decimal(18, 4)
+  lastPrice     Decimal? @map("last_price") @db.Decimal(14, 2)
+  specs         String? @db.Text
+  status        String  @default("pending") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  indent PurIndent @relation(fields: [indentId], references: [id], onDelete: Restrict)
+
+  @@unique([indentId, lineNo])
+  @@index([hospitalId, indentId])
+  @@index([hospitalId, itemId, status])
+  @@map("pur_indent_lines")
+  @@schema("inventory")
+}
+
+model PurRfq {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  rfqNo       String  @map("rfq_no") @db.VarChar(48)
+  title       String  @db.VarChar(300)
+  dueAt       DateTime @map("due_at") @db.Timestamptz(6)
+  terms       Json    @default("{}")
+  /// A sealed RFQ hides quotations from the buyer until `due_at`. The migration
+  /// enforces it: `pur_quotations` rows for a sealed, un-elapsed RFQ are not
+  /// readable by `hms_app` at all.
+  sealed      Boolean @default(false)
+  twoEnvelope Boolean @default(false) @map("two_envelope")
+  status      PurRfqStatus @default(draft)
+  openedBy    String? @map("opened_by") @db.Uuid
+  openedAt    DateTime? @map("opened_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines      PurRfqLine[]
+  vendors    PurRfqVendor[]
+  quotations PurQuotation[]
+
+  @@unique([hospitalId, rfqNo])
+  @@index([hospitalId, branchId, status, dueAt])
+  @@map("pur_rfqs")
+  @@schema("inventory")
+}
+
+model PurRfqLine {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  rfqId       String  @map("rfq_id") @db.Uuid
+  lineNo      Int     @map("line_no")
+  itemId      String  @map("item_id") @db.Uuid
+  uomId       String  @map("uom_id") @db.Uuid
+  qtyEntered  Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase     Decimal @map("qty_base") @db.Decimal(18, 4)
+  specs       String? @db.Text
+  indentLineIds String[] @default([]) @map("indent_line_ids") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  rfq PurRfq @relation(fields: [rfqId], references: [id], onDelete: Restrict)
+
+  @@unique([rfqId, lineNo])
+  @@index([hospitalId, rfqId])
+  @@map("pur_rfq_lines")
+  @@schema("inventory")
+}
+
+model PurRfqVendor {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  rfqId       String  @map("rfq_id") @db.Uuid
+  vendorId    String  @map("vendor_id") @db.Uuid
+  channel     String  @default("email") @db.VarChar(24)
+  sentAt      DateTime? @map("sent_at") @db.Timestamptz(6)
+  viewedAt    DateTime? @map("viewed_at") @db.Timestamptz(6)
+  respondedAt DateTime? @map("responded_at") @db.Timestamptz(6)
+  declinedReason String? @map("declined_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  rfq PurRfq @relation(fields: [rfqId], references: [id], onDelete: Restrict)
+
+  @@unique([rfqId, vendorId])
+  @@index([hospitalId, vendorId])
+  @@map("pur_rfq_vendors")
+  @@schema("inventory")
+}
+
+model PurQuotation {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  rfqId         String  @map("rfq_id") @db.Uuid
+  vendorId      String  @map("vendor_id") @db.Uuid
+  quoteNo       String  @map("quote_no") @db.VarChar(64)
+  quoteDate     DateTime @map("quote_date") @db.Date
+  validTill     DateTime? @map("valid_till") @db.Date
+  currency      String  @default("INR") @db.Char(3)
+  exchangeRate  Decimal? @map("exchange_rate") @db.Decimal(14, 6)
+  deliveryDays  Int?    @map("delivery_days")
+  paymentTerms  String? @map("payment_terms") @db.VarChar(200)
+  freight       Decimal @default(0) @db.Decimal(14, 2)
+  warrantyMonths Int?   @map("warranty_months")
+  remarks       String? @db.Text
+  attachments   Json    @default("[]")
+  status        PurQuotationStatus @default(received)
+  quotationVersion Int  @default(1) @map("quotation_version")
+  source        String  @default("manual") @db.VarChar(16)
+  enteredBy     String? @map("entered_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  rfq   PurRfq @relation(fields: [rfqId], references: [id], onDelete: Restrict)
+  lines PurQuotationLine[]
+
+  @@unique([rfqId, vendorId, quotationVersion])
+  @@index([hospitalId, rfqId, status])
+  @@index([hospitalId, vendorId])
+  @@map("pur_quotations")
+  @@schema("inventory")
+}
+
+model PurQuotationLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  quotationId   String  @map("quotation_id") @db.Uuid
+  rfqLineId     String  @map("rfq_line_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  brand         String? @db.VarChar(200)
+  uomId         String  @map("uom_id") @db.Uuid
+  unitPrice     Decimal @map("unit_price") @db.Decimal(14, 2)
+  discountPct   Decimal @default(0) @map("discount_pct") @db.Decimal(5, 2)
+  gstRate       Decimal @default(0) @map("gst_rate") @db.Decimal(5, 2)
+  moq           Decimal? @db.Decimal(18, 4)
+  freeQty       Decimal @default(0) @map("free_qty") @db.Decimal(18, 4)
+  /// Price + freight + duty, per BASE unit — the only number two quotations in
+  /// different pack sizes can honestly be compared on.
+  landedUnitCostBase Decimal? @map("landed_unit_cost_base") @db.Decimal(14, 4)
+  techScore     Decimal? @map("tech_score") @db.Decimal(5, 2)
+  isL1          Boolean @default(false) @map("is_l1")
+  selected      Boolean @default(false)
+  /// Mandatory when `selected` is true and `is_l1` is false — a CHECK, because
+  /// "why did we not take the lowest quote" is the first question an auditor
+  /// asks and it must not depend on somebody remembering to type it.
+  selectionJustification String? @map("selection_justification") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  quotation PurQuotation @relation(fields: [quotationId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, quotationId])
+  @@index([hospitalId, rfqLineId, landedUnitCostBase])
+  @@map("pur_quotation_lines")
+  @@schema("inventory")
+}
+
+/// The comparative statement, snapshotted. Regenerating it later from live
+/// quotations would produce a different table than the one that was approved.
+model PurComparative {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  rfqId       String  @map("rfq_id") @db.Uuid
+  matrix      Json
+  scoringModel Json   @default("{}") @map("scoring_model")
+  generatedAt DateTime @map("generated_at") @db.Timestamptz(6)
+  generatedBy String? @map("generated_by") @db.Uuid
+  approvalInstanceId String? @map("approval_instance_id") @db.Uuid
+  approvedBy  String? @map("approved_by") @db.Uuid
+  approvedAt  DateTime? @map("approved_at") @db.Timestamptz(6)
+  status      String  @default("draft") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, rfqId, generatedAt])
+  @@map("pur_comparatives")
+  @@schema("inventory")
+}
+
+model PurPurchaseOrder {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  poNo          String  @map("po_no") @db.VarChar(48)
+  poVersion     Int     @default(1) @map("po_version")
+  /// True for the version currently in force. Exactly one per `po_no`; a
+  /// partial unique index enforces it.
+  isCurrent     Boolean @default(true) @map("is_current")
+  poType        PurPoType @default(standard) @map("po_type")
+  vendorId      String  @map("vendor_id") @db.Uuid
+  vendorGstin   String? @map("vendor_gstin") @db.VarChar(15)
+  billToGstin   String? @map("bill_to_gstin") @db.VarChar(15)
+  shipToStoreId String  @map("ship_to_store_id") @db.Uuid
+  currency      String  @default("INR") @db.Char(3)
+  exchangeRate  Decimal? @map("exchange_rate") @db.Decimal(14, 6)
+  subtotal      Decimal @default(0) @db.Decimal(14, 2)
+  discount      Decimal @default(0) @db.Decimal(14, 2)
+  taxable       Decimal @default(0) @db.Decimal(14, 2)
+  cgst          Decimal @default(0) @db.Decimal(14, 2)
+  sgst          Decimal @default(0) @db.Decimal(14, 2)
+  igst          Decimal @default(0) @db.Decimal(14, 2)
+  cess          Decimal @default(0) @db.Decimal(14, 2)
+  freight       Decimal @default(0) @db.Decimal(14, 2)
+  otherCharges  Decimal @default(0) @map("other_charges") @db.Decimal(14, 2)
+  total         Decimal @default(0) @db.Decimal(14, 2)
+  paymentTerms  String? @map("payment_terms") @db.VarChar(200)
+  deliveryTerms String? @map("delivery_terms") @db.VarChar(200)
+  expectedDelivery DateTime? @map("expected_delivery") @db.Date
+  /// Over-receipt allowance, as a percentage. The GRN check reads the line's
+  /// own tolerance first and falls back to this.
+  tolerancePct  Decimal @default(0) @map("tolerance_pct") @db.Decimal(5, 2)
+  rateContractId String? @map("rate_contract_id") @db.Uuid
+  rfqId         String? @map("rfq_id") @db.Uuid
+  indentIds     String[] @default([]) @map("indent_ids") @db.Uuid
+  budgetLineRef String? @map("budget_line_ref") @db.VarChar(64)
+  status        PurPoStatus @default(draft)
+  approvalInstanceId String? @map("approval_instance_id") @db.Uuid
+  approvedBy    String[] @default([]) @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  esignId       String? @map("esign_id") @db.Uuid
+  pdfFileId     String? @map("pdf_file_id") @db.Uuid
+  sentAt        DateTime? @map("sent_at") @db.Timestamptz(6)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  shortClosedReason String? @map("short_closed_reason") @db.Text
+  cancelReason  String? @map("cancel_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines      PurPoLine[]
+  amendments PurPoAmendment[]
+  grns       PurGrn[]
+
+  @@unique([hospitalId, poNo, poVersion])
+  @@index([hospitalId, branchId, status, createdAt])
+  @@index([hospitalId, vendorId, status])
+  @@index([hospitalId, shipToStoreId, status])
+  @@index([hospitalId, expectedDelivery, status])
+  @@map("pur_purchase_orders")
+  @@schema("inventory")
+}
+
+model PurPoLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  poId          String  @map("po_id") @db.Uuid
+  lineNo        Int     @map("line_no")
+  itemId        String  @map("item_id") @db.Uuid
+  description   String? @db.VarChar(300)
+  uomId         String  @map("uom_id") @db.Uuid
+  qtyEntered    Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase       Decimal @map("qty_base") @db.Decimal(18, 4)
+  /// Per the ENTERED UoM — that is what the vendor quoted and what the invoice
+  /// will show. `rate_per_base` is derived for comparison.
+  rate          Decimal @db.Decimal(14, 2)
+  ratePerBase   Decimal? @map("rate_per_base") @db.Decimal(14, 4)
+  discountPct   Decimal @default(0) @map("discount_pct") @db.Decimal(5, 2)
+  freeQtyBase   Decimal @default(0) @map("free_qty_base") @db.Decimal(18, 4)
+  hsnCode       String? @map("hsn_code") @db.VarChar(16)
+  /// Snapshotted from `mdm_gst_rates` at PO date. A later notification must not
+  /// restate a PO the vendor already acknowledged.
+  gstRate       Decimal @default(0) @map("gst_rate") @db.Decimal(5, 2)
+  taxable       Decimal @default(0) @db.Decimal(14, 2)
+  taxAmount     Decimal @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  lineTotal     Decimal @default(0) @map("line_total") @db.Decimal(14, 2)
+  deliverySchedule Json @default("[]") @map("delivery_schedule")
+  qtyReceivedBase Decimal @default(0) @map("qty_received_base") @db.Decimal(18, 4)
+  qtyRejectedBase Decimal @default(0) @map("qty_rejected_base") @db.Decimal(18, 4)
+  qtyInvoicedBase Decimal @default(0) @map("qty_invoiced_base") @db.Decimal(18, 4)
+  tolerancePct  Decimal? @map("tolerance_pct") @db.Decimal(5, 2)
+  warrantyMonths Int?   @map("warranty_months")
+  minShelfLifeDays Int? @map("min_shelf_life_days")
+  status        String  @default("open") @db.VarChar(24)
+  indentLineId  String? @map("indent_line_id") @db.Uuid
+  quotationLineId String? @map("quotation_line_id") @db.Uuid
+  rateContractLineId String? @map("rate_contract_line_id") @db.Uuid
+  assetCapital  Boolean @default(false) @map("asset_capital")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  po PurPurchaseOrder @relation(fields: [poId], references: [id], onDelete: Restrict)
+
+  @@unique([poId, lineNo])
+  @@index([hospitalId, poId])
+  @@index([hospitalId, itemId, status])
+  @@map("pur_po_lines")
+  @@schema("inventory")
+}
+
+model PurPoAmendment {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  poId        String  @map("po_id") @db.Uuid
+  poNo        String  @map("po_no") @db.VarChar(48)
+  fromVersion Int     @map("from_version")
+  toVersion   Int     @map("to_version")
+  changedFields Json  @map("changed_fields")
+  reason      String  @db.Text
+  requestedBy String? @map("requested_by") @db.Uuid
+  approvedBy  String? @map("approved_by") @db.Uuid
+  approvalInstanceId String? @map("approval_instance_id") @db.Uuid
+  amendedAt   DateTime @map("amended_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  po PurPurchaseOrder @relation(fields: [poId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, poNo, toVersion])
+  @@map("pur_po_amendments")
+  @@schema("inventory")
+}
+
+/// Goods receipt. The document where a batch and an expiry first enter the
+/// system, which is why so many of this phase's guarantees are checked here.
+model PurGrn {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  grnNo         String  @map("grn_no") @db.VarChar(48)
+  poId          String? @map("po_id") @db.Uuid
+  poVersion     Int?    @map("po_version")
+  vendorId      String  @map("vendor_id") @db.Uuid
+  storeId       String  @map("store_id") @db.Uuid
+  invoiceNo     String? @map("invoice_no") @db.VarChar(64)
+  invoiceDate   DateTime? @map("invoice_date") @db.Date
+  ewayBillNo    String? @map("eway_bill_no") @db.VarChar(24)
+  dcNo          String? @map("dc_no") @db.VarChar(64)
+  receivedAt    DateTime @map("received_at") @db.Timestamptz(6)
+  receivedBy    String? @map("received_by") @db.Uuid
+  /// Quality check is a distinct act by a distinct person from receipt.
+  /// `docs/04 §3` segregation: the receiver and the QC passer should differ,
+  /// and the SoD rule in the permission catalogue says so.
+  qcBy          String? @map("qc_by") @db.Uuid
+  qcAt          DateTime? @map("qc_at") @db.Timestamptz(6)
+  qcNotes       String? @map("qc_notes") @db.Text
+  status        PurGrnStatus @default(draft)
+  /// Freight, customs and insurance, apportioned onto line costs so the batch
+  /// cost is the landed one.
+  landedCostExtras Json @default("{}") @map("landed_cost_extras")
+  /// An emergency receipt with no PO. Legal, and it must be regularised —
+  /// `pur_emergency_purchases` carries the post-facto approval.
+  withoutPo     Boolean @default(false) @map("without_po")
+  emergencyPurchaseId String? @map("emergency_purchase_id") @db.Uuid
+  temperatureLogRef String? @map("temperature_log_ref") @db.VarChar(64)
+  attachments   Json    @default("[]")
+  remarks       String? @db.Text
+  postedAt      DateTime? @map("posted_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  po    PurPurchaseOrder? @relation(fields: [poId], references: [id], onDelete: Restrict)
+  lines PurGrnLine[]
+
+  @@unique([hospitalId, grnNo])
+  @@index([hospitalId, branchId, receivedAt])
+  @@index([hospitalId, poId])
+  @@index([hospitalId, vendorId, receivedAt])
+  @@index([hospitalId, storeId, status])
+  @@map("pur_grns")
+  @@schema("inventory")
+}
+
+model PurGrnLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  grnId         String  @map("grn_id") @db.Uuid
+  lineNo        Int     @map("line_no")
+  poLineId      String? @map("po_line_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  uomId         String  @map("uom_id") @db.Uuid
+  /// Three quantities, because a partial receipt with a rejection is ordinary.
+  /// `qty_received = qty_accepted + qty_rejected` is a CHECK.
+  qtyReceivedEntered Decimal @map("qty_received_entered") @db.Decimal(18, 4)
+  qtyReceivedBase Decimal @map("qty_received_base") @db.Decimal(18, 4)
+  qtyAcceptedBase Decimal @map("qty_accepted_base") @db.Decimal(18, 4)
+  qtyRejectedBase Decimal @default(0) @map("qty_rejected_base") @db.Decimal(18, 4)
+  freeQtyBase   Decimal @default(0) @map("free_qty_base") @db.Decimal(18, 4)
+  rejectReason  PurRejectReason? @map("reject_reason")
+  rejectNote    String? @map("reject_note") @db.Text
+  /// Batch identity, captured at receipt. `inventory.enforce_grn_batch()`
+  /// refuses a line with no batch or no expiry for an item whose tracking
+  /// demands one, and refuses an expiry that has already passed or that leaves
+  /// less shelf life than the item or the rate contract requires.
+  batchNo       String? @map("batch_no") @db.VarChar(64)
+  mfgDate       DateTime? @map("mfg_date") @db.Date
+  expiryDate    DateTime? @map("expiry_date") @db.Date
+  mrp           Decimal? @db.Decimal(14, 2)
+  batchId       String? @map("batch_id") @db.Uuid
+  unitCost      Decimal @map("unit_cost") @db.Decimal(14, 4)
+  landedUnitCost Decimal? @map("landed_unit_cost") @db.Decimal(14, 4)
+  hsnCode       String? @map("hsn_code") @db.VarChar(16)
+  gstRate       Decimal @default(0) @map("gst_rate") @db.Decimal(5, 2)
+  taxable       Decimal @default(0) @db.Decimal(14, 2)
+  taxAmount     Decimal @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  lineTotal     Decimal @default(0) @map("line_total") @db.Decimal(14, 2)
+  serials       Json    @default("[]")
+  udis          Json    @default("[]")
+  coaFileId     String? @map("coa_file_id") @db.Uuid
+  minShelfLifeOk Boolean @default(true) @map("min_shelf_life_ok")
+  quarantine    Boolean @default(false)
+  ledgerId      String? @map("ledger_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  grn PurGrn @relation(fields: [grnId], references: [id], onDelete: Restrict)
+
+  @@unique([grnId, lineNo])
+  @@index([hospitalId, grnId])
+  @@index([hospitalId, poLineId])
+  @@index([hospitalId, itemId, expiryDate])
+  @@index([hospitalId, batchId])
+  @@map("pur_grn_lines")
+  @@schema("inventory")
+}
+
+model PurReturn {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  returnNo    String  @map("return_no") @db.VarChar(48)
+  vendorId    String  @map("vendor_id") @db.Uuid
+  storeId     String  @map("store_id") @db.Uuid
+  grnId       String? @map("grn_id") @db.Uuid
+  reason      String  @db.VarChar(48)
+  reasonNote  String? @map("reason_note") @db.Text
+  debitNoteNo String? @map("debit_note_no") @db.VarChar(48)
+  totalValue  Decimal? @map("total_value") @db.Decimal(14, 2)
+  status      String  @default("draft") @db.VarChar(24)
+  approvedBy  String? @map("approved_by") @db.Uuid
+  dispatchedAt DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  creditedAt  DateTime? @map("credited_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines PurReturnLine[]
+
+  @@unique([hospitalId, returnNo])
+  @@index([hospitalId, vendorId, status])
+  @@index([hospitalId, branchId, createdAt])
+  @@map("pur_returns")
+  @@schema("inventory")
+}
+
+model PurReturnLine {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  returnId    String  @map("return_id") @db.Uuid
+  lineNo      Int     @map("line_no")
+  itemId      String  @map("item_id") @db.Uuid
+  batchId     String? @map("batch_id") @db.Uuid
+  uomId       String  @map("uom_id") @db.Uuid
+  qtyEntered  Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase     Decimal @map("qty_base") @db.Decimal(18, 4)
+  unitCost    Decimal? @map("unit_cost") @db.Decimal(14, 4)
+  gstRate     Decimal @default(0) @map("gst_rate") @db.Decimal(5, 2)
+  value       Decimal? @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  ret PurReturn @relation(fields: [returnId], references: [id], onDelete: Restrict)
+
+  @@unique([returnId, lineNo])
+  @@index([hospitalId, returnId])
+  @@map("pur_return_lines")
+  @@schema("inventory")
+}
+
+/// The vendor's bill, and the verdict of matching it.
+model PurVendorInvoice {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  vendorId      String  @map("vendor_id") @db.Uuid
+  invoiceNo     String  @map("invoice_no") @db.VarChar(64)
+  invoiceDate   DateTime @map("invoice_date") @db.Date
+  /// The Indian financial year the invoice falls in — part of the uniqueness
+  /// key, because vendors restart invoice numbers each April.
+  fy            String  @db.VarChar(7)
+  gstin         String? @db.VarChar(15)
+  irn           String? @db.VarChar(64)
+  irnVerified   Boolean @default(false) @map("irn_verified")
+  currency      String  @default("INR") @db.Char(3)
+  subtotal      Decimal @default(0) @db.Decimal(14, 2)
+  taxTotal      Decimal @default(0) @map("tax_total") @db.Decimal(14, 2)
+  total         Decimal @default(0) @db.Decimal(14, 2)
+  taxBreakup    Json    @default("{}") @map("tax_breakup")
+  tdsSection    String? @map("tds_section") @db.VarChar(16)
+  reverseCharge Boolean @default(false) @map("reverse_charge")
+  poId          String? @map("po_id") @db.Uuid
+  grnIds        String[] @default([]) @map("grn_ids") @db.Uuid
+  matchStatus   PurMatchStatus @default(pending) @map("match_status")
+  /// Which tolerance rule let a difference through, and by how much. Present
+  /// exactly when a line matched only because of a tolerance.
+  toleranceApplied Json @default("{}") @map("tolerance_applied")
+  exceptionNote String? @map("exception_note") @db.Text
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  apVoucherRef  String? @map("ap_voucher_ref") @db.VarChar(64)
+  fileId        String? @map("file_id") @db.Uuid
+  source        String  @default("manual") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  lines PurInvoiceMatchLine[]
+
+  @@unique([hospitalId, vendorId, invoiceNo, fy])
+  /// The exception queue. Leading `hospital_id`, then the status the queue
+  /// filters on, then the date it sorts by.
+  @@index([hospitalId, matchStatus, invoiceDate])
+  @@index([hospitalId, vendorId, invoiceDate])
+  @@index([hospitalId, poId])
+  @@map("pur_vendor_invoices")
+  @@schema("inventory")
+}
+
+/// One line of the three-way comparison. PO says one thing, GRN another, the
+/// invoice a third; the differences are columns so the exception names itself.
+model PurInvoiceMatchLine {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  invoiceId     String  @map("invoice_id") @db.Uuid
+  lineNo        Int     @map("line_no")
+  itemId        String  @map("item_id") @db.Uuid
+  poLineId      String? @map("po_line_id") @db.Uuid
+  grnLineId     String? @map("grn_line_id") @db.Uuid
+  uomId         String  @map("uom_id") @db.Uuid
+  /// All three quantities in BASE units, which is the only way a PO in boxes,
+  /// a GRN in strips and an invoice in tablets can be compared at all.
+  invQtyBase    Decimal @map("inv_qty_base") @db.Decimal(18, 4)
+  grnQtyBase    Decimal @default(0) @map("grn_qty_base") @db.Decimal(18, 4)
+  poQtyBase     Decimal @default(0) @map("po_qty_base") @db.Decimal(18, 4)
+  invRatePerBase Decimal @map("inv_rate_per_base") @db.Decimal(14, 4)
+  poRatePerBase Decimal? @map("po_rate_per_base") @db.Decimal(14, 4)
+  invTax        Decimal @default(0) @map("inv_tax") @db.Decimal(14, 2)
+  poTax         Decimal @default(0) @map("po_tax") @db.Decimal(14, 2)
+  qtyDiffBase   Decimal @default(0) @map("qty_diff_base") @db.Decimal(18, 4)
+  rateDiff      Decimal @default(0) @map("rate_diff") @db.Decimal(14, 4)
+  taxDiff       Decimal @default(0) @map("tax_diff") @db.Decimal(14, 2)
+  status        PurMatchStatus @default(pending)
+  withinTolerance Boolean @default(false) @map("within_tolerance")
+  note          String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  invoice PurVendorInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@unique([invoiceId, lineNo])
+  @@index([hospitalId, invoiceId, status])
+  @@index([hospitalId, grnLineId])
+  @@map("pur_invoice_match_lines")
+  @@schema("inventory")
+}
+
+/// An emergency buy that skipped the process, and its regularisation.
+/// `regularised_at` null past the deadline is what the exception report lists.
+model PurEmergencyPurchase {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  refNo       String  @map("ref_no") @db.VarChar(48)
+  indentId    String? @map("indent_id") @db.Uuid
+  raisedBy    String  @map("raised_by") @db.Uuid
+  reason      String  @db.Text
+  clinicalJustification String? @map("clinical_justification") @db.Text
+  approverId  String? @map("approver_id") @db.Uuid
+  approvedAt  DateTime? @map("approved_at") @db.Timestamptz(6)
+  capAmount   Decimal? @map("cap_amount") @db.Decimal(14, 2)
+  vendorId    String? @map("vendor_id") @db.Uuid
+  amount      Decimal? @db.Decimal(14, 2)
+  grnId       String? @map("grn_id") @db.Uuid
+  poId        String? @map("po_id") @db.Uuid
+  regularisedAt DateTime? @map("regularised_at") @db.Timestamptz(6)
+  regulariseDueAt DateTime? @map("regularise_due_at") @db.Timestamptz(6)
+  status      String  @default("open") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@unique([hospitalId, refNo])
+  @@index([hospitalId, status, regulariseDueAt])
+  @@map("pur_emergency_purchases")
+  @@schema("inventory")
+}
+
+/// Purchasing policy as data: the tolerances the match applies, how many
+/// vendors an RFQ needs, and the value bands the approval matrix keys on.
+///
+/// One row per hospital (and optionally per branch). `CLAUDE.md §3`:
+/// "Configuration over code."
+model PurSettings {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  /// 3-way match tolerances. Absolute *and* percentage; a line passes only if
+  /// it is inside both, so a 2 % tolerance cannot wave through ₹40 000 on a
+  /// ₹2 000 000 line.
+  qtyTolerancePct Decimal @default(0) @map("qty_tolerance_pct") @db.Decimal(5, 2)
+  qtyToleranceAbsBase Decimal @default(0) @map("qty_tolerance_abs_base") @db.Decimal(18, 4)
+  priceTolerancePct Decimal @default(0) @map("price_tolerance_pct") @db.Decimal(5, 2)
+  priceToleranceAbs Decimal @default(0) @map("price_tolerance_abs") @db.Decimal(14, 2)
+  taxToleranceAbs Decimal @default(1) @map("tax_tolerance_abs") @db.Decimal(14, 2)
+  /// Over-receipt allowance at GRN, separate from the match tolerance.
+  receiptTolerancePct Decimal @default(0) @map("receipt_tolerance_pct") @db.Decimal(5, 2)
+  minVendorsForRfq Int @default(3) @map("min_vendors_for_rfq")
+  /// Above this value an RFQ is mandatory; below it a direct PO is allowed.
+  rfqThresholdAmount Decimal @default(0) @map("rfq_threshold_amount") @db.Decimal(14, 2)
+  emergencyRegulariseDays Int @default(7) @map("emergency_regularise_days")
+  /// Refuse a GRN whose batch has less than this proportion of shelf life left,
+  /// when neither the item nor the contract says otherwise.
+  defaultMinShelfLifePct Decimal @default(0) @map("default_min_shelf_life_pct") @db.Decimal(5, 2)
+  requireQcBeforeAccept Boolean @default(true) @map("require_qc_before_accept")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@index([hospitalId, branchId])
+  @@map("pur_settings")
+  @@schema("inventory")
+}

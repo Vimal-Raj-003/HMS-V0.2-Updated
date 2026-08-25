@@ -1,0 +1,858 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-003 §4 — the pharmacy (schema `pharmacy`)
+//
+// `docs/03 §Schemas` reserves the name: "lab / rad / **pharmacy** / blood / ot /
+// ip / er … one schema per bounded context". The stock lives in `inventory`;
+// what lives here is the counter — the queue, the dispense, the substitution,
+// the return, and the three statutory registers.
+//
+// ── The registers are the reason this file is careful ───────────────────────
+//
+// `docs/04 §1` (CDSCO / Drugs & Cosmetics Act; NDPS Act) requires a Schedule
+// H/H1 register, a Schedule X register and "an **NDPS narcotic register with
+// dual authorisation and physical stock reconciliation**". `phase-04` exit gate
+// 4 makes it concrete: "Narcotic issue requires two users; the register
+// balances against physical count; a deliberate mismatch raises an alert and
+// **cannot be silently adjusted**."
+//
+// `pharmacy.controlled_drug_register` therefore is:
+//
+//   • **one table with a `register_type`**, not three. The columns are the same
+//     and the difference is which are mandatory; three tables would be three
+//     places to forget the same rule.
+//   • **append-only, trigger-enforced and with DELETE revoked.** A statutory
+//     register that can be edited is not a register.
+//   • **gapless per (store, register_type, financial year)** — a numbered page
+//     with a hole in it is the first thing an inspector notices.
+//   • **balanced by the database.** `balance_after` is computed by trigger from
+//     the previous row, not supplied. Two entries racing cannot produce two
+//     "balance 40" rows, because the trigger takes a per-register advisory lock.
+//   • **dual-authorised for NDPS.** `second_auth_user_id` is NOT NULL and must
+//     differ from the first for `register_type = 'ndps'`. That is a CHECK, and
+//     the permission catalogue marks the same actions `requiresSecondPerson`.
+//
+// ── Dispensing fails closed ────────────────────────────────────────────────
+//
+// `phase-04 §Constraints`: "never dispense without a successful batch
+// validation — fail closed on stock integrity." Three refusals live in the
+// migration rather than in a service:
+//
+//   1. an expired batch cannot be dispensed (exit gate 3);
+//   2. a quarantined or recalled batch cannot be dispensed;
+//   3. a Schedule H/H1/X/NDPS item cannot leave on an OTC sale — there must be
+//      a prescription, and for X and NDPS a prescriber registration number.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PhStoreType {
+  op_retail
+  ip
+  emergency
+  satellite
+  night
+  ot
+  daycare
+
+  @@schema("pharmacy")
+}
+
+enum PhRxQueueStatus {
+  pending
+  patient_arrived
+  in_progress
+  on_hold
+  awaiting_approval
+  completed
+  partial
+  not_collected
+  cancelled
+
+  @@schema("pharmacy")
+}
+
+enum PhDispenseType {
+  rx
+  otc
+  ip_issue
+  ward_stock
+  sample
+  emergency_box
+
+  @@schema("pharmacy")
+}
+
+enum PhDispenseStatus {
+  draft
+  awaiting_payment
+  dispensed
+  partially_dispensed
+  cancelled
+  returned
+  partially_returned
+
+  @@schema("pharmacy")
+}
+
+enum PhDispenseItemStatus {
+  dispensed
+  partial
+  backordered
+  declined
+  external
+  substituted
+  cancelled
+
+  @@schema("pharmacy")
+}
+
+enum PhSubstitutionStatus {
+  pending
+  approved
+  rejected
+  timed_out
+  not_required
+
+  @@schema("pharmacy")
+}
+
+/// Which statutory register a row belongs to. One table, three legal regimes.
+enum PhRegisterType {
+  ndps
+  schedule_x
+  schedule_h1
+
+  @@schema("pharmacy")
+}
+
+enum PhRegisterTxnType {
+  opening
+  receipt
+  issue
+  dispense
+  return_in
+  destruction
+  adjustment
+
+  @@schema("pharmacy")
+}
+
+enum PhRecallSource {
+  cdsco
+  manufacturer
+  internal
+  vendor
+  state_fda
+
+  @@schema("pharmacy")
+}
+
+enum PhExpiryAction {
+  return_to_supplier
+  transfer
+  discount
+  quarantine
+  writeoff
+  disposal
+
+  @@schema("pharmacy")
+}
+
+/// A licensed pharmacy counter. Distinct from `inventory.stores`: the store is
+/// where stock sits, this is the licensed premises that may sell from it. One
+/// pharmacy names exactly one store.
+model PhPharmacyStore {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  storeId       String  @map("store_id") @db.Uuid
+  code          String  @db.VarChar(32)
+  name          String  @db.VarChar(200)
+  pharmacyType  PhStoreType @map("pharmacy_type")
+  /// Form 20 / 21 (retail) and 20B / 21B (wholesale). Without a valid,
+  /// unexpired licence the counter may not dispense a scheduled drug at all —
+  /// `pharmacy.enforce_pharmacy_licence()` refuses it.
+  licenceNo     String? @map("licence_no") @db.VarChar(64)
+  licenceType   String? @map("licence_type") @db.VarChar(32)
+  licenceValidTo DateTime? @map("licence_valid_to") @db.Date
+  /// NDPS licence for a Recognised Medical Institution. Separate, and a
+  /// narcotic dispense without it is refused.
+  ndpsLicenceNo String? @map("ndps_licence_no") @db.VarChar(64)
+  ndpsLicenceValidTo DateTime? @map("ndps_licence_valid_to") @db.Date
+  gstin         String? @db.VarChar(15)
+  registeredPharmacistIds String[] @default([]) @map("registered_pharmacist_ids") @db.Uuid
+  counters      Json    @default("[]")
+  is24x7        Boolean @default(false) @map("is_24x7")
+  printProfileId String? @map("print_profile_id") @db.Uuid
+  /// Languages the dispensing label prints in, beyond `en-IN`.
+  labelLocales  String[] @default([]) @map("label_locales")
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  dispenses PhDispense[]
+
+  @@unique([hospitalId, code])
+  @@unique([hospitalId, storeId])
+  @@index([hospitalId, branchId, active])
+  @@map("pharmacy_stores")
+  @@schema("pharmacy")
+}
+
+/// The read model the counter works off, fed by `rx.created` from Phase 2.
+/// A projection, so it may be rebuilt; the authority is
+/// `clinical.prescriptions`.
+model PhRxQueue {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  pharmacyStoreId String @map("pharmacy_store_id") @db.Uuid
+  prescriptionId String @map("prescription_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  encounterId   String? @map("encounter_id") @db.Uuid
+  prescriberUserId String? @map("prescriber_user_id") @db.Uuid
+  status        PhRxQueueStatus @default(pending)
+  /// stat > er > urgent > routine. Sorted descending, which is why it is an
+  /// integer and not an enum: the ordering is the point.
+  priority      Int     @default(0)
+  itemCount     Int     @default(0) @map("item_count")
+  hasAllergyFlag Boolean @default(false) @map("has_allergy_flag")
+  hasControlled Boolean @default(false) @map("has_controlled")
+  payerType     String? @map("payer_type") @db.VarChar(24)
+  assignedTo    String? @map("assigned_to") @db.Uuid
+  /// Identity check at the counter — two identifiers, per `docs/04 §7`.
+  identityVerified Boolean @default(false) @map("identity_verified")
+  identityMethod String? @map("identity_method") @db.VarChar(48)
+  queuedAt      DateTime @map("queued_at") @db.Timestamptz(6)
+  arrivedAt     DateTime? @map("arrived_at") @db.Timestamptz(6)
+  startedAt     DateTime? @map("started_at") @db.Timestamptz(6)
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz(6)
+  slaDueAt      DateTime? @map("sla_due_at") @db.Timestamptz(6)
+  cancelReason  String? @map("cancel_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@unique([prescriptionId, pharmacyStoreId])
+  /// The queue screen's only query: this counter, open work, priority first,
+  /// oldest first inside a priority.
+  @@index([hospitalId, pharmacyStoreId, status, priority, queuedAt])
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, status, slaDueAt])
+  @@map("rx_queue")
+  @@schema("pharmacy")
+}
+
+/// One counter transaction.
+model PhDispense {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  pharmacyStoreId String @map("pharmacy_store_id") @db.Uuid
+  storeId       String  @map("store_id") @db.Uuid
+  dispenseNo    String  @map("dispense_no") @db.VarChar(48)
+  dispenseType  PhDispenseType @map("dispense_type")
+  prescriptionId String? @map("prescription_id") @db.Uuid
+  rxQueueId     String? @map("rx_queue_id") @db.Uuid
+  patientId     String? @map("patient_id") @db.Uuid
+  encounterId   String? @map("encounter_id") @db.Uuid
+  /// A walk-in with no registration. Name and phone only; a full record is
+  /// created if they return. Never a substitute for `patient_id` where one
+  /// exists.
+  walkInName    String? @map("walk_in_name") @db.VarChar(200)
+  walkInPhone   String? @map("walk_in_phone") @db.VarChar(20)
+  prescriberName String? @map("prescriber_name") @db.VarChar(200)
+  /// Mandatory for an external prescription carrying a Schedule X or NDPS
+  /// item — a CHECK, because a controlled dispense without a traceable
+  /// prescriber is the whole reason the register exists.
+  prescriberRegNo String? @map("prescriber_reg_no") @db.VarChar(64)
+  externalRxImageFileId String? @map("external_rx_image_file_id") @db.Uuid
+  status        PhDispenseStatus @default(draft)
+  pharmacistUserId String @map("pharmacist_user_id") @db.Uuid
+  /// The second authorising pharmacist. Required when any line is NDPS.
+  secondAuthUserId String? @map("second_auth_user_id") @db.Uuid
+  counselling   Json    @default("{}")
+  payerType     String? @map("payer_type") @db.VarChar(24)
+  chargeIntentId String? @map("charge_intent_id") @db.Uuid
+  billRef       String? @map("bill_ref") @db.VarChar(48)
+  subtotal      Decimal @default(0) @db.Decimal(14, 2)
+  discount      Decimal @default(0) @db.Decimal(14, 2)
+  taxAmount     Decimal @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  totalAmount   Decimal @default(0) @map("total_amount") @db.Decimal(14, 2)
+  currency      String  @default("INR") @db.Char(3)
+  dispensedAt   DateTime? @map("dispensed_at") @db.Timestamptz(6)
+  cancelReason  String? @map("cancel_reason") @db.Text
+  notes         String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  pharmacyStore PhPharmacyStore @relation(fields: [pharmacyStoreId], references: [id], onDelete: Restrict)
+  items         PhDispenseItem[]
+
+  @@unique([hospitalId, dispenseNo])
+  @@index([hospitalId, pharmacyStoreId, createdAt])
+  @@index([hospitalId, patientId, createdAt])
+  @@index([hospitalId, prescriptionId])
+  @@index([hospitalId, status, dispensedAt])
+  @@map("dispenses")
+  @@schema("pharmacy")
+}
+
+/// One drug, one batch, one quantity. The row a recall trace lands on.
+model PhDispenseItem {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  dispenseId    String  @map("dispense_id") @db.Uuid
+  lineNo        Int     @map("line_no")
+  prescriptionItemId String? @map("prescription_item_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  /// Batch is NOT NULL in practice for a batch-tracked item and the trigger
+  /// enforces it. Nullable in the column only because a declined line has none.
+  batchId       String? @map("batch_id") @db.Uuid
+  serialId      String? @map("serial_id") @db.Uuid
+  uomId         String  @map("uom_id") @db.Uuid
+  qtyOrderedBase Decimal @default(0) @map("qty_ordered_base") @db.Decimal(18, 4)
+  qtyEntered    Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase       Decimal @map("qty_base") @db.Decimal(18, 4)
+  qtyReturnedBase Decimal @default(0) @map("qty_returned_base") @db.Decimal(18, 4)
+  status        PhDispenseItemStatus @default(dispensed)
+  /// A partial fill needs a reason, always. A CHECK, not a convention.
+  partialReason String? @map("partial_reason") @db.Text
+  /// Substitution provenance: what was prescribed, who approved the swap.
+  substitutedFromItemId String? @map("substituted_from_item_id") @db.Uuid
+  substitutionRequestId String? @map("substitution_request_id") @db.Uuid
+  /// Snapshotted money. MRP is the batch's, selling price the item price in
+  /// force on the dispense date; both stored so a reprint reproduces the bill.
+  mrp           Decimal? @db.Decimal(14, 2)
+  sellingPrice  Decimal? @map("selling_price") @db.Decimal(14, 2)
+  discount      Decimal @default(0) @db.Decimal(14, 2)
+  hsnCode       String? @map("hsn_code") @db.VarChar(16)
+  gstRate       Decimal @default(0) @map("gst_rate") @db.Decimal(5, 2)
+  taxAmount     Decimal @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  lineTotal     Decimal @default(0) @map("line_total") @db.Decimal(14, 2)
+  /// What the second safety net found (EN-029). Kept on the line because the
+  /// pharmacist's override of an alert is itself a clinical act.
+  cdssAlerts    Json    @default("[]") @map("cdss_alerts")
+  cdssOverrideReason String? @map("cdss_override_reason") @db.Text
+  /// FEFO: true when the batch picked was not the earliest-expiring available.
+  /// `override_reason` is then mandatory.
+  fefoOverride  Boolean @default(false) @map("fefo_override")
+  fefoOverrideReason String? @map("fefo_override_reason") @db.Text
+  scanned       Boolean @default(false)
+  labelPrintedAt DateTime? @map("label_printed_at") @db.Timestamptz(6)
+  ledgerId      String? @map("ledger_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  dispense PhDispense @relation(fields: [dispenseId], references: [id], onDelete: Restrict)
+
+  @@unique([dispenseId, lineNo])
+  @@index([hospitalId, dispenseId])
+  /// The recall trace (`phase-04` exit gate 5): batch → the lines that left the
+  /// counter → the patients on their dispenses.
+  @@index([hospitalId, batchId])
+  @@index([hospitalId, itemId, createdAt])
+  @@index([hospitalId, prescriptionItemId])
+  @@map("dispense_items")
+  @@schema("pharmacy")
+}
+
+/// What could not be filled today, and who is waiting for it.
+model PhDispenseBackorder {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  dispenseItemId String @map("dispense_item_id") @db.Uuid
+  patientId     String? @map("patient_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  qtyPendingBase Decimal @map("qty_pending_base") @db.Decimal(18, 4)
+  notifiedAt    DateTime? @map("notified_at") @db.Timestamptz(6)
+  fulfilledDispenseId String? @map("fulfilled_dispense_id") @db.Uuid
+  fulfilledAt   DateTime? @map("fulfilled_at") @db.Timestamptz(6)
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz(6)
+  status        String  @default("open") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, status, createdAt])
+  @@index([hospitalId, itemId, status])
+  @@index([hospitalId, patientId])
+  @@map("dispense_backorders")
+  @@schema("pharmacy")
+}
+
+/// The pharmacist proposes, the prescriber disposes. `timed_out` is a real
+/// outcome and it means "not dispensed", never "dispensed anyway".
+model PhSubstitutionRequest {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  prescriptionItemId String? @map("prescription_item_id") @db.Uuid
+  dispenseId    String? @map("dispense_id") @db.Uuid
+  patientId     String? @map("patient_id") @db.Uuid
+  fromItemId    String  @map("from_item_id") @db.Uuid
+  toItemId      String  @map("to_item_id") @db.Uuid
+  reason        String  @db.Text
+  requestedBy   String  @map("requested_by") @db.Uuid
+  prescriberUserId String? @map("prescriber_user_id") @db.Uuid
+  status        PhSubstitutionStatus @default(pending)
+  decidedBy     String? @map("decided_by") @db.Uuid
+  decidedAt     DateTime? @map("decided_at") @db.Timestamptz(6)
+  decisionNote  String? @map("decision_note") @db.Text
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, status, createdAt])
+  @@index([hospitalId, prescriberUserId, status])
+  @@index([hospitalId, dispenseId])
+  @@map("substitution_requests")
+  @@schema("pharmacy")
+}
+
+/// A pharmacist's clinical intervention. NABH asks for these by count and by
+/// outcome; they are also the evidence that the second safety net is working.
+model PhIntervention {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  dispenseId    String? @map("dispense_id") @db.Uuid
+  prescriptionId String? @map("prescription_id") @db.Uuid
+  patientId     String? @map("patient_id") @db.Uuid
+  interventionType String @map("intervention_type") @db.VarChar(32)
+  detail        String  @db.Text
+  outcome       String? @db.VarChar(48)
+  doctorContacted Boolean @default(false) @map("doctor_contacted")
+  doctorUserId  String? @map("doctor_user_id") @db.Uuid
+  pharmacistUserId String @map("pharmacist_user_id") @db.Uuid
+  occurredAt    DateTime @map("occurred_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, occurredAt])
+  @@index([hospitalId, interventionType, occurredAt])
+  @@index([hospitalId, dispenseId])
+  @@map("pharmacy_interventions")
+  @@schema("pharmacy")
+}
+
+/// A patient bringing medicine back. Whether it re-enters saleable stock is a
+/// judgement made per line and recorded, never a default: a strip that has left
+/// the premises has an unverifiable storage history.
+model PhSaleReturn {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  pharmacyStoreId String @map("pharmacy_store_id") @db.Uuid
+  returnNo      String  @map("return_no") @db.VarChar(48)
+  originalDispenseId String @map("original_dispense_id") @db.Uuid
+  patientId     String? @map("patient_id") @db.Uuid
+  reasonCode    String  @map("reason_code") @db.VarChar(48)
+  reason        String? @db.Text
+  status        String  @default("draft") @db.VarChar(24)
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  refundAmount  Decimal @default(0) @map("refund_amount") @db.Decimal(14, 2)
+  creditNoteRef String? @map("credit_note_ref") @db.VarChar(48)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  items PhSaleReturnItem[]
+
+  @@unique([hospitalId, returnNo])
+  @@index([hospitalId, pharmacyStoreId, createdAt])
+  @@index([hospitalId, originalDispenseId])
+  @@index([hospitalId, patientId])
+  @@map("sale_returns")
+  @@schema("pharmacy")
+}
+
+model PhSaleReturnItem {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  saleReturnId  String  @map("sale_return_id") @db.Uuid
+  lineNo        Int     @map("line_no")
+  dispenseItemId String @map("dispense_item_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  batchId       String? @map("batch_id") @db.Uuid
+  uomId         String  @map("uom_id") @db.Uuid
+  qtyEntered    Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase       Decimal @map("qty_base") @db.Decimal(18, 4)
+  /// restock | quarantine | destroy. A controlled drug is never restocked.
+  disposition   String  @default("quarantine") @db.VarChar(24)
+  refundAmount  Decimal @default(0) @map("refund_amount") @db.Decimal(14, 2)
+  ledgerId      String? @map("ledger_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  saleReturn PhSaleReturn @relation(fields: [saleReturnId], references: [id], onDelete: Restrict)
+
+  @@unique([saleReturnId, lineNo])
+  @@index([hospitalId, saleReturnId])
+  @@index([hospitalId, dispenseItemId])
+  @@map("sale_return_items")
+  @@schema("pharmacy")
+}
+
+/// **The statutory register. Append-only, gapless, balanced by the database.**
+///
+/// See the header of this file for why each of those is a mechanism rather than
+/// a rule. `balance_after` is the running balance the inspector reads and it is
+/// computed, never supplied.
+model PhControlledDrugRegister {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  storeId       String  @map("store_id") @db.Uuid
+  registerType  PhRegisterType @map("register_type")
+  /// Gapless per (store, register_type, fy). Allocated by
+  /// `core.numbering_series` under a row lock inside the same transaction.
+  serialNo      String  @map("serial_no") @db.VarChar(48)
+  fy            String  @db.VarChar(7)
+  itemId        String  @map("item_id") @db.Uuid
+  batchId       String? @map("batch_id") @db.Uuid
+  txnType       PhRegisterTxnType @map("txn_type")
+  uomId         String  @map("uom_id") @db.Uuid
+  /// Exactly one of `qty_in_base` / `qty_out_base` is non-zero — a CHECK.
+  qtyInBase     Decimal @default(0) @map("qty_in_base") @db.Decimal(18, 4)
+  qtyOutBase    Decimal @default(0) @map("qty_out_base") @db.Decimal(18, 4)
+  /// Computed by trigger from the previous row of the same register/item/batch.
+  balanceAfterBase Decimal @map("balance_after_base") @db.Decimal(18, 4)
+  patientId     String? @map("patient_id") @db.Uuid
+  patientName   String? @map("patient_name") @db.VarChar(200)
+  patientAddress String? @map("patient_address") @db.Text
+  prescriberName String? @map("prescriber_name") @db.VarChar(200)
+  prescriberRegNo String? @map("prescriber_reg_no") @db.VarChar(64)
+  rxRef         String? @map("rx_ref") @db.VarChar(64)
+  rxImageFileId String? @map("rx_image_file_id") @db.Uuid
+  /// **Dual authorisation.** For `ndps`, `second_auth_user_id` is NOT NULL and
+  /// must differ from `first_auth_user_id`.
+  firstAuthUserId String @map("first_auth_user_id") @db.Uuid
+  secondAuthUserId String? @map("second_auth_user_id") @db.Uuid
+  refType       String? @map("ref_type") @db.VarChar(24)
+  refId         String? @map("ref_id") @db.Uuid
+  ledgerId      String? @map("ledger_id") @db.Uuid
+  remarks       String? @db.Text
+  enteredAt     DateTime @map("entered_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@unique([storeId, registerType, fy, serialNo])
+  @@index([hospitalId, storeId, registerType, enteredAt])
+  @@index([hospitalId, itemId, batchId, enteredAt])
+  @@index([hospitalId, patientId])
+  @@map("controlled_drug_register")
+  @@schema("pharmacy")
+}
+
+/// The shift custody check. Two counters, a system balance, a physical count,
+/// and — when they differ — an incident that must be raised before the shift
+/// closes. `phase-04` exit gate 4: a mismatch "cannot be silently adjusted".
+model PhNarcoticCustodyCheck {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  storeId       String  @map("store_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  batchId       String? @map("batch_id") @db.Uuid
+  shiftLabel    String  @map("shift_label") @db.VarChar(32)
+  uomId         String  @map("uom_id") @db.Uuid
+  systemBalanceBase Decimal @map("system_balance_base") @db.Decimal(18, 4)
+  physicalCountBase Decimal @map("physical_count_base") @db.Decimal(18, 4)
+  varianceBase  Decimal @map("variance_base") @db.Decimal(18, 4)
+  checkedBy1    String  @map("checked_by_1") @db.Uuid
+  checkedBy2    String  @map("checked_by_2") @db.Uuid
+  /// Mandatory when `variance_base <> 0`. A CHECK, so a discrepancy cannot be
+  /// closed by saving the form.
+  incidentRef   String? @map("incident_ref") @db.VarChar(64)
+  explanation   String? @db.Text
+  adjustmentId  String? @map("adjustment_id") @db.Uuid
+  checkedAt     DateTime @map("checked_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@index([hospitalId, storeId, checkedAt])
+  @@index([hospitalId, itemId, checkedAt])
+  @@map("narcotic_custody_checks")
+  @@schema("pharmacy")
+}
+
+/// What was decided about a batch approaching or past expiry.
+model PhExpiryDecision {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  storeId       String  @map("store_id") @db.Uuid
+  batchId       String  @map("batch_id") @db.Uuid
+  itemId        String  @map("item_id") @db.Uuid
+  action        PhExpiryAction
+  uomId         String  @map("uom_id") @db.Uuid
+  qtyEntered    Decimal @map("qty_entered") @db.Decimal(18, 4)
+  qtyBase       Decimal @map("qty_base") @db.Decimal(18, 4)
+  valueAtCost   Decimal? @map("value_at_cost") @db.Decimal(14, 2)
+  reason        String  @db.Text
+  approvalInstanceId String? @map("approval_instance_id") @db.Uuid
+  approvedBy    String? @map("approved_by") @db.Uuid
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+  refDocType    String? @map("ref_doc_type") @db.VarChar(24)
+  refDocId      String? @map("ref_doc_id") @db.Uuid
+  /// NC-016: expired medicines are bio-medical waste and leave under a manifest.
+  bmwRecordRef  String? @map("bmw_record_ref") @db.VarChar(64)
+  status        String  @default("proposed") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, storeId, status])
+  @@index([hospitalId, batchId])
+  @@map("expiry_actions")
+  @@schema("pharmacy")
+}
+
+/// A recall. `phase-04` exit gate 5: recall a batch → the list of affected
+/// patients is produced and notifications go out. The list is
+/// `recall_traces`, and it is materialised rather than queried live because it
+/// is evidence of who was contacted.
+model PhRecall {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  recallNo      String  @map("recall_no") @db.VarChar(48)
+  source        PhRecallSource
+  sourceRef     String? @map("source_ref") @db.VarChar(160)
+  itemId        String? @map("item_id") @db.Uuid
+  batchId       String? @map("batch_id") @db.Uuid
+  batchNo       String? @map("batch_no") @db.VarChar(64)
+  /// Class I/II/III per CDSCO recall guidelines — drives the urgency of the
+  /// patient notification.
+  recallClass   String? @map("recall_class") @db.VarChar(8)
+  reason        String  @db.Text
+  raisedAt      DateTime @map("raised_at") @db.Timestamptz(6)
+  raisedBy      String? @map("raised_by") @db.Uuid
+  quarantinedAt DateTime? @map("quarantined_at") @db.Timestamptz(6)
+  patientsIdentified Int @default(0) @map("patients_identified")
+  patientsContacted Int @default(0) @map("patients_contacted")
+  unitsReturned Decimal @default(0) @map("units_returned") @db.Decimal(18, 4)
+  closedAt      DateTime? @map("closed_at") @db.Timestamptz(6)
+  closedBy      String? @map("closed_by") @db.Uuid
+  status        String  @default("open") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  traces PhRecallTrace[]
+
+  @@unique([hospitalId, recallNo])
+  @@index([hospitalId, status, raisedAt])
+  @@index([hospitalId, batchId])
+  @@map("recalls")
+  @@schema("pharmacy")
+}
+
+model PhRecallTrace {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  recallId      String  @map("recall_id") @db.Uuid
+  dispenseItemId String? @map("dispense_item_id") @db.Uuid
+  patientId     String? @map("patient_id") @db.Uuid
+  qtyDispensedBase Decimal @default(0) @map("qty_dispensed_base") @db.Decimal(18, 4)
+  dispensedAt   DateTime? @map("dispensed_at") @db.Timestamptz(6)
+  contactedAt   DateTime? @map("contacted_at") @db.Timestamptz(6)
+  contactChannel String? @map("contact_channel") @db.VarChar(24)
+  contactAttempts Int   @default(0) @map("contact_attempts")
+  returned      Boolean @default(false)
+  returnedAt    DateTime? @map("returned_at") @db.Timestamptz(6)
+  notes         String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  recall PhRecall @relation(fields: [recallId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, recallId, contactedAt])
+  @@index([hospitalId, patientId])
+  @@map("recall_traces")
+  @@schema("pharmacy")
+}
+
+/// Counselling points per drug class, in the languages the label prints in.
+model PhCounsellingChecklist {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  drugClass   String  @map("drug_class") @db.VarChar(96)
+  itemId      String? @map("item_id") @db.Uuid
+  items       Json    @default("[]")
+  /// locale → translated points. `en-IN` is always present (CLAUDE.md §4).
+  translations Json   @default("{}")
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, drugClass, active])
+  @@index([hospitalId, itemId])
+  @@map("counselling_checklists")
+  @@schema("pharmacy")
+}
+
+/// The end of a pharmacy shift: cash against bills, stock against ledger, and
+/// the exceptions that are neither. Closing is not permitted while a narcotic
+/// custody variance is open — the trigger says so.
+model PhDayClose {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String  @map("branch_id") @db.Uuid
+  pharmacyStoreId String @map("pharmacy_store_id") @db.Uuid
+  businessDate  DateTime @map("business_date") @db.Date
+  shiftLabel    String? @map("shift_label") @db.VarChar(32)
+  dispenseCount Int     @default(0) @map("dispense_count")
+  grossSales    Decimal @default(0) @map("gross_sales") @db.Decimal(14, 2)
+  returnsValue  Decimal @default(0) @map("returns_value") @db.Decimal(14, 2)
+  cashCollected Decimal @default(0) @map("cash_collected") @db.Decimal(14, 2)
+  cardCollected Decimal @default(0) @map("card_collected") @db.Decimal(14, 2)
+  upiCollected  Decimal @default(0) @map("upi_collected") @db.Decimal(14, 2)
+  creditValue   Decimal @default(0) @map("credit_value") @db.Decimal(14, 2)
+  cashCounted   Decimal @default(0) @map("cash_counted") @db.Decimal(14, 2)
+  cashVariance  Decimal @default(0) @map("cash_variance") @db.Decimal(14, 2)
+  stockExceptions Json  @default("[]") @map("stock_exceptions")
+  narcoticChecksDone Boolean @default(false) @map("narcotic_checks_done")
+  closedBy      String? @map("closed_by") @db.Uuid
+  closedAt      DateTime? @map("closed_at") @db.Timestamptz(6)
+  status        String  @default("open") @db.VarChar(24)
+  notes         String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(0)
+
+  @@unique([pharmacyStoreId, businessDate, shiftLabel])
+  @@index([hospitalId, businessDate])
+  @@index([hospitalId, pharmacyStoreId, status])
+  @@map("pharmacy_day_close")
+  @@schema("pharmacy")
+}
+
+/// **Statutory and policy limits on controlled dispensing.**
+///
+/// This table exists because the research behind it produced a *negative*
+/// result that would otherwise have been guessed at, and guessing would have
+/// harmed patients in the direction nobody notices.
+///
+/// The NDPS regime for Essential Narcotic Drugs — morphine, fentanyl,
+/// methadone, oxycodone, codeine/ethylmorphine, hydrocodone, notified by
+/// S.O. 1181(E) of 5 May 2015 — lives in Chapters VA and VB of the **NDPS
+/// Rules, 1985**, inserted by **G.S.R. 359(E) of 5 May 2015**. Those chapters
+/// contain **no maximum duration and no maximum quantity per patient**. Rule
+/// 52U caps what the *institution* may hold against its Form 3J annual
+/// estimate, and rule 52T's Explanation lets even that be exceeded with a
+/// recorded justification. Rule 52G(i) requires the prescription to state total
+/// quantity, daily dose and period of consumption — it delegates the period to
+/// the prescriber rather than capping it. India's morphine consumption fell by
+/// roughly 92 % under the pre-2015 licensing regime, and the 2014 amendment
+/// exists to undo that; a fabricated seven-day ceiling would quietly rebuild
+/// it.
+///
+/// What *is* a hard statutory number is **NDPS Rules 1985, rule 66(2)**: an
+/// individual may possess a psychotropic substance for personal medical use up
+/// to **100 dosage units**, or up to **300 dosage units** where the prescriber
+/// has specifically prescribed it for long-term personal medical use. That
+/// binds Schedule X drugs and the psychotropic Schedule H1 drugs — not the
+/// Essential Narcotic Drugs, which are narcotics rather than psychotropics.
+///
+/// So the table separates the two, and the separation is a column:
+/// `basis = 'statutory'` may not be raised by a hospital, `basis = 'policy'`
+/// may. A row with no `max_dosage_units` and no `max_course_days` says "no
+/// limit is known", which is different from "no limit applies" — `is_enforced`
+/// is what decides whether the dispensing check blocks or warns.
+model PhControlledSubstanceLimit {
+  id            String  @id @db.Uuid
+  /// Null = a product-shipped statutory row readable by every tenant. A
+  /// hospital row overrides it for `policy` limits only.
+  hospitalId    String? @map("hospital_id") @db.Uuid
+  /// The schedule the limit attaches to. A limit may also name one item.
+  schedule      MdmDrugSchedule
+  itemId        String? @map("item_id") @db.Uuid
+  /// → `mdm.mdm_drugs.record_key`, when the limit is per formulation.
+  drugKey       String? @map("drug_key") @db.Uuid
+  /// statutory | policy. A `statutory` row cannot be relaxed by a hospital —
+  /// `pharmacy.enforce_controlled_limit_authority()` refuses it.
+  basis         String  @db.VarChar(16)
+  /// NDPS Rules 1985 r.66(2): 100 dosage units for ordinary personal medical
+  /// use. Null where no quantity ceiling is known to apply.
+  maxDosageUnits Int?   @map("max_dosage_units")
+  /// The higher ceiling r.66(2) allows when the prescriber has specifically
+  /// prescribed for long-term personal medical use. 300 under the current rule.
+  maxDosageUnitsLongTerm Int? @map("max_dosage_units_long_term")
+  /// Days. **Null for Essential Narcotic Drugs**, because no such statutory
+  /// cap exists; a hospital may add a `policy` row with a number and its own
+  /// justification.
+  maxCourseDays Int?    @map("max_course_days")
+  /// Whether a breach blocks the dispense or merely warns. Statutory rows
+  /// block; a policy review interval warns, so palliative care is not stopped
+  /// at a counter by a number the pharmacy committee chose.
+  isEnforced    Boolean @default(true) @map("is_enforced")
+  /// Whether the prescription may be dispensed more than once. Rule 65(11)(a)
+  /// of the Drugs & Cosmetics Rules 1945 makes no-refill the default for
+  /// H / H1 / X unless the prescriber says otherwise.
+  refillAllowedByDefault Boolean @default(false) @map("refill_allowed_by_default")
+  /// How long the dispensing record must be kept. Schedule X duplicate
+  /// prescription: 2 years (D&C r.65(9)(a)). Schedule H1 register: 3 years
+  /// (G.S.R. 588(E) of 30 Aug 2013). END records: 2 years (NDPS r.52R/52X).
+  recordRetentionYears Int? @map("record_retention_years")
+  /// Whether a second authorised person must countersign. True for NDPS —
+  /// `docs/04 §1` and `phase-04` exit gate 4.
+  requiresSecondPerson Boolean @default(false) @map("requires_second_person")
+  /// The instrument this row is taken from, verbatim enough to look up.
+  legalBasis    String? @map("legal_basis") @db.VarChar(300)
+  notes         String? @db.Text
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@index([hospitalId, schedule, active])
+  @@index([hospitalId, itemId])
+  @@index([hospitalId, drugKey])
+  @@map("controlled_substance_limits")
+  @@schema("pharmacy")
+}
