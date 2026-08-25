@@ -61,6 +61,20 @@ export const envSchema = z.object({
    * landing in a DEFAULT partition.
    */
   PARTITION_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().min(60_000).default(3_600_000),
+
+  /**
+   * How often the critical-value ladder is checked (`OP-004 §3`, `EN-037`).
+   *
+   * The ladder itself is measured in tens of minutes -- 10 to the HOD/on-call,
+   * 20 to the medical superintendent -- so a minute of granularity costs at most
+   * a minute of an already-overdue alert. Cheaper would be false precision: this
+   * is a bounded, indexed query over alerts already past `due_by`.
+   *
+   * The floor is 10 s rather than 1 s deliberately. Escalating faster than a
+   * clinician can plausibly answer a page turns the ladder into a pager storm,
+   * and the failure mode of a pager storm is that people stop reading it.
+   */
+  CRITICAL_ESCALATION_INTERVAL_MS: z.coerce.number().int().min(10_000).default(60_000),
   /** `docs/07` §4: "premake 3 months ahead". One behind, for back-dated catch-up entry. */
   PARTITION_PREMAKE_MONTHS: z.coerce.number().int().min(1).max(24).default(3),
   PARTITION_BACKFILL_MONTHS: z.coerce.number().int().min(0).max(24).default(1),

@@ -5,6 +5,7 @@ import type { Logger } from 'pino';
 
 import { maintenanceUrl, type WorkerEnv } from './config/env.js';
 import { createHealthServer, type ComponentState, type HealthServer } from './health/health.js';
+import { CRITICAL_QUEUES, escalateOverdueCriticalValues } from './escalation/critical-value-escalation.js';
 import { sealAuditChains } from './maintenance/audit-chain-sealer.js';
 import { ensureMonthPartitions } from './maintenance/partition-maintenance.js';
 import { PlaywrightPdfRenderer } from './print/pdf-renderer.js';
@@ -50,6 +51,12 @@ export interface StartedWorker {
 
 export const AUDIT_SEAL_JOB = 'audit.seal';
 export const PARTITION_ENSURE_JOB = 'partition.ensure';
+/**
+ * `docs/07 §4` lists "EWS escalation" and "critical result fan-out" under the
+ * `critical` class, so this belongs there and not in `maintenance`. A ladder
+ * that escalates a potassium of 7.4 must not queue behind a partition premake.
+ */
+export const CRITICAL_ESCALATION_JOB = 'critical.escalate';
 
 interface MaintenanceJobData {
   readonly reason: string;
@@ -203,6 +210,57 @@ export function createWorkerRuntime(env: WorkerEnv, logger: Logger): WorkerRunti
       );
       mounted.push(`audit-chain-sealer(maintenance,${env.AUDIT_SEAL_INTERVAL_MS}ms)`);
       mounted.push(`partition-maintenance(maintenance,${env.PARTITION_MAINTENANCE_INTERVAL_MS}ms)`);
+
+      // ── critical: the critical-value ladder ──────────────────────────────
+      //
+      // The database raises the alert in the same transaction as the value, so
+      // storing a critical result and owing a phone call cannot come apart. What
+      // no trigger can do is notice that nobody answered — `due_by` was written
+      // at detection and, until this was mounted, nothing ever read it.
+      const criticalQueue = classQueues.get('critical');
+      if (criticalQueue === undefined) throw new Error('critical queue was not created');
+
+      const criticalWorker = new Worker<MaintenanceJobData, MaintenanceJobResult>(
+        PRIORITY_CLASSES.critical.queueName,
+        async (job: Job<MaintenanceJobData, MaintenanceJobResult>): Promise<MaintenanceJobResult> => {
+          if (job.name !== CRITICAL_ESCALATION_JOB) {
+            throw new Error(`No handler is registered for critical job "${job.name}".`);
+          }
+          const detail: Record<string, number> = {};
+          for (const queue of CRITICAL_QUEUES) {
+            const result = await escalateOverdueCriticalValues(maintenancePool, queue);
+            detail[`${queue.aggregate}.escalated`] = result.escalated;
+            detail[`${queue.aggregate}.atTopTier`] = result.atTopTier;
+            if (result.escalated > 0) {
+              // Ids and counts only. The analyte, the value and a radiologist's
+              // finding text are all PHI and none of them belong in a log line.
+              logger.warn({
+                event: 'worker.critical.escalated',
+                queue: queue.table,
+                escalated: result.escalated,
+              });
+            }
+          }
+          return { job: job.name, detail };
+        },
+        { connection, concurrency: PRIORITY_CLASSES.critical.concurrency },
+      );
+      criticalWorker.on('failed', (job, error: Error) => {
+        logger.error({
+          event: 'worker.critical.failed',
+          job: job?.name ?? 'unknown',
+          attempts: job?.attemptsMade ?? 0,
+          message: error.message,
+        });
+      });
+      closers.push(() => criticalWorker.close());
+
+      await criticalQueue.upsertJobScheduler(
+        CRITICAL_ESCALATION_JOB,
+        { every: env.CRITICAL_ESCALATION_INTERVAL_MS },
+        { name: CRITICAL_ESCALATION_JOB, data: { reason: 'schedule' }, opts: jobOptionsFor('critical') },
+      );
+      mounted.push(`critical-value-escalation(critical,${env.CRITICAL_ESCALATION_INTERVAL_MS}ms)`);
 
       // ── interactive: the print queue ─────────────────────────────────────
       let printWorker: Worker<PrintJobRef, PrintJobOutcome> | null = null;

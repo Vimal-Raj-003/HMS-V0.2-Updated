@@ -86,11 +86,15 @@ afterAll(async () => {
 });
 
 describe('services/worker starts from its build output', () => {
-  it('mounts the relay, the sealer and partition maintenance', () => {
+  it('mounts the relay, the sealer, partition maintenance and the critical ladder', () => {
     const out = service.output();
     expect(out).toContain('outbox-relay(standard)');
     expect(out).toContain('audit-chain-sealer(maintenance');
     expect(out).toContain('partition-maintenance(maintenance');
+    // A job that is written and never scheduled runs never, and the symptom is
+    // an alert nobody was paged about rather than an error anybody sees. This
+    // line is what makes forgetting to mount it fail here instead of in a ward.
+    expect(out).toContain('critical-value-escalation(critical');
     // The five priority classes of docs/07 §4, with their §4 concurrency.
     expect(out).toContain('critical:p1/c20');
     expect(out).toContain('interactive:p2/c16');
