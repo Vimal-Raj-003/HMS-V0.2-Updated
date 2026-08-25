@@ -26,6 +26,25 @@ export interface OutboxRelayOptions {
   readonly maxAttempts?: number;
   /** Stream key per hospital keeps one busy tenant from starving the others. */
   readonly streamKey?: (hospitalId: string) => string;
+  /**
+   * Approximate cap on entries kept per hospital stream.
+   *
+   * The stream is a **transport, not a store**: `core.outbox_events` is the
+   * record and it is retained on its own schedule. Until this existed the
+   * relay wrote with no cap at all, so every event a hospital had ever emitted
+   * stayed in Redis for ever -- unbounded memory on the same instance that
+   * holds sessions, rate limits and the BullMQ queues.
+   *
+   * It also bounds the one-off replay a new consumer group takes when it starts
+   * at the beginning of a stream, which is what
+   * `services/realtime`'s consumer does so that an event written moments before
+   * it discovered the stream is not silently lost.
+   *
+   * `~` is deliberate: exact trimming makes XADD O(N) in the number of entries
+   * removed, approximate trimming lets Redis drop whole macro-nodes and stay
+   * O(1). Slightly more than `maxLen` may survive, which costs nothing.
+   */
+  readonly maxLen?: number;
 }
 
 interface OutboxRow {
@@ -66,6 +85,7 @@ export async function relayOnce(
   const batchSize = options.batchSize ?? 200;
   const maxAttempts = options.maxAttempts ?? 10;
   const streamKey = options.streamKey ?? ((hospitalId: string) => `hms:events:${hospitalId}`);
+  const maxLen = options.maxLen ?? 10_000;
 
   const client = await pool.connect();
   let published = 0;
@@ -92,6 +112,9 @@ export async function relayOnce(
       try {
         await redis.xadd(
           streamKey(row.hospital_id),
+          'MAXLEN',
+          '~',
+          maxLen,
           '*',
           'id',
           row.id,

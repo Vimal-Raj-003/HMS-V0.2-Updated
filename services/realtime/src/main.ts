@@ -4,6 +4,8 @@ import { createAccessTokenVerifier } from './auth/access-token.js';
 import { loadEnv } from './config/env.js';
 import { createGateway } from './gateway/gateway.js';
 import { createLogger } from './logger.js';
+import { eventToDiff } from './events/event-router.js';
+import { createStreamConsumer } from './events/stream-consumer.js';
 import { createRedisPresenceStore } from './presence/presence.js';
 
 /**
@@ -22,11 +24,16 @@ async function main(): Promise<void> {
   const pub = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null, lazyConnect: false });
   const sub = pub.duplicate();
   const presenceRedis = pub.duplicate();
+  // Its own connection: `XREADGROUP ... BLOCK` parks the socket for up to a
+  // second at a time, and sharing it with presence would stall every heartbeat
+  // behind an idle stream read.
+  const eventsRedis = pub.duplicate();
 
   for (const [name, client] of [
     ['pub', pub],
     ['sub', sub],
     ['presence', presenceRedis],
+    ['events', eventsRedis],
   ] as const) {
     client.on('error', (error: Error) => {
       logger.error({ event: 'realtime.redis.error', client: name, message: error.message });
@@ -48,8 +55,32 @@ async function main(): Promise<void> {
     },
   });
 
+  /**
+   * The half of `docs/01 §3` step 10 that reads the stream.
+   *
+   * `services/worker` has relayed committed outbox rows to
+   * `hms:events:<hospital>` since Phase 0 and nothing consumed them, so every
+   * board in `docs/01 §6` was a screen that never updated and every budget in
+   * `docs/07 §2.3` described a path that was not connected.
+   *
+   * The consumer name must be unique per pod or two pods would split one pod's
+   * backlog between them and each would think it had delivered everything.
+   * `HOSTNAME` is what Kubernetes sets to the pod name; the pid is the fallback
+   * that keeps two local processes apart.
+   */
+  const consumerName = process.env['HOSTNAME'] ?? `realtime-${String(process.pid)}`;
+  const events = createStreamConsumer({
+    redis: eventsRedis,
+    logger,
+    consumer: consumerName,
+    deliver: (room, event) => {
+      gateway.emitter.push(room, eventToDiff(event));
+    },
+  });
+  events.start();
+
   const port = await gateway.listen();
-  logger.info({ event: 'realtime.started', port, nodeEnv: env.NODE_ENV });
+  logger.info({ event: 'realtime.started', port, nodeEnv: env.NODE_ENV, consumer: consumerName });
 
   let shuttingDown = false;
   const shutdown = (signal: string): void => {
@@ -68,8 +99,11 @@ async function main(): Promise<void> {
 
     void (async (): Promise<void> => {
       try {
+        // Stop reading before closing the gateway, so nothing is delivered to
+        // an emitter that is shutting down.
+        await events.stop();
         await gateway.close(signal);
-        await Promise.all([pub.quit(), sub.quit(), presenceRedis.quit()]);
+        await Promise.all([pub.quit(), sub.quit(), presenceRedis.quit(), eventsRedis.quit()]);
         logger.info({ event: 'realtime.shutdown.complete', signal });
         clearTimeout(deadline);
         process.exit(0);
