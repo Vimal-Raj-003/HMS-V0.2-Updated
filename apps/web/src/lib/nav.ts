@@ -1,5 +1,6 @@
 import type { RoleNavItem } from '@vims/ui';
 import { ADMIN_SCREENS } from '@/features/admin/screens';
+import { DIAGNOSTICS_SCREENS } from '@/features/diagnostics/screens';
 
 /**
  * The Phase-0 navigation.
@@ -21,6 +22,31 @@ import { ADMIN_SCREENS } from '@/features/admin/screens';
 export const PHASE0_NAV: readonly RoleNavItem[] = [
   // No permission: every authenticated user has a home.
   { key: 'dashboard', label: 'Dashboard', href: '/dashboard' },
+  /**
+   * Phase 3 — diagnostics.
+   *
+   * Generated from `DIAGNOSTICS_SCREENS` for the same reason the administration
+   * group is generated from `ADMIN_SCREENS`: the menu, the console home and the
+   * ⌘K palette are three surfaces reading one list, and a screen added to one
+   * and forgotten in another is how somebody ends up reaching a page their
+   * navigation deliberately hid.
+   *
+   * The parent carries **no permission of its own** — the hub renders only the
+   * tiles the session can open, and `RoleNav` drops each child the session
+   * cannot use. A permission on the parent would hide the whole console from a
+   * pathologist who holds four of the eight keys.
+   */
+  {
+    key: 'diagnostics',
+    label: 'Diagnostics',
+    href: '/diagnostics',
+    children: DIAGNOSTICS_SCREENS.map((screen) => ({
+      key: screen.key,
+      label: screen.label,
+      href: screen.href,
+      permission: screen.permission,
+    })),
+  },
   {
     key: 'administration',
     label: 'Administration',
