@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { sampleContext } from './fixtures.js';
+import { sampleContext, sampleCumulativeReport, sampleLabReport, sampleRadReport } from './fixtures.js';
 import {
   BUILT_IN_TEMPLATES,
   defaultTemplateFor,
@@ -58,6 +58,9 @@ describe('the built-in template registry', () => {
   it('renders every built-in template from its own sample payload without throwing', () => {
     const payloads: Readonly<Record<string, unknown>> = {
       'bill_a4.html.v1': { title: 'Tax Invoice' },
+      'lab_report.html.v1': sampleLabReport(),
+      'lab_report_cumulative.html.v1': sampleCumulativeReport(),
+      'rad_report.html.v1': sampleRadReport(),
       'token.escpos.v1': {
         tokenNumber: 'C-1',
         counterName: 'C1',
@@ -84,6 +87,13 @@ describe('the built-in template registry', () => {
         barcodeData: 'UH1',
       },
     };
+
+    // Asserted before rendering, because the failure otherwise arrives as
+    // `(root): expected object, received undefined` from deep inside Zod — which
+    // reads like a broken schema and is actually a missing sample. Registering a
+    // template without one must say so in those words.
+    const missing = BUILT_IN_TEMPLATES.filter((t) => payloads[t.key] === undefined).map((t) => t.key);
+    expect(missing, 'registered templates with no sample payload in this test').toEqual([]);
 
     for (const template of BUILT_IN_TEMPLATES) {
       const result = template.render(payloads[template.key], sampleContext());

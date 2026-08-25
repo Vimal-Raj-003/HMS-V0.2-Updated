@@ -12,6 +12,9 @@
  */
 
 import { a4DocumentTemplate } from './html/document.js';
+import { labCumulativeReportTemplate } from './html/lab-cumulative-report.js';
+import { labReportTemplate } from './html/lab-report.js';
+import { radReportTemplate } from './html/rad-report.js';
 import { tokenSlipTemplate } from './escpos/token-slip.js';
 import { labLabelTemplate } from './zpl/lab-label.js';
 import { wristbandTemplate } from './zpl/wristband.js';
@@ -19,6 +22,9 @@ import { PrintTemplateError, type DocType, type PrintFormat, type RegisteredTemp
 
 export const BUILT_IN_TEMPLATES: readonly RegisteredTemplate[] = Object.freeze([
   a4DocumentTemplate,
+  labReportTemplate,
+  labCumulativeReportTemplate,
+  radReportTemplate,
   tokenSlipTemplate,
   labLabelTemplate,
   wristbandTemplate,

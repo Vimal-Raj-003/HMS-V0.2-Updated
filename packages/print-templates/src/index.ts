@@ -37,7 +37,14 @@ export {
   type TemplateFilter,
 } from './registry.js';
 
-export { sampleContext } from './fixtures.js';
+export {
+  SAMPLE_PATIENT,
+  SAMPLE_VERIFY_TOKEN,
+  sampleContext,
+  sampleCumulativeReport,
+  sampleLabReport,
+  sampleRadReport,
+} from './fixtures.js';
 
 export * from './html/index.js';
 export * from './escpos/index.js';

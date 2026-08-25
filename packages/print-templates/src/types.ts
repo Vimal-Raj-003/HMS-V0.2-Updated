@@ -37,6 +37,16 @@ export type DocType =
   | 'gst_invoice'
   | 'lab_label'
   | 'lab_report'
+  /**
+   * The serial/cumulative laboratory report of `OP-004 §3.6.1`. Its own type
+   * rather than a second `lab_report` template, because a hospital routes it
+   * differently — the single-order report auto-prints at the collection counter
+   * on `lab.result.final`, the cumulative one is produced on request from the
+   * report centre and never auto-prints. `core.print_mappings.doc_type` is a
+   * free-text column, so this needs no migration; `EN-005 §4.1`'s table does
+   * not list it yet and should gain a row.
+   */
+  | 'lab_report_cumulative'
   | 'rad_report'
   | 'wristband'
   | 'patient_card'
