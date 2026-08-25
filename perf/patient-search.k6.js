@@ -12,13 +12,20 @@
  * Environment:
  *   BASE_URL      default http://localhost:4000/api/v1
  *   HOSPITAL_ID   required — the tenant to search within
- *   USERNAME      default receptionist@vims-blr
- *   PASSWORD      default VimsDev#2026
+ *   LOGIN_USERNAME      default receptionist@vims-blr
+ *   LOGIN_PASSWORD      default VimsDev#2026
  *
  * Each search mode is measured separately and gated separately, because they
  * take different code paths to different indexes: an exact-mobile lookup that
  * stays fast can hide a name search that has fallen back to a sequential scan,
  * and an aggregate p95 across all five would let it.
+ *
+ * **The credential variables are `LOGIN_USERNAME` / `LOGIN_PASSWORD`, not
+ * `USERNAME` / `PASSWORD`.** `USERNAME` is a *special parameter* in zsh, bound
+ * to the current user, and an inline `USERNAME=x k6 run ...` does not override
+ * it — k6 receives the shell's value. This cost a debugging session: the script
+ * sent `"identifier":"vims"`, the API answered 401, and the account it named was
+ * perfectly valid when tested with curl.
  */
 import http from 'k6/http';
 import { check, fail } from 'k6';
@@ -26,8 +33,8 @@ import { Trend } from 'k6/metrics';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:4000/api/v1';
 const HOSPITAL_ID = __ENV.HOSPITAL_ID;
-const USERNAME = __ENV.USERNAME || 'receptionist@vims-blr';
-const PASSWORD = __ENV.PASSWORD || 'VimsDev#2026';
+const USERNAME = __ENV.LOGIN_USERNAME || 'receptionist@vims-blr';
+const PASSWORD = __ENV.LOGIN_PASSWORD || 'VimsDev#2026';
 
 /**
  * `docs/07 §2.1`: patient search is class F — "full-text / fuzzy search" —
