@@ -36,3 +36,8 @@ export * from './messaging/index.js';
 export * from './db/database.js';
 export * from './logger.js';
 export * from './hub.js';
+
+// EN-004 — the laboratory analyzer interface (Phase 3).
+export * from './hl7/index.js';
+export * from './astm/index.js';
+export * from './analyzer/index.js';
