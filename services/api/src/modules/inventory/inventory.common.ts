@@ -617,7 +617,15 @@ export function toNumber(value: string | null | undefined): number | null {
  * happened. It is reported with this phase.
  */
 export function quantityString(value: number): string {
-  return Math.abs(value).toFixed(4);
+  // Signed, now that the contract's `quantity` accepts a minus.
+  //
+  // It emitted `Math.abs()` because the pattern was `^\d+...` and publishing a
+  // negative would have failed the event's own schema and rolled back a movement
+  // that had physically happened. The cost was that a consumer had to recover
+  // direction from `movementType` — workable for `stock.moved`, impossible for
+  // `stock.corrected`, which carries no movement type. The sign is the thing
+  // that makes `sum(qty_base)` a balance, so it travels with the quantity.
+  return value.toFixed(4);
 }
 
 /** Money in an event payload is a decimal string, never a float (docs/01 §5). */

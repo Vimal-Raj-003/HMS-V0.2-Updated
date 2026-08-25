@@ -498,7 +498,14 @@ export class StockLedgerService {
         movementType: input.movementType,
         refType: input.refType,
         refId: input.refId,
-        qtyBase: quantityString(Number(converted.qtyBase)),
+        // `signedBase`, not `converted.qtyBase`. The ledger row for an
+        // `issue_out` holds -10 while the entered quantity is 10, and it is the
+        // sign that makes `sum(qty_base)` a balance. Publishing the unsigned
+        // value gave every consumer of this event a running total that diverges
+        // from the ledger the moment anything leaves a store — and it was
+        // published that way because the contract's `quantity` pattern refused a
+        // minus, which is now fixed rather than worked around.
+        qtyBase: quantityString(Number(signedBase)),
         uomId: converted.uomId,
         unitCost: unitCost === null ? null : moneyString(unitCost),
         value: value === null ? null : moneyString(Number(value)),

@@ -1329,6 +1329,33 @@ describe('picking and issuing', () => {
     expect(justified.statusCode, justified.body).toBe(201);
   });
 
+  /**
+   * The sign travels with the quantity.
+   *
+   * `quantityString()` published `Math.abs()` because the contract's `quantity`
+   * pattern was `^\d+…` and a negative would have failed the event's own schema,
+   * rolling back a movement that had physically happened. A consumer then had to
+   * recover direction from `movementType` — workable here, impossible for
+   * `inventory.stock.corrected`, which carries no movement type at all.
+   *
+   * The pattern now accepts a leading minus and this asserts the emitter uses it.
+   * Without the assertion the fix would be a function nobody reads: every other
+   * test in this file moves stock *in*, where `abs()` and the signed value agree.
+   */
+  it('publishes an outbound movement as a negative quantity', async () => {
+    const events = await outboxRows('inventory.stock.moved');
+    const outbound = events
+      .map((e) => e.payload as Record<string, unknown>)
+      .filter((p) => Number(p['qtyBase']) < 0);
+    expect(outbound.length, 'no outbound movement was announced at all').toBeGreaterThanOrEqual(1);
+    for (const payload of outbound) {
+      expect(String(payload['qtyBase']).startsWith('-')).toBe(true);
+      // `sum(qty_base)` is the balance, so the sign is what makes the number mean
+      // anything — and the balance it reports must agree with it.
+      expect(Number(payload['balanceAfterBase'])).toBeGreaterThanOrEqual(0);
+    }
+  });
+
   it('leaves stock in transit between issue and acknowledgement', async () => {
     state.mainBeforeIssue = await storeTotal(A.mainStore);
     state.wardBeforeIssue = await storeTotal(A.wardStore);

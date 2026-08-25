@@ -2771,9 +2771,25 @@ const consentEvents: readonly EventDefinition[] = [
 // price and posts the result to a ledger is wrong by a paisa, silently.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A quantity in an event payload, as a decimal string — and **signed**.
+ *
+ * The leading minus is not cosmetic. `inventory.stock.moved` says in its own
+ * description that it carries "the signed base quantity", and a `qty_base` in
+ * `inventory.stock_ledger` is negative on the way out — that sign convention is
+ * what makes `sum(qty_base)` the balance. With an unsigned pattern the emitter
+ * had to publish the magnitude and let the consumer recover direction from
+ * `movementType`, which works there and **cannot** work for
+ * `inventory.stock.corrected`: a correction carries no movement type, so its
+ * direction was not representable on the event at all.
+ *
+ * A string rather than a number for the same reason money is: `qty_base` is
+ * `numeric(18,4)`, and IEEE-754 cannot hold four decimal places of an arbitrary
+ * dispense quantity exactly.
+ */
 const quantity = z
   .string()
-  .regex(/^\d+(\.\d{1,4})?$/, 'quantity must be a decimal string, e.g. "1" or "2.5"');
+  .regex(/^-?\d+(\.\d{1,4})?$/, 'quantity must be a decimal string, e.g. "1", "2.5" or "-5"');
 
 const diagnosisCode = z.object({
   code: z.string(),
