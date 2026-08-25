@@ -60,6 +60,9 @@ import {
   RADIOLOGY_CONTROLLERS,
   RADIOLOGY_PROVIDERS,
 } from './modules/diagnostics/radiology/radiology.module.js';
+// Phase 4 (OP-003, NC-005..NC-008, NC-021). Same spread-not-import treatment.
+import { INVENTORY_CONTROLLERS, INVENTORY_PROVIDERS } from './modules/inventory/inventory.module.js';
+import { PHARMACY_CONTROLLERS, PHARMACY_PROVIDERS } from './modules/pharmacy/pharmacy.module.js';
 import { CashController } from './modules/frontoffice/cash/cash.controller.js';
 import { CoSignService } from './modules/frontoffice/cash/cosign.service.js';
 import { PaymentsService } from './modules/frontoffice/cash/payments.service.js';
@@ -117,6 +120,9 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     // Phase 3 — laboratory, radiology, PACS and the investigation console.
     ...LAB_CONTROLLERS,
     ...RADIOLOGY_CONTROLLERS,
+    // Phase 4 — stores, purchase, pharmacy dispensing and the registers.
+    ...INVENTORY_CONTROLLERS,
+    ...PHARMACY_CONTROLLERS,
   ],
   providers: [
     { provide: ENV, useFactory: () => loadEnv() },
@@ -158,6 +164,14 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     ...PRESCRIBING_PROVIDERS.filter((provider) => provider !== NumberingService),
     ...LAB_PROVIDERS.filter((provider) => provider !== NumberingService),
     ...RADIOLOGY_PROVIDERS.filter((provider) => provider !== NumberingService),
+    // Both Phase 4 arrays re-list the shared services they depend on, so that
+    // each module also stands up on its own in a test. Spread here the duplicate
+    // tokens collapse to one provider, which is the point — one `StockLedgerService`
+    // is what makes it the only writer.
+    ...INVENTORY_PROVIDERS.filter((provider) => provider !== NumberingService),
+    ...PHARMACY_PROVIDERS.filter(
+      (provider) => provider !== NumberingService && !INVENTORY_PROVIDERS.includes(provider),
+    ),
     { provide: APP_FILTER, useClass: ProblemFilter },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: TenantGuard },

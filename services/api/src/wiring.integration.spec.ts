@@ -143,6 +143,25 @@ describe('API wiring', () => {
     ['GET', '/api/v1/pacs/reconciliation'],
     ['GET', '/api/v1/investigations/worklist'],
     ['POST', '/api/v1/investigations/studies'],
+    // Phase 4 — stores, purchase, pharmacy and the registers. At least one route
+    // per controller, because a controller is what goes missing.
+    ['GET', '/api/v1/inventory/items'],
+    ['GET', '/api/v1/inventory/stores'],
+    ['GET', '/api/v1/inventory/stock'],
+    ['GET', '/api/v1/inventory/ledger'],
+    ['GET', '/api/v1/inventory/integrity'],
+    ['POST', '/api/v1/inventory/issues'],
+    ['GET', '/api/v1/inventory/purchase/indents'],
+    ['POST', '/api/v1/inventory/purchase/indents'],
+    ['GET', '/api/v1/vendors'],
+    ['GET', '/api/v1/inventory/consignment/agreements'],
+    ['GET', '/api/v1/inventory/consumption/entries'],
+    ['GET', '/api/v1/finance/cost-centres'],
+    ['GET', '/api/v1/pharmacy/queue'],
+    ['GET', '/api/v1/pharmacy/dispenses'],
+    ['POST', '/api/v1/pharmacy/dispenses'],
+    ['GET', '/api/v1/pharmacy/substitutions/00000000-0000-7000-8000-000000000000'],
+    ['GET', '/api/v1/pharmacy/controlled-register'],
   ] as const;
 
   it('mounts every route the built phases define', async () => {
