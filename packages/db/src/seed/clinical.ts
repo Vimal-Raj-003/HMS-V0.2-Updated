@@ -426,7 +426,13 @@ async function seedDoseFrequencies(ctx: SeedContext, tenancy: SeededTenancy): Pr
 
 // ── the drug formulary ──────────────────────────────────────────────────────
 
-interface DrugSeed {
+/**
+ * Exported so the Phase-4 item master can be built from the same formulary the
+ * prescriber writes against. An `inventory.items` row whose `drug_key` points at
+ * a drug the CDSS has never heard of is an item nobody can prescribe, and a
+ * second, divergent drug list is exactly the thing `EN-027` exists to prevent.
+ */
+export interface DrugSeed {
   readonly code: string;
   readonly generic: string;
   readonly atc: string;
@@ -449,7 +455,7 @@ interface DrugSeed {
   readonly brand: readonly [name: string, manufacturer: string, pack: number, mrp: number];
 }
 
-const DRUGS: readonly DrugSeed[] = [
+export const DRUGS: readonly DrugSeed[] = [
   {
     code: 'PCM500',
     generic: 'Paracetamol',
@@ -844,13 +850,18 @@ const DRUGS: readonly DrugSeed[] = [
   },
 ];
 
+/** The `mdm_drugs.record_key` a Phase-4 item points at. One function, two callers. */
+export function drugKeyOf(hospitalCode: string, drugCode: string): string {
+  return seedId('mdm-drug-key', hospitalCode, drugCode);
+}
+
 async function seedDrugFormulary(ctx: SeedContext, tenancy: SeededTenancy): Promise<void> {
   const drugRows: SeedRow[] = [];
   const brandRows: SeedRow[] = [];
 
   for (const h of tenancy.hospitals) {
     for (const d of DRUGS) {
-      const drugKey = seedId('mdm-drug-key', h.code, d.code);
+      const drugKey = drugKeyOf(h.code, d.code);
       drugRows.push(
         master('mdm-drug', h.id, drugKey, null, {
           code: d.code,

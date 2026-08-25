@@ -314,6 +314,13 @@ const DOCTOR_CLINICAL = [
   ...ORDERING,
   ...MOBILE_CLINICIAN,
   'rx.cosign',
+  // Phase 4 — the prescriber's half of the pharmacy loop: decide the
+  // substitution the counter proposed, and see what was actually dispensed.
+  'rx.substitution.approve',
+  'pharmacy.substitution.read',
+  'pharmacy.substitution.list',
+  'pharmacy.dispense.read',
+  'pharmacy.dispense.list',
   'order.admission.request',
   'mrd.coding.query.answer',
   'mrd.deficiency.read',
@@ -345,6 +352,10 @@ const RESIDENT_CLINICAL = [
   'rx.print',
   'order.create',
   'order.list',
+  // Sees what the counter dispensed; does not decide a substitution against a
+  // prescription they could not sign in the first place (docs/05 row 14).
+  'pharmacy.dispense.read',
+  'pharmacy.dispense.list',
 ] as const;
 
 /** A diagnostic consultant (radiologist, pathologist): reads charts and orders, prescribes nothing. */
@@ -647,6 +658,418 @@ const INVESTIGATION_REPORTER = [
   'invest.report.deliver',
 ] as const;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4 bundles — Pharmacy, Stores & Supply Chain
+//
+// Built the way LAB_BENCH and CASHIER_BASE are: a grant is made once and
+// composed, so "who may approve a purchase order" is one line to read rather
+// than five literals to diff.
+//
+// Two rules shape every bundle below, and both have cost a phase before:
+//
+//  1. **A `.read` is useless without its `.list`.** `CASHIER_BASE` carries the
+//     comment: `receipt.shift.list` was omitted once and the cashier could not
+//     find their own open shift, because `.read` needs an id the cashier had no
+//     way to obtain. That is not a restriction, it is a role that cannot start
+//     its day. `phase4-grants.spec.ts` now asserts the property for every
+//     template rather than trusting anybody to remember it.
+//
+//  2. **A second-person key is granted, never decorated.** The four
+//     `pharmacy.narcotic.*` co-signed keys appear in the grants below because a
+//     pharmacist must hold them to be a valid first *or* second signature — but
+//     the route they are exercised through is decorated with
+//     `pharmacy.narcotic.prepare` or `pharmacy.dispense.create`. See the note
+//     above the Phase-4 block in `permissions.ts`.
+//
+// And the separations these bundles encode come from `docs/04 §3`,
+// `docs/05 §Segregation of duties`, NC-005 §12 and NC-021 §12:
+//   • the buyer raises the order and never approves it;
+//   • whoever posts the receipt never releases the invoice for payment;
+//   • whoever counts the shelf never approves their own variance;
+//   • whoever onboards a vendor never approves it, and never its bank account.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What anybody who touches stock needs: find an item, find a store, see what is
+ * on the shelf. Read-only and held by every supply, pharmacy and sub-store role.
+ */
+const STOCK_LOOKUP = [
+  'inventory.item.read',
+  'inventory.item.list',
+  'inventory.store.read',
+  'inventory.store.list',
+  'inventory.stock.read',
+  'inventory.stock.list',
+  'inventory.batch.read',
+  'inventory.batch.list',
+] as const;
+
+/**
+ * A ward, theatre, laboratory or kitchen sub-store: indent from the main store,
+ * receive what arrives, return what is unused, record what was consumed and
+ * count the shelf. Deliberately no adjustment, no approval and no write-off —
+ * those belong to the store in-charge.
+ */
+const SUB_STORE_CUSTODIAN = [
+  ...STOCK_LOOKUP,
+  'inventory.store_indent.create',
+  'inventory.store_indent.read',
+  'inventory.store_indent.list',
+  'inventory.issue.receive',
+  'inventory.issue.read',
+  'inventory.issue.list',
+  'inventory.return.create',
+  'inventory.return.read',
+  'inventory.return.list',
+  'inventory.count.count',
+  'inventory.count.read',
+  'inventory.count.list',
+  'inventory.consumption.record',
+  'inventory.consumption.read',
+  'inventory.consumption.list',
+  'inventory.consumption.reverse',
+  'inventory.label.print',
+] as const;
+
+/**
+ * The main store: receive, put away, pick, issue, transfer, count.
+ *
+ * Holds `inventory.grn.post` and therefore may never hold
+ * `inventory.invoice.approve` — NC-005 §12, and the pair is a blocking
+ * segregation rule. Holds `inventory.count.count` and therefore never
+ * `inventory.count.approve`. Raises adjustments and never approves them.
+ */
+const STORES_DESK = [
+  ...STOCK_LOOKUP,
+  'inventory.item.params.configure',
+  'inventory.item.gtin.map',
+  'inventory.ledger.read',
+  'inventory.ledger.list',
+  'inventory.stock.putaway',
+  'inventory.store_indent.read',
+  'inventory.store_indent.list',
+  'inventory.store_indent.approve',
+  'inventory.issue.pick',
+  'inventory.issue.create',
+  'inventory.issue.read',
+  'inventory.issue.list',
+  'inventory.issue.emergency.create',
+  'inventory.return.read',
+  'inventory.return.list',
+  'inventory.return.inspect',
+  'inventory.transfer.create',
+  'inventory.transfer.read',
+  'inventory.transfer.list',
+  'inventory.transfer.dispatch',
+  'inventory.transfer.receive',
+  'inventory.adjustment.create',
+  'inventory.adjustment.read',
+  'inventory.adjustment.list',
+  'inventory.batch.quarantine',
+  'inventory.batch.trace',
+  'inventory.expiry.read',
+  'inventory.coldchain.read',
+  'inventory.coldchain.decide',
+  'inventory.reorder.read',
+  'inventory.reorder.manage',
+  'inventory.count.plan',
+  'inventory.count.count',
+  'inventory.count.read',
+  'inventory.count.list',
+  'inventory.analysis.read',
+  'inventory.label.print',
+  'inventory.report.read',
+  'inventory.fefo.override',
+  'inventory.grn.create',
+  'inventory.grn.qc',
+  'inventory.grn.post',
+  // Reversing a receipt the dock itself posted, with a reason and compensating
+  // ledger entries. NC-005 §5 refuses it once the stock has been issued, which
+  // is what keeps "I mis-keyed the batch" apart from "make the shortage go away".
+  'inventory.grn.reverse',
+  // The emergency that has to stay countable: goods that arrive with no order
+  // behind them. Its own key, its own reason, its own report line.
+  'inventory.grn.without_po.create',
+  'inventory.grn.read',
+  'inventory.grn.list',
+  'inventory.analysis.run',
+  'inventory.consumption.read',
+  'inventory.consumption.list',
+  'inventory.indent.create',
+  'inventory.indent.read',
+  'inventory.indent.list',
+] as const;
+
+/**
+ * The buyer's desk: indent to order, and the vendor register behind it.
+ *
+ * `inventory.po.create` without `inventory.po.approve` is the whole point —
+ * `docs/04 §3` puts maker and checker on different people for a purchase order,
+ * and the value bands in EN-038 decide who the checker is. Likewise
+ * `vendor.master.manage` without `vendor.master.approve` or
+ * `vendor.bank.approve`.
+ */
+const PROCUREMENT_DESK = [
+  ...STOCK_LOOKUP,
+  'inventory.indent.read',
+  'inventory.indent.list',
+  'inventory.indent.cancel',
+  'inventory.rfq.create',
+  'inventory.rfq.send',
+  'inventory.rfq.read',
+  'inventory.rfq.list',
+  'inventory.quotation.enter',
+  'inventory.quotation.read',
+  'inventory.quotation.list',
+  'inventory.comparative.compare',
+  'inventory.comparative.read',
+  'inventory.comparative.list',
+  'inventory.rate_contract.read',
+  'inventory.rate_contract.list',
+  'inventory.rate_contract.manage',
+  'inventory.po.create',
+  'inventory.po.read',
+  'inventory.po.list',
+  'inventory.po.send',
+  'inventory.po.amend',
+  'inventory.po.cancel',
+  'inventory.po.short_close',
+  'inventory.grn.read',
+  'inventory.grn.list',
+  'inventory.purchase_return.manage',
+  'inventory.purchase_return.read',
+  'inventory.purchase_return.list',
+  'inventory.invoice.capture',
+  'inventory.invoice.match',
+  'inventory.invoice.read',
+  'inventory.invoice.list',
+  'inventory.purchase.emergency.create',
+  'inventory.purchase.report.read',
+  'inventory.report.read',
+  'vendor.master.read',
+  'vendor.master.list',
+  'vendor.master.manage',
+  'vendor.item.read',
+  'vendor.item.manage',
+  'vendor.contract.read',
+  'vendor.contract.list',
+  'vendor.contract.manage',
+  'vendor.score.read',
+  'vendor.report.read',
+  // Proposes a sanction; NC-021 §5 puts the approval with the administrator,
+  // after a show-cause notice and a response window.
+  'vendor.action.propose',
+  'inventory.consignment.agreement.manage',
+] as const;
+
+/**
+ * The consignment coordinator: the vendor's stock on our shelves, and the
+ * paperwork that turns a used implant into an invoice.
+ *
+ * `inventory.consignment.sign` is deliberately not here — NC-007 §12 keeps the
+ * reconciliation signature away from whoever scanned the usages being
+ * reconciled, and the coordinator is usually both scanner and counter.
+ */
+const CONSIGNMENT_DESK = [
+  'inventory.consignment.agreement.read',
+  'inventory.consignment.agreement.list',
+  'inventory.consignment.kit.manage',
+  'inventory.consignment.receive',
+  'inventory.consignment.stock.read',
+  'inventory.consignment.use',
+  'inventory.consignment.usage.read',
+  'inventory.consignment.usage.list',
+  'inventory.consignment.po.read',
+  'inventory.consignment.po.list',
+  'inventory.consignment.return.manage',
+  'inventory.consignment.count',
+  'inventory.consignment.report.read',
+] as const;
+
+/**
+ * Reading what came back from the counter, for a clinician. `pharmacy.*` reads
+ * only — nothing here dispenses, prices or adjusts.
+ */
+const PHARMACY_READER = [
+  'pharmacy.dispense.read',
+  'pharmacy.dispense.list',
+  'pharmacy.substitution.read',
+  'pharmacy.substitution.list',
+] as const;
+
+/**
+ * The dispensing counter.
+ *
+ * Holds all four `pharmacy.narcotic.*` co-signed keys, because a pharmacist has
+ * to be a valid signature on either side of a two-person controlled-drug
+ * transaction — and holds `pharmacy.narcotic.prepare`, which is the key the
+ * route is actually decorated with. Deliberately excludes
+ * `pharmacy.return.approve`, `pharmacy.expiry.manage`, `pharmacy.price.update`
+ * and `pharmacy.recall.manage`: OP-003 §12 keeps all four with the in-charge.
+ */
+const PHARMACY_COUNTER = [
+  ...STOCK_LOOKUP,
+  ...PHARMACY_READER,
+  'pharmacy.queue.read',
+  'pharmacy.queue.list',
+  'pharmacy.queue.manage',
+  'pharmacy.dispense.create',
+  'pharmacy.dispense.complete',
+  'pharmacy.dispense.bill',
+  'pharmacy.dispense.cancel',
+  'pharmacy.substitution.request',
+  'pharmacy.batch.override',
+  'pharmacy.label.print',
+  'pharmacy.label.reprint',
+  'pharmacy.otc.sell',
+  'pharmacy.return.create',
+  'pharmacy.return.read',
+  'pharmacy.return.list',
+  'pharmacy.stock.read',
+  'pharmacy.stock.list',
+  'pharmacy.indent.create',
+  'pharmacy.expiry.read',
+  'pharmacy.recall.read',
+  'pharmacy.recall.list',
+  'pharmacy.narcotic.read',
+  'pharmacy.narcotic.list',
+  'pharmacy.narcotic.prepare',
+  'pharmacy.narcotic.dispense',
+  'pharmacy.narcotic.issue',
+  'pharmacy.narcotic.custody',
+  'pharmacy.narcotic.destroy',
+  'pharmacy.coldchain.record',
+  'pharmacy.intervention.record',
+  'pharmacy.intervention.read',
+  'pharmacy.intervention.list',
+  'pharmacy.day_close.read',
+  'pharmacy.day_close.list',
+  'pharmacy.day_close.complete',
+  'inventory.store_indent.create',
+  'inventory.store_indent.read',
+  'inventory.store_indent.list',
+  'inventory.issue.receive',
+  'inventory.count.count',
+  'inventory.count.read',
+  'inventory.count.list',
+  'inventory.batch.trace',
+] as const;
+
+/**
+ * Pharmacy administration on top of the counter: pricing, expiry decisions,
+ * recalls, the statutory registers and the drug side of purchasing.
+ *
+ * `pharmacy.discount.apply` is here and not on the counter because OP-003 §3
+ * caps a pharmacist's discount and sends the rest to the in-charge.
+ */
+const PHARMACY_ADMIN = [
+  'pharmacy.return.approve',
+  'pharmacy.stock.adjust',
+  'pharmacy.indent.approve',
+  'pharmacy.expiry.manage',
+  'pharmacy.recall.manage',
+  'pharmacy.recall.trace',
+  'pharmacy.coldchain.decide',
+  'pharmacy.price.update',
+  'pharmacy.discount.apply',
+  'pharmacy.report.read',
+  'pharmacy.report.export',
+  'pharmacy.configure',
+  'inventory.item.create',
+  'inventory.item.update',
+  'inventory.item.params.configure',
+  'inventory.item.gtin.map',
+  'inventory.ledger.read',
+  'inventory.ledger.list',
+  'inventory.adjustment.create',
+  'inventory.adjustment.read',
+  'inventory.adjustment.list',
+  'inventory.batch.quarantine',
+  'inventory.batch.release',
+  'inventory.expiry.read',
+  'inventory.expiry.manage',
+  'inventory.coldchain.read',
+  'inventory.reorder.read',
+  'inventory.reorder.manage',
+  'inventory.count.plan',
+  'inventory.analysis.read',
+  'inventory.report.read',
+  'inventory.indent.create',
+  'inventory.indent.read',
+  'inventory.indent.list',
+  'inventory.grn.read',
+  'inventory.grn.list',
+  'inventory.po.read',
+  'inventory.po.list',
+  'vendor.master.read',
+  'vendor.master.list',
+  'vendor.item.read',
+] as const;
+
+/** Read-only reach across the whole supply chain, for an auditor or a drug inspector. */
+const SUPPLY_CHAIN_AUDIT = [
+  'inventory.item.read',
+  'inventory.item.list',
+  'inventory.store.read',
+  'inventory.store.list',
+  'inventory.stock.read',
+  'inventory.stock.list',
+  'inventory.batch.read',
+  'inventory.batch.list',
+  'inventory.ledger.read',
+  'inventory.ledger.list',
+  'inventory.adjustment.read',
+  'inventory.adjustment.list',
+  'inventory.count.read',
+  'inventory.count.list',
+  'inventory.valuation.read',
+  'inventory.analysis.read',
+  'inventory.report.read',
+  'inventory.export',
+  'inventory.indent.read',
+  'inventory.indent.list',
+  'inventory.rfq.read',
+  'inventory.rfq.list',
+  'inventory.quotation.read',
+  'inventory.quotation.list',
+  'inventory.rate_contract.read',
+  'inventory.rate_contract.list',
+  'inventory.po.read',
+  'inventory.po.list',
+  'inventory.grn.read',
+  'inventory.grn.list',
+  'inventory.purchase_return.read',
+  'inventory.purchase_return.list',
+  'inventory.invoice.read',
+  'inventory.invoice.list',
+  'inventory.purchase.report.read',
+  'inventory.purchase.export',
+  'inventory.consignment.agreement.read',
+  'inventory.consignment.agreement.list',
+  'inventory.consignment.stock.read',
+  'inventory.consignment.po.read',
+  'inventory.consignment.po.list',
+  'inventory.consignment.report.read',
+  'inventory.consumption.report.read',
+  'inventory.consumption.variance.read',
+  'finance.costcentre.read',
+  'finance.costcentre.list',
+  'vendor.master.read',
+  'vendor.master.list',
+  'vendor.item.read',
+  'vendor.contract.read',
+  'vendor.contract.list',
+  'vendor.score.read',
+  'vendor.report.read',
+  'vendor.export',
+  'pharmacy.report.read',
+  'pharmacy.report.export',
+  'pharmacy.day_close.read',
+  'pharmacy.day_close.list',
+  'pharmacy.narcotic.read',
+  'pharmacy.narcotic.list',
+] as const;
+
 // ── the 64 templates ─────────────────────────────────────────────────────────
 
 const templates: readonly RoleTemplate[] = [
@@ -789,6 +1212,64 @@ const templates: readonly RoleTemplate[] = [
       'gateway.client.manage',
       'admin.print.configure',
       'admin.print.read',
+
+      // Phase 4 — the configuration and the top approval tier. Deliberately no
+      // `vendor.master.manage`, no `inventory.po.create` and no
+      // `vendor.action.propose`: the administrator approves what somebody else
+      // raised, and every one of those pairs is a blocking segregation rule.
+      'inventory.store.configure',
+      'inventory.item.read',
+      'inventory.item.list',
+      'inventory.item.import',
+      'inventory.purchase.configure',
+      'inventory.purchase.emergency.approve',
+      'inventory.purchase.report.read',
+      'inventory.po.read',
+      'inventory.po.list',
+      'inventory.po.approve',
+      'inventory.comparative.approve',
+      'inventory.rate_contract.read',
+      'inventory.rate_contract.list',
+      'inventory.rate_contract.approve',
+      'inventory.transfer.read',
+      'inventory.transfer.list',
+      'inventory.transfer.approve',
+      'inventory.adjustment.read',
+      'inventory.adjustment.list',
+      'inventory.adjustment.approve',
+      'inventory.count.read',
+      'inventory.count.list',
+      'inventory.count.approve',
+      'inventory.valuation.read',
+      'inventory.report.read',
+      'inventory.export',
+      'inventory.negative_stock.override',
+      'inventory.consignment.agreement.read',
+      'inventory.consignment.agreement.list',
+      'inventory.consignment.agreement.approve',
+      'inventory.consignment.approve',
+      'inventory.consignment.configure',
+      'inventory.consignment.report.read',
+      'inventory.consumption.configure',
+      'inventory.consumption.report.read',
+      'finance.costcentre.read',
+      'finance.costcentre.list',
+      'finance.costcentre.manage',
+      'vendor.master.read',
+      'vendor.master.list',
+      'vendor.master.approve',
+      'vendor.contract.read',
+      'vendor.contract.list',
+      'vendor.contract.approve',
+      'vendor.action.approve',
+      'vendor.score.manage',
+      'vendor.score.read',
+      'vendor.report.read',
+      'vendor.configure',
+      'pharmacy.configure',
+      'pharmacy.report.read',
+      'pharmacy.day_close.read',
+      'pharmacy.day_close.list',
     ],
     // No narrowing: a Hospital Admin's reach is set by their branch grants in
     // `org_user_branch_access`, not by an ABAC default (EN-041 §3.7).
@@ -840,6 +1321,35 @@ const templates: readonly RoleTemplate[] = [
       'admin.print.configure',
       'admin.print.read',
       'barcode.scheme.configure',
+
+      // Phase 4 — the same surface as the hospital administrator, narrowed to
+      // one branch by ABAC rather than by the key.
+      'inventory.store.configure',
+      'inventory.item.read',
+      'inventory.item.list',
+      'inventory.po.read',
+      'inventory.po.list',
+      'inventory.po.approve',
+      'inventory.transfer.read',
+      'inventory.transfer.list',
+      'inventory.transfer.approve',
+      'inventory.adjustment.read',
+      'inventory.adjustment.list',
+      'inventory.adjustment.approve',
+      'inventory.count.read',
+      'inventory.count.list',
+      'inventory.count.approve',
+      'inventory.valuation.read',
+      'inventory.report.read',
+      'inventory.consumption.report.read',
+      'finance.costcentre.read',
+      'finance.costcentre.list',
+      'vendor.master.read',
+      'vendor.master.list',
+      'vendor.report.read',
+      'pharmacy.report.read',
+      'pharmacy.day_close.read',
+      'pharmacy.day_close.list',
     ],
     abacDefaults: {},
     mfaMandatory: true,
@@ -921,6 +1431,20 @@ const templates: readonly RoleTemplate[] = [
       'org.report.read',
       'security.incident.read',
       'dr.status.read',
+
+      // Phase 4 — medication-safety governance. Sees the interventions, the
+      // recalls and the controlled-drug registers; dispenses nothing.
+      'pharmacy.recall.read',
+      'pharmacy.recall.list',
+      'pharmacy.recall.manage',
+      'pharmacy.intervention.read',
+      'pharmacy.intervention.list',
+      'pharmacy.narcotic.read',
+      'pharmacy.narcotic.list',
+      'pharmacy.report.read',
+      'inventory.batch.read',
+      'inventory.batch.list',
+      'inventory.batch.trace',
     ],
     abacDefaults: {},
     mfaMandatory: true,
@@ -956,6 +1480,28 @@ const templates: readonly RoleTemplate[] = [
       ...SIGNS_DOCUMENTS,
       ...HOD_BASE,
       'tpl.form.manage',
+      // Phase 4 — the department head's supply-chain surface: approve what the
+      // department asks for, and answer for what it consumed. No ordering, no
+      // receipt, no adjustment.
+      'inventory.store_indent.read',
+      'inventory.store_indent.list',
+      'inventory.store_indent.approve',
+      'inventory.indent.create',
+      'inventory.indent.read',
+      'inventory.indent.list',
+      'inventory.indent.approve',
+      'inventory.item.read',
+      'inventory.item.list',
+      'inventory.stock.read',
+      'inventory.stock.list',
+      'inventory.consumption.read',
+      'inventory.consumption.list',
+      'inventory.consumption.report.read',
+      'inventory.consumption.variance.read',
+      'inventory.consumption.variance.explain',
+      'inventory.report.read',
+      'finance.costcentre.read',
+      'finance.costcentre.list',
     ],
     abacDefaults: { ownDepartmentOnly: true },
     mfaMandatory: false,
@@ -1065,6 +1611,15 @@ const templates: readonly RoleTemplate[] = [
       ...BREAK_GLASS,
       ...SIGNS_DOCUMENTS,
       'barcode.verify.implant',
+
+      // Phase 4 — implants. The surgeon records what went into the patient and
+      // reads the traceability afterwards; the coordinator does the paperwork.
+      'inventory.consignment.stock.read',
+      'inventory.consignment.use',
+      'inventory.consignment.usage.read',
+      'inventory.consignment.usage.list',
+      'inventory.item.read',
+      'inventory.item.list',
     ],
     abacDefaults: { careTeamOnly: true },
     mfaMandatory: false,
@@ -1271,6 +1826,11 @@ const templates: readonly RoleTemplate[] = [
       'barcode.verify.mar',
       'barcode.verify.sample',
       'notify.escalation.read',
+
+      // Phase 4 — the ward or unit is a sub-store: indent, receive, return,
+      // count the shelf and record what was used. No adjustment and no
+      // approval; those are the store in-charge's (NC-006 §12).
+      ...SUB_STORE_CUSTODIAN,
     ],
     abacDefaults: { assignedWardOnly: true },
     mfaMandatory: false,
@@ -1298,6 +1858,11 @@ const templates: readonly RoleTemplate[] = [
       'barcode.verify.sample',
       'barcode.verify.blood',
       'notify.escalation.read',
+
+      // Phase 4 — the ward or unit is a sub-store: indent, receive, return,
+      // count the shelf and record what was used. No adjustment and no
+      // approval; those are the store in-charge's (NC-006 §12).
+      ...SUB_STORE_CUSTODIAN,
     ],
     abacDefaults: { assignedWardOnly: true },
     mfaMandatory: false,
@@ -1329,6 +1894,11 @@ const templates: readonly RoleTemplate[] = [
       'barcode.verify.mar',
       'barcode.verify.sample',
       'notify.escalation.read',
+
+      // Phase 4 — the ward or unit is a sub-store: indent, receive, return,
+      // count the shelf and record what was used. No adjustment and no
+      // approval; those are the store in-charge's (NC-006 §12).
+      ...SUB_STORE_CUSTODIAN,
     ],
     abacDefaults: {},
     mfaMandatory: false,
@@ -1342,7 +1912,16 @@ const templates: readonly RoleTemplate[] = [
     description: 'OT checklist, instrument and swab counts, consumables and implant capture.',
     category: 'nursing',
     homeWorkspace: 'ot-checklist',
-    permissions: [...BASE_CLINICAL, ...LABEL_PRINTER, 'barcode.verify.implant', 'barcode.verify.cssd'],
+    permissions: [
+      ...BASE_CLINICAL,
+      ...LABEL_PRINTER,
+      'barcode.verify.implant',
+      'barcode.verify.cssd',
+      // Phase 4 — the ward or unit is a sub-store: indent, receive, return,
+      // count the shelf and record what was used. No adjustment and no
+      // approval; those are the store in-charge's (NC-006 §12).
+      ...SUB_STORE_CUSTODIAN,
+    ],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -1393,6 +1972,28 @@ const templates: readonly RoleTemplate[] = [
       'org.transfer.manage',
       'barcode.verify.override',
       'barcode.report.read',
+
+      // Phase 4 — the nursing command centre owns the ward stores. Approves the
+      // par-level override NC-006 §5 allows on a ward (`allow_with_approval`)
+      // and the manual consignment entry NC-007 §5 requires a supervisor for.
+      'inventory.item.read',
+      'inventory.item.list',
+      'inventory.store.read',
+      'inventory.store.list',
+      'inventory.stock.read',
+      'inventory.stock.list',
+      'inventory.store_indent.read',
+      'inventory.store_indent.list',
+      'inventory.store_indent.approve',
+      'inventory.consumption.read',
+      'inventory.consumption.list',
+      'inventory.consumption.supervise',
+      'inventory.consumption.report.read',
+      'inventory.count.read',
+      'inventory.count.list',
+      'inventory.report.read',
+      'inventory.negative_stock.override',
+      'inventory.consignment.approve',
     ],
     abacDefaults: {},
     mfaMandatory: false,
@@ -1557,7 +2158,8 @@ const templates: readonly RoleTemplate[] = [
     key: 'pharmacist_op',
     docsRow: 30,
     name: 'Pharmacist (OP)',
-    description: 'Outpatient dispensing, over-the-counter sales and returns.',
+    description:
+      'Outpatient dispensing, over-the-counter sales and returns. The second safety net on every prescription: the CDSS re-check at the counter is theirs, not the prescriber’s.',
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-rx-queue',
     permissions: [
@@ -1567,9 +2169,14 @@ const templates: readonly RoleTemplate[] = [
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
       'mdm.pharmacy.propose',
+      ...PHARMACY_COUNTER,
     ],
-    abacDefaults: {},
-    mfaMandatory: false,
+    // `requiresSecondPerson` on the role is what makes this pharmacist a valid
+    // *co-signer* on somebody else's controlled-drug transaction as well as the
+    // first signature on their own. docs/04 §2 mandates 2FA for anybody who can
+    // touch the narcotic register, which is why MFA moves to true here.
+    abacDefaults: { requiresSecondPerson: true },
+    mfaMandatory: true,
     sensitiveGrant: false,
     requiresCoSign: false,
   },
@@ -1577,7 +2184,8 @@ const templates: readonly RoleTemplate[] = [
     key: 'pharmacist_ip',
     docsRow: 31,
     name: 'Pharmacist (IP / Ward stock)',
-    description: 'Ward indents, unit-dose dispensing and returns.',
+    description:
+      'Ward indents, unit-dose dispensing and returns, scoped by ABAC to the wards the pharmacist covers.',
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-ward-indents',
     permissions: [
@@ -1587,9 +2195,23 @@ const templates: readonly RoleTemplate[] = [
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
       'mdm.pharmacy.propose',
+      ...PHARMACY_COUNTER,
+      // Ward stock is a sub-store, so the IP pharmacist also works the issue,
+      // return and consumption side that the OP counter does not.
+      'inventory.issue.pick',
+      'inventory.issue.create',
+      'inventory.issue.read',
+      'inventory.issue.list',
+      'inventory.return.read',
+      'inventory.return.list',
+      'inventory.return.inspect',
+      'inventory.consumption.record',
+      'inventory.consumption.read',
+      'inventory.consumption.list',
+      'inventory.consumption.reverse',
     ],
-    abacDefaults: { assignedWardOnly: true },
-    mfaMandatory: false,
+    abacDefaults: { assignedWardOnly: true, requiresSecondPerson: true },
+    mfaMandatory: true,
     sensitiveGrant: false,
     requiresCoSign: false,
   },
@@ -1620,6 +2242,29 @@ const templates: readonly RoleTemplate[] = [
       'mdm.inventory.propose',
       'barcode.verify.override',
       'barcode.report.read',
+      ...PHARMACY_COUNTER,
+      ...PHARMACY_ADMIN,
+      // The drug side of purchasing: NC-005 §3 gives the pharmacy in-charge the
+      // indent and the receipt for scheduled drugs, and NC-021 §5 requires their
+      // sign-off on a drug vendor. Raising a purchase order and approving one
+      // are both deliberately absent — that is the purchase officer and the
+      // finance approver, and `docs/04 §3` keeps them apart.
+      'inventory.grn.create',
+      'inventory.grn.qc',
+      'inventory.grn.post',
+      'inventory.transfer.create',
+      'inventory.transfer.read',
+      'inventory.transfer.list',
+      'inventory.transfer.dispatch',
+      'inventory.transfer.receive',
+      'inventory.count.plan',
+      // Not `inventory.count.approve`: PHARMACY_COUNTER already carries
+      // `inventory.count.count`, and NC-006 §5 keeps counting and approving the
+      // variance apart. The pharmacy's count variance is approved by stores or
+      // finance, which is what makes the count evidence rather than assertion.
+      'inventory.consumption.read',
+      'inventory.consumption.list',
+      'inventory.consumption.supervise',
     ],
     abacDefaults: { requiresSecondPerson: true },
     mfaMandatory: true,
@@ -1633,7 +2278,15 @@ const templates: readonly RoleTemplate[] = [
     description: 'Bench worklist and result entry. Deliberately cannot validate — that is the pathologist.',
     category: 'diagnostics',
     homeWorkspace: 'lab-bench',
-    permissions: [...LAB_BENCH, ...BASE_CLINICAL, ...LABEL_PRINTER, 'barcode.verify.sample'],
+    permissions: [
+      ...LAB_BENCH,
+      ...BASE_CLINICAL,
+      ...LABEL_PRINTER,
+      'barcode.verify.sample',
+      // Phase 4 — the department store: reagents, films, packs and consumables
+      // are indented, received and consumed here (NC-006 §12 sub-store custodians).
+      ...SUB_STORE_CUSTODIAN,
+    ],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -1680,7 +2333,15 @@ const templates: readonly RoleTemplate[] = [
     description: 'Modality worklist, scheduling and acquisition status.',
     category: 'diagnostics',
     homeWorkspace: 'radiology-modality',
-    permissions: [...RADIOLOGY_MODALITY, ...INVESTIGATION_TECH, ...BASE_CLINICAL, ...LABEL_PRINTER],
+    permissions: [
+      ...RADIOLOGY_MODALITY,
+      ...INVESTIGATION_TECH,
+      ...BASE_CLINICAL,
+      ...LABEL_PRINTER,
+      // Phase 4 — the department store: reagents, films, packs and consumables
+      // are indented, received and consumed here (NC-006 §12 sub-store custodians).
+      ...SUB_STORE_CUSTODIAN,
+    ],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -1706,7 +2367,15 @@ const templates: readonly RoleTemplate[] = [
     description: 'Tray assembly, sterilisation cycles, issue and return, and recall.',
     category: 'supply',
     homeWorkspace: 'cssd',
-    permissions: [...BASE_STAFF, 'barcode.scan', ...LABEL_PRINTER, 'barcode.verify.cssd'],
+    permissions: [
+      ...BASE_STAFF,
+      'barcode.scan',
+      ...LABEL_PRINTER,
+      'barcode.verify.cssd',
+      // Phase 4 — the department store: reagents, films, packs and consumables
+      // are indented, received and consumed here (NC-006 §12 sub-store custodians).
+      ...SUB_STORE_CUSTODIAN,
+    ],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -1745,7 +2414,14 @@ const templates: readonly RoleTemplate[] = [
     description: 'Dialysis board, sessions and machine assignment.',
     category: 'therapy',
     homeWorkspace: 'dialysis-board',
-    permissions: [...BASE_CLINICAL, ...LABEL_PRINTER],
+    permissions: [
+      ...BASE_CLINICAL,
+      ...LABEL_PRINTER,
+      // Phase 4 — the ward or unit is a sub-store: indent, receive, return,
+      // count the shelf and record what was used. No adjustment and no
+      // approval; those are the store in-charge's (NC-006 §12).
+      ...SUB_STORE_CUSTODIAN,
+    ],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -1824,7 +2500,8 @@ const templates: readonly RoleTemplate[] = [
     key: 'stores_keeper',
     docsRow: 44,
     name: 'Stores Keeper / Store In-charge',
-    description: 'Goods receipt, issues and stock counts.',
+    description:
+      'Goods receipt, issues, transfers and stock counts. Posts the receipt and therefore never releases the invoice for payment, and counts the shelf and therefore never approves its own variance.',
     category: 'supply',
     homeWorkspace: 'stores',
     permissions: [
@@ -1833,8 +2510,14 @@ const templates: readonly RoleTemplate[] = [
       ...LABEL_PRINTER,
       'mdm.inventory.propose',
       'org.transfer.manage',
+      ...STORES_DESK,
+      ...CONSIGNMENT_DESK,
+      'inventory.consignment.receive',
+      'vendor.master.read',
+      'vendor.master.list',
+      'vendor.item.read',
     ],
-    abacDefaults: {},
+    abacDefaults: { ownDepartmentOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
     requiresCoSign: false,
@@ -1843,7 +2526,8 @@ const templates: readonly RoleTemplate[] = [
     key: 'purchase_officer',
     docsRow: 45,
     name: 'Purchase Officer',
-    description: 'Indents, requests for quotation and purchase orders.',
+    description:
+      'Indents, requests for quotation, comparatives and purchase orders. Raises the order and never approves it — `docs/04 §3` puts maker and checker on different people for a PO, and the value bands decide who the checker is.',
     category: 'supply',
     homeWorkspace: 'procurement',
     permissions: [
@@ -1854,6 +2538,13 @@ const templates: readonly RoleTemplate[] = [
       'mdm.inventory.approve',
       'tpl.render',
       'email.send',
+      ...PROCUREMENT_DESK,
+      'inventory.indent.approve',
+      'inventory.consignment.agreement.read',
+      'inventory.consignment.agreement.list',
+      'inventory.consignment.po.read',
+      'inventory.consignment.po.list',
+      'inventory.consignment.po.close',
     ],
     abacDefaults: { amountLimit: { maxAmount: '50000.00', combine: 'whichever_is_lower' } },
     mfaMandatory: false,
@@ -1900,6 +2591,65 @@ const templates: readonly RoleTemplate[] = [
       'lic.subscription.read',
       'audit.report.read',
       'email.send',
+
+      // Phase 4 — accounts payable. Releases the invoice for payment and
+      // therefore never posts the goods receipt (NC-005 §12), and approves a
+      // vendor's bank change but never maintains the vendor record that
+      // proposed it (NC-021 §5).
+      'inventory.invoice.capture',
+      'inventory.invoice.match',
+      'inventory.invoice.approve',
+      'inventory.invoice.read',
+      'inventory.invoice.list',
+      'inventory.po.read',
+      'inventory.po.list',
+      'inventory.po.approve',
+      'inventory.comparative.read',
+      'inventory.comparative.list',
+      'inventory.comparative.approve',
+      'inventory.grn.read',
+      'inventory.grn.list',
+      'inventory.purchase_return.read',
+      'inventory.purchase_return.list',
+      'inventory.purchase.emergency.approve',
+      'inventory.purchase.report.read',
+      'inventory.purchase.export',
+      'inventory.purchase.configure',
+      'inventory.valuation.read',
+      'inventory.valuation.close',
+      'inventory.adjustment.read',
+      'inventory.adjustment.list',
+      'inventory.adjustment.approve',
+      'inventory.count.read',
+      'inventory.count.list',
+      'inventory.count.approve',
+      'inventory.report.read',
+      'inventory.export',
+      'inventory.consignment.reconcile',
+      'inventory.consignment.sign',
+      'inventory.consignment.dispute.manage',
+      'inventory.consignment.report.read',
+      'inventory.consumption.report.read',
+      'inventory.consumption.variance.read',
+      'inventory.consumption.export',
+      'finance.costcentre.read',
+      'finance.costcentre.list',
+      'finance.costcentre.manage',
+      'finance.allocation.run',
+      'finance.allocation.post',
+      'vendor.master.read',
+      'vendor.master.list',
+      'vendor.kyc.verify',
+      'vendor.bank.approve',
+      'vendor.contract.read',
+      'vendor.contract.list',
+      'vendor.score.read',
+      'vendor.report.read',
+      'vendor.export',
+      'pharmacy.report.read',
+      'pharmacy.report.export',
+      'pharmacy.day_close.read',
+      'pharmacy.day_close.list',
     ],
     abacDefaults: {},
     mfaMandatory: true,
@@ -1954,6 +2704,30 @@ const templates: readonly RoleTemplate[] = [
       'vitals.report.read',
       'security.patch.manage',
       'admin.status.read',
+
+      // Phase 4 — spares and engineering consumables. Indents them, receives
+      // them, records what a repair consumed.
+      'inventory.item.read',
+      'inventory.item.list',
+      'inventory.store.read',
+      'inventory.store.list',
+      'inventory.stock.read',
+      'inventory.stock.list',
+      'inventory.store_indent.create',
+      'inventory.store_indent.read',
+      'inventory.store_indent.list',
+      'inventory.issue.receive',
+      'inventory.issue.read',
+      'inventory.issue.list',
+      'inventory.consumption.record',
+      'inventory.consumption.read',
+      'inventory.consumption.list',
+      'inventory.indent.create',
+      'inventory.indent.read',
+      'inventory.indent.list',
+      'vendor.master.read',
+      'vendor.master.list',
+      'vendor.item.read',
     ],
     abacDefaults: {},
     mfaMandatory: false,
@@ -1987,6 +2761,25 @@ const templates: readonly RoleTemplate[] = [
       'barcode.scan',
       'print.job.create',
       'print.job.read',
+
+      // Phase 4 — a non-clinical sub-store: indent and receive, nothing more.
+      // Deliberately no `inventory.consumption.record`, which can be
+      // patient-linked and would sit oddly against this role's identifier masks.
+      'inventory.item.read',
+      'inventory.item.list',
+      'inventory.store.read',
+      'inventory.store.list',
+      'inventory.stock.read',
+      'inventory.stock.list',
+      'inventory.store_indent.create',
+      'inventory.store_indent.read',
+      'inventory.store_indent.list',
+      'inventory.issue.receive',
+      'inventory.issue.read',
+      'inventory.issue.list',
+      'inventory.return.create',
+      'inventory.return.read',
+      'inventory.return.list',
     ],
     abacDefaults: { dataClassMasks: ['aadhaar', 'address', 'mobile', 'diagnosis', 'full_name'] },
     mfaMandatory: false,
@@ -2033,6 +2826,25 @@ const templates: readonly RoleTemplate[] = [
       'barcode.scan',
       'print.job.create',
       'print.job.read',
+
+      // Phase 4 — a non-clinical sub-store: indent and receive, nothing more.
+      // Deliberately no `inventory.consumption.record`, which can be
+      // patient-linked and would sit oddly against this role's identifier masks.
+      'inventory.item.read',
+      'inventory.item.list',
+      'inventory.store.read',
+      'inventory.store.list',
+      'inventory.stock.read',
+      'inventory.stock.list',
+      'inventory.store_indent.create',
+      'inventory.store_indent.read',
+      'inventory.store_indent.list',
+      'inventory.issue.receive',
+      'inventory.issue.read',
+      'inventory.issue.list',
+      'inventory.return.create',
+      'inventory.return.read',
+      'inventory.return.list',
     ],
     abacDefaults: { dataClassMasks: ['aadhaar', 'address', 'mobile', 'diagnosis'] },
     mfaMandatory: false,
@@ -2084,6 +2896,26 @@ const templates: readonly RoleTemplate[] = [
       'dr.drill.read',
       'security.report.read',
       'barcode.report.read',
+
+      // Phase 4 — NABH evidence: recalls, cold chain, expiry loss, narcotic
+      // registers and vendor audits. Read-only throughout.
+      'inventory.report.read',
+      'inventory.analysis.read',
+      'inventory.batch.read',
+      'inventory.batch.list',
+      'inventory.batch.trace',
+      'inventory.coldchain.read',
+      'inventory.expiry.read',
+      'inventory.count.read',
+      'inventory.count.list',
+      'pharmacy.recall.read',
+      'pharmacy.recall.list',
+      'pharmacy.intervention.read',
+      'pharmacy.intervention.list',
+      'pharmacy.report.read',
+      'vendor.audit.manage',
+      'vendor.score.read',
+      'vendor.report.read',
     ],
     abacDefaults: {},
     mfaMandatory: false,
@@ -2365,6 +3197,11 @@ const templates: readonly RoleTemplate[] = [
       'gateway.dataflow.read',
       'notify.report.read',
       'lic.subscription.read',
+
+      // Phase 4 — read-only reach across stores, procurement, consignment,
+      // consumption and the statutory registers. Every key here is a read, a
+      // list or an audited export; docs/05 row 58 admits nothing else.
+      ...SUPPLY_CHAIN_AUDIT,
     ],
     abacDefaults: { dataClassMasks: ['aadhaar'] },
     mfaMandatory: true,

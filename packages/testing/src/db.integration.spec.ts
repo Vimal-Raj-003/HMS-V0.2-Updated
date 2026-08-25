@@ -41,18 +41,38 @@ afterAll(async () => {
 async function tableDigests(): Promise<ReadonlyMap<string, string>> {
   const pool = pg.pool('migrator');
   const { rows: tables } = await pool.query<{ schemaname: string; tablename: string }>(
-    `SELECT schemaname, tablename
-       FROM pg_tables
-      -- Every schema that holds tenant data. A narrower list silently exempts
-      -- whole phases from the idempotency check: the Phase 1 schemas were
-      -- invisible here while this read ('core','mdm','integration'), so a seed
-      -- that rewrote 220,000 patient rows on every run would have passed.
-      WHERE schemaname IN ('core', 'mdm', 'integration', 'patient', 'clinical',
-                           'queue', 'engage', 'billing', 'lab', 'rad')
+    // The schema list is **derived, not written down**.
+    //
+    // It was written down twice and wrong twice. It first read
+    // ('core','mdm','integration'), which made the whole of Phase 1 invisible —
+    // a seed rewriting 220 000 patient rows on every run would have passed. It
+    // was widened, the comment recording that fix stayed, and then Phase 4
+    // added `inventory`, `pharmacy` and `finance` — 112 tables — and the list
+    // was not widened again. The same bug, twice, in the same six lines.
+    //
+    // `core.v_rls_coverage` already enumerates every tenant-scoped table and is
+    // extended by each phase's migration as a matter of course, because RLS is
+    // not optional. Deriving from it means a phase cannot add a schema this
+    // check ignores without also shipping tables that have no RLS, which a test
+    // twenty lines above already fails on.
+    `SELECT DISTINCT c.schema_name AS schemaname, t.tablename
+       FROM core.v_rls_coverage c
+       JOIN pg_tables t
+         ON t.schemaname = c.schema_name
         -- Leaf partitions are covered through their parent.
-        AND tablename NOT LIKE '%\\_2%'
-      ORDER BY schemaname, tablename`,
+        AND t.tablename NOT LIKE '%\\_2%'
+      ORDER BY 1, 2`,
   );
+
+  // Derivation that silently finds nothing would make every assertion below
+  // vacuous — the failure mode this whole change exists to remove.
+  if (tables.length < 150) {
+    throw new Error(
+      `tableDigests() discovered only ${String(tables.length)} tables from core.v_rls_coverage. ` +
+        `The schema is far larger than that, so the derivation is broken and the idempotency ` +
+        `proof would pass without checking anything.`,
+    );
+  }
 
   const digests = new Map<string, string>();
   for (const { schemaname, tablename } of tables) {

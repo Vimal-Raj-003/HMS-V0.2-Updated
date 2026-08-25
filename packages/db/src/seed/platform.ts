@@ -55,10 +55,52 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   ['PO', '{BR}/PO/{FY}/{SEQ:5}', false, 'fy'],
   ['GRN', '{BR}/GRN/{FY}/{SEQ:5}', false, 'fy'],
   ['INDENT', '{BR}/IND/{FY}/{SEQ:5}', false, 'fy'],
+  // Phase 4 — pharmacy, stores and supply chain. `PO`, `GRN` and `INDENT`
+  // already existed above and are not repeated; `INDENT` numbers the *store*
+  // indent (NC-006) and `IND` the *purchase* indent (NC-005 §3.14), which are
+  // two different documents with two different approval chains.
+  //
+  // Only two of these are gapless, and for the same reason `RECEIPT` is:
+  //   `BILL_PH`  a pharmacy sale is a GST tax invoice (OP-003 §5, docs/04 §1).
+  //   `NARC_REG` the controlled-drug register serial. A statutory register with
+  //              a hole in its page numbers is not a register — a drug
+  //              inspector reads the sequence, not the rows.
+  // The rest are documents whose abandoned drafts must not burn a number an
+  // auditor will later ask about.
+  ['IND', '{BR}/IND/{FY}/{SEQ:5}', false, 'fy'],
+  ['RFQ', '{BR}/RFQ/{FY}/{SEQ:5}', false, 'fy'],
+  ['PRN', '{BR}/PRN/{FY}/{SEQ:5}', false, 'fy'],
+  ['VINV', '{BR}/VINV/{FY}/{SEQ:6}', false, 'fy'],
+  ['ISSUE', '{BR}/ISS/{FY}/{SEQ:6}', false, 'fy'],
+  ['TRANSFER', '{BR}/TRF/{FY}/{SEQ:6}', false, 'fy'],
+  ['ADJ', '{BR}/ADJ/{FY}/{SEQ:5}', false, 'fy'],
+  ['COUNT', '{BR}/CNT/{FY}/{SEQ:5}', false, 'fy'],
+  ['CONS', '{BR}/CON/{FY}/{SEQ:7}', false, 'fy'],
+  ['CSN_IN', '{BR}/CSN/{FY}/{SEQ:5}', false, 'fy'],
+  ['DISP', '{BR}/DSP/{FY}/{SEQ:7}', false, 'fy'],
+  ['PHRET', '{BR}/PHR/{FY}/{SEQ:6}', false, 'fy'],
+  ['BILL_PH', '{BR}/PHB/{FY}/{SEQ:6}', true, 'fy'],
+  ['NARC_REG', '{BR}/NDPS/{FY}/{SEQ:5}', true, 'fy'],
+  // Item and vendor codes are per hospital and never reset: an item code that
+  // restarts each April is an item code that means two different things.
+  ['ITEM', 'ITM{SEQ:6}', false, 'never'],
+  ['VEND', 'VND{SEQ:5}', false, 'never'],
   ['MLC', '{BR}/MLC/{FY}/{SEQ:4}', true, 'fy'],
   ['BLOOD_BAG', '{BR}/BB/{FY}/{SEQ:5}', true, 'fy'],
   ['LIC_INVOICE', 'VIMS/{FY}/{SEQ:5}', true, 'fy'],
 ];
+
+/**
+ * Series written once per hospital with a null `branch_id`.
+ *
+ * Deliberately does **not** include `MRD`, whose comment above says "per
+ * hospital" but whose row has always been written per branch. Adding it here
+ * would emit two rows for a two-branch hospital, both claiming `branch_id IS
+ * NULL` — a change to Phase-1 behaviour that has nothing to do with Phase 4.
+ * The three keys here are all skipped for non-main branches below, so each one
+ * produces exactly one row per hospital.
+ */
+const HOSPITAL_SCOPED = new Set(['LIC_INVOICE', 'ITEM', 'VEND']);
 
 async function seedNumberingSeries(ctx: SeedContext, tenancy: SeededTenancy): Promise<void> {
   const rows: SeedRow[] = [];
@@ -67,13 +109,16 @@ async function seedNumberingSeries(ctx: SeedContext, tenancy: SeededTenancy): Pr
       for (const [key, pattern, gapless, reset] of SERIES) {
         // The SaaS invoice series belongs to the vendor, not to a branch.
         if (key === 'LIC_INVOICE' && !b.isMain) continue;
+        // Item and vendor codes are hospital-wide: the same item bought at two
+        // campuses is one item, and a vendor supplying both is one vendor.
+        if ((key === 'ITEM' || key === 'VEND') && !b.isMain) continue;
         rows.push({
           id: seedId('numbering-series', h.code, b.code, key),
           hospital_id: h.id,
-          branch_id: key === 'LIC_INVOICE' ? null : b.id,
+          branch_id: HOSPITAL_SCOPED.has(key) ? null : b.id,
           key,
           pattern,
-          scope: key === 'LIC_INVOICE' ? 'hospital' : 'branch',
+          scope: HOSPITAL_SCOPED.has(key) ? 'hospital' : 'branch',
           fy: reset === 'fy' ? '2026-27' : null,
           current_value: 0,
           gapless,

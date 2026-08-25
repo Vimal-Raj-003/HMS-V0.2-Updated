@@ -35,6 +35,8 @@ import { seedFrontOffice } from './frontoffice.js';
 import { seedPatientPopulation } from './patients.js';
 import { seedClinical } from './clinical.js';
 import { seedDiagnostics } from './diagnostics.js';
+import { seedSupplyChain } from './inventory.js';
+import { seedPharmacy } from './pharmacy.js';
 
 interface Args {
   readonly tier: Tier;
@@ -103,6 +105,13 @@ export async function runSeed(db: Pool, tier: Tier): Promise<ReturnType<typeof t
     // catalogue; before the patient population, because a seeded order would
     // otherwise have no catalogue to name.
     await seedDiagnostics(ctx, tenancy);
+    // Phase 4. After the Phase-2 formulary, because every drug item is derived
+    // from it and points at its `drug_key`; after the Phase-1 departments,
+    // because a store and a cost centre name one. The pharmacy counters come
+    // last of the pair: `pharmacy_stores.store_id` points at a store the
+    // supply-chain seed has to have created first.
+    await seedSupplyChain(ctx, tenancy);
+    await seedPharmacy(ctx, tenancy);
   }
   await seedActivity(ctx, tenancy);
   await seedPatientPopulation(ctx, tenancy);
