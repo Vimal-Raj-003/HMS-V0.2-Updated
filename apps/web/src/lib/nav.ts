@@ -1,6 +1,8 @@
 import type { RoleNavItem } from '@vims/ui';
 import { ADMIN_SCREENS } from '@/features/admin/screens';
 import { DIAGNOSTICS_SCREENS } from '@/features/diagnostics/screens';
+import { INVENTORY_SCREENS } from '@/features/inventory/screens';
+import { PHARMACY_SCREENS } from '@/features/pharmacy/screens';
 
 /**
  * The Phase-0 navigation.
@@ -41,6 +43,51 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
     label: 'Diagnostics',
     href: '/diagnostics',
     children: DIAGNOSTICS_SCREENS.map((screen) => ({
+      key: screen.key,
+      label: screen.label,
+      href: screen.href,
+      permission: screen.permission,
+    })),
+  },
+  /**
+   * Phase 4 — the pharmacy counter.
+   *
+   * Generated from `PHARMACY_SCREENS`, for the same reason the diagnostics and
+   * administration groups are generated from theirs: the menu, the console home
+   * and the ⌘K palette are surfaces reading one list, and a screen added to one
+   * and forgotten in another is how somebody reaches a page their navigation
+   * deliberately hid.
+   *
+   * The parent carries **no permission of its own**. A counter pharmacist holds
+   * the queue and the dispense keys and none of the register or day-close ones;
+   * a permission on the parent would hide the whole console from them.
+   */
+  {
+    key: 'pharmacy',
+    label: 'Pharmacy',
+    href: '/pharmacy',
+    children: PHARMACY_SCREENS.map((screen) => ({
+      key: screen.key,
+      label: screen.label,
+      href: screen.href,
+      permission: screen.permission,
+    })),
+  },
+  /**
+   * Phase 4 — stores, purchase and vendors.
+   *
+   * Separate from the pharmacy group rather than nested under it, because these
+   * are different hands: a materials manager, a purchase officer and an accounts
+   * payable clerk never open the dispensing counter, and a counter pharmacist
+   * rarely opens a comparative statement. `docs/06` §4.1 caps the navigation at
+   * two levels, so a combined "supply chain" parent would have pushed one of the
+   * two into a third.
+   */
+  {
+    key: 'inventory',
+    label: 'Stores & purchase',
+    href: '/inventory',
+    children: INVENTORY_SCREENS.map((screen) => ({
       key: screen.key,
       label: screen.label,
       href: screen.href,
