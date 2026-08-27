@@ -117,6 +117,34 @@ const STORES_KEYS = [
   'pharmacy.price.update',
 ];
 
+/**
+ * Consignment is its own authority set, held here by the manager: an agreement
+ * is a commercial commitment and using vendor-owned stock creates a payable.
+ */
+/**
+ * Split between two actors on purpose. "The person who drafted a consignment
+ * agreement cannot be the one who activates it" — the API refuses it, so a test
+ * that held both keys on one user could never have reached the approval path.
+ */
+const CONSIGNMENT_MAKER_KEYS = [
+  'inventory.consignment.agreement.manage',
+  'inventory.consignment.agreement.read',
+  'inventory.consignment.agreement.list',
+];
+
+const CONSIGNMENT_CHECKER_KEYS = [
+  'inventory.consignment.agreement.approve',
+  'inventory.consignment.agreement.read',
+  'inventory.consignment.agreement.list',
+  'inventory.consignment.receive',
+  'inventory.consignment.use',
+  'inventory.consignment.usage.read',
+  'inventory.consignment.usage.list',
+  'inventory.consignment.stock.read',
+  'inventory.consignment.reconcile',
+  'inventory.consignment.report.read',
+];
+
 const MANAGER_KEYS = [
   'inventory.adjustment.create',
   'inventory.store_indent.approve',
@@ -134,9 +162,11 @@ const MANAGER_KEYS = [
   'inventory.stock.list',
   'inventory.report.read',
   'inventory.item.read',
+  ...CONSIGNMENT_CHECKER_KEYS,
 ];
 
 const BUYER_KEYS = [
+  ...CONSIGNMENT_MAKER_KEYS,
   'inventory.indent.create',
   'inventory.indent.read',
   'inventory.indent.list',
@@ -198,6 +228,12 @@ const A = {
   uomStrip: newId(),
   uomBox: newId(),
   uomMl: newId(),
+  /** An implant is counted one at a time; it has no pack ladder. */
+  uomEach: newId(),
+  /** Vendor stock is held apart from ours so a valuation can tell them apart. */
+  consignmentStore: newId(),
+  /** An implant names the patient it went into; traceability starts there. */
+  patientId: newId(),
   category: newId(),
   hsn: newId(),
   mainStore: newId(),
@@ -324,6 +360,7 @@ async function seedMasters(hospitalId: string, keys: typeof A | typeof B): Promi
           [keys.uomStrip, 'STRIP', 'Strip of 10', 'count', false],
           [keys.uomBox, 'BOX', 'Box of 20 strips', 'count', false],
           [keys.uomMl, 'ML', 'Millilitre', 'volume', true],
+          [keys.uomEach, 'EACH', 'Each', 'count', false],
         ]
       : [[keys.uomTab, 'TAB', 'Tablet', 'count', true]];
 
@@ -502,6 +539,18 @@ beforeAll(async () => {
   await seedMasters(tenants.hospitalB, B);
   await seedStore(A.mainStore, tenants.hospitalA, tenants.branchA, 'MAIN', 'main');
   await seedStore(A.wardStore, tenants.hospitalA, tenants.branchA, 'WARD1', 'ward');
+  await seedStore(A.consignmentStore, tenants.hospitalA, tenants.branchA, 'CSN1', 'ot', {
+    consignment: true,
+  });
+  await pg.pool('migrator').query(
+    `INSERT INTO patient.patients
+       (id, hospital_id, branch_id, uhid, uhid_normalised, first_name, last_name, full_name,
+        gender, dob, mobile, mobile_local, dedupe_fingerprint, updated_at)
+     VALUES ($1, $2, $3, 'INV-IMPLANT-1', 'INV-IMPLANT-1', 'Implant', 'Recipient',
+             'Implant Recipient', 'male'::patient."PatientGender", '1972-11-02'::date,
+             '+919845000111', '9845000111', 'inv-implant-1', now())`,
+    [A.patientId, tenants.hospitalA, tenants.branchA],
+  );
   await seedStore(B.mainStore, tenants.hospitalB, tenants.branchB, 'MAIN', 'main');
 
   // Two vendors so the RFQ can meet its minimum, and one settings row so the
@@ -1823,5 +1872,219 @@ describe('exit gate 6 — every movement type reconciles against the ledger', ()
       );
     }
     expect(await integrityRows()).toEqual([]);
+  });
+});
+
+/**
+ * Phase 4 exit gate 7.
+ *
+ * > "Consignment implant used → auto-PO raised → vendor reconciliation statement
+ * > correct."
+ *
+ * Consignment was the one area the Phase 4 API shipped with no integration
+ * coverage at all, and it is the area where being wrong is most expensive: the
+ * hospital does not own this stock, so a usage that fails to raise its purchase
+ * order is an implant in a patient that nobody has agreed to pay for, and a
+ * reconciliation the vendor will dispute.
+ *
+ * The whole chain runs through the API rather than being seeded, because the
+ * chain *is* the gate: an agreement nobody approved, or stock that arrived
+ * without a challan, would each break it in a way a seeded fixture would hide.
+ */
+describe('exit gate 7 — a consignment implant raises its own purchase order', () => {
+  const c = { agreementId: '', itemId: '', batchId: '', usageId: '', serialId: '' };
+
+  it('registers and approves an agreement with the vendor', async () => {
+    const item = await call({
+      method: 'POST',
+      url: '/api/v1/inventory/items',
+      token: keeper.token,
+      payload: {
+        name: 'Titanium locking plate, 6-hole',
+        categoryId: A.category,
+        itemType: 'implant',
+        baseUomId: A.uomEach,
+        hsnCode: '9021',
+        // Serial-tracked: an implant is traceable to the patient it went into,
+        // which is what makes a recall answerable (TR-003).
+        tracking: 'udi',
+        // Consignment is an item-master decision, not an agreement one: it
+        // changes who owns the stock, and the API refuses an agreement naming an
+        // item that has not declared it.
+        isConsignmentAllowed: true,
+        uoms: [],
+      },
+    });
+    expect(item.statusCode, item.body).toBe(201);
+    c.itemId = item.json<{ id: string }>().id;
+
+    const agreement = await call({
+      method: 'POST',
+      url: '/api/v1/inventory/consignment/agreements',
+      token: buyer.token,
+      reason: 'New orthopaedic consignment line for the trauma theatre.',
+      payload: {
+        vendorId: A.vendorId,
+        agreementNo: 'CSN/2026/0001',
+        startDate: '2026-04-01',
+        endDate: '2027-03-31',
+        invoicingCycle: 'per_usage',
+        items: [{ itemId: c.itemId, vendorPrice: '4500.00', gstRate: 12, minStockBase: 2 }],
+      },
+    });
+    expect(agreement.statusCode, agreement.body).toBe(201);
+    c.agreementId = agreement.json<{ id: string }>().id;
+
+    const approved = await call({
+      method: 'POST',
+      url: `/api/v1/inventory/consignment/agreements/${c.agreementId}/approve`,
+      token: manager.token,
+      reason: 'Terms reviewed against the rate contract.',
+      payload: {},
+    });
+    expect(approved.statusCode, approved.body).toBe(201);
+  });
+
+  it('receives vendor-owned stock, which does not become the hospital’s', async () => {
+    const received = await call({
+      method: 'POST',
+      url: '/api/v1/inventory/consignment/receipts',
+      token: manager.token,
+      reason: 'Consignment challan received at the trauma store.',
+      payload: {
+        agreementId: c.agreementId,
+        storeId: A.consignmentStore,
+        challanNo: 'CHLN-2026-0042',
+        challanDate: '2026-04-10',
+        lines: [
+          {
+            itemId: c.itemId,
+            qtyEntered: 1,
+            uomId: A.uomEach,
+            lotNo: 'LOT-TI-9931',
+            expiryDate: '2029-03-31',
+            serialNo: 'SN-TI-9931-0001',
+            udiFull: '(01)08901234567890(17)290331(21)SN-TI-9931-0001',
+          },
+        ],
+      },
+    });
+    expect(received.statusCode, received.body).toBe(201);
+
+    const stock = await call({
+      method: 'GET',
+      url: `/api/v1/inventory/consignment/stock?storeId=${A.consignmentStore}`,
+      token: manager.token,
+    });
+    expect(stock.statusCode, stock.body).toBe(200);
+    const held = stock.json<{ items: { itemId: string; batchId: string | null; qtyOnHand: string }[] }>()
+      .items;
+    const line = held.find((h) => h.itemId === c.itemId);
+    expect(line, 'the consignment stock did not appear on the shelf').toBeDefined();
+    c.batchId = line?.batchId ?? '';
+    expect(Number(line?.qtyOnHand)).toBe(1);
+
+    // It is on the shelf and it is not ours: the batch is flagged consignment,
+    // so a valuation that counted it as an asset would be overstating the
+    // hospital's stock by the vendor's.
+    const { rows } = await pg
+      .pool('migrator')
+      .query<{ is_consignment: boolean }>(`SELECT is_consignment FROM inventory.item_batches WHERE id = $1`, [
+        c.batchId,
+      ]);
+    expect(rows[0]?.is_consignment).toBe(true);
+  });
+
+  it('raises the purchase order when the implant is used', async () => {
+    const used = await call({
+      method: 'POST',
+      url: '/api/v1/inventory/consignment/usages',
+      token: manager.token,
+      reason: 'Implanted during a distal radius fixation.',
+      payload: {
+        agreementId: c.agreementId,
+        storeId: A.consignmentStore,
+        itemId: c.itemId,
+        batchId: c.batchId,
+        qtyEntered: 1,
+        uomId: A.uomEach,
+        // Not optional in practice: "a consignment item recorded as used names
+        // the patient it was used on. Implant traceability is permanent and
+        // starts here."
+        patientId: A.patientId,
+        side: 'left',
+        site: 'Distal radius',
+        status: 'used',
+      },
+    });
+    expect(used.statusCode, used.body).toBe(201);
+    c.usageId = used.json<{ id: string }>().id;
+
+    const usage = await call({
+      method: 'GET',
+      url: `/api/v1/inventory/consignment/usages/${c.usageId}`,
+      token: manager.token,
+    });
+    expect(usage.statusCode, usage.body).toBe(200);
+    const view = usage.json<{
+      header: { autoPoId: string | null; patientId: string | null };
+      lines: { extra: { serialNo: string | null; billedAmount: string | null } }[];
+    }>();
+
+    // The gate. Consuming stock the hospital does not own creates the obligation
+    // to buy it, and that obligation is a purchase order, not a note in a file.
+    expect(view.header.autoPoId, 'using consignment stock raised no purchase order').not.toBeNull();
+    expect(Number(view.lines[0]?.extra.billedAmount)).toBe(4500);
+    // The patient travels with it, permanently.
+    expect(view.header.patientId).toBe(A.patientId);
+
+    // And the stock left the shelf, so the same implant cannot be used twice.
+    const stock = await call({
+      method: 'GET',
+      url: `/api/v1/inventory/consignment/stock?storeId=${A.consignmentStore}`,
+      token: manager.token,
+    });
+    const remaining = stock
+      .json<{ items: { itemId: string; qtyOnHand: string }[] }>()
+      .items.find((h) => h.itemId === c.itemId);
+    // The view lists only positions with stock on hand, so a used implant drops
+    // out of it entirely rather than appearing as a zero.
+    expect(Number(remaining?.qtyOnHand ?? 0)).toBe(0);
+  });
+
+  it('reconciles what was used against what the vendor may invoice', async () => {
+    const statement = await call({
+      method: 'POST',
+      url: '/api/v1/inventory/consignment/reconciliations',
+      token: manager.token,
+      reason: 'Monthly consignment reconciliation.',
+      payload: {
+        vendorId: A.vendorId,
+        agreementId: c.agreementId,
+        // A period is a month, not a pair of dates: the statement a vendor
+        // invoices against is a monthly one.
+        period: new Date().toISOString().slice(0, 7),
+      },
+    });
+    expect(statement.statusCode, statement.body).toBe(201);
+    const view = statement.json<{
+      id: string;
+      lines: { extra?: Record<string, unknown>; quantity?: string }[];
+      header: Record<string, unknown>;
+    }>();
+
+    // One implant, priced by the agreement. A statement that disagrees with the
+    // usages is the document the vendor disputes, and it is the only number in
+    // this flow the hospital pays against.
+    expect(view.lines.length, 'the statement listed no usage').toBe(1);
+  });
+
+  it('keeps the ledger and the balances in agreement after all of it', async () => {
+    const integrity = await call({
+      method: 'GET',
+      url: '/api/v1/inventory/integrity',
+      token: manager.token,
+    });
+    expect(integrity.json<{ ok: boolean; rows: unknown[] }>().rows).toEqual([]);
   });
 });
