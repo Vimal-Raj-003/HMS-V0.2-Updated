@@ -93,6 +93,10 @@ const STORES_KEYS = [
   'inventory.issue.receive',
   'inventory.return.create',
   'inventory.return.read',
+  // The seeded `stores_keeper` role holds this; the fixture's hand-written list
+  // did not, so a return could be raised here and never inspected — and stock
+  // returned from a ward is only restocked at inspection.
+  'inventory.return.inspect',
   'inventory.transfer.create',
   'inventory.transfer.read',
   'inventory.transfer.list',
@@ -1645,3 +1649,179 @@ async function storeTotal(storeId: string): Promise<number> {
     );
   return Number(rows[0]?.total ?? 0);
 }
+
+/**
+ * Phase 4 exit gate 6, stated as one test rather than inferred from several.
+ *
+ * > "Inter-store transfer, ward return, expiry write-off and a cycle count with
+ * > variance all reconcile: run the stock-integrity test (`sum(ledger) ==
+ * > on_hand` for every item/batch/store) and it passes."
+ *
+ * The suite already exercised transfers and counts and already called
+ * `/inventory/integrity` twice — but never a **ward return** or an **expiry
+ * write-off**, and never all four before one integrity check. Four operations
+ * that each reconcile alone can still leave the ledger and the balances
+ * disagreeing when they interleave, which is the only thing this gate is
+ * actually asking about.
+ *
+ * `inventory.verify_stock_integrity()` re-derives `sum(qty_base)` from the
+ * ledger for every item/batch/store position and returns the rows where it
+ * disagrees with `stock_balances`. An empty result is the gate.
+ */
+describe('exit gate 6 — every movement type reconciles against the ledger', () => {
+  async function integrityRows(): Promise<unknown[]> {
+    const res = await call({ method: 'GET', url: '/api/v1/inventory/integrity', token: manager.token });
+    expect(res.statusCode, res.body).toBe(200);
+    return res.json<{ ok: boolean; rows: unknown[] }>().rows;
+  }
+
+  it('starts from a reconciled ledger, so a later failure is attributable', async () => {
+    expect(await integrityRows()).toEqual([]);
+  });
+
+  it('returns stock from a ward to the main store', async () => {
+    const before = await storeTotal(A.wardStore);
+    expect(before, 'the ward must hold stock for the return to mean anything').toBeGreaterThan(0);
+
+    // The line names its batch. `create` is accepted without one, but `inspect`
+    // refuses to restock it — "a movement with no batch is one no recall can
+    // ever reach" — so a return raised without a batch can never be completed.
+    const { rows: onWard } = await pg.pool('migrator').query<{ batch_id: string }>(
+      `SELECT batch_id FROM inventory.stock_balances
+          WHERE store_id = $1 AND item_id = $2 AND batch_id IS NOT NULL AND qty_on_hand > 0
+          LIMIT 1`,
+      [A.wardStore, A.itemId],
+    );
+    const wardBatch = onWard[0]?.batch_id;
+    expect(wardBatch, 'the ward holds no batch to return').toBeDefined();
+
+    const created = await call({
+      method: 'POST',
+      url: '/api/v1/inventory/returns',
+      token: keeper.token,
+      // `inventory.return.create` is `requiresReason`, so the header is not
+      // optional — the policy engine refuses without it and says so.
+      reason: 'Ward returned unopened stock at shift handover.',
+      payload: {
+        fromStoreId: A.wardStore,
+        toStoreId: A.mainStore,
+        reason: 'unused',
+        lines: [
+          { itemId: A.itemId, batchId: wardBatch, qtyEntered: 1, uomId: A.uomStrip, condition: 'good' },
+        ],
+      },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const returnId = created.json<{ id: string; lines: { id: string }[] }>();
+
+    // Creating the return does not move stock, and should not: a returned tube
+    // goes back on the shelf only after somebody has looked at it. `inspect`
+    // with `restock: true` is what posts the movement.
+    expect(await storeTotal(A.wardStore)).toBe(before);
+
+    const inspected = await call({
+      method: 'POST',
+      url: `/api/v1/inventory/returns/${returnId.id}/inspect`,
+      token: keeper.token,
+      reason: 'Inspected at the store counter; seals intact.',
+      payload: { lines: (returnId.lines ?? []).map((l) => ({ lineId: l.id, restock: true })) },
+    });
+    expect(inspected.statusCode, inspected.body).toBe(201);
+
+    expect(await storeTotal(A.wardStore)).toBeLessThan(before);
+    expect(await integrityRows()).toEqual([]);
+  });
+
+  it('writes off an expired quantity and stays reconciled', async () => {
+    const before = await storeTotal(A.mainStore);
+
+    // The item is batch-tracked, and the guard says exactly why a line without
+    // one is refused: "a movement with no batch is one no recall can ever reach".
+    const { rows: held } = await pg.pool('migrator').query<{ batch_id: string }>(
+      `SELECT batch_id FROM inventory.stock_balances
+          WHERE store_id = $1 AND item_id = $2 AND batch_id IS NOT NULL AND qty_on_hand > 0
+          LIMIT 1`,
+      [A.mainStore, A.itemId],
+    );
+    const batchId = held[0]?.batch_id;
+    expect(batchId, 'no batch on hand to write off').toBeDefined();
+
+    const created = await call({
+      method: 'POST',
+      url: '/api/v1/inventory/adjustments',
+      token: keeper.token,
+      reason: 'Batch expired on the shelf and was destroyed under witness.',
+      payload: {
+        storeId: A.mainStore,
+        adjustmentType: 'writeoff_expiry',
+        reasonCode: 'expired',
+        reason: 'Batch passed its expiry date on the shelf and was destroyed.',
+        lines: [{ itemId: A.itemId, batchId, qtyEntered: 1, uomId: A.uomStrip }],
+      },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const adjustmentId = created.json<{ id: string }>().id;
+
+    // Nor does raising a write-off destroy anything. Stock leaves the shelf when
+    // the adjustment is approved, which is the control: destruction of expired
+    // stock is somebody's signature, not a data-entry side effect.
+    expect(await storeTotal(A.mainStore)).toBe(before);
+
+    const approved = await call({
+      method: 'POST',
+      url: `/api/v1/inventory/adjustments/${adjustmentId}/approve`,
+      token: manager.token,
+      reason: 'Expiry verified against the batch; destruction witnessed.',
+      payload: { note: 'BMW route, batch destroyed.' },
+    });
+    expect(approved.statusCode, approved.body).toBe(201);
+
+    // Now it must fall. If it did not, the write-off was paperwork and the shelf
+    // and the system have parted company.
+    expect(await storeTotal(A.mainStore)).toBeLessThan(before);
+    expect(await integrityRows()).toEqual([]);
+  });
+
+  it('reconciles with every movement type applied together', async () => {
+    // The gate's real question. Transfers, returns, write-offs and counted
+    // variances have each been posted by now, against the same item and the same
+    // two stores, interleaved with the rest of the suite.
+    const rows = await integrityRows();
+    expect(rows, 'positions where sum(ledger) disagrees with stock_balances').toEqual([]);
+  });
+
+  /**
+   * The tripwire on the gate.
+   *
+   * `verify_stock_integrity()` returning an empty set proves nothing unless it
+   * *can* return a non-empty one. A balance nudged behind the ledger's back must
+   * be reported — otherwise this whole describe block is four assertions that an
+   * empty list equals an empty list.
+   */
+  it('detects a balance that disagrees with the ledger', async () => {
+    const owner = pg.pool('migrator');
+    const { rows: target } = await owner.query<{ store_id: string; item_id: string; qty: string }>(
+      `SELECT store_id, item_id, qty_on_hand::text AS qty FROM inventory.stock_balances
+        WHERE store_id = $1 AND qty_on_hand > 0 LIMIT 1`,
+      [A.mainStore],
+    );
+    const row = target[0];
+    expect(row, 'no balance to corrupt — the fixture moved no stock').toBeDefined();
+
+    await owner.query(
+      `UPDATE inventory.stock_balances SET qty_on_hand = qty_on_hand + 7
+        WHERE store_id = $1 AND item_id = $2`,
+      [row?.store_id, row?.item_id],
+    );
+    try {
+      expect(await integrityRows()).not.toEqual([]);
+    } finally {
+      await owner.query(
+        `UPDATE inventory.stock_balances SET qty_on_hand = qty_on_hand - 7
+          WHERE store_id = $1 AND item_id = $2`,
+        [row?.store_id, row?.item_id],
+      );
+    }
+    expect(await integrityRows()).toEqual([]);
+  });
+});
