@@ -204,6 +204,41 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
   ep('quota.import_rows.monthly', 'quota', 'quota', 'Data-import rows per month (EN-036).', {
     message: 'The monthly import quota is used up.',
   }),
+
+  // ── clinical and operational modules, phases 1–4 ───────────────────────────
+  //
+  // The header above says "later phases append theirs". None did. Every key in
+  // this file was a Phase-0 platform module, so `seedLicences` — which writes one
+  // licence row per hospital for each `module.*` key — had nothing to write for
+  // OPD, diagnostics, pharmacy or stores. A hospital could not enable those
+  // modules because there was no row to enable, and screens declaring
+  // `entitlement: 'module.lab.enabled'` named a key the catalogue did not define.
+  //
+  // None of these is `exempt`. Clinical *safety* is protected one level down: the
+  // policy engine's `clinicalSafetyExempt` carve-out means an allergy hard stop,
+  // a critical result or a recall trace is never blocked by licence state
+  // whatever a hospital has paid for. Licensing gates a **module**, never a
+  // safety behaviour inside one.
+  ep('module.opd.enabled', 'feature', 'route', 'OP-001/OP-002 OPD registration and clinical core.', {
+    message: 'Outpatient clinical records are not included in your plan.',
+    upgradeCta: 'Ask about Hospital Clinical',
+  }),
+  ep('module.lab.enabled', 'feature', 'route', 'OP-004/EN-031 Laboratory information system.', {
+    message: 'The laboratory module is not included in your plan.',
+    upgradeCta: 'Ask about Hospital Diagnostics',
+  }),
+  ep('module.radiology.enabled', 'feature', 'route', 'OP-008/EN-008 Radiology, PACS and dose.', {
+    message: 'The radiology module is not included in your plan.',
+    upgradeCta: 'Ask about Hospital Diagnostics',
+  }),
+  ep('module.pharmacy.enabled', 'feature', 'route', 'OP-003 Pharmacy and dispensing.', {
+    message: 'The pharmacy module is not included in your plan.',
+    upgradeCta: 'Ask about Hospital Operations',
+  }),
+  ep('module.inventory.enabled', 'feature', 'route', 'NC-006/NC-005 Stores, purchase and supply chain.', {
+    message: 'Stores and purchase are not included in your plan.',
+    upgradeCta: 'Ask about Hospital Operations',
+  }),
 ]);
 
 const pointsByKey = new Map(ENFORCEMENT_POINTS.map((e) => [e.key, e]));
