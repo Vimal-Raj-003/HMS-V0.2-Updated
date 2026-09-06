@@ -41,6 +41,54 @@ describe('the emergency screen catalogue', () => {
     expect(merge?.requiresReason).toBe(true);
   });
 
+  /**
+   * TR-001's central asymmetry, asserted rather than described.
+   *
+   * Under-triage — the team not called, or called late — is the failure mode
+   * every trauma system is judged on. So calling the team is a `low`-risk key
+   * held by every nurse on the floor, and *releasing* them is the one that
+   * carries a reason. A catalogue that ever inverted this would produce the
+   * failure the module exists to prevent.
+   */
+  it('makes calling the trauma team easy and standing it down considered', () => {
+    const call = PERMISSION_CATALOGUE.find((p) => p.key === 'trauma.activation.create');
+    const release = PERMISSION_CATALOGUE.find((p) => p.key === 'trauma.activation.standdown');
+
+    expect(call?.risk).toBe('low');
+    expect(call?.requiresReason ?? false).toBe(false);
+    expect(release?.requiresReason).toBe(true);
+  });
+
+  /**
+   * The nurse in front of the patient is the person who knows the algorithm is
+   * wrong about them. An override that needed a supervisor would become a level
+   * nobody corrected, so it stays reachable — and stays reasoned.
+   */
+  it('keeps the triage override reachable but always reasoned', () => {
+    const override = PERMISSION_CATALOGUE.find((p) => p.key === 'triage.level.override');
+    expect(override?.risk).toBe('medium');
+    expect(override?.requiresReason).toBe(true);
+  });
+
+  /**
+   * ISS and TRISS go into a registry and into mortality review. "Was the score
+   * changed after the death?" has to be answerable either way, so an amendment
+   * is a separate, higher key that states its reason.
+   */
+  it('separates signing a score from amending a signed one', () => {
+    const lock = PERMISSION_CATALOGUE.find((p) => p.key === 'trauma.score.lock');
+    const amend = PERMISSION_CATALOGUE.find((p) => p.key === 'trauma.score.amend');
+
+    expect(lock?.key).not.toBe(amend?.key);
+    expect(amend?.risk).toBe('high');
+    expect(amend?.requiresReason).toBe(true);
+  });
+
+  it('gates each Phase 6 screen on the list it loads', () => {
+    expect(erScreen('trauma-board').permission).toBe('trauma.activation.list');
+    expect(erScreen('trauma-registry').permission).toBe('trauma.score.read');
+  });
+
   it('explains every denial in plain words', () => {
     for (const screen of ER_SCREENS) {
       expect(screen.summary.length).toBeGreaterThan(20);

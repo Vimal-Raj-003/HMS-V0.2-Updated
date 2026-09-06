@@ -401,6 +401,83 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-06 (later) · Phase 6 · TR-001 triage, the trauma team and the golden hour
+
+**Built — TR-001, complete.** 8 tables, 19 permission keys, 10 events, 3 screens.
+The scoring itself went into `packages/contracts/src/scores/` rather than the
+service, so the tablet and the server run the same function: `scoreGcs`,
+`scoreEsi`, `scoreRts`, `scoreIss` (with NISS), `shockIndex`, `scoreMgap` and
+`scoreTriss`, 37 tests against published worked examples. The triage screen
+renders a level as the observations are typed and then replaces it with what the
+server computed. Nothing computed is ever accepted from a client — `phase-06`'s
+"never let a UI compute a score the server does not agree with", enforced by
+there being no field to send one in.
+
+**Driven end to end over real HTTP.** A motorcyclist ejected at speed: triaged
+ESI 1 at decision point A, level-1 team called, 7 roles paged, orthopaedics
+answered in 17 s with a 6-minute ETA, primary survey with a tourniquet at 95
+minutes (warning at 90, critical at 120), 5 injuries coded, and the scores came
+back **RTS 5.8806 · ISS 34 · NISS 34 · shock index 1.56 · MGAP 21 · GAP 17 ·
+TRISS 85.3% on MTOS blunt** — every figure matching the hand calculation.
+
+**Twelve constraints proven live**, in both directions where that matters:
+
+| Refused                                           | Because                                                       |
+| ------------------------------------------------- | ------------------------------------------------------------- |
+| Rewriting or deleting a triage record             | The first triage is the only evidence the wait was reasonable |
+| A second triage at a new level                    | _Accepted_ — re-triage is a new record, and both stay         |
+| An ESI record carrying a START tag                | One ladder's answer per record, or the board is a coin toss   |
+| A verbal GCS on an intubated patient              | A GCS one point out is a level-2 called as a level-1          |
+| Creating a level-1 page suppressed                | §6.3, and no configuration reaches it                         |
+| Suppressing a level-1 page afterwards             | The same rule, from the other direction                       |
+| Silencing a **level-2** page                      | _Accepted_ — the rule is about level 1 only                   |
+| An activation with neither criteria nor judgement | Both are legitimate; recording neither is not                 |
+| A stand-down with no reason                       | A silent stand-down is how the next page gets ignored         |
+| Editing, unlocking or deleting a locked score     | Mortality review has to be able to ask, either way            |
+| An amendment with no reason                       | Two numbers and no account of the difference                  |
+| A NISS below its ISS                              | Arithmetic, not policy                                        |
+
+**A defect TR-001 found in OP-006.** `er_visit_triage_is_complete` was written as
+`(esi_level IS NULL) = (triaged_at IS NULL)` — correct for a module that knows
+only ESI, and wrong the moment a START triage exists. Those patients _are_
+triaged and have no level, so the constraint refused to record when they were
+seen. Fixed by saying what triaged means: the visit carries a level **or** a tag.
+`triage_tag` is now denormalised beside `esi_level` with a companion CHECK that
+only one may be set, and the ER board's acuity sort maps red→1, yellow→3,
+green→5 and **black→10, below the un-triaged**. Expectant means expectant, and it
+belongs in the `ORDER BY` rather than in somebody's head at 2 a.m.
+
+**A defect in eight other files.** `z.coerce.boolean()` is `Boolean(value)`, and
+`Boolean("false")` is `true` — so `?includeDeparted=false` meant _true_ on every
+boolean query flag in the codebase. The default masked it: correct when the
+client omits the parameter, inverted the moment a checkbox sends it. It surfaced
+as an ER board showing departed patients with "show departed" unticked. Replaced
+all 20 occurrences with a `queryFlag()` primitive that reads the spellings a URL
+actually carries and **rejects** an unrecognised one, so `?deniedOnly=treu` is a
+400 rather than the denied-only audit view.
+
+Two smaller consistency fixes, both the same shape: a TRISS that read 85.2% when
+computed and 85.3% on reload, and an ISS band badge that appeared on compute and
+vanished on refresh. Both now derive from the stored value alone. A survival
+probability that moves on a page refresh is one nobody can quote at a mortality
+review.
+
+Also removed: `ErService.applyTriage`, a second UPDATE of the same denormalised
+columns with no callers, which would have violated the new one-ladder CHECK; and
+OP-006's private copy of the ESI target table, now the one in
+`@vims/contracts/scores` next to the function that produces the level.
+
+**Gates** — 20/20 packages typecheck, lint and test (**2,896 tests**); 525 routes
+across 69 controllers; catalogue **941 keys**; event registry **687**; 639
+monitored tables, **0 without RLS and 0 without a tenant policy**; 644 tables
+across 15 schemas; 32 migrations, all applied to a real container.
+
+**Still missing, same as every module here:** no e2e golden path and no k6 script
+for TR-001, so it does not meet `CLAUDE.md` §7's Definition of Done.
+
+**Next:** TR-008 (MLC and forensic), then TR-009 + NC-013 (ambulance), TR-002 +
+OP-009, TR-003, TR-005, TR-007.
+
 ## Phase 5 complete — 2026-09-06
 
 Nine modules: RC-003 tariff, OP-005 OP billing, EN-010 payments, OP-023 packages,

@@ -39,15 +39,12 @@ function asNumberOrNull(v: unknown): number | null {
   return v === null || v === undefined ? null : asNumber(v);
 }
 
-/**
- * ESI target times, in minutes. `phase-06` §6.2, and a NABH indicator.
- *
- * Level 1 is zero because "immediate" is not a duration — the target is that
- * somebody is already with them. It is kept in the table so the board's
- * percentage arithmetic has no special case, and a level-1 patient not yet seen
- * is breached from the first second, which is correct.
- */
-const ESI_TARGET_MINUTES: Readonly<Record<number, number>> = { 1: 0, 2: 10, 3: 30, 4: 60, 5: 120 };
+// The ESI target times used to live here. They are now
+// `ESI_TARGET_MINUTES` in `@vims/contracts/scores`, next to the function that
+// produces the level they belong to — the tablet needs them to render a
+// countdown before the round trip, and two copies of a NABH indicator is one
+// copy too many. The board reads `target_seen_by`, which TR-001 stamps from
+// that table when it writes the triage record.
 
 /**
  * OP-006 — ER intake, the board and dispositions.
@@ -126,7 +123,22 @@ export class ErService {
             (v.status = 'inbound') DESC,
             -- Then strictly by acuity, then by who has waited longest. Anything
             -- else is a queue that rewards being noticed.
-            COALESCE(v.esi_level, 9) ASC,
+            --
+            -- Under a declared MCI the acuity is a START tag rather than an ESI
+            -- level, and it maps onto the same scale so one sort serves both.
+            -- Black sorts last, below the un-triaged: expectant means the
+            -- patient is not treated while red and yellow are waiting, and that
+            -- belongs in the ORDER BY rather than in somebody's head at 2 a.m.
+            COALESCE(
+              v.esi_level,
+              CASE v.triage_tag
+                WHEN 'red' THEN 1
+                WHEN 'yellow' THEN 3
+                WHEN 'green' THEN 5
+                WHEN 'black' THEN 10
+              END,
+              9
+            ) ASC,
             COALESCE(v.arrived_at, v.expected_at) ASC
           LIMIT $6`,
         [hospital, branch, query.status ?? null, query.zoneId ?? null, query.includeDeparted, query.limit],
@@ -244,6 +256,7 @@ export class ErService {
       chiefComplaint: asTextOrNull(r['chief_complaint']),
       mlcSuspected: Boolean(r['mlc_suspected']),
       esiLevel: asNumberOrNull(r['esi_level']),
+      triageTag: asTextOrNull(r['triage_tag']),
       status: asText(r['status']),
       zoneId: asTextOrNull(r['zone_id']),
       bayId: asTextOrNull(r['bay_id']),
@@ -890,27 +903,5 @@ export class ErService {
       if (row === undefined) throw AppError.conflict(`A bay with code "${body.code}" already exists.`);
       return this.toBay(row);
     });
-  }
-
-  /**
-   * Set the triage result on the visit.
-   *
-   * Called by TR-001 inside its own transaction so the denormalised `esi_level`
-   * and the triage record are written together and cannot disagree. Exported
-   * rather than inlined there because the target-time table lives here with the
-   * board that renders it.
-   */
-  async applyTriage(tx: TransactionClient, visitId: string, esiLevel: number): Promise<void> {
-    const target = ESI_TARGET_MINUTES[esiLevel] ?? 120;
-    const { rowCount } = await tx.query(
-      `UPDATE clinical.er_visits
-          SET esi_level = $3, triaged_at = now(),
-              target_seen_by = COALESCE(arrived_at, now()) + make_interval(mins => $4),
-              status = CASE WHEN status = 'arrived' THEN 'triaged'::"clinical"."ErVisitStatus" ELSE status END,
-              updated_at = now()
-        WHERE id = $1 AND hospital_id = $2`,
-      [visitId, this.hospitalId(), esiLevel, target],
-    );
-    if (rowCount === 0) throw AppError.notFound('ER visit');
   }
 }

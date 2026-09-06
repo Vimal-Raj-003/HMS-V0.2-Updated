@@ -7646,6 +7646,182 @@ const OP006 = group('OP-006', 6, [
   ),
 ]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-001 — triage, trauma team activation and the golden hour
+//
+// Two keys here are deliberately `low` and held widely, for the same reason
+// `er.quickreg` is: `triage.record.create` and `trauma.activation.create`. The
+// published failure mode of every trauma system is under-triage — the team not
+// called, or called late — and a permission that makes the call harder to place
+// is a permission that produces it. Over-triage costs a surgeon a wasted trip
+// downstairs; under-triage costs a patient.
+//
+// The consequential keys are the ones that *undo* something: standing the team
+// down, amending a locked score, closing an MCI. Those carry a reason.
+// ─────────────────────────────────────────────────────────────────────────────
+const TR001 = group('TR-001', 6, [
+  p(
+    'triage.record.create',
+    'triage_record',
+    'create',
+    'phi',
+    'low',
+    'Triage a patient, or re-triage one who has deteriorated. Never overwrites the previous record.',
+  ),
+  p(
+    'triage.record.read',
+    'triage_record',
+    'read',
+    'phi',
+    'low',
+    'View a triage and the observations behind it.',
+    {
+      phiRead: true,
+    },
+  ),
+  p(
+    'triage.record.list',
+    'triage_record',
+    'list',
+    'phi',
+    'low',
+    'See the triage history of a visit — every level, in the order it was assigned.',
+  ),
+  p(
+    'triage.level.override',
+    'triage_record',
+    'override',
+    'phi',
+    'medium',
+    'Assign a level other than the one the algorithm computed. The reason is stored on the record, not in an audit row nobody reads.',
+    { requiresReason: true },
+  ),
+  p(
+    'trauma.activation.create',
+    'trauma_activation',
+    'create',
+    'phi',
+    'low',
+    'Call the trauma team. Held widely: under-triage is the failure mode this permission must not cause.',
+  ),
+  p(
+    'trauma.activation.read',
+    'trauma_activation',
+    'read',
+    'phi',
+    'low',
+    'View one activation and its pages.',
+    {
+      phiRead: true,
+    },
+  ),
+  p(
+    'trauma.activation.list',
+    'trauma_activation',
+    'list',
+    'phi',
+    'low',
+    'See the activations running now and the ones that ran today.',
+  ),
+  p(
+    'trauma.activation.standdown',
+    'trauma_activation',
+    'cancel',
+    'phi',
+    'medium',
+    'Stand the team down. Needs the team leader and a reason — a silent stand-down is how the next page gets ignored.',
+    { requiresReason: true },
+  ),
+  p(
+    'trauma.page.acknowledge',
+    'activation_page',
+    'receive',
+    'phi',
+    'low',
+    'Acknowledge a trauma page and give an ETA. The acknowledgement is the whole point of the page.',
+  ),
+  p(
+    'trauma.survey.record',
+    'primary_survey',
+    'record',
+    'phi',
+    'low',
+    'Record the ATLS primary survey and its timed interventions. Append-only: a timeline that can be rewritten is not a timeline.',
+  ),
+  p(
+    'trauma.survey.read',
+    'primary_survey',
+    'read',
+    'phi',
+    'low',
+    'View the primary survey and the golden-hour clocks.',
+    {
+      phiRead: true,
+    },
+  ),
+  p(
+    'trauma.injury.record',
+    'trauma_injury',
+    'record',
+    'phi',
+    'low',
+    'Code the injuries by AIS region and severity. ISS and NISS are computed from these, never typed.',
+  ),
+  p(
+    'trauma.score.compute',
+    'trauma_score',
+    'run',
+    'phi',
+    'low',
+    'Compute RTS, ISS, NISS, shock index, MGAP and TRISS from the coded injuries and the arrival physiology.',
+  ),
+  p('trauma.score.read', 'trauma_score', 'read', 'phi', 'low', 'View the trauma scores and their versions.', {
+    phiRead: true,
+  }),
+  p(
+    'trauma.score.lock',
+    'trauma_score',
+    'sign',
+    'phi',
+    'medium',
+    'Sign off a trauma score. From then on it is immutable and a registry submission can rely on it.',
+  ),
+  p(
+    'trauma.score.amend',
+    'trauma_score',
+    'amend',
+    'phi',
+    'high',
+    'Supersede a locked score with a corrected version. The original stays; the reason is on the amendment.',
+    { requiresReason: true },
+  ),
+  p(
+    'mci.incident.declare',
+    'mci_incident',
+    'activate',
+    'operational',
+    'high',
+    'Declare a mass-casualty incident. Switches triage to START and calls in the surge roster.',
+  ),
+  p(
+    'mci.incident.standdown',
+    'mci_incident',
+    'close',
+    'operational',
+    'medium',
+    'Close a mass-casualty incident and file the after-action report.',
+    { requiresReason: true },
+  ),
+  p(
+    'mci.incident.read',
+    'mci_incident',
+    'read',
+    'operational',
+    'low',
+    'See whether an MCI is running, and read the after-action reports of the ones that are not.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -7709,6 +7885,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
 
   // Phase 6
   ...OP006,
+  ...TR001,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

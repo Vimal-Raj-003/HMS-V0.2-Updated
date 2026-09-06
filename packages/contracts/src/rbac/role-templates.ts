@@ -334,6 +334,64 @@ const ER_FLOOR = [
   'er.prealert.receive',
 ] as const;
 
+/**
+ * TR-001 — the triage desk.
+ *
+ * `triage.level.override` sits in the same bundle as the triage itself, not in a
+ * senior one. The nurse standing in front of the patient is the person who knows
+ * the algorithm is wrong about them, and an override that needs a supervisor is
+ * an override that becomes a level nobody corrected.
+ */
+const TRIAGE_FLOOR = [
+  'triage.record.create',
+  'triage.record.read',
+  'triage.record.list',
+  'triage.level.override',
+  'mci.incident.read',
+] as const;
+
+/**
+ * TR-001 — everyone who answers a trauma page.
+ *
+ * `trauma.activation.create` is here rather than in the lead bundle for the
+ * reason the catalogue gives: under-triage is the failure mode, so calling the
+ * team is the easy action and standing it down is the considered one.
+ */
+const TRAUMA_TEAM = [
+  'trauma.activation.create',
+  'trauma.activation.read',
+  'trauma.activation.list',
+  'trauma.page.acknowledge',
+  'trauma.survey.record',
+  'trauma.survey.read',
+  'trauma.injury.record',
+  'trauma.score.compute',
+  'trauma.score.read',
+] as const;
+
+/** The team leader: the one person who can release the team, and sign the score. */
+const TRAUMA_LEAD = [...TRAUMA_TEAM, 'trauma.activation.standdown', 'trauma.score.lock'] as const;
+
+/**
+ * TR-001 — the trauma registry.
+ *
+ * Coding and amending, without the floor keys. A registry coder correcting an
+ * AIS three weeks later should not also be able to call the team.
+ */
+const TRAUMA_REGISTRY = [
+  'trauma.activation.read',
+  'trauma.activation.list',
+  'trauma.survey.read',
+  'trauma.injury.record',
+  'trauma.score.compute',
+  'trauma.score.read',
+  'trauma.score.lock',
+  'trauma.score.amend',
+] as const;
+
+/** Declaring an MCI converts the whole hospital. Two roles hold it, not twenty. */
+const MCI_COMMAND = ['mci.incident.declare', 'mci.incident.standdown', 'mci.incident.read'] as const;
+
 const PAYOUT_EARNER = ['payout.statement.read', 'payout.statement.list', 'payout.dispute.raise'] as const;
 
 const DOCTOR_CLINICAL = [
@@ -1416,6 +1474,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'admin-console',
     permissions: [
+      ...MCI_COMMAND,
       // Phase 5 — RC-003. Holds the *publish* half only. The finance manager
       // builds and submits a revision; making it live is a second pair of
       // hands, which is what RC-003 §5's "requester ≠ approver" means in
@@ -1689,6 +1748,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      ...MCI_COMMAND,
       ...DIAGNOSTIC_RESULTS_READER,
       'rad.peer_review.read',
       'rad.mlc.read',
@@ -1897,6 +1957,9 @@ const templates: readonly RoleTemplate[] = [
     homeWorkspace: 'er-board',
     permissions: [
       ...ER_FLOOR,
+      ...TRIAGE_FLOOR,
+      ...TRAUMA_LEAD,
+      ...MCI_COMMAND,
       'er.disposition.decide',
       'er.identity.merge',
       ...DIAGNOSTIC_ORDERING,
@@ -1934,6 +1997,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...TRAUMA_TEAM,
       ...DIAGNOSTIC_ORDERING,
 
       ...DOCTOR_CLINICAL,
@@ -1966,6 +2030,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'anaesthesia-worklist',
     permissions: [
+      ...TRAUMA_TEAM,
       ...DIAGNOSTIC_ORDERING,
 
       ...DOCTOR_CLINICAL,
@@ -1988,6 +2053,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'icu-board',
     permissions: [
+      ...TRAUMA_TEAM,
       ...DIAGNOSTIC_ORDERING,
 
       ...DOCTOR_CLINICAL,
@@ -2059,6 +2125,7 @@ const templates: readonly RoleTemplate[] = [
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
     permissions: [
+      ...TRAUMA_TEAM,
       ...DIAGNOSTIC_RESULTS_READER,
       'lab.order.create',
       'rad.order.create',
@@ -2212,6 +2279,8 @@ const templates: readonly RoleTemplate[] = [
     homeWorkspace: 'triage-board',
     permissions: [
       ...ER_FLOOR,
+      ...TRIAGE_FLOOR,
+      ...TRAUMA_TEAM,
       'er.disposition.decide',
       ...WARD_DIAGNOSTICS,
 
@@ -2813,6 +2882,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'records',
     homeWorkspace: 'mrd-queue',
     permissions: [
+      ...TRAUMA_REGISTRY,
       'lab.report.read',
       'lab.report.export',
       'rad.report.read',
@@ -3287,6 +3357,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'quality',
     permissions: [
+      'trauma.activation.read',
+      'trauma.activation.list',
+      'trauma.survey.read',
+      'trauma.score.read',
+      'mci.incident.read',
       'lab.report.read',
       'labq.checklist.manage',
       'labq.accreditation.manage',

@@ -1,0 +1,438 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-001 — triage, trauma activation and the golden hour (schema `clinical`)
+//
+// `phase-06` §6.2–6.5, exit gates 3, 4 and 5.
+//
+//   triage_records        one triage, and every re-triage after it
+//   trauma_activations    the team was called; who, when, and did they come
+//   activation_pages      one page to one person, with its acknowledgement
+//   primary_surveys       the ATLS A/B/C/D/E, every intervention timestamped
+//   survey_interventions  the timed things: tourniquet, ICD, binder, MTP
+//   trauma_scores         RTS/ISS/NISS/TRISS, versioned, lockable
+//   trauma_injuries       the coded AIS list the scores are computed from
+//   mci_incidents         a declared mass-casualty event
+//
+// ── Re-triage never overwrites ──────────────────────────────────────────────
+//
+// A patient triaged ESI-4 who deteriorates to ESI-2 has two triage records, not
+// one edited record. The first one is why they waited, and deleting it deletes
+// the only evidence of whether the wait was reasonable. §B.1 makes the table
+// append-only for the fields that matter.
+//
+// ── A Level 1 page cannot be silenced ───────────────────────────────────────
+//
+// §6.3 states it plainly, and §B.3 enforces it: `activation_pages` for a level-1
+// activation cannot be created suppressed and cannot be updated to suppressed.
+// The failure this prevents is a night shift muting the trauma pager because it
+// went off twice for a stand-down, and then not hearing the third one.
+//
+// ── Arrival values are frozen ───────────────────────────────────────────────
+//
+// TRISS is a survival probability computed from physiology *on arrival*.
+// Recomputing it two hours into a resuscitation produces a number saying the
+// patient was always going to survive, because by then you have resuscitated
+// them. `trauma_scores` stores the arrival GCS, SBP and RR it used, and §B.5
+// refuses a locked score being edited — an amendment is a new version with a
+// reason, which is how a registry submission stays defensible.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum TriageSystem {
+  esi
+  /// Mass-casualty field triage. A different ladder for a different problem.
+  start
+  jump_start
+
+  @@schema("clinical")
+}
+
+/// START/JumpSTART categories. Colour *and* word, never colour alone.
+enum TriageTag {
+  red
+  yellow
+  green
+  black
+
+  @@schema("clinical")
+}
+
+enum ActivationTier {
+  /// The full team, immediately. Cannot be silenced.
+  level_1
+  /// A limited team, with a longer fuse.
+  level_2
+  /// Consult only.
+  consult
+
+  @@schema("clinical")
+}
+
+enum ActivationStatus {
+  active
+  stood_down
+  completed
+
+  @@schema("clinical")
+}
+
+enum PageStatus {
+  queued
+  sent
+  acknowledged
+  arrived
+  failed
+
+  @@schema("clinical")
+}
+
+enum ScoreStatus {
+  /// Computed but not yet reviewed. Everything starts here.
+  provisional
+  /// A coder or EM consultant has signed it off. Immutable from now on.
+  locked
+  /// Superseded by a later version.
+  amended
+
+  @@schema("clinical")
+}
+
+/// One triage. A re-triage is a new row, never an edit — see the header.
+model TriageRecord {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  erVisitId String  @map("er_visit_id") @db.Uuid
+  patientId String? @map("patient_id") @db.Uuid
+
+  system TriageSystem @default(esi)
+  /// 1 for each re-triage. The first record is 1.
+  sequenceNo Int @map("sequence_no")
+
+  // ── ESI ───────────────────────────────────────────────────────────────────
+  /// 1–5. Null for a START triage, which uses `tag` instead.
+  esiLevel Int? @map("esi_level")
+  /// `A` | `B` | `C` | `D` — which decision point produced the level. Recorded
+  /// so a nurse overriding it can see what the algorithm keyed on.
+  decisionPoint String? @map("decision_point") @db.VarChar(2)
+  resourceCount Int?    @map("resource_count")
+  /// What the shared pure function returned, before any override.
+  suggestedLevel Int?   @map("suggested_level")
+  /// Set when the nurse disagreed. Requires a reason — §B.2.
+  overridden       Boolean @default(false)
+  overrideReason   String? @map("override_reason") @db.Text
+
+  // ── START / JumpSTART ─────────────────────────────────────────────────────
+  tag TriageTag?
+
+  // ── Observations the level was based on ───────────────────────────────────
+  heartRate       Int?     @map("heart_rate")
+  respiratoryRate Int?     @map("respiratory_rate")
+  systolicBp      Int?     @map("systolic_bp")
+  diastolicBp     Int?     @map("diastolic_bp")
+  spo2            Int?
+  temperatureC    Decimal? @map("temperature_c") @db.Decimal(4, 1)
+  painScore       Int?     @map("pain_score")
+  /// Capillary blood glucose, mg/dL. Cheap, and it changes the differential.
+  glucose         Int?
+
+  // ── GCS ───────────────────────────────────────────────────────────────────
+  gcsEye    Int?    @map("gcs_eye")
+  gcsVerbal Int?    @map("gcs_verbal")
+  gcsMotor  Int?    @map("gcs_motor")
+  gcsTotal  Int?    @map("gcs_total")
+  /// `12T`. A verbal score cannot be observed through a tube.
+  gcsIntubated Boolean @default(false) @map("gcs_intubated")
+
+  chiefComplaint String? @map("chief_complaint") @db.Text
+  /// Stroke, STEMI, sepsis, paediatric, obstetric, poisoning, psychiatric,
+  /// infectious — each starts its own clock (§6.2).
+  pathways String[] @default([])
+
+  /// When the patient should be seen by, from the level's target.
+  targetSeenBy DateTime? @map("target_seen_by") @db.Timestamptz(6)
+
+  triagedAt DateTime @default(now()) @map("triaged_at") @db.Timestamptz(6)
+  triagedBy String?  @map("triaged_by") @db.Uuid
+
+  /// Written offline in a resus bay and synced later. `phase-06` requires the
+  /// device clock plus a monotonic sequence so two tablets cannot collide.
+  deviceId       String?   @map("device_id") @db.VarChar(64)
+  deviceSequence Int?      @map("device_sequence")
+  recordedOffline Boolean  @default(false) @map("recorded_offline")
+  syncedAt       DateTime? @map("synced_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  activations TraumaActivation[]
+
+  @@unique([erVisitId, sequenceNo], map: "uq_triage_sequence_per_visit")
+  @@index([hospitalId, erVisitId, triagedAt(sort: Desc)])
+  @@index([hospitalId, branchId, triagedAt(sort: Desc)])
+  @@map("triage_records")
+  @@schema("clinical")
+}
+
+/// The team was called.
+model TraumaActivation {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  erVisitId       String  @map("er_visit_id") @db.Uuid
+  triageRecordId  String? @map("triage_record_id") @db.Uuid
+
+  tier   ActivationTier
+  status ActivationStatus @default(active)
+
+  /// Which criteria fired, from the EN-029 rule set. Stored rather than
+  /// re-derived: the rule set is editable, and an activation has to remain
+  /// explicable after somebody changes it.
+  criteriaFired String[] @default([]) @map("criteria_fired")
+  /// Set when a clinician activated without a criterion — always allowed, and
+  /// always recorded as a judgement rather than a rule.
+  clinicalJudgement Boolean @default(false) @map("clinical_judgement")
+
+  activatedAt DateTime @default(now()) @map("activated_at") @db.Timestamptz(6)
+  activatedBy String?  @map("activated_by") @db.Uuid
+
+  /// Stand-down needs the team leader and a reason — §B.4.
+  stoodDownAt     DateTime? @map("stood_down_at") @db.Timestamptz(6)
+  stoodDownBy     String?   @map("stood_down_by") @db.Uuid
+  standDownReason String?   @map("stand_down_reason") @db.Text
+
+  /// The Cribari matrix inputs, captured now for TR-011 in Phase 11.
+  finalIss    Int?     @map("final_iss")
+  overTriage  Boolean? @map("over_triage")
+  underTriage Boolean? @map("under_triage")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  triageRecord TriageRecord?    @relation(fields: [triageRecordId], references: [id], onDelete: SetNull)
+  pages        ActivationPage[]
+
+  @@index([hospitalId, branchId, status, activatedAt(sort: Desc)])
+  @@index([hospitalId, erVisitId])
+  @@map("trauma_activations")
+  @@schema("clinical")
+}
+
+/// One page to one person. The acknowledgement is the point.
+model ActivationPage {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  activationId String @map("activation_id") @db.Uuid
+
+  /// `trauma_surgeon` | `em_physician` | `anaesthetist` | `orthopaedics` |
+  /// `neurosurgery` | `radiology` | `blood_bank` | `ot_coordinator` | `icu`.
+  role      String  @db.VarChar(32)
+  userId    String? @map("user_id") @db.Uuid
+  /// From the NC-030 roster at the moment of paging, so a later roster change
+  /// does not rewrite who was actually called.
+  rosterRef String? @map("roster_ref") @db.VarChar(64)
+
+  channel String     @default("push") @db.VarChar(16)
+  status  PageStatus @default(queued)
+
+  /// A level-1 page can never carry this. §B.3.
+  suppressed Boolean @default(false)
+
+  sentAt         DateTime? @map("sent_at") @db.Timestamptz(6)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  arrivedAt      DateTime? @map("arrived_at") @db.Timestamptz(6)
+  etaMinutes     Int?      @map("eta_minutes")
+  failureReason  String?   @map("failure_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  activation TraumaActivation @relation(fields: [activationId], references: [id], onDelete: Cascade)
+
+  @@unique([activationId, role], map: "uq_activation_page_per_role")
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@map("activation_pages")
+  @@schema("clinical")
+}
+
+/// The ATLS primary survey. Every intervention is a timestamped row.
+model PrimarySurvey {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  erVisitId    String  @unique @map("er_visit_id") @db.Uuid
+  activationId String? @map("activation_id") @db.Uuid
+
+  /// The clocks §6.4 requires. `injury_at` is what the crew reported; the rest
+  /// are ours.
+  injuryAt DateTime? @map("injury_at") @db.Timestamptz(6)
+  doorAt   DateTime  @default(now()) @map("door_at") @db.Timestamptz(6)
+  ctAt     DateTime? @map("ct_at") @db.Timestamptz(6)
+  otAt     DateTime? @map("ot_at") @db.Timestamptz(6)
+
+  // ── A ─────────────────────────────────────────────────────────────────────
+  airwayPatent  Boolean?  @map("airway_patent")
+  airwayAdjunct String?   @map("airway_adjunct") @db.VarChar(40)
+  collarAt      DateTime? @map("collar_at") @db.Timestamptz(6)
+  intubatedAt   DateTime? @map("intubated_at") @db.Timestamptz(6)
+
+  // ── B ─────────────────────────────────────────────────────────────────────
+  breathSoundsEqual Boolean?  @map("breath_sounds_equal")
+  needleDecompAt    DateTime? @map("needle_decomp_at") @db.Timestamptz(6)
+  chestDrainAt      DateTime? @map("chest_drain_at") @db.Timestamptz(6)
+
+  // ── C ─────────────────────────────────────────────────────────────────────
+  /// Tourniquets have an on-time and alarms at 90 and 120 minutes. A tourniquet
+  /// nobody timed is a limb.
+  tourniquetOnAt DateTime? @map("tourniquet_on_at") @db.Timestamptz(6)
+  tourniquetOffAt DateTime? @map("tourniquet_off_at") @db.Timestamptz(6)
+  tourniquetSite String?   @map("tourniquet_site") @db.VarChar(40)
+  pelvicBinderAt DateTime? @map("pelvic_binder_at") @db.Timestamptz(6)
+  ivAccessCount  Int       @default(0) @map("iv_access_count")
+  ioAccess       Boolean   @default(false) @map("io_access")
+  crystalloidMl  Int       @default(0) @map("crystalloid_ml")
+  bloodUnits     Int       @default(0) @map("blood_units")
+  mtpActivatedAt DateTime? @map("mtp_activated_at") @db.Timestamptz(6)
+  fastResult     String?   @map("fast_result") @db.VarChar(24)
+
+  // ── D ─────────────────────────────────────────────────────────────────────
+  pupilLeftMm   Int?    @map("pupil_left_mm")
+  pupilRightMm  Int?    @map("pupil_right_mm")
+  pupilsReactive Boolean? @map("pupils_reactive")
+
+  // ── E ─────────────────────────────────────────────────────────────────────
+  exposedAt   DateTime? @map("exposed_at") @db.Timestamptz(6)
+  logRolledAt DateTime? @map("log_rolled_at") @db.Timestamptz(6)
+  temperatureC Decimal? @map("temperature_c") @db.Decimal(4, 1)
+
+  /// The three time-critical drugs §6.4 prompts for.
+  tetanusAt    DateTime? @map("tetanus_at") @db.Timestamptz(6)
+  txaAt        DateTime? @map("txa_at") @db.Timestamptz(6)
+  antibioticAt DateTime? @map("antibiotic_at") @db.Timestamptz(6)
+
+  /// AMPLE, and the structured mechanism the MLC suggestion keys off.
+  ampleHistory Json?   @map("ample_history")
+  mechanism    String? @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  interventions SurveyIntervention[]
+
+  @@index([hospitalId, doorAt(sort: Desc)])
+  @@map("primary_surveys")
+  @@schema("clinical")
+}
+
+/// Anything done, when it was done, by whom. Append-only.
+model SurveyIntervention {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  surveyId   String @map("survey_id") @db.Uuid
+
+  kind   String  @db.VarChar(40)
+  detail String? @db.Text
+  atTime DateTime @default(now()) @map("at_time") @db.Timestamptz(6)
+  byId   String?  @map("by_id") @db.Uuid
+
+  survey PrimarySurvey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, surveyId, atTime])
+  @@map("survey_interventions")
+  @@schema("clinical")
+}
+
+/// The coded injuries the scores are computed from.
+model TraumaInjury {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  erVisitId  String @map("er_visit_id") @db.Uuid
+
+  /// One of the six AIS regions.
+  region      String @db.VarChar(24)
+  /// AIS severity 1–6.
+  aisSeverity Int    @map("ais_severity")
+  aisCode     String? @map("ais_code") @db.VarChar(24)
+  description String  @db.VarChar(300)
+  side        String? @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@index([hospitalId, erVisitId])
+  @@map("trauma_injuries")
+  @@schema("clinical")
+}
+
+/// RTS, ISS, NISS, TRISS — versioned, and immutable once locked.
+model TraumaScore {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  erVisitId  String @map("er_visit_id") @db.Uuid
+
+  versionNo Int         @map("version_no")
+  status    ScoreStatus @default(provisional)
+
+  /// The arrival physiology TRISS used. Frozen — see the header.
+  arrivalGcs Int? @map("arrival_gcs")
+  arrivalSbp Int? @map("arrival_sbp")
+  arrivalRr  Int? @map("arrival_rr")
+  ageYears   Int? @map("age_years")
+  mechanism  String? @db.VarChar(16)
+
+  rts     Decimal? @db.Decimal(6, 4)
+  iss     Int?
+  niss    Int?
+  shockIndex Decimal? @map("shock_index") @db.Decimal(5, 2)
+  mgap    Int?
+  gap     Int?
+  /// Probability of survival, 0–1.
+  triss   Decimal? @db.Decimal(6, 4)
+  /// Which coefficient set produced the TRISS. MTOS is not right for every
+  /// population, and a score whose provenance is unknown is not comparable.
+  trissCoefficientSet String? @map("triss_coefficient_set") @db.VarChar(64)
+
+  lockedAt DateTime? @map("locked_at") @db.Timestamptz(6)
+  lockedBy String?   @map("locked_by") @db.Uuid
+  /// Set on an amendment. A locked score is superseded, never edited.
+  supersedesId  String? @map("supersedes_id") @db.Uuid
+  amendReason   String? @map("amend_reason") @db.Text
+
+  computedAt DateTime @default(now()) @map("computed_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy  String?  @map("created_by") @db.Uuid
+
+  @@unique([erVisitId, versionNo], map: "uq_trauma_score_version")
+  @@index([hospitalId, erVisitId, versionNo(sort: Desc)])
+  @@map("trauma_scores")
+  @@schema("clinical")
+}
+
+/// A declared mass-casualty incident.
+model MciIncident {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  incidentCode String  @map("incident_code") @db.VarChar(24)
+  name         String  @db.VarChar(200)
+  /// `local` | `control_room` — who declared it.
+  source       String  @default("local") @db.VarChar(24)
+
+  declaredAt   DateTime  @default(now()) @map("declared_at") @db.Timestamptz(6)
+  declaredBy   String?   @map("declared_by") @db.Uuid
+  stoodDownAt  DateTime? @map("stood_down_at") @db.Timestamptz(6)
+  stoodDownBy  String?   @map("stood_down_by") @db.Uuid
+
+  /// The after-action report §6.5 requires, written on stand-down.
+  afterActionReport Json? @map("after_action_report")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, incidentCode])
+  @@index([hospitalId, branchId, declaredAt(sort: Desc)])
+  @@map("mci_incidents")
+  @@schema("clinical")
+}

@@ -42,6 +42,12 @@
       "types": "./dist/primitives/index.d.ts",
       "import": "./dist/primitives/index.js",
       "default": "./dist/primitives/index.js"
+    },
+    "./scores": {
+      "development": "./src/scores/index.ts",
+      "types": "./dist/scores/index.d.ts",
+      "import": "./dist/scores/index.js",
+      "default": "./dist/scores/index.js"
     }
   },
   "scripts": {

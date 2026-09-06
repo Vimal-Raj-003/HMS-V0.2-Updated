@@ -224,8 +224,17 @@ model ErVisit {
 
   /// Denormalised from TR-001 so the board sorts without a join. Written in the
   /// same transaction as the triage record.
-  esiLevel     Int?      @map("esi_level")
-  triagedAt    DateTime? @map("triaged_at") @db.Timestamptz(6)
+  ///
+  /// A visit is triaged when it carries *either* a level or a tag. Everyday
+  /// triage is ESI and sets `esiLevel`; under a declared MCI it is START and
+  /// sets `triageTag` instead, because counting resources for a patient you have
+  /// thirty seconds for is not a thing anybody does. Both are denormalised: with
+  /// only the level here, every MCI patient would show on the board as
+  /// un-triaged, at exactly the moment the board is the only thing holding the
+  /// department together.
+  esiLevel     Int?       @map("esi_level")
+  triageTag    TriageTag? @map("triage_tag")
+  triagedAt    DateTime?  @map("triaged_at") @db.Timestamptz(6)
   /// The clock the ESI target is measured against.
   targetSeenBy DateTime? @map("target_seen_by") @db.Timestamptz(6)
 

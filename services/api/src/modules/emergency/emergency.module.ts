@@ -3,6 +3,8 @@ import { AppModule } from '../../app.module.js';
 import { NumberingService } from '../../core/numbering/numbering.service.js';
 import { ErController } from './er/er.controller.js';
 import { ErService } from './er/er.service.js';
+import { TraumaController } from './trauma/trauma.controller.js';
+import { TraumaService } from './trauma/trauma.service.js';
 
 /**
  * Phase 6 — the hospital's front door at 3 a.m.
@@ -15,15 +17,15 @@ import { ErService } from './er/er.service.js';
  * the visit inside its own transaction — the board's sort key and the triage
  * record have to be written together or they will eventually disagree.
  */
-export const EMERGENCY_CONTROLLERS: Type<unknown>[] = [ErController];
+export const EMERGENCY_CONTROLLERS: Type<unknown>[] = [ErController, TraumaController];
 
-/** `NumberingService` because OP-006 burns `ER_NO` and `ER_TAG`. */
-export const EMERGENCY_PROVIDERS: Provider[] = [NumberingService, ErService];
+/** `NumberingService` because OP-006 burns `ER_NO`/`ER_TAG` and TR-001 burns `MCI_NO`. */
+export const EMERGENCY_PROVIDERS: Provider[] = [NumberingService, ErService, TraumaService];
 
 @Module({
   imports: [forwardRef(() => AppModule)],
   controllers: EMERGENCY_CONTROLLERS,
   providers: EMERGENCY_PROVIDERS,
-  exports: [ErService],
+  exports: [ErService, TraumaService],
 })
 export class EmergencyModule {}

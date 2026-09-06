@@ -28,3 +28,7 @@ export * from './licensing/entitlements.js';
 
 // request/response schemas
 export * from './schemas/index.js';
+
+// Phase 6 — clinical scores. Pure functions, shared by the tablet and the server
+// so a triage level computed in a resus bay is the one the API agrees with.
+export * from './scores/index.js';

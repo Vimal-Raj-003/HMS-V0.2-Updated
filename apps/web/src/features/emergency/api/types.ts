@@ -39,6 +39,8 @@ export interface ErVisitView {
   readonly chiefComplaint: string | null;
   readonly mlcSuspected: boolean;
   readonly esiLevel: number | null;
+  /** START/JumpSTART category, set instead of `esiLevel` during a declared MCI. */
+  readonly triageTag: string | null;
   readonly status: string;
   readonly zoneId: string | null;
   readonly bayId: string | null;

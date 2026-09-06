@@ -8839,6 +8839,160 @@ const emergencyEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * TR-001 — triage, the trauma team and the golden hour.
+ *
+ * `trauma.activation.created` is the one event in this file that a subscriber is
+ * allowed to treat as an interrupt. Everything else can queue.
+ */
+const traumaEvents: readonly EventDefinition[] = [
+  ev(
+    'triage.assigned',
+    'triage_record',
+    'TR-001',
+    'A patient was triaged. Re-triage fires this again with a higher sequence — the board re-sorts, and the previous record stays.',
+    z.object({
+      triageId: uuid,
+      visitId: uuid,
+      system: z.string(),
+      sequenceNo: z.number().int(),
+      esiLevel: z.number().int().nullable(),
+      tag: z.string().nullable(),
+      suggestedLevel: z.number().int().nullable(),
+      overridden: z.boolean(),
+      targetSeenBy: z.string().nullable(),
+      pathways: z.array(z.string()),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'triage.deteriorated',
+    'triage_record',
+    'TR-001',
+    'A re-triage moved the patient to a more urgent level. Separate from `triage.assigned` because this one should wake somebody.',
+    z.object({
+      triageId: uuid,
+      visitId: uuid,
+      fromLevel: z.number().int(),
+      toLevel: z.number().int(),
+      minutesWaiting: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'trauma.activation.created',
+    'trauma_activation',
+    'TR-001',
+    'The trauma team was called. Level 1 pages cannot be suppressed by any configuration a subscriber holds.',
+    z.object({
+      activationId: uuid,
+      visitId: uuid,
+      tier: z.string(),
+      criteriaFired: z.array(z.string()),
+      clinicalJudgement: z.boolean(),
+      pagedRoles: z.array(z.string()),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'trauma.page.acknowledged',
+    'activation_page',
+    'TR-001',
+    'A paged clinician answered, with an ETA. The gap between the page and this is the number the trauma audit reports.',
+    z.object({
+      pageId: uuid,
+      activationId: uuid,
+      role: z.string(),
+      secondsToAcknowledge: z.number().int(),
+      etaMinutes: z.number().int().nullable(),
+    }),
+    { retentionDays: 3650 },
+  ),
+  ev(
+    'trauma.activation.stood_down',
+    'trauma_activation',
+    'TR-001',
+    'The team was released. Carries the reason, so the next stand-down is not read as the pager crying wolf.',
+    z.object({
+      activationId: uuid,
+      visitId: uuid,
+      tier: z.string(),
+      reason: z.string(),
+      minutesActive: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'trauma.score.computed',
+    'trauma_score',
+    'TR-001',
+    'RTS, ISS, NISS and TRISS were computed from the coded injuries. TR-011 consumes this for the Cribari matrix in Phase 11.',
+    z.object({
+      scoreId: uuid,
+      visitId: uuid,
+      versionNo: z.number().int(),
+      iss: z.number().int().nullable(),
+      niss: z.number().int().nullable(),
+      rts: z.string().nullable(),
+      triss: z.string().nullable(),
+      coefficientSet: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'trauma.score.locked',
+    'trauma_score',
+    'TR-001',
+    'A score was signed off and is now immutable. Registry submissions key off this, not off `computed`.',
+    z.object({
+      scoreId: uuid,
+      visitId: uuid,
+      versionNo: z.number().int(),
+      iss: z.number().int().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'trauma.tourniquet.due',
+    'primary_survey',
+    'TR-001',
+    'A tourniquet has been on for 90 minutes. Fires again at 120. A tourniquet nobody timed is a limb.',
+    z.object({
+      surveyId: uuid,
+      visitId: uuid,
+      site: z.string().nullable(),
+      minutesOn: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'mci.declared',
+    'mci_incident',
+    'TR-001',
+    'A mass-casualty incident is running. Triage switches to START, the surge roster is called, and elective lists are held.',
+    z.object({
+      incidentId: uuid,
+      incidentCode: z.string(),
+      name: z.string(),
+      source: z.string(),
+    }),
+    { retentionDays: 3650 },
+  ),
+  ev(
+    'mci.stood_down',
+    'mci_incident',
+    'TR-001',
+    'The incident is over. The after-action report is attached to the event so the debrief has one source.',
+    z.object({
+      incidentId: uuid,
+      incidentCode: z.string(),
+      minutesActive: z.number().int(),
+      patientsSeen: z.number().int(),
+    }),
+    { retentionDays: 3650 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -8899,6 +9053,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...leakageEvents,
   ...payoutEvents,
   ...emergencyEvents,
+  ...traumaEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

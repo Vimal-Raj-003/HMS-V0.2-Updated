@@ -70,6 +70,11 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   // unidentified that is exactly the confusion the tag exists to prevent. Not
   // gapless — an abandoned tag must not burn a number an auditor asks about.
   ['ER_TAG', 'ER-TAG-{SEQ:5}', false, 'never'],
+  // TR-001 §6.5: the mass-casualty incident code. Per branch and reset yearly,
+  // because an MCI is referenced by name in a district report months later and
+  // "MCI/2026/003" has to mean one incident. Not gapless: a declaration that is
+  // cancelled in the first minute must not leave a number an auditor chases.
+  ['MCI_NO', '{BR}/MCI/{YYYY}/{SEQ:3}', false, 'year'],
   // OP-002 §5: "Numbering: `RX`, `ORD` per hospital/branch/FY (non-gapless)."
   // Not gapless — an abandoned prescription draft must not burn a number an
   // auditor will later ask about, and nothing legal depends on the sequence
