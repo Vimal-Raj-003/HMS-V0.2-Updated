@@ -9090,6 +9090,75 @@ const IP012 = group('IP-012', 7, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 7C — IP-005, inpatient billing
+//
+// Running the room-charge job is `medium` and held by billing and the admins:
+// it is idempotent by construction, so running it twice is harmless and running
+// it never is the actual risk. Overriding the discharge gate is `high`, because
+// it lets a patient leave over an unresolved bill and somebody has to own that.
+// ═════════════════════════════════════════════════════════════════════════════
+const IP005 = group('IP-005', 7, [
+  p(
+    'ipbill.read',
+    'bill',
+    'read',
+    'financial',
+    'low',
+    'See the running inpatient bill, its lines and where each came from.',
+  ),
+  p(
+    'ipbill.charge.run',
+    'room_charge',
+    'run',
+    'financial',
+    'medium',
+    'Run the room-charge job for a date. Idempotent — running it twice changes nothing, and running it never is the risk.',
+  ),
+  p(
+    'ipbill.charge.explain',
+    'room_charge',
+    'explain',
+    'financial',
+    'low',
+    'Show how a night was derived: the occupancy, the policy, the rate version and the window it covers.',
+  ),
+  p(
+    'ipbill.policy.manage',
+    'charge_policy',
+    'configure',
+    'financial',
+    'high',
+    'Change the charging policy: the cut-off hour, the grace, the minimum days and the GST threshold.',
+    { requiresReason: true },
+  ),
+  p(
+    'ipbill.clearance.read',
+    'discharge_clearance',
+    'read',
+    'financial',
+    'low',
+    'See what is blocking a discharge, department by department.',
+  ),
+  p(
+    'ipbill.clearance.clear',
+    'discharge_clearance',
+    'approve',
+    'financial',
+    'medium',
+    'Clear a patient for discharge once nothing is outstanding.',
+  ),
+  p(
+    'ipbill.clearance.override',
+    'discharge_clearance',
+    'override',
+    'financial',
+    'high',
+    'Let a patient leave over an unresolved bill. Recorded with the grounds — a patient who insists on leaving is leaving; the question is whether the hospital wrote down that it knew.',
+    { requiresReason: true },
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -9171,6 +9240,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...IP003,
   ...EN029IP,
   ...IP012,
+  ...IP005,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

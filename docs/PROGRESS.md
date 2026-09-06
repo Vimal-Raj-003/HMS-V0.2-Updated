@@ -401,6 +401,72 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-07 (evening) · Phase 7C · IP billing, and the job you can run three times
+
+**Built — IP-005 (step 7C of seven), complete.** 4 tables, 7 permission keys, 4
+events, 1 screen. **Exit gate 3 passes.**
+
+**The single line the whole step turns on**
+
+```sql
+CREATE UNIQUE INDEX uq_room_charge_idempotency
+  ON ip_room_charges (admission_id, charge_date, charge_code,
+                      COALESCE(occupancy_id, '00000000-…'))
+  WHERE superseded_at IS NULL;
+```
+
+`phase-07` calls duplicate room rent "the single most common source of billing
+disputes in Indian hospitals; test it like money depends on it, because it
+does." A job that is _careful_ not to duplicate is a job that duplicates the
+night somebody restarts it mid-run, or two workers overlap, or a retry fires
+after a timeout that had actually succeeded. A unique index cannot. The job's
+`ON CONFLICT DO NOTHING` makes a re-run cheap; the index makes it correct.
+
+**Gate 3, driven twice — in SQL and over HTTP**
+
+Three runs against the same admission: `posted 0, skipped 4` every time, bill
+identical at ₹33,000. Then the harder half. A back-dated transfer moved the
+patient to ICU at 23:50 on the 5th, discovered after the charges were posted.
+The job superseded the charge the timeline had moved out from under, posted the
+two ICU nights, and three further re-runs produced the same ₹33,000 — with the
+superseded line still in the table.
+
+That retention is deliberate. "What did you charge me on Tuesday" must have an
+answer even when the answer was wrong, and deleting the row to make room for the
+correction destroys exactly the record a dispute needs. A posted charge is
+immutable: the trigger permits being superseded and nothing else.
+
+**GST as arithmetic the database checks**
+
+ICU, HDU, NICU and PICU are exempt by statute; a room at or below the configured
+threshold is exempt by threshold; anything above is taxed at 5% on the room line
+only. Three CHECKs hold it: an exempt line states its ground, an exempt line
+bears no tax, and the tax equals the rate applied to the amount within two
+paise. That last one catches the error that survives a hundred bills and then
+arrives as an assessment.
+
+**The discharge gate recomputes before it clears**
+
+Four checks — outstanding doses, live lines and catheters, open escalations, the
+bill — each a query run now. Clearing against a snapshot from a minute ago is how
+somebody leaves over a test billed while they were putting their shoes on. The
+override exists, takes an `x-reason` _and_ a written acknowledgement of what the
+family were told, and is audited with the reasons it bypassed: a patient who
+insists on leaving is leaving, and the question is whether the hospital wrote
+down that it knew.
+
+**Tested** — three identical runs and three more after a back-dated transfer,
+both in SQL and over HTTP; the immutability trigger, both GST CHECKs and the
+clearance constraints proved in both directions; the gate driven blocked →
+refused clear → refused override without a reason → overridden with one.
+
+**Gates** — 20/20 packages typecheck, lint and test; **686 routes across 63
+controllers**; catalogue **1,094 keys**; event registry **753**; 727 base tables,
+0 without RLS; 43 migrations; 80 screens.
+
+**Next:** 7D — operation theatre, the WHO checklist as a hard gate, anaesthesia
+and CSSD.
+
 ### 2026-09-07 (later) · Phase 7B · The nursing station, the five rights, and a near miss that survived its own refusal
 
 **Built — IP-003, IP-004, IP-014, IP-012, EN-029, EN-039 (step 7B of seven),

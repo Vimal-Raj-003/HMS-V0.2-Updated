@@ -141,6 +141,30 @@ export const IP_SCREENS: readonly IpScreen[] = [
     ],
     entitlement: 'module.inpatient.enabled',
   },
+  {
+    key: 'ip-bill',
+    label: 'Inpatient bill',
+    href: '/ip/bill',
+    area: 'inpatient',
+    permission: 'ipbill.read',
+    summary:
+      'The running bill derived from the occupancy timeline, the corrections shown as corrections, and the discharge gate with what is holding it.',
+    deniedExplanation:
+      'The inpatient bill is held by billing, cash, the insurance desk and the ward in charge. Running the charge job, changing the policy and overriding the discharge gate are three further keys.',
+    keywords: [
+      'inpatient bill',
+      'room rent',
+      'charges',
+      'gst',
+      'discharge clearance',
+      'outstanding',
+      'deposit',
+      'midnight job',
+      'proration',
+      'superseded',
+    ],
+    entitlement: 'module.inpatient.enabled',
+  },
 ];
 
 export function ipScreen(key: string): IpScreen {

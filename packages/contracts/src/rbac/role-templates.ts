@@ -613,6 +613,12 @@ const INFECTION_CONTROL = [
   'infection.hai.adjudicate',
 ] as const;
 
+/** Phase 7C — the inpatient bill, as the ward and the desk see it. */
+const IP_BILL_READER = ['ipbill.read', 'ipbill.charge.explain', 'ipbill.clearance.read'] as const;
+
+/** Billing's own: running the job, clearing the gate. */
+const IP_BILL_DESK = [...IP_BILL_READER, 'ipbill.charge.run', 'ipbill.clearance.clear'] as const;
+
 const FLEET_DISPATCH = [
   'fleet.vehicle.read',
   'fleet.request.create',
@@ -1865,6 +1871,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'admin-console',
     permissions: [
+      ...IP_BILL_DESK,
+      'ipbill.policy.manage',
+      'ipbill.clearance.override',
       ...BED_COMMAND,
       ...FLEET_MANAGER,
       'mlc.configure',
@@ -2063,6 +2072,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'branch-admin',
     permissions: [
+      ...IP_BILL_DESK,
+      'ipbill.policy.manage',
+      'ipbill.clearance.override',
       ...BED_COMMAND,
       'schedule.publish',
       'schedule.configure',
@@ -2143,6 +2155,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      ...IP_BILL_READER,
+      'ipbill.clearance.override',
       'nursing.ward.read',
       'escalation.read',
       'escalation.resolve',
@@ -2353,6 +2367,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      'ipbill.clearance.read',
       ...MAR_PRESCRIBER,
       'nursing.assessment.record',
       'nursing.note.write',
@@ -2906,6 +2921,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-command-centre',
     permissions: [
+      ...IP_BILL_READER,
       ...NURSING_IN_CHARGE,
       ...BED_MANAGEMENT,
       'bed.block',
@@ -3062,6 +3078,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'finance',
     homeWorkspace: 'cash-counter',
     permissions: [
+      ...IP_BILL_READER,
       'admission.read',
       'admission.list',
       ...PATIENT_READ,
@@ -3085,6 +3102,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'finance',
     homeWorkspace: 'billing-desk',
     permissions: [
+      ...IP_BILL_DESK,
       ...BED_BOARD_READER,
       'transfer.read',
       ...PATIENT_READ,
@@ -3124,6 +3142,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'finance',
     homeWorkspace: 'insurance-queue',
     permissions: [
+      ...IP_BILL_READER,
       ...BED_BOARD_READER,
       'transfer.read',
       ...BASE_STAFF,
@@ -3505,6 +3524,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'records',
     homeWorkspace: 'mrd-queue',
     permissions: [
+      'ipbill.clearance.read',
       'admission.read',
       'admission.list',
       'transfer.read',
@@ -3625,6 +3645,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'finance',
     homeWorkspace: 'finance',
     permissions: [
+      ...IP_BILL_READER,
+      'ipbill.charge.run',
       'receipt.shift.open_any',
       'receipt.shift.force_close',
       'receipt.void',

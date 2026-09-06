@@ -21,6 +21,7 @@ const PHASE_7_PREFIXES = [
   'mar',
   'escalation',
   'infection',
+  'ipbill',
 ] as const;
 
 /**
@@ -143,6 +144,27 @@ describe('Phase 7A permission catalogue', () => {
     for (const prescriber of holdersOf('mar.order.write')) {
       expect(holdersOf('mar.administer'), `${prescriber} must not also administer`).not.toContain(prescriber);
     }
+  });
+
+  /**
+   * Running the room-charge job is idempotent by construction, so running it
+   * twice is harmless and running it never is the actual risk. It is `medium`
+   * because it posts money, not because a second run is dangerous.
+   */
+  it('keeps running the charge job free of a reason requirement', () => {
+    const run = permission('ipbill.charge.run');
+    expect(run.requiresReason ?? false).toBe(false);
+    expect(run.risk).toBe('medium');
+  });
+
+  /**
+   * Letting a patient leave over an unresolved bill is not. Somebody owns that,
+   * and the grounds are what makes it owned.
+   */
+  it('makes overriding the discharge gate high-risk and reasoned', () => {
+    const override = permission('ipbill.clearance.override');
+    expect(override.risk).toBe('high');
+    expect(override.requiresReason).toBe(true);
   });
 
   it('gives every Phase 7 key only to roles that were meant to have it', () => {
@@ -295,6 +317,18 @@ describe('Phase 7A permission catalogue', () => {
         'surgeon',
         'medical_superintendent',
         'quality_manager',
+      ],
+      ipbill: [
+        'hospital_admin',
+        'branch_admin',
+        'medical_superintendent',
+        'billing_executive',
+        'cashier',
+        'insurance_desk',
+        'accountant',
+        'nurse_supervisor',
+        'doctor_ip',
+        'mrd_officer',
       ],
       census: [
         'hospital_admin',

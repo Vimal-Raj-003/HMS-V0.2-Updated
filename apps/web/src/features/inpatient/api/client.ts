@@ -4,9 +4,12 @@ import type {
   AdmissionView,
   BedBoardRow,
   CensusRow,
+  ChargeRunView,
   CleaningTaskView,
+  ClearanceView,
   EscalationRow,
   MarDoseRow,
+  RunningBillView,
   WardPatientRow,
 } from './types';
 
@@ -262,4 +265,59 @@ export async function acknowledgeEscalation(id: string, note?: string): Promise<
 
 export async function resolveEscalation(id: string, outcome: string): Promise<EscalationRow> {
   return request(`${V1}/nursing/escalations/${id}/resolve`, { method: 'PATCH', body: { outcome } });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7C
+//
+// `runCharges` is safe to call twice. It is idempotent against a unique index
+// on (admission, charge date, charge code, occupancy), so a retry, a
+// double-click and two overlapping workers all produce the same bill.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getRunningBill(
+  admissionId: string,
+  includeSuperseded = false,
+  options: Signal = {},
+): Promise<RunningBillView> {
+  return request(
+    `${V1}/ipbill/running${queryString({ admissionId, includeSuperseded })}`,
+    withSignal(options),
+  );
+}
+
+export async function runCharges(body: {
+  readonly forDate?: string;
+  readonly admissionId?: string;
+  readonly trigger?: string;
+}): Promise<ChargeRunView> {
+  return request(`${V1}/ipbill/charge-runs`, {
+    method: 'POST',
+    body,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export async function getChargeRuns(options: Signal = {}): Promise<readonly ChargeRunView[]> {
+  return request(`${V1}/ipbill/charge-runs`, withSignal(options));
+}
+
+export async function getClearance(admissionId: string, options: Signal = {}): Promise<ClearanceView> {
+  return request(`${V1}/ipbill/clearance/${admissionId}`, withSignal(options));
+}
+
+export async function clearDischarge(admissionId: string): Promise<ClearanceView> {
+  return request(`${V1}/ipbill/clearance/${admissionId}/clear`, { method: 'PATCH', body: {} });
+}
+
+export async function overrideClearance(
+  admissionId: string,
+  acknowledgement: string,
+  reason: string,
+): Promise<ClearanceView> {
+  return request(`${V1}/ipbill/clearance/${admissionId}/override`, {
+    method: 'PATCH',
+    body: { acknowledgement },
+    reason,
+  });
 }

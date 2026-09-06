@@ -3,6 +3,8 @@ import { AppModule } from '../../app.module.js';
 import { NumberingService } from '../../core/numbering/numbering.service.js';
 import { BedsController } from './beds/beds.controller.js';
 import { BedsService } from './beds/beds.service.js';
+import { IpBillingController } from './ipbilling/ipbilling.controller.js';
+import { IpBillingService } from './ipbilling/ipbilling.service.js';
 import { NursingController } from './nursing/nursing.controller.js';
 import { NursingService } from './nursing/nursing.service.js';
 
@@ -19,15 +21,24 @@ import { NursingService } from './nursing/nursing.service.js';
  * on a schedule, and it does so through this service so the outbox events and
  * the audit rows are the same ones a human action would produce.
  */
-export const INPATIENT_CONTROLLERS: Type<unknown>[] = [BedsController, NursingController];
+export const INPATIENT_CONTROLLERS: Type<unknown>[] = [
+  BedsController,
+  NursingController,
+  IpBillingController,
+];
 
 /** `NumberingService` because IP-001 burns the gapless `IP_NO` series. */
-export const INPATIENT_PROVIDERS: Provider[] = [NumberingService, BedsService, NursingService];
+export const INPATIENT_PROVIDERS: Provider[] = [
+  NumberingService,
+  BedsService,
+  NursingService,
+  IpBillingService,
+];
 
 @Module({
   imports: [forwardRef(() => AppModule)],
   controllers: INPATIENT_CONTROLLERS,
   providers: INPATIENT_PROVIDERS,
-  exports: [BedsService, NursingService],
+  exports: [BedsService, NursingService, IpBillingService],
 })
 export class InpatientModule {}

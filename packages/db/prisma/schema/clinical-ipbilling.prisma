@@ -1,0 +1,217 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7C · IP-005 — inpatient billing, and the midnight room charge
+//
+// ── The idempotency key is the whole design ─────────────────────────────────
+//
+// `phase-07`: "Every auto line is idempotent on (admission_id, charge_date,
+// charge_code, occupancy_id) — reruns never duplicate", and "the midnight
+// room-charge job is idempotent and re-runnable. Run it three times, run it
+// after a back-dated transfer, run it after a clock change — the bill must be
+// identical. This is the single most common source of billing disputes in
+// Indian hospitals."
+//
+// So the key is a unique index, not a convention the job is careful about. A
+// job that is careful is a job that duplicates the night somebody restarts it
+// mid-run; a unique index cannot.
+//
+// ── Why a ledger beside `billing.bill_items` ────────────────────────────────
+//
+// The bill line is what the patient is charged. This table is the *derivation*:
+// which occupancy, which policy, which rate version, how many chargeable units
+// and why. When a family disputes a day, the answer is a row here, and it
+// survives the bill line being reversed and re-posted.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// How a stay crossing a boundary is charged.
+enum RoomChargePolicy {
+  /// A calendar day is a day. Admission at 23:50 and discharge at 00:10 is two
+  /// days. Blunt, common, and the one most patients argue with.
+  day_boundary
+  /// The dearer of the two classes for the whole day when a patient moves.
+  /// Protects the hospital on an ICU step-down; the reason a transfer preview
+  /// exists before anybody confirms one.
+  higher_class
+  /// Charged by the hour against each class actually occupied. Fairest, and the
+  /// only one that needs the occupancy timeline rather than a date.
+  hourly_proration
+
+  @@schema("clinical")
+}
+
+/// What a hospital charges, and how.
+model ChargePolicy {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String? @map("branch_id") @db.Uuid
+
+  policy RoomChargePolicy @default(day_boundary)
+
+  /// The hour the day rolls over. Midnight in most places; some hospitals use
+  /// the admission hour so a day is a day from when the patient arrived.
+  cutoffHour Int @default(0) @map("cutoff_hour")
+
+  /// A discharge inside this many minutes after the cut-off does not start a
+  /// new day. The single most-argued rule in Indian inpatient billing.
+  dischargeGraceMinutes Int @default(120) @map("discharge_grace_minutes")
+  /// And an admission inside this many minutes *before* the cut-off does not
+  /// charge the day that is about to end.
+  admissionGraceMinutes Int @default(0) @map("admission_grace_minutes")
+
+  /// A stay of any length is at least this many days.
+  minimumDays Int @default(1) @map("minimum_days")
+
+  /// Day-care is a flat charge, not a day of room rent.
+  dayCareFlat Decimal? @map("day_care_flat") @db.Decimal(14, 2)
+
+  /// Room rent above this per-day figure attracts GST at `roomGstRate`, on the
+  /// room line only. Under it, exempt. ICU, CCU, NICU and HDU are exempt
+  /// regardless — that is statute, not configuration, and it is in the engine.
+  gstThresholdPerDay Decimal @default(5000) @map("gst_threshold_per_day") @db.Decimal(14, 2)
+  roomGstRate        Decimal @default(5) @map("room_gst_rate") @db.Decimal(5, 2)
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, branchId], map: "uq_charge_policy_scope")
+  @@map("ip_charge_policies")
+  @@schema("clinical")
+}
+
+/// One automatically-posted inpatient charge, and how it was derived.
+///
+/// The unique index on (admission, date, code, occupancy) is what makes the
+/// nightly job re-runnable. Everything else on the row exists so that a
+/// disputed day can be answered without re-deriving it.
+model RoomCharge {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String  @map("admission_id") @db.Uuid
+  occupancyId String? @map("occupancy_id") @db.Uuid
+  billId      String? @map("bill_id") @db.Uuid
+  billItemId  String? @map("bill_item_id") @db.Uuid
+
+  /// The service day this charge is for, in the hospital's own timezone.
+  chargeDate DateTime @map("charge_date") @db.Date
+
+  /// `ROOM` | `NURSING` | `RMO` | `ICU_MONITOR` | `EQUIPMENT` | `DIET` | `ATTENDANT`.
+  chargeCode String @map("charge_code") @db.VarChar(40)
+
+  classId String? @map("class_id") @db.Uuid
+  wardId  String? @map("ward_id") @db.Uuid
+
+  /// Days, or fractions of one under hourly proration. Kept to three places so
+  /// a six-hour stay is 0.250 rather than a rounding argument.
+  units Decimal @db.Decimal(10, 3)
+
+  /// The rate as it was on the day, copied. A tariff revision next month must
+  /// not silently re-price a night the patient already stayed.
+  unitRate Decimal @map("unit_rate") @db.Decimal(14, 2)
+  amount   Decimal @db.Decimal(14, 2)
+
+  /// GST on the room line only, and only above the threshold. ICU, CCU, NICU
+  /// and HDU are exempt by statute.
+  gstRate   Decimal @default(0) @map("gst_rate") @db.Decimal(5, 2)
+  gstAmount Decimal @default(0) @map("gst_amount") @db.Decimal(14, 2)
+  isExempt  Boolean @default(true) @map("is_exempt")
+  exemptReason String? @map("exempt_reason") @db.VarChar(80)
+
+  /// Which policy produced this, and which tariff version priced it.
+  policy           RoomChargePolicy
+  tariffVersionId  String? @map("tariff_version_id") @db.Uuid
+
+  /// The occupancy window this charge covers, so a dispute can be answered
+  /// without re-deriving anything.
+  coversFrom DateTime @map("covers_from") @db.Timestamptz(6)
+  coversTo   DateTime @map("covers_to") @db.Timestamptz(6)
+
+  /// Set when a later run supersedes this row — a back-dated transfer, a
+  /// corrected discharge time. The old row stays; the bill line is reversed.
+  supersededAt DateTime? @map("superseded_at") @db.Timestamptz(6)
+  supersededBy String?   @map("superseded_by") @db.Uuid
+
+  postedAt DateTime @default(now()) @map("posted_at") @db.Timestamptz(6)
+  runId    String?  @map("run_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, chargeDate])
+  @@index([hospitalId, admissionId, chargeDate])
+  @@index([hospitalId, runId])
+  @@map("ip_room_charges")
+  @@schema("clinical")
+}
+
+/// One execution of the nightly job, so a re-run can be told from a first run.
+model ChargeRun {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  /// The service day being charged.
+  forDate DateTime @map("for_date") @db.Date
+
+  startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  admissionsConsidered Int @default(0) @map("admissions_considered")
+  chargesPosted        Int @default(0) @map("charges_posted")
+  /// The number a re-run produces: rows that already existed and were left
+  /// alone. On a correct second run this equals `charges_posted` of the first.
+  chargesSkipped       Int @default(0) @map("charges_skipped")
+  chargesSuperseded    Int @default(0) @map("charges_superseded")
+
+  /// `running` | `done` | `failed`.
+  state String @default("running") @db.VarChar(20)
+  error String? @db.Text
+
+  triggeredBy String? @map("triggered_by") @db.Uuid
+  /// `schedule` | `manual` | `transfer` | `discharge`.
+  trigger     String  @default("schedule") @db.VarChar(20)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, forDate(sort: Desc)])
+  @@map("ip_charge_runs")
+  @@schema("clinical")
+}
+
+/// The gate between a patient being medically fit and the door.
+model DischargeClearance {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+
+  /// Each check, its state and what is outstanding. Held as JSON because the
+  /// list is configurable per hospital and a column per check would be a
+  /// migration every time somebody adds one.
+  checks Json @default("[]")
+
+  /// `pending` | `blocked` | `cleared`.
+  state String @default("pending") @db.VarChar(20)
+
+  blockedReasons String[] @map("blocked_reasons")
+
+  clearedAt DateTime? @map("cleared_at") @db.Timestamptz(6)
+  clearedBy String?   @map("cleared_by") @db.Uuid
+
+  /// An override is possible and audited. A patient who insists on leaving is
+  /// leaving; the question is whether the hospital wrote down that they knew.
+  overriddenAt DateTime? @map("overridden_at") @db.Timestamptz(6)
+  overriddenBy String?   @map("overridden_by") @db.Uuid
+  overrideReason String? @map("override_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, admissionId], map: "uq_clearance_per_admission")
+  @@index([hospitalId, branchId, state])
+  @@map("ip_discharge_clearances")
+  @@schema("clinical")
+}

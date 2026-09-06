@@ -10000,6 +10000,74 @@ const nursingEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * Phase 7C — inpatient billing.
+ *
+ * `ip.charge.run.completed` carries `skipped` as well as `posted`. On a correct
+ * second run the two swap: everything the first posted, the second skips. A run
+ * that posts on every pass is a run that is duplicating, and the shape of the
+ * event is what makes that visible without reading the bill.
+ */
+const ipBillingEvents: readonly EventDefinition[] = [
+  ev(
+    'ip.charge.run.completed',
+    'charge_run',
+    'IP-005',
+    'The room-charge job finished. `skipped` is the count of charges that already existed — on a correct re-run it equals the first run’s `posted`.',
+    z.object({
+      runId: uuid,
+      forDate: z.string(),
+      trigger: z.string(),
+      admissions: z.number().int(),
+      posted: z.number().int(),
+      skipped: z.number().int(),
+      superseded: z.number().int(),
+    }),
+    { retentionDays: 2555 },
+  ),
+  ev(
+    'ip.charge.superseded',
+    'room_charge',
+    'IP-005',
+    'A posted charge was superseded because the occupancy timeline moved under it — a back-dated transfer, a corrected discharge time. The old row stays; this says why it stopped being the answer.',
+    z.object({
+      chargeId: uuid,
+      admissionId: uuid,
+      chargeDate: z.string(),
+      chargeCode: z.string(),
+      amount: z.string(),
+      reason: z.string(),
+    }),
+    { retentionDays: 2555 },
+  ),
+  ev(
+    'ip.clearance.blocked',
+    'discharge_clearance',
+    'IP-005',
+    'A discharge is held. Carries what is outstanding, because "blocked" with no list is a door somebody has to phone four departments to open.',
+    z.object({
+      clearanceId: uuid,
+      admissionId: uuid,
+      reasons: z.array(z.string()),
+    }),
+    { containsPhi: true, retentionDays: 2555 },
+  ),
+  ev(
+    'ip.clearance.overridden',
+    'discharge_clearance',
+    'IP-005',
+    'A patient left over an unresolved bill, with the grounds recorded.',
+    z.object({
+      clearanceId: uuid,
+      admissionId: uuid,
+      reasons: z.array(z.string()),
+      overriddenBy: uuid,
+      reason: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 2555 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -10070,6 +10138,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   // Phase 7
   ...inpatientEvents,
   ...nursingEvents,
+  ...ipBillingEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));
