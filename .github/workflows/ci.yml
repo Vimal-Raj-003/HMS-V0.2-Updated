@@ -62,6 +62,10 @@ jobs:
         run: node scripts/check-alert-runbooks.mjs
       - name: No hex colour literals outside the token layer
         run: node scripts/check-hex-literals.mjs
+      - name: Chart ramps stay colourblind-safe
+        # docs/06 §3.7. The documented ramps did not pass; these are re-derived
+        # and this is what stops them drifting back. See scripts/check-chart-palette.mjs.
+        run: node scripts/check-chart-palette.mjs
       - name: Every route declares a permission key
         # phase-00 §0.3. PolicyGuard refuses an unguarded route at request time;
         # this finds it before it ships, which is the point of deny-by-default.

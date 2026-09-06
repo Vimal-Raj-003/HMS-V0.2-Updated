@@ -24,12 +24,45 @@ import { signIn } from './fixtures';
 
 const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
+/**
+ * A token unique to this moment, shared by the mobile number and the surname.
+ *
+ * From the clock rather than `Math.random`, which `docs/09` §2 bans for making
+ * a failing run irreproducible.
+ */
+function runToken(): string {
+  return String(Date.now() % 10_000_000).padStart(7, '0');
+}
+
 /** A mobile number nobody in the seeded database has. */
 function uniqueMobile(): string {
-  // Deterministic per run, from the clock rather than `Math.random`, which
-  // `docs/09` §2 bans for making a failing run irreproducible.
-  const tail = String(Date.now() % 10_000_000).padStart(7, '0');
-  return `98${tail}`;
+  return `98${runToken()}`;
+}
+
+/**
+ * An identity nobody in the database has — including the patients an *earlier
+ * Playwright project* registered.
+ *
+ * A unique mobile is not enough: OP-001 §5's duplicate rule scores on
+ * `name_trgm_gender_dob` and never looks at the phone, and `globalSetup` builds
+ * one stack that all three projects share. So desktop-chromium registering
+ * "Ramesh Sharma / 1981-04-12" made the *first* registration of the tablet and
+ * webkit-ipad runs — the step that is supposed to succeed — trip the hard stop.
+ *
+ * A unique *surname* is not enough either, which is the subtler half. The rule
+ * is a **trigram** comparison, so `Candidate8416166` and `Candidate2909431`
+ * still score 85% against each other on a shared stem. The date of birth is
+ * what makes the identities genuinely disjoint: the rule only matches a date
+ * within a year, so spreading the year over a wide range means no two runs can
+ * collide however similar the names look. Within one test both registrations
+ * reuse the same identity, so the deliberate duplicate still fires.
+ */
+function uniqueIdentity(stem: string): { readonly last: string; readonly dob: string } {
+  const token = runToken();
+  // 1940–1999, from the token rather than the calendar: two runs a second apart
+  // land on different years, and every year is a plausible adult date of birth.
+  const year = 1940 + (Number(token) % 60);
+  return { last: `${stem}${token}`, dob: `${String(year)}-04-12` };
 }
 
 /**
@@ -107,6 +140,7 @@ async function fillRegistration(
 test.describe('the registration desk', () => {
   test('search → not found → register → duplicate caught → 360 → amend with a reason', async ({ page }) => {
     const mobile = uniqueMobile();
+    const { last, dob } = uniqueIdentity('Sharma');
 
     await signIn(page, 'receptionist');
     await page.goto('/patients');
@@ -122,7 +156,7 @@ test.describe('the registration desk', () => {
     await search.fill('');
 
     // ── 2. register ─────────────────────────────────────────────────────────
-    await fillRegistration(page, { mobile, first: 'Ramesh', last: 'Sharma', dob: '1981-04-12' });
+    await fillRegistration(page, { mobile, first: 'Ramesh', last, dob });
     await page.getByTestId('register-save').click();
 
     const uhid = page.getByTestId('new-uhid');
@@ -135,7 +169,7 @@ test.describe('the registration desk', () => {
     await expect(page.getByTestId('uhid-card-uhid').first()).toHaveText(allocated);
 
     // ── 3. the same patient again — the hard stop ───────────────────────────
-    await fillRegistration(page, { mobile, first: 'Ramesh', last: 'Sharma', dob: '1981-04-12' });
+    await fillRegistration(page, { mobile, first: 'Ramesh', last, dob });
     await page.getByTestId('register-save').click();
 
     const stop = page.getByTestId('duplicate-hard-stop');
@@ -200,8 +234,9 @@ test.describe('the registration desk', () => {
 
     await page.getByTestId('reg-mobile').fill(uniqueMobile());
     await page.getByTestId('reg-first-name').fill('Keyboard');
-    await page.getByTestId('reg-last-name').fill('Only');
-    await page.getByTestId('reg-dob').fill('1990-01-01');
+    const keyboardOnly = uniqueIdentity('Only');
+    await page.getByTestId('reg-last-name').fill(keyboardOnly.last);
+    await page.getByTestId('reg-dob').fill(keyboardOnly.dob);
     await page.keyboard.press('Control+s');
 
     await expect(page.getByTestId('new-uhid')).toBeVisible({ timeout: 20_000 });
@@ -258,14 +293,15 @@ test.describe('accessibility', () => {
 
   test('the duplicate hard stop has no detectable WCAG violation', async ({ page }) => {
     const mobile = uniqueMobile();
+    const { last, dob } = uniqueIdentity('Candidate');
     await signIn(page, 'receptionist');
     await page.goto('/patients');
 
-    await fillRegistration(page, { mobile, first: 'Axe', last: 'Candidate', dob: '1975-06-06' });
+    await fillRegistration(page, { mobile, first: 'Axe', last, dob });
     await page.getByTestId('register-save').click();
     await expect(page.getByTestId('new-uhid')).toBeVisible({ timeout: 20_000 });
 
-    await fillRegistration(page, { mobile, first: 'Axe', last: 'Candidate', dob: '1975-06-06' });
+    await fillRegistration(page, { mobile, first: 'Axe', last, dob });
     await page.getByTestId('register-save').click();
     await expect(page.getByTestId('duplicate-hard-stop')).toBeVisible({ timeout: 20_000 });
     await scan(page, { withModal: true });
@@ -273,10 +309,11 @@ test.describe('accessibility', () => {
 
   test('patient 360 has no detectable WCAG violation, including its amendment dialog', async ({ page }) => {
     const mobile = uniqueMobile();
+    const { last, dob } = uniqueIdentity('Record');
     await signIn(page, 'receptionist');
     await page.goto('/patients');
 
-    await fillRegistration(page, { mobile, first: 'Axe', last: 'Record', dob: '1968-02-02' });
+    await fillRegistration(page, { mobile, first: 'Axe', last, dob });
     await page.getByTestId('register-save').click();
     await expect(page.getByTestId('new-uhid')).toBeVisible({ timeout: 20_000 });
     await page.getByTestId('open-new-patient').click();

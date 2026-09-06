@@ -32,11 +32,13 @@ import {
   toCreateRequest,
   type VitalsFormState,
 } from '../lib/vitals-form';
+import { news2Labels, news2Score, type TrendPoint } from '../lib/news2-presentation';
+import { EwsBadge } from '@vims/ui/clinical';
 import { CriticalActionPrompt } from './critical-action-prompt';
 import { VitalsEntryPad } from './vitals-entry-pad';
-import { FlagChip, Ews2Badge } from './flag-chip';
+import { FlagChip } from './flag-chip';
 import { ClinicalPatientHeader, usePatientContext } from './patient-header';
-import { VitalsSparkline, type TrendPoint } from './vitals-sparkline';
+import { VitalsTrend } from './vitals-trend';
 
 /**
  * OP-007 — the vitals station.
@@ -269,7 +271,13 @@ export function VitalsRoomScreen(): React.JSX.Element {
             <Badge tone="neutral" icon={<HeartPulse aria-hidden="true" />}>
               {canReadBands ? 'Bands from this hospital' : 'Bands applied on save'}
             </Badge>
-            {saved === null ? null : <Ews2Badge score={saved.news2_score} band={saved.news2_band} />}
+            {saved === null ? null : (
+              <EwsBadge
+                type="news2"
+                score={news2Score(saved.news2_score, saved.news2_band)}
+                labels={news2Labels(saved.news2_band)}
+              />
+            )}
           </>
         }
       />
@@ -419,9 +427,14 @@ export function VitalsRoomScreen(): React.JSX.Element {
                   }
                 >
                   <div className="flex flex-col gap-3">
-                    <VitalsSparkline points={trendFor('systolic')} label="Systolic BP" unit="mmHg" />
-                    <VitalsSparkline points={trendFor('pulse')} label="Pulse" unit="/min" />
-                    <VitalsSparkline points={trendFor('spo2')} label="SpO₂" unit="%" />
+                    <VitalsTrend
+                      parameter="systolic"
+                      label="Systolic BP"
+                      unit="mmHg"
+                      points={trendFor('systolic')}
+                    />
+                    <VitalsTrend parameter="pulse" label="Pulse" unit="/min" points={trendFor('pulse')} />
+                    <VitalsTrend parameter="spo2" label="SpO₂" unit="%" points={trendFor('spo2')} />
                     <ul className="flex flex-col gap-1">
                       {history.slice(0, 5).map((row) => (
                         <li key={row.id} className="flex items-center justify-between gap-2 text-2xs">

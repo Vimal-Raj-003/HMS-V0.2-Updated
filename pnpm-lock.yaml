@@ -594,6 +594,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^4.1.10
         version: 4.1.10(vitest@4.1.10)
+      dotenv-cli:
+        specifier: ^8.0.0
+        version: 8.0.0
       supertest:
         specifier: ^7.0.0
         version: 7.2.2
@@ -643,6 +646,9 @@ importers:
       '@vims/testing':
         specifier: workspace:*
         version: link:../../packages/testing
+      dotenv-cli:
+        specifier: ^8.0.0
+        version: 8.0.0
       tsx:
         specifier: ^4.19.2
         version: 4.23.12
@@ -683,6 +689,9 @@ importers:
       '@vims/testing':
         specifier: workspace:*
         version: link:../../packages/testing
+      dotenv-cli:
+        specifier: ^8.0.0
+        version: 8.0.0
       socket.io-client:
         specifier: ^4.8.3
         version: 4.8.3
@@ -735,6 +744,9 @@ importers:
       '@vims/testing':
         specifier: workspace:*
         version: link:../../packages/testing
+      dotenv-cli:
+        specifier: ^8.0.0
+        version: 8.0.0
       tsx:
         specifier: ^4.19.2
         version: 4.23.12

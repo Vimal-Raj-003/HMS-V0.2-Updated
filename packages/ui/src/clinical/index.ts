@@ -193,3 +193,56 @@ export {
   type WorklistTableLabels,
   type WorklistTableProps,
 } from './worklist-table.js';
+export {
+  EwsBadge,
+  type EwsBadgeLabels,
+  type EwsBadgeProps,
+  type EwsBand,
+  type EwsScore,
+  type EwsType,
+} from './ews-badge.js';
+export {
+  ResultFlag,
+  resultFlagPresentation,
+  type ResultFlagKind,
+  type ResultFlagLabels,
+  type ResultFlagProps,
+} from './result-flag.js';
+export {
+  VitalsSparkline,
+  type VitalPoint,
+  type VitalsSparklineLabels,
+  type VitalsSparklineProps,
+} from './vitals-sparkline.js';
+export {
+  DoseCalculator,
+  type DoseCalculatorLabels,
+  type DoseCalculatorProps,
+  type DoseOutcome,
+  type DoseStep,
+  type PatientWeight,
+} from './dose-calculator.js';
+export {
+  InteractionPanel,
+  sortInteractionsBySeverity,
+  type InteractionInterruption,
+  type InteractionItem,
+  type InteractionPanelLabels,
+  type InteractionPanelProps,
+  type InteractionSeverity,
+} from './interaction-panel.js';
+export {
+  SignatureSeal,
+  type DocumentSeal,
+  type SignatureSealLabels,
+  type SignatureSealProps,
+  type Signer,
+} from './signature-seal.js';
+export {
+  TaskList,
+  groupTasks,
+  type ClinicalTask,
+  type TaskListLabels,
+  type TaskListProps,
+  type TaskWindow,
+} from './task-list.js';

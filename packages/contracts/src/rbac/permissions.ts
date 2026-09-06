@@ -6370,6 +6370,1217 @@ const OP003 = group('OP-003', 4, [
   ),
 ]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 5
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── RC-003 — tariff management, the pricing authority ────────────────────────
+//
+// `tariff.rate.resolve` is the hot path every bill line calls, so it is `low`
+// risk and widely granted: a clinician who cannot resolve a rate sees an
+// estimate they cannot explain. Everything that *changes* a price is `high` or
+// `critical` and split three ways — configure, submit, publish — because
+// RC-003 §5's approval matrix is worthless if one person holds the whole chain.
+const RC003 = group('RC-003', 5, [
+  p('tariff.plan.list', 'tariff_plan', 'list', 'commercial', 'low', 'List rate plans and their scope.'),
+  p('tariff.plan.read', 'tariff_plan', 'read', 'commercial', 'low', 'View one rate plan and its derivation.'),
+  p(
+    'tariff.plan.configure',
+    'tariff_plan',
+    'configure',
+    'commercial',
+    'high',
+    'Create and amend rate plans: payer linkage, derivation formula, rounding and priority.',
+  ),
+  p('tariff.version.list', 'tariff_version', 'list', 'commercial', 'low', 'List the versions of a plan.'),
+  p('tariff.version.read', 'tariff_version', 'read', 'commercial', 'low', 'View one tariff version header.'),
+  p(
+    'tariff.version.create',
+    'tariff_version',
+    'create',
+    'commercial',
+    'medium',
+    'Open a draft version — fresh, cloned from a published one, or derived from another plan.',
+  ),
+  p(
+    'tariff.version.update',
+    'tariff_version',
+    'update',
+    'commercial',
+    'medium',
+    'Amend a draft version header. A published version is immutable and this key cannot touch one.',
+  ),
+  p(
+    'tariff.version.simulate',
+    'tariff_version',
+    'read',
+    'commercial',
+    'low',
+    'Run the revenue-impact simulation for a draft against historical volumes.',
+  ),
+  p(
+    'tariff.version.submit',
+    'tariff_version',
+    'request',
+    'commercial',
+    'medium',
+    'Submit a draft for approval. Deliberately not the key that publishes it.',
+    { requiresReason: true },
+  ),
+  p(
+    'tariff.version.publish',
+    'tariff_version',
+    'publish',
+    'commercial',
+    'critical',
+    'Publish an approved version. From that instant every bill line in the window prices from it.',
+    { requiresReason: true },
+  ),
+  p(
+    'tariff.version.withdraw',
+    'tariff_version',
+    'withdraw',
+    'commercial',
+    'critical',
+    'Withdraw a published version that no bill line has referenced yet.',
+    { requiresReason: true },
+  ),
+  p('tariff.item.list', 'tariff_item', 'list', 'commercial', 'low', 'Read the rate grid of a version.'),
+  p(
+    'tariff.item.update',
+    'tariff_item',
+    'update',
+    'commercial',
+    'high',
+    'Upsert rate rows into a draft version.',
+  ),
+  p(
+    'tariff.bulk.revise',
+    'tariff_item',
+    'update',
+    'commercial',
+    'high',
+    'Apply an uplift, formula or copy across a draft, behind a preview token.',
+    { requiresReason: true },
+  ),
+  p(
+    'tariff.package.read',
+    'tariff_package',
+    'read',
+    'commercial',
+    'low',
+    'Read package pricing and its cap rules.',
+  ),
+  p(
+    'tariff.package.update',
+    'tariff_package',
+    'update',
+    'commercial',
+    'high',
+    'Price a package: rate, caps, exclusions and the component split.',
+  ),
+  p(
+    'tariff.payer_sheet.upload',
+    'tariff_payer_sheet',
+    'create',
+    'commercial',
+    'medium',
+    'Upload a payer rate sheet for mapping.',
+  ),
+  p(
+    'tariff.payer_sheet.map',
+    'tariff_payer_sheet',
+    'update',
+    'commercial',
+    'medium',
+    'Match payer rate rows to services and accept, edit or reject each one.',
+  ),
+  p(
+    'tariff.payer_sheet.publish',
+    'tariff_payer_sheet',
+    'publish',
+    'commercial',
+    'high',
+    'Turn a mapped payer sheet into a plan version.',
+  ),
+  p(
+    'tariff.scheme.import',
+    'tariff_scheme_import',
+    'create',
+    'commercial',
+    'high',
+    'Import a PMJAY, CGHS, ECHS, ESIC or state package list from a circular.',
+  ),
+  /**
+   * The hot path. Every bill line, every estimate and every pre-auth calls it,
+   * so it is granted widely and carries no reason requirement — it reads a
+   * price, it does not set one.
+   */
+  p(
+    'tariff.rate.resolve',
+    'tariff_item',
+    'read',
+    'commercial',
+    'low',
+    'Resolve the applicable rate for a service, payer, bed class and date.',
+  ),
+  p(
+    'tariff.rate.explain',
+    'tariff_item',
+    'read',
+    'commercial',
+    'low',
+    'Show the resolution chain behind a priced bill line — why this price.',
+  ),
+  p(
+    'tariff.report.compare',
+    'tariff_item',
+    'read',
+    'commercial',
+    'medium',
+    'Compare a service across plans with cost and margin.',
+  ),
+  p(
+    'tariff.missing.read',
+    'tariff_missing_rate',
+    'list',
+    'commercial',
+    'medium',
+    'Read the missing-rate worklist — the services a bill could not price.',
+  ),
+  p(
+    'tariff.missing.resolve',
+    'tariff_missing_rate',
+    'update',
+    'commercial',
+    'high',
+    'Close a missing-rate entry by pricing it or waiving it.',
+    { requiresReason: true },
+  ),
+  p(
+    'tariff.audit.read',
+    'tariff_change_log',
+    'list',
+    'commercial',
+    'medium',
+    'Read the append-only log of every rate change.',
+  ),
+  p(
+    'tariff.ratecard.publish',
+    'tariff_rate_card',
+    'publish',
+    'commercial',
+    'medium',
+    'Publish the statutory public rate card required by the Clinical Establishments Act.',
+  ),
+  p(
+    'tariff.export',
+    'tariff_item',
+    'export',
+    'commercial',
+    'medium',
+    'Export a published or draft price list as a spreadsheet.',
+    { requiresReason: true },
+  ),
+]);
+
+// ── OP-005 — OP billing ──────────────────────────────────────────────────────
+//
+// `bill.finalize` is the moment a draft becomes a demand for money and a GST
+// document, so it is `critical` and separate from every key that assembles the
+// bill. `bill.discount.request` and `bill.discount.approve` are two keys and
+// carry a `block` rule for the same reason RC-003's submit/publish pair does:
+// OP-005 §5 says "requester ≠ approver", and a role holding both makes the
+// approval matrix a formality performed on oneself.
+const OP005 = group('OP-005', 5, [
+  p('bill.read', 'bill', 'read', 'financial', 'low', 'View a bill, its lines and its tax breakdown.'),
+  p('bill.list', 'bill', 'list', 'financial', 'low', 'List and search bills for a branch or a patient.'),
+  p(
+    'bill.create',
+    'bill',
+    'create',
+    'financial',
+    'medium',
+    'Open a bill for a visit and post charges onto it.',
+  ),
+  p(
+    'bill.item.post',
+    'bill_item',
+    'create',
+    'financial',
+    'medium',
+    'Post a charge line onto an open bill, priced through RC-003.',
+  ),
+  p(
+    'bill.item.remove',
+    'bill_item',
+    'cancel',
+    'financial',
+    'high',
+    'Cancel a line on a bill that has not been finalised.',
+    { requiresReason: true },
+  ),
+  p(
+    'bill.finalize',
+    'bill',
+    'approve',
+    'financial',
+    'critical',
+    'Finalise a bill: fix its amounts, issue its GST document and make it collectable. Irreversible except by credit note.',
+    { requiresReason: true },
+  ),
+  p(
+    'bill.cancel',
+    'bill',
+    'cancel',
+    'financial',
+    'critical',
+    'Cancel a bill. The row and its number stay; only the status changes.',
+    { requiresReason: true },
+  ),
+  p(
+    'bill.discount.request',
+    'discount_request',
+    'request',
+    'financial',
+    'medium',
+    'Ask for a discount on a bill or a line, with a coded reason.',
+    { requiresReason: true },
+  ),
+  p(
+    'bill.discount.approve',
+    'discount_request',
+    'approve',
+    'financial',
+    'high',
+    'Approve or refuse a discount. Never the same person who asked for it.',
+    { requiresReason: true },
+  ),
+  p('invoice.read', 'invoice', 'read', 'financial', 'low', 'View an issued GST document.'),
+  p(
+    'invoice.issue',
+    'invoice',
+    'create',
+    'financial',
+    'high',
+    'Issue a tax invoice or bill of supply against a finalised bill.',
+  ),
+  p(
+    'invoice.credit_note',
+    'invoice',
+    'create',
+    'financial',
+    'critical',
+    'Raise a credit note against an issued invoice. The correction path for anything already finalised.',
+    { requiresReason: true },
+  ),
+  p(
+    'invoice.cancel',
+    'invoice',
+    'cancel',
+    'financial',
+    'critical',
+    'Cancel an issued invoice. The number is retained and shown as cancelled in the register.',
+    { requiresReason: true },
+  ),
+  p(
+    'invoice.reprint',
+    'invoice',
+    'reprint',
+    'financial',
+    'medium',
+    'Reprint an invoice. Every reprint is watermarked and audited.',
+  ),
+  p(
+    'billing.report.read',
+    'bill',
+    'read',
+    'financial',
+    'medium',
+    'Read day-end revenue by department, doctor, service and payer.',
+  ),
+  p(
+    'billing.exception.read',
+    'billing_exception',
+    'list',
+    'financial',
+    'medium',
+    'Read the billing exception queue — unbilled, underbilled and unpriced findings.',
+  ),
+  p(
+    'billing.gst.configure',
+    'gst_profile',
+    'configure',
+    'financial',
+    'high',
+    'Configure a branch GSTIN, its place of supply and its e-invoice posture.',
+  ),
+  p(
+    'billing.discount_matrix.configure',
+    'discount_matrix',
+    'configure',
+    'financial',
+    'high',
+    'Set how much each role may discount before somebody else must approve.',
+  ),
+]);
+
+// ── EN-010 — payment gateway ─────────────────────────────────────────────────
+//
+// `pay.webhook.receive` is not here on purpose: a webhook arrives with a
+// provider signature, not a user session, and giving it a permission key would
+// imply a human could hold it. It is authenticated by HMAC at the edge.
+const EN010 = group('EN-010', 5, [
+  p('pay.intent.read', 'pay_intent', 'read', 'financial', 'low', 'View a payment intent and its status.'),
+  p('pay.intent.list', 'pay_intent', 'list', 'financial', 'low', 'List payment intents for a branch.'),
+  p(
+    'pay.intent.create',
+    'pay_intent',
+    'create',
+    'financial',
+    'medium',
+    'Ask the gateway for a QR, a link or a card-machine order against a bill.',
+  ),
+  p(
+    'pay.intent.cancel',
+    'pay_intent',
+    'cancel',
+    'financial',
+    'medium',
+    'Cancel an unpaid intent so it cannot later be paid against a settled bill.',
+    { requiresReason: true },
+  ),
+  p('pay.payment.read', 'pay_payment', 'read', 'financial', 'low', 'View a captured payment.'),
+  p('pay.payment.list', 'pay_payment', 'list', 'financial', 'low', 'List captured payments.'),
+  p(
+    'pay.refund.request',
+    'pay_refund',
+    'request',
+    'financial',
+    'high',
+    'Ask for a refund through the original instrument.',
+    { requiresReason: true },
+  ),
+  p(
+    'pay.refund.approve',
+    'pay_refund',
+    'approve',
+    'financial',
+    'critical',
+    'Approve a refund and release it to the gateway. Never the person who asked.',
+    { requiresReason: true },
+  ),
+  p(
+    'pay.settlement.read',
+    'pay_settlement',
+    'list',
+    'financial',
+    'medium',
+    'Read settlement files and what they matched against.',
+  ),
+  p(
+    'pay.settlement.reconcile',
+    'pay_settlement',
+    'reconcile',
+    'financial',
+    'high',
+    'Match a settlement to receipts and post the difference.',
+  ),
+  p(
+    'pay.recon.read',
+    'pay_recon_exception',
+    'list',
+    'financial',
+    'medium',
+    'Read the reconciliation exception queue.',
+  ),
+  p(
+    'pay.recon.resolve',
+    'pay_recon_exception',
+    'resolve',
+    'financial',
+    'high',
+    'Close a reconciliation exception with an explanation.',
+    { requiresReason: true },
+  ),
+  p(
+    'pay.gateway.configure',
+    'pay_gateway_account',
+    'configure',
+    'security',
+    'critical',
+    'Configure a payment gateway account, its keys and its cash policy.',
+    { requiresReason: true },
+  ),
+  p(
+    'pay.terminal.manage',
+    'pay_terminal',
+    'manage',
+    'financial',
+    'medium',
+    'Register and retire card machines against counters.',
+  ),
+  p(
+    'pay.dispute.read',
+    'pay_dispute',
+    'list',
+    'financial',
+    'medium',
+    'Read chargebacks and the evidence submitted against them.',
+  ),
+  p(
+    'pay.dispute.respond',
+    'pay_dispute',
+    'update',
+    'financial',
+    'high',
+    'Submit evidence against a chargeback before its deadline.',
+  ),
+]);
+
+// ── OP-023 — packages ────────────────────────────────────────────────────────
+//
+// `pkg.variance.approve` is `critical` and separate from everything else: it
+// decides who pays for an overrun on a fixed-price promise, and §5.4 requires
+// that decision *before* the excess reaches the patient's bill.
+const OP023 = group('OP-023', 5, [
+  p(
+    'pkg.read',
+    'package',
+    'read',
+    'commercial',
+    'low',
+    'View a package, what it includes and what it excludes.',
+  ),
+  p('pkg.list', 'package', 'list', 'commercial', 'low', 'List packages available at a branch.'),
+  p(
+    'pkg.configure',
+    'package',
+    'configure',
+    'commercial',
+    'high',
+    'Define a package: its components, its caps, its exclusions and its validity.',
+  ),
+  p(
+    'pkg.version.publish',
+    'package_version',
+    'publish',
+    'commercial',
+    'critical',
+    'Publish a package version. From its effective date this is what a patient buys.',
+    { requiresReason: true },
+  ),
+  p('pkg.price.update', 'package_price', 'update', 'commercial', 'high', 'Price a package for a payer plan.'),
+  p('pkg.booking.read', 'package_booking', 'read', 'financial', 'low', 'View a package booking.'),
+  p('pkg.booking.list', 'package_booking', 'list', 'financial', 'low', 'List package bookings.'),
+  p(
+    'pkg.booking.create',
+    'package_booking',
+    'create',
+    'financial',
+    'medium',
+    'Book a package for a patient and take the advance.',
+  ),
+  p(
+    'pkg.booking.cancel',
+    'package_booking',
+    'cancel',
+    'financial',
+    'high',
+    'Cancel a booking and start the refund of any advance.',
+    { requiresReason: true },
+  ),
+  p(
+    'pkg.activate',
+    'package_activation',
+    'create',
+    'financial',
+    'high',
+    'Activate a package so charges begin consuming it.',
+  ),
+  p(
+    'pkg.activation.read',
+    'package_activation',
+    'read',
+    'financial',
+    'low',
+    'View an activation, its caps and what has been consumed.',
+  ),
+  p(
+    'pkg.activation.close',
+    'package_activation',
+    'close',
+    'financial',
+    'high',
+    'Close an activation and settle the difference between promise and delivery.',
+    { requiresReason: true },
+  ),
+  p(
+    'pkg.variance.request',
+    'package_variance_request',
+    'request',
+    'financial',
+    'medium',
+    'Ask for approval to bill beyond the package.',
+    { requiresReason: true },
+  ),
+  p(
+    'pkg.variance.approve',
+    'package_variance_request',
+    'approve',
+    'financial',
+    'critical',
+    'Decide who pays for an overrun: the patient, the insurer, or the hospital.',
+    { requiresReason: true },
+  ),
+  p(
+    'pkg.report.read',
+    'package',
+    'read',
+    'commercial',
+    'medium',
+    'Read package utilisation and profitability.',
+  ),
+]);
+
+// ── EN-002 + RC-002 — insurance, TPA and pre-authorisation ───────────────────
+//
+// `preauth.decision.record` is the key that writes what the payer said. It is
+// `critical` and separate from `preauth.submit`: the person who assembles a
+// request must not be able to record its approval, because an invented approval
+// is a credit limit billing will honour and an insurer will later refuse.
+const EN002 = group('EN-002', 5, [
+  p(
+    'ins.payer.read',
+    'ins_payer',
+    'read',
+    'commercial',
+    'low',
+    'View a payer, TPA or scheme and its contacts.',
+  ),
+  p('ins.payer.list', 'ins_payer', 'list', 'commercial', 'low', 'List payers and TPAs.'),
+  p(
+    'ins.payer.configure',
+    'ins_payer',
+    'configure',
+    'commercial',
+    'high',
+    'Maintain the payer, TPA and plan masters.',
+  ),
+  p(
+    'ins.empanelment.read',
+    'ins_empanelment',
+    'read',
+    'commercial',
+    'low',
+    'View an empanelment contract and its SLA.',
+  ),
+  p(
+    'ins.empanelment.manage',
+    'ins_empanelment',
+    'manage',
+    'commercial',
+    'high',
+    'Maintain empanelment contracts, tariffs and credit terms.',
+  ),
+  p(
+    'ins.policy.read',
+    'ins_patient_policy',
+    'read',
+    'phi',
+    'medium',
+    'View a patient policy and its remaining sum insured.',
+    { phiRead: true },
+  ),
+  p(
+    'ins.policy.manage',
+    'ins_patient_policy',
+    'update',
+    'phi',
+    'medium',
+    'Capture and correct a patient policy.',
+  ),
+  p(
+    'ins.policy.verify',
+    'ins_patient_policy',
+    'verify',
+    'phi',
+    'medium',
+    'Record the result of an eligibility check against the payer.',
+  ),
+  p('ins.case.read', 'ins_case', 'read', 'phi', 'low', 'View an insurance case for an encounter.', {
+    phiRead: true,
+  }),
+  p('ins.case.list', 'ins_case', 'list', 'phi', 'low', 'List insurance cases at the desk.'),
+  p('ins.case.manage', 'ins_case', 'update', 'phi', 'medium', 'Open, assign and close an insurance case.'),
+  p(
+    'ins.nonpayable.read',
+    'ins_non_payable_item',
+    'list',
+    'commercial',
+    'low',
+    'Read the non-payable item lists.',
+  ),
+]);
+
+const RC002 = group('RC-002', 5, [
+  p(
+    'preauth.read',
+    'preauth_request',
+    'read',
+    'phi',
+    'low',
+    'View a pre-authorisation, its documents and its clock.',
+    { phiRead: true },
+  ),
+  p('preauth.list', 'preauth_request', 'list', 'phi', 'low', 'List pre-authorisations and what is due.'),
+  p(
+    'preauth.create',
+    'preauth_request',
+    'create',
+    'phi',
+    'medium',
+    'Assemble a pre-authorisation request from the clinical record.',
+  ),
+  p(
+    'preauth.update',
+    'preauth_request',
+    'update',
+    'phi',
+    'medium',
+    'Amend a pre-authorisation that has not been submitted.',
+  ),
+  p(
+    'preauth.submit',
+    'preauth_request',
+    'request',
+    'phi',
+    'high',
+    'Submit a pre-authorisation to the payer and start the decision clock.',
+    { requiresReason: true },
+  ),
+  /**
+   * Writes what the payer decided. Never the person who submitted it: an
+   * invented approval becomes a credit limit billing honours and the insurer
+   * later refuses, and the patient discovers it at discharge.
+   */
+  p(
+    'preauth.decision.record',
+    'preauth_request',
+    'decide',
+    'financial',
+    'critical',
+    'Record the payer decision: approved amount, room class and validity, or a denial with its reason.',
+    { requiresReason: true },
+  ),
+  p(
+    'preauth.query.reply',
+    'preauth_query',
+    'update',
+    'phi',
+    'medium',
+    'Answer a payer query before its clock runs out.',
+  ),
+  p(
+    'preauth.document.manage',
+    'preauth_document',
+    'update',
+    'phi',
+    'medium',
+    'Attach and verify the documents a payer requires.',
+  ),
+  p(
+    'preauth.withdraw',
+    'preauth_request',
+    'withdraw',
+    'phi',
+    'high',
+    'Withdraw a submitted pre-authorisation.',
+    { requiresReason: true },
+  ),
+  p(
+    'preauth.sla.read',
+    'preauth_sla_event',
+    'list',
+    'operational',
+    'medium',
+    'Read the pre-authorisation TAT and breach dashboard.',
+  ),
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RC-007 — Government schemes (PMJAY/Ayushman, CGHS, ECHS, ESIC, state)
+//
+// The unusual key here is `scheme.cash.attempt.read`. Every refused tender is a
+// row, and reading that log is how a hospital answers an NHA audit — so it is a
+// permission finance and quality hold, not something buried in a debug screen.
+// ─────────────────────────────────────────────────────────────────────────────
+const RC007 = group('RC-007', 5, [
+  p('scheme.read', 'scheme_master', 'read', 'commercial', 'low', 'View a government scheme and its rules.'),
+  p(
+    'scheme.list',
+    'scheme_master',
+    'list',
+    'commercial',
+    'low',
+    'List the schemes this hospital is empanelled for.',
+  ),
+  p(
+    'scheme.configure',
+    'scheme_master',
+    'configure',
+    'commercial',
+    'high',
+    'Maintain the scheme master, including how far its cash block reaches.',
+  ),
+  p(
+    'scheme.package.read',
+    'scheme_package',
+    'read',
+    'commercial',
+    'low',
+    'View the HBP rate list and what each package covers.',
+  ),
+  p(
+    'scheme.package.manage',
+    'scheme_package',
+    'manage',
+    'commercial',
+    'high',
+    'Draft a scheme rate list and its packages. A published list is immutable.',
+  ),
+  p(
+    'scheme.package.publish',
+    'scheme_package',
+    'approve',
+    'commercial',
+    'high',
+    'Publish a scheme rate list, fixing the rates every claim from that date settles at.',
+    { requiresReason: true },
+  ),
+  p(
+    'scheme.beneficiary.read',
+    'scheme_beneficiary',
+    'read',
+    'phi',
+    'medium',
+    "View a patient's scheme entitlement and what is left of the family floater.",
+    { phiRead: true },
+  ),
+  p(
+    'scheme.beneficiary.capture',
+    'scheme_beneficiary',
+    'create',
+    'phi',
+    'medium',
+    'Record a scheme card against a patient, unverified until the authority confirms it.',
+  ),
+  p(
+    'scheme.beneficiary.verify',
+    'scheme_beneficiary',
+    'approve',
+    'phi',
+    'high',
+    "Record the authority's eligibility answer. Verification is what turns the cash block on.",
+    { requiresReason: true },
+  ),
+  p('scheme.case.read', 'scheme_case', 'read', 'phi', 'low', 'View a scheme case and its packages.', {
+    phiRead: true,
+  }),
+  p('scheme.case.list', 'scheme_case', 'list', 'phi', 'low', 'List scheme cases in flight.'),
+  p('scheme.case.open', 'scheme_case', 'create', 'phi', 'medium', 'Open a scheme case for an episode.'),
+  p(
+    'scheme.case.manage',
+    'scheme_case',
+    'update',
+    'phi',
+    'medium',
+    'Select packages, record the authority case number and move the case through treatment.',
+  ),
+  p(
+    'scheme.case.close',
+    'scheme_case',
+    'update',
+    'financial',
+    'high',
+    'Close a scheme case. Closing releases the cash block, so it is its own key.',
+    { requiresReason: true },
+  ),
+  p(
+    'scheme.cash.attempt.read',
+    'scheme_cash_attempt',
+    'list',
+    'financial',
+    'medium',
+    'Read the log of cash tenders the system refused. This is the evidence an NHA audit asks for.',
+  ),
+  p('scheme.claim.read', 'scheme_claim', 'read', 'financial', 'low', 'View a scheme claim and its lines.'),
+  p(
+    'scheme.claim.list',
+    'scheme_claim',
+    'list',
+    'financial',
+    'low',
+    'List scheme claims and what they are waiting on.',
+  ),
+  p(
+    'scheme.claim.assemble',
+    'scheme_claim',
+    'create',
+    'financial',
+    'medium',
+    'Assemble a scheme claim from the case and attach its document checklist.',
+  ),
+  p(
+    'scheme.claim.submit',
+    'scheme_claim',
+    'request',
+    'financial',
+    'high',
+    'Submit a claim to the authority. Refused while a mandatory document is missing.',
+    { requiresReason: true },
+  ),
+  p(
+    'scheme.claim.decision.record',
+    'scheme_claim',
+    'approve',
+    'financial',
+    'high',
+    'Record what the authority decided and paid. Separate from submission for the same reason a pre-auth decision is.',
+    { requiresReason: true },
+  ),
+  p(
+    'scheme.shortfall.read',
+    'scheme_shortfall',
+    'list',
+    'financial',
+    'low',
+    'View the money a scheme did not pay, and why.',
+  ),
+  p(
+    'scheme.shortfall.appeal',
+    'scheme_shortfall',
+    'request',
+    'financial',
+    'medium',
+    'Appeal a deduction, or ask for a shortfall to be written off.',
+    { requiresReason: true },
+  ),
+  p(
+    'scheme.shortfall.writeoff.approve',
+    'scheme_shortfall',
+    'approve',
+    'financial',
+    'high',
+    'Agree that a shortfall will never be recovered. Maker-checker against the appeal key.',
+    { requiresReason: true },
+  ),
+  p(
+    'scheme.recon.manage',
+    'scheme_reconciliation',
+    'manage',
+    'financial',
+    'medium',
+    "Load and match the authority's settlement batch against submitted claims.",
+  ),
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RC-008 — Cost estimator
+//
+// `est.variance.read` is the unusual one. Measuring the estimator against the
+// bills it produced is how a hospital finds out its quotes run 20 % light, and
+// the people who need that number are quality and finance, not the desk that
+// wrote the quote.
+// ─────────────────────────────────────────────────────────────────────────────
+const RC008 = group('RC-008', 5, [
+  p('est.read', 'estimate', 'read', 'financial', 'low', 'View a cost estimate and what it is made of.', {
+    phiRead: true,
+  }),
+  p('est.list', 'estimate', 'list', 'financial', 'low', 'List estimates and what became of them.'),
+  p(
+    'est.create',
+    'estimate',
+    'create',
+    'financial',
+    'medium',
+    'Build a draft estimate, priced through the tariff like any bill line.',
+  ),
+  p(
+    'est.update',
+    'estimate',
+    'update',
+    'financial',
+    'medium',
+    'Amend a draft estimate. An issued one is immutable and is revised by superseding it.',
+  ),
+  p(
+    'est.issue',
+    'estimate',
+    'approve',
+    'financial',
+    'high',
+    'Issue an estimate to a family. From here the number is fixed and the hospital is held to it.',
+    { requiresReason: true },
+  ),
+  p(
+    'est.share',
+    'estimate',
+    'export',
+    'phi',
+    'medium',
+    'Send an issued estimate to the family by WhatsApp, SMS, email or print.',
+    // EN-024 §5: every `export` carries a reason. Sending a quote is routine,
+    // but it puts a costing for a named person onto a phone number somebody
+    // typed, and the reason is what makes a misdirected send traceable.
+    { requiresReason: true },
+  ),
+  p(
+    'est.outcome.record',
+    'estimate',
+    'update',
+    'financial',
+    'medium',
+    'Record that a family accepted or declined an estimate, or that it converted to an admission.',
+  ),
+  p(
+    'est.template.read',
+    'estimate_template',
+    'read',
+    'financial',
+    'low',
+    'View the standing line set for a procedure.',
+  ),
+  p(
+    'est.template.manage',
+    'estimate_template',
+    'manage',
+    'financial',
+    'high',
+    'Maintain the standing line sets, so two desks quote the same procedure the same way.',
+  ),
+  p(
+    'est.variance.read',
+    'estimate_variance',
+    'list',
+    'financial',
+    'medium',
+    'Read estimate-versus-actual. This is how a hospital learns its quotes run light.',
+  ),
+  p(
+    'est.variance.record',
+    'estimate_variance',
+    'create',
+    'financial',
+    'medium',
+    'Reconcile an estimate against the bill it became, and explain the difference.',
+  ),
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RC-006 — Revenue leakage audit
+//
+// `leak.finding.accept` is the key the whole module turns on. §5.7 says the
+// audit never auto-posts, so nothing it finds becomes money without somebody
+// holding this key agreeing it is a real gap — and `leak.discharge.override` is
+// the one that lets a patient leave with money still on the table, which is a
+// decision that needs a name against it.
+// ─────────────────────────────────────────────────────────────────────────────
+const RC006 = group('RC-006', 5, [
+  p(
+    'leak.rule.read',
+    'leak_rule',
+    'read',
+    'financial',
+    'low',
+    'View which reconciliations run and at what threshold.',
+  ),
+  p(
+    'leak.rule.manage',
+    'leak_rule',
+    'manage',
+    'financial',
+    'high',
+    'Enable a reconciliation and set the gap below which it stays quiet.',
+  ),
+  p(
+    'leak.scan.run',
+    'leak_scan',
+    'create',
+    'financial',
+    'medium',
+    'Run the reconciliations over a window or one encounter.',
+  ),
+  p('leak.scan.read', 'leak_scan', 'list', 'financial', 'low', 'View past scans and what they covered.'),
+  p(
+    'leak.finding.read',
+    'leak_finding',
+    'read',
+    'financial',
+    'low',
+    'View a suspected gap and the record behind it.',
+  ),
+  p('leak.finding.list', 'leak_finding', 'list', 'financial', 'low', 'Work the leakage worklist.'),
+  p(
+    'leak.finding.accept',
+    'leak_finding',
+    'approve',
+    'financial',
+    'high',
+    'Agree a suspected gap is real. Nothing the audit finds is billed without this.',
+    { requiresReason: true },
+  ),
+  p(
+    'leak.finding.dismiss',
+    'leak_finding',
+    'reject',
+    'financial',
+    'medium',
+    'Say a suspected gap is not one, and why. A dismissal with no reason is ignoring it.',
+    { requiresReason: true },
+  ),
+  p(
+    'leak.recovery.record',
+    'leak_recovery',
+    'create',
+    'financial',
+    'high',
+    'Record that an accepted gap was billed and the money came back.',
+    { requiresReason: true },
+  ),
+  p(
+    'leak.discharge.check',
+    'leak_discharge_check',
+    'create',
+    'financial',
+    'medium',
+    'Run the pre-discharge missed-charge check on an encounter.',
+  ),
+  p(
+    'leak.discharge.override',
+    'leak_discharge_check',
+    'override',
+    'financial',
+    'high',
+    'Let a patient leave with a gap still open. The hospital is choosing to lose the money, so the decision carries a name.',
+    { requiresReason: true },
+  ),
+  p(
+    'leak.report.read',
+    'leak_finding',
+    'export',
+    'financial',
+    'medium',
+    'Read the recovered-amount dashboard: what the audit found, and what came back.',
+    { requiresReason: true },
+  ),
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-034 — Doctor payouts
+//
+// `payout.statement.compute` and `payout.statement.approve` are a `block` pair:
+// a payout statement is an outbound payment authorised on the strength of a
+// calculation nobody else has looked at, so the person who ran it does not also
+// release it.
+// ─────────────────────────────────────────────────────────────────────────────
+const NC034 = group('NC-034', 5, [
+  p(
+    'payout.contract.read',
+    'payout_contract',
+    'read',
+    'hr',
+    'medium',
+    "View a doctor's payout arrangement and its rules.",
+  ),
+  p(
+    'payout.contract.manage',
+    'payout_contract',
+    'manage',
+    'hr',
+    'high',
+    'Maintain payout contracts, fee-share rules and slabs.',
+    { requiresReason: true },
+  ),
+  p(
+    'payout.period.read',
+    'payout_period',
+    'list',
+    'financial',
+    'low',
+    'View payout periods and their totals.',
+  ),
+  p(
+    'payout.period.manage',
+    'payout_period',
+    'manage',
+    'financial',
+    'medium',
+    'Open and close a payout period.',
+  ),
+  p(
+    'payout.statement.read',
+    'payout_statement',
+    'read',
+    'hr',
+    'medium',
+    "View a doctor's statement and every line behind it.",
+  ),
+  p('payout.statement.list', 'payout_statement', 'list', 'hr', 'medium', 'List payout statements.'),
+  p(
+    'payout.statement.compute',
+    'payout_statement',
+    'create',
+    'financial',
+    'high',
+    'Compute a period\u2019s statements from what each doctor performed.',
+  ),
+  p(
+    'payout.statement.approve',
+    'payout_statement',
+    'approve',
+    'financial',
+    'high',
+    'Release a statement for payment. Never the same hands that computed it.',
+    { requiresReason: true },
+  ),
+  p(
+    'payout.statement.pay',
+    'payout_statement',
+    'update',
+    'financial',
+    'high',
+    'Record that an approved statement was paid, with its reference.',
+    { requiresReason: true },
+  ),
+  p(
+    'payout.dispute.raise',
+    'payout_dispute',
+    'create',
+    'hr',
+    'medium',
+    '\u201cThat consultation was mine.\u201d A statement under dispute is not paid.',
+  ),
+  p(
+    'payout.dispute.resolve',
+    'payout_dispute',
+    'approve',
+    'financial',
+    'high',
+    'Settle a dispute, with the adjustment and the reasoning.',
+    { requiresReason: true },
+  ),
+  p(
+    'payout.tds.read',
+    'payout_tds_entry',
+    'export',
+    'financial',
+    'high',
+    'Read the section 194J register for filing.',
+    { requiresReason: true },
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -6418,6 +7629,18 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...NC008,
   ...NC021,
   ...OP003,
+
+  // Phase 5
+  ...RC003,
+  ...OP005,
+  ...EN010,
+  ...OP023,
+  ...EN002,
+  ...RC002,
+  ...RC007,
+  ...RC008,
+  ...RC006,
+  ...NC034,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));
@@ -6702,6 +7925,62 @@ export const SEGREGATION_OF_DUTIES_RULES: readonly SodRule[] = Object.freeze([
     mode: 'warn',
     reason:
       'NC-007 §12 keeps the usage scanner away from the reconciliation signer for the same case, but makes it configurable — a small theatre has one coordinator. It warns rather than blocks so the exposure is visible.',
+  },
+  {
+    permA: 'preauth.submit',
+    permB: 'preauth.decision.record',
+    mode: 'block',
+    reason:
+      'RC-002 §5. The person who assembles and submits a pre-auth must not be the one who records what the payer decided: an invented approval becomes a credit limit billing honours, and the insurer refuses it months later with the patient already discharged.',
+  },
+  {
+    permA: 'payout.statement.compute',
+    permB: 'payout.statement.approve',
+    mode: 'block',
+    reason:
+      'NC-034 §5.7. A payout statement is an outbound payment authorised on the strength of a calculation nobody else has looked at. The person who ran it does not also release it.',
+  },
+  {
+    permA: 'scheme.claim.submit',
+    permB: 'scheme.claim.decision.record',
+    mode: 'block',
+    reason:
+      'RC-007 §5.6. The person chasing a scheme claim must not be the one who types in what the authority paid: an invented settlement closes a case and stops anybody chasing money that never arrived.',
+  },
+  {
+    permA: 'scheme.shortfall.appeal',
+    permB: 'scheme.shortfall.writeoff.approve',
+    mode: 'block',
+    reason:
+      'RC-007 §5.6. A write-off is revenue the hospital gives up. The person who worked the claim has every reason to make an awkward shortfall disappear quietly, so they cannot also be the one who agrees it is gone.',
+  },
+  {
+    permA: 'pkg.variance.request',
+    permB: 'pkg.variance.approve',
+    mode: 'block',
+    reason:
+      'OP-023 §5 requires excess approval before the overrun reaches the bill. One person holding both halves can bill a patient past a fixed-price promise on their own signature, which is the complaint package pricing exists to avoid.',
+  },
+  {
+    permA: 'pay.refund.request',
+    permB: 'pay.refund.approve',
+    mode: 'block',
+    reason:
+      'A refund moves money out of the hospital through the same instrument it came in on. One person holding both halves can originate and release a payment to an account of their choosing, which is the single largest fraud exposure in the payment path (EN-010 §5, OP-005 §5).',
+  },
+  {
+    permA: 'bill.discount.request',
+    permB: 'bill.discount.approve',
+    mode: 'block',
+    reason:
+      'OP-005 §5: "approval matrix mandatory; reason codes; requester ≠ approver". A biller who can approve their own discount is the discount matrix, and the register of who authorised what stops meaning anything.',
+  },
+  {
+    permA: 'tariff.version.submit',
+    permB: 'tariff.version.publish',
+    mode: 'block',
+    reason:
+      'RC-003 §5: "Requester ≠ approver, always." A published tariff version prices every bill line in its window from that instant, so one person holding both halves can reprice the hospital unilaterally and the approval matrix becomes a formality performed on themselves.',
   },
   {
     permA: 'pharmacy.dispense.create',

@@ -227,14 +227,17 @@ const light: SemanticTokens = {
   '--clinical-infection': su(800),
 
   // charts (§3.7)
-  '--chart-1': lit('#0E7A88'),
-  '--chart-2': lit('#6938EF'),
-  '--chart-3': lit('#DC6803'),
-  '--chart-4': lit('#175CD3'),
-  '--chart-5': lit('#027A48'),
-  '--chart-6': lit('#B42318'),
-  '--chart-7': lit('#67748A'),
-  '--chart-8': lit('#5925DC'),
+  // Re-derived, not hand-picked — see DEVIATIONS. Every step below is one the
+  // scales in §3.1–3.3 already own; only the choice of step and the ORDER are
+  // new, and both come out of the dataviz validator rather than out of taste.
+  '--chart-1': lit('#1596A5'), // teal   --p-500   — brand leads every chart
+  '--chart-2': lit('#5925DC'), // violet --vi-700
+  '--chart-3': lit('#B54708'), // amber  --wa-700
+  '--chart-4': lit('#027A48'), // green  --su-700
+  '--chart-5': lit('#175CD3'), // blue   --in-700
+  '--chart-6': lit('#B42318'), // red    --da-700
+  '--chart-7': lit('#DD2590'), // magenta
+  '--chart-8': lit('#93370D'), // brown  --wa-900
   '--chart-grid': lit('rgba(23, 30, 39, 0.10)'),
   '--chart-plot-bg': n(0),
 };
@@ -407,14 +410,18 @@ const dark: SemanticTokens = {
   '--clinical-fall-risk': wa(300),
   '--clinical-infection': su(300),
 
-  '--chart-1': lit('#5FC9D2'),
-  '--chart-2': lit('#BDB4FE'),
-  '--chart-3': lit('#FEC84B'),
-  '--chart-4': lit('#84CAFF'),
-  '--chart-5': lit('#6CE9A6'),
-  '--chart-6': lit('#FDA29B'),
-  '--chart-7': lit('#B3BDCA'),
-  '--chart-8': lit('#D6BBFB'),
+  // Re-stepped for the dark plot ground, not flipped onto it. The doc's 300-level
+  // tints sit at OKLCH L 0.78–0.86, far above the L 0.48–0.67 a dark surface
+  // wants, which is exactly why they crowded together: two of them were 9.0 ΔE
+  // apart under NORMAL vision.
+  '--chart-1': lit('#1596A5'), // teal
+  '--chart-2': lit('#B98246'), // tan
+  '--chart-3': lit('#1570EF'), // blue
+  '--chart-4': lit('#DC6803'), // amber
+  '--chart-5': lit('#039855'), // green
+  '--chart-6': lit('#DD2590'), // magenta
+  '--chart-7': lit('#7A5AF8'), // violet
+  '--chart-8': lit('#F04438'), // red
   '--chart-grid': lit('rgba(255, 255, 255, 0.08)'),
   '--chart-plot-bg': lit(darkLayers.layer3),
 };
@@ -587,14 +594,20 @@ const high: SemanticTokens = {
   '--clinical-fall-risk': wa(800),
   '--clinical-infection': su(800),
 
-  '--chart-1': lit('#094A54'),
-  '--chart-2': lit('#4A1FB8'),
-  '--chart-3': lit('#93370D'),
-  '--chart-4': lit('#1849A9'),
-  '--chart-5': lit('#05603A'),
-  '--chart-6': lit('#912018'),
-  '--chart-7': lit('#3A4553'),
-  '--chart-8': lit('#39178C'),
+  // High contrast reuses the light ramp rather than going darker. Pushing every
+  // hue to its 800/900 step drains chroma — three of the old steps read as grey
+  // to the validator — and it collapsed red against green at ΔE 5.4, which is
+  // the one pair a high-contrast theme exists to keep apart. The light ramp
+  // clears every check on pure white, so identity here is carried by that ramp
+  // plus the mandatory texture fill and a heavier grid.
+  '--chart-1': lit('#1596A5'),
+  '--chart-2': lit('#5925DC'),
+  '--chart-3': lit('#B54708'),
+  '--chart-4': lit('#027A48'),
+  '--chart-5': lit('#175CD3'),
+  '--chart-6': lit('#B42318'),
+  '--chart-7': lit('#DD2590'),
+  '--chart-8': lit('#93370D'),
   '--chart-grid': lit('rgba(23, 30, 39, 0.28)'),
   '--chart-plot-bg': n(0),
 };
@@ -628,6 +641,7 @@ export const DEVIATIONS: readonly string[] = [
   '--flag-normal, --flag-pending, --q-completed: --n-600 (docs: --n-500 / --n-400). Both fail 4.5:1 on --bg-layer-3 and --bg-sunken.',
   '--q-waiting: --n-700 (docs: --n-500), --q-no-show: --n-800 (docs: --n-700) — kept one step apart from --q-completed so the greys stay distinguishable after the AA bump.',
   'high-contrast --border-default: --n-500 (docs §3.4 says --n-400). --n-400 is 2.96:1 on white — just under the 3:1 that 1.4.11 requires of a control boundary.',
-  'light --chart-7: #67748A (docs §3.7 categorical ramp says #8A97A8). #8A97A8 is 2.96:1 on a white plot background, below the 3:1 SC 1.4.11 asks of a graphical object.',
+  'All three --chart-1..8 ramps are re-derived from docs §3.7. The documented ramps do not pass the dataviz validator: light failed the chroma floor on #0E7A88 and #8A97A8 and put red beside green at ΔE 6.2 (deutan); dark failed on all five checks bar contrast, worst of all a NORMAL-vision ΔE of 9.0 between #D6BBFB and #B3BDCA — a pair full-colour readers cannot separate; high contrast failed the chroma floor three times and collapsed red against green at ΔE 5.4. The replacements use only steps the scales already own, are ordered so the VIMS teal leads and red never neighbours green, and are checked by scripts/check-chart-palette.mjs on every CI run.',
+  'dark --chart-* sits in the CVD 6-8 floor band (worst adjacent 7.0 deutan), which the dataviz skill permits ONLY with secondary encoding. That is why the chart components make a legend mandatory above one series, direct-label up to four, and ship a texture fill.',
   '--border-default / --border-strong in light and dark are decorative hairlines (card edges, row rules); the gated control boundary is --border-control, which is a separate token precisely so the decorative one can stay a hairline.',
 ];

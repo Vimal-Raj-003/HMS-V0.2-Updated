@@ -1,0 +1,329 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-006 — ER intake, the ER board and dispositions (schema `clinical`)
+//
+// `phase-06` §6.1.
+//
+//   er_zones          Resus, Acute, Fast-track, Observation, Paeds, Isolation…
+//   er_bays           a trolley, a chair, a resus bay — and what is in it
+//   er_visits         the ER episode, from the door to the disposition
+//   er_bay_movements  where the patient was, and when
+//   er_dispositions   how the episode ended, and what that decision required
+//
+// ── The rule this schema is shaped around ───────────────────────────────────
+//
+// **Care never waits for identity, and never waits for money.**
+//
+// `er_visits.patient_id` is nullable. A patient who arrives unconscious with no
+// name gets `temp_identity` — `ER-TAG-0001` — a wristband, a bay, a triage
+// category and treatment, and the UHID is reconciled later. That is not a
+// convenience: *Parmanand Katara v. Union of India* (1989) makes emergency
+// treatment a duty that cannot be conditioned on formalities, and a schema whose
+// foreign key required a registered patient would make the lawful thing
+// impossible to record.
+//
+// Nothing in this file references a bill, a payer or a balance. There is no
+// column a "pay first" gate could hang off, which is the strongest form the
+// guarantee can take: it is not that the check is skipped, it is that there is
+// nowhere to put one.
+//
+// ── The board sorts by acuity, then by waiting ──────────────────────────────
+//
+// `esi_level` is denormalised onto the visit from TR-001 for exactly one reason:
+// the board is the busiest read in the hospital at 3 a.m. and it sorts strictly
+// by ESI then arrival time. A join to the triage table on every board refresh is
+// a join that eventually gets slow on the night it matters.
+//
+// The denormalisation is written by the triage service in the same transaction
+// as the triage record, so the two cannot disagree.
+//
+// ── A vacated bay is dirty until somebody says otherwise ────────────────────
+//
+// `er_bays.status` has a `cleaning` state and vacating moves a bay into it
+// rather than to `free`. NC-018 (housekeeping) arrives in Phase 7; until then the
+// event is emitted and the bay sits visibly dirty on the board. A bay that
+// silently became free is how the next patient is put on an unwiped trolley.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ErZoneKind {
+  resus
+  acute
+  fast_track
+  observation
+  paediatric
+  isolation
+  decontamination
+  triage
+  waiting
+
+  @@schema("clinical")
+}
+
+enum ErBayKind {
+  resus_bay
+  trolley
+  chair
+  wheelchair
+  cubicle
+  isolation_room
+
+  @@schema("clinical")
+}
+
+enum ErBayStatus {
+  free
+  occupied
+  /// Vacated and not yet cleaned. See the header — never straight to `free`.
+  cleaning
+  blocked
+  out_of_service
+
+  @@schema("clinical")
+}
+
+enum ErArrivalMode {
+  walk_in
+  ambulance
+  police
+  referred
+  transfer
+  mci
+  brought_dead
+
+  @@schema("clinical")
+}
+
+enum ErVisitStatus {
+  /// Pre-arrival record from an ambulance pre-alert (TR-009). Not yet here.
+  inbound
+  arrived
+  triaged
+  in_treatment
+  /// Waiting for an inpatient bed. Still ours, still counting ER LOS.
+  boarding
+  disposition_pending
+  departed
+
+  @@schema("clinical")
+}
+
+enum ErDispositionKind {
+  admit
+  discharge
+  refer_out
+  /// Left / discharged against medical advice. Needs a witnessed consent.
+  lama
+  absconded
+  death
+  observation
+  brought_dead
+
+  @@schema("clinical")
+}
+
+model ErZone {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  code String     @db.VarChar(24)
+  name String     @db.VarChar(120)
+  kind ErZoneKind
+
+  /// Where it sits on the board, left to right.
+  sortOrder Int     @default(0) @map("sort_order")
+  isActive  Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  bays ErBay[]
+
+  @@unique([hospitalId, branchId, code])
+  @@index([hospitalId, branchId, isActive, sortOrder])
+  @@map("er_zones")
+  @@schema("clinical")
+}
+
+model ErBay {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  zoneId     String @map("zone_id") @db.Uuid
+
+  code String    @db.VarChar(24)
+  name String    @db.VarChar(80)
+  kind ErBayKind @default(trolley)
+
+  /// Scanned to assign a patient without typing. `phase-06` §6.1.
+  barcode String? @db.VarChar(64)
+
+  status ErBayStatus @default(free)
+  /// Set alongside `status = 'occupied'`; the partial unique index below is what
+  /// actually stops two patients sharing a trolley.
+  currentVisitId String? @map("current_visit_id") @db.Uuid
+
+  hasMonitor    Boolean @default(false) @map("has_monitor")
+  hasVentilator Boolean @default(false) @map("has_ventilator")
+  hasOxygen     Boolean @default(true) @map("has_oxygen")
+
+  vacatedAt DateTime? @map("vacated_at") @db.Timestamptz(6)
+  isActive  Boolean   @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  zone      ErZone           @relation(fields: [zoneId], references: [id], onDelete: Restrict)
+  movements ErBayMovement[]
+
+  @@unique([hospitalId, branchId, code])
+  @@index([hospitalId, branchId, status])
+  @@index([hospitalId, barcode])
+  @@map("er_bays")
+  @@schema("clinical")
+}
+
+/// The ER episode. See the header for why `patient_id` is nullable.
+model ErVisit {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  erNo String @map("er_no") @db.VarChar(40)
+
+  /// Null until somebody is identified. Care does not wait for this.
+  patientId String? @map("patient_id") @db.Uuid
+  /// `ER-TAG-0001`, or an `MCI-<incident>-<seq>` tag in mass-casualty mode.
+  /// One of this and `patient_id` is always present — enforced by CHECK.
+  tempIdentity String? @map("temp_identity") @db.VarChar(40)
+  /// "Unknown male, approx 40" is a clinical fact, not a placeholder.
+  displayName    String? @map("display_name") @db.VarChar(200)
+  approximateAge Int?    @map("approximate_age")
+  gender         String? @db.VarChar(16)
+  photoFileId    String? @map("photo_file_id") @db.Uuid
+
+  /// The clinical record proper, once one exists. Nullable so the tag-first
+  /// path is not blocked on creating an encounter.
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  arrivalMode  ErArrivalMode @map("arrival_mode")
+  broughtBy    String?       @map("brought_by") @db.VarChar(200)
+  broughtByPhone String?     @map("brought_by_phone") @db.VarChar(20)
+  /// The pre-hospital record this arrived from (TR-009).
+  preHospitalRef String?     @map("pre_hospital_ref") @db.Uuid
+  ambulanceRef   String?     @map("ambulance_ref") @db.VarChar(40)
+
+  chiefComplaint String? @map("chief_complaint") @db.Text
+  /// Suspicion at the door. TR-008 turns this into a registered MLC or a
+  /// documented decision not to.
+  mlcSuspected Boolean @default(false) @map("mlc_suspected")
+  mlcRef       String? @map("mlc_ref") @db.Uuid
+
+  /// Denormalised from TR-001 so the board sorts without a join. Written in the
+  /// same transaction as the triage record.
+  esiLevel     Int?      @map("esi_level")
+  triagedAt    DateTime? @map("triaged_at") @db.Timestamptz(6)
+  /// The clock the ESI target is measured against.
+  targetSeenBy DateTime? @map("target_seen_by") @db.Timestamptz(6)
+
+  zoneId String? @map("zone_id") @db.Uuid
+  bayId  String? @map("bay_id") @db.Uuid
+
+  status ErVisitStatus @default(arrived)
+
+  /// The ETA on a pre-alert; the real thing once they are through the door.
+  expectedAt   DateTime? @map("expected_at") @db.Timestamptz(6)
+  arrivedAt    DateTime? @map("arrived_at") @db.Timestamptz(6)
+  firstSeenAt  DateTime? @map("first_seen_at") @db.Timestamptz(6)
+  dispositionAt DateTime? @map("disposition_at") @db.Timestamptz(6)
+  departedAt   DateTime? @map("departed_at") @db.Timestamptz(6)
+
+  /// True while a tag is still a tag. Cleared by the merge, which keeps the
+  /// `er_no` — exit gate 2 turns on the record surviving the reconciliation.
+  isUnidentified Boolean @default(false) @map("is_unidentified")
+  mergedIntoPatientId String? @map("merged_into_patient_id") @db.Uuid
+  mergedAt            DateTime? @map("merged_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  movements   ErBayMovement[]
+  disposition ErDisposition?
+
+  @@unique([hospitalId, erNo])
+  @@unique([hospitalId, tempIdentity], map: "uq_er_visit_temp_identity")
+  @@index([hospitalId, branchId, status, esiLevel, arrivedAt])
+  @@index([hospitalId, patientId, arrivedAt(sort: Desc)])
+  @@index([hospitalId, branchId, arrivedAt(sort: Desc)])
+  @@map("er_visits")
+  @@schema("clinical")
+}
+
+/// Where the patient was, and when. The ER LOS breakdown comes from this.
+model ErBayMovement {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  visitId    String @map("visit_id") @db.Uuid
+  bayId      String @map("bay_id") @db.Uuid
+
+  movedInAt  DateTime  @default(now()) @map("moved_in_at") @db.Timestamptz(6)
+  movedOutAt DateTime? @map("moved_out_at") @db.Timestamptz(6)
+  /// `assigned` | `moved` | `scan` — how the bay was chosen.
+  method     String    @default("assigned") @db.VarChar(16)
+  reason     String?   @db.Text
+
+  byId String? @map("by_id") @db.Uuid
+
+  visit ErVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  bay   ErBay   @relation(fields: [bayId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, visitId, movedInAt])
+  @@index([hospitalId, bayId, movedInAt(sort: Desc)])
+  @@map("er_bay_movements")
+  @@schema("clinical")
+}
+
+/// How the episode ended. Each kind carries what that decision requires.
+model ErDisposition {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  visitId    String @unique @map("visit_id") @db.Uuid
+
+  kind ErDispositionKind
+
+  /// `admit`: the IP-001 request this pre-filled. Phase 7 consumes it.
+  admissionRequestId String? @map("admission_request_id") @db.Uuid
+  admitWardHint      String? @map("admit_ward_hint") @db.VarChar(80)
+
+  /// `refer_out`: where, why, and how they travelled.
+  referredToFacility String? @map("referred_to_facility") @db.VarChar(200)
+  referralReason     String? @map("referral_reason") @db.Text
+  transportMode      String? @map("transport_mode") @db.VarChar(40)
+
+  /// `lama`: the consent has to be witnessed, and the risks explained.
+  lamaWitnessName     String? @map("lama_witness_name") @db.VarChar(200)
+  lamaWitnessRelation String? @map("lama_witness_relation") @db.VarChar(80)
+  lamaRisksExplained  Boolean @default(false) @map("lama_risks_explained")
+
+  /// `death`: the time, and whether it is a case the coroner sees.
+  deathAt          DateTime? @map("death_at") @db.Timestamptz(6)
+  deathCauseText   String?   @map("death_cause_text") @db.Text
+  bodyReleasedAt   DateTime? @map("body_released_at") @db.Timestamptz(6)
+
+  summaryText String? @map("summary_text") @db.Text
+  decidedBy   String? @map("decided_by") @db.Uuid
+  decidedAt   DateTime @default(now()) @map("decided_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  visit ErVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, kind, decidedAt(sort: Desc)])
+  @@map("er_dispositions")
+  @@schema("clinical")
+}

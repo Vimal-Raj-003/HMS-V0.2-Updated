@@ -306,6 +306,18 @@ const MOBILE_CLINICIAN = ['mobile.sync', 'auth.device.manage'] as const;
  * `mrd.deficiency.waive`, which is a governance decision, nor
  * `rx.schedule_x.prescribe`, which each role takes explicitly.
  */
+/**
+ * NC-034 — what a doctor may see and say about their own earnings.
+ *
+ * Reading the statement and disputing it, and nothing else. A doctor cannot
+ * compute, approve or pay one — but "that consultation was mine" has to be
+ * sayable by the only person who would know, and a payout system where the
+ * earner cannot query the figure is one they have to argue about by email.
+ *
+ * ABAC scopes the read to their own statements; the permission alone does not.
+ */
+const PAYOUT_EARNER = ['payout.statement.read', 'payout.statement.list', 'payout.dispute.raise'] as const;
+
 const DOCTOR_CLINICAL = [
   ...CLINICAL_LOOKUP,
   ...CDSS_SAFETY_FLOOR,
@@ -870,6 +882,274 @@ const PROCUREMENT_DESK = [
  * reconciliation signature away from whoever scanned the usages being
  * reconciled, and the coordinator is usually both scanner and counter.
  */
+/**
+ * RC-003 — reading a price.
+ *
+ * Granted widely and on purpose: `tariff.rate.resolve` is what every bill line,
+ * estimate and pre-auth calls, and a biller who cannot resolve a rate cannot
+ * bill. Nothing in this bundle changes a price.
+ */
+const TARIFF_READ = [
+  'tariff.rate.resolve',
+  'tariff.rate.explain',
+  'tariff.plan.list',
+  'tariff.plan.read',
+  'tariff.item.list',
+  'tariff.package.read',
+] as const;
+
+/**
+ * RC-003 — maintaining the price list.
+ *
+ * Deliberately excludes `tariff.version.publish` and `tariff.version.withdraw`.
+ * RC-003 §5's approval matrix is "requester ≠ approver, always", and a bundle
+ * that held both halves would make that sentence decorative: the finance
+ * manager who builds a revision submits it, and somebody else publishes it.
+ */
+const TARIFF_DESK = [
+  ...TARIFF_READ,
+  'tariff.plan.configure',
+  'tariff.version.list',
+  'tariff.version.read',
+  'tariff.version.create',
+  'tariff.version.update',
+  'tariff.version.simulate',
+  'tariff.version.submit',
+  'tariff.item.update',
+  'tariff.bulk.revise',
+  'tariff.package.update',
+  'tariff.payer_sheet.upload',
+  'tariff.payer_sheet.map',
+  'tariff.scheme.import',
+  'tariff.missing.read',
+  'tariff.missing.resolve',
+  'tariff.report.compare',
+  'tariff.audit.read',
+  'tariff.export',
+] as const;
+
+/**
+ * OP-005 — working a bill.
+ *
+ * Deliberately excludes `bill.discount.approve`, `bill.cancel` and
+ * `invoice.credit_note`. A biller assembles, finalises and collects; undoing any
+ * of that is somebody else's key, which is what makes the discount register and
+ * the credit-note register worth reading.
+ */
+const BILLING_DESK = [
+  'bill.read',
+  'bill.list',
+  'bill.create',
+  'bill.item.post',
+  'bill.item.remove',
+  'bill.finalize',
+  'bill.discount.request',
+  'invoice.read',
+  'invoice.issue',
+  'invoice.reprint',
+  'billing.exception.read',
+] as const;
+
+/** The other half of the maker-checker pair, plus the reversal keys. */
+const BILLING_APPROVER = [
+  'bill.read',
+  'bill.list',
+  'bill.discount.approve',
+  'bill.cancel',
+  'invoice.read',
+  'invoice.credit_note',
+  'invoice.cancel',
+  'billing.report.read',
+  'billing.exception.read',
+] as const;
+
+/** EN-010 — taking money. Excludes approving a refund, on purpose. */
+const PAYMENT_DESK = [
+  'pay.intent.read',
+  'pay.intent.list',
+  'pay.intent.create',
+  'pay.intent.cancel',
+  'pay.payment.read',
+  'pay.payment.list',
+  'pay.refund.request',
+] as const;
+
+/** The checker half, plus reconciliation — finance, not the counter. */
+const PAYMENT_FINANCE = [
+  'pay.intent.read',
+  'pay.intent.list',
+  'pay.payment.read',
+  'pay.payment.list',
+  'pay.refund.approve',
+  'pay.settlement.read',
+  'pay.settlement.reconcile',
+  'pay.recon.read',
+  'pay.recon.resolve',
+  'pay.dispute.read',
+  'pay.dispute.respond',
+] as const;
+
+/** OP-023 — selling and running a package. Not deciding who pays an overrun. */
+const PACKAGE_DESK = [
+  'pkg.read',
+  'pkg.list',
+  'pkg.booking.read',
+  'pkg.booking.list',
+  'pkg.booking.create',
+  'pkg.activate',
+  'pkg.activation.read',
+  'pkg.variance.request',
+] as const;
+
+/**
+ * EN-002 / RC-002 — the insurance desk.
+ *
+ * Assembles and submits; never records the payer's decision. That key belongs
+ * to finance, because an invented approval is a credit limit billing honours.
+ */
+const INSURANCE_DESK = [
+  'ins.payer.read',
+  'ins.payer.list',
+  'ins.empanelment.read',
+  'ins.policy.read',
+  'ins.policy.manage',
+  'ins.policy.verify',
+  'ins.case.read',
+  'ins.case.list',
+  'ins.case.manage',
+  'ins.nonpayable.read',
+  'preauth.read',
+  'preauth.list',
+  'preauth.create',
+  'preauth.update',
+  'preauth.submit',
+  'preauth.query.reply',
+  'preauth.document.manage',
+  'preauth.sla.read',
+] as const;
+
+/**
+ * RC-007 — the scheme desk.
+ *
+ * Verifies the card and works the case and the claim. It does not hold
+ * `scheme.claim.decision.record` or `scheme.shortfall.writeoff.approve`: the
+ * person chasing the money is not the person who confirms it arrived, or who
+ * agrees it never will.
+ */
+/**
+ * RC-008 — the estimating desk.
+ *
+ * Front office and the billing desk both quote. Neither holds
+ * `est.template.manage` or `est.variance.read`: the standing line sets are how
+ * two desks quote a procedure the same way, and measuring the estimator against
+ * its own bills is not the job of the people writing the quotes.
+ */
+/**
+ * RC-006 — the leakage worklist.
+ *
+ * Finance holds all of it including `leak.finding.accept`, because §5.7's "never
+ * auto-post" only means anything if the person accepting is accountable for the
+ * charge that follows. The billing desk gets the read side: they are the ones who
+ * will raise the charge once it is accepted, and a worklist they cannot see is a
+ * worklist they cannot work.
+ */
+/**
+ * NC-034 — the payout run.
+ *
+ * Finance computes and pays; the hospital admin approves. That split is the
+ * `block` rule made real: a payout statement is an outbound payment authorised
+ * on a calculation nobody else has checked, so the person who ran it does not
+ * also release it.
+ */
+const PAYOUT_FINANCE = [
+  'payout.contract.read',
+  'payout.period.read',
+  'payout.period.manage',
+  'payout.statement.read',
+  'payout.statement.list',
+  'payout.statement.compute',
+  'payout.statement.pay',
+  'payout.dispute.resolve',
+  'payout.tds.read',
+] as const;
+
+const LEAKAGE_FINANCE = [
+  'leak.rule.read',
+  'leak.rule.manage',
+  'leak.scan.run',
+  'leak.scan.read',
+  'leak.finding.read',
+  'leak.finding.list',
+  'leak.finding.accept',
+  'leak.finding.dismiss',
+  'leak.recovery.record',
+  'leak.discharge.check',
+  'leak.discharge.override',
+  'leak.report.read',
+] as const;
+
+const LEAKAGE_DESK = [
+  'leak.scan.read',
+  'leak.finding.read',
+  'leak.finding.list',
+  'leak.discharge.check',
+] as const;
+
+const ESTIMATE_DESK = [
+  'est.read',
+  'est.list',
+  'est.create',
+  'est.update',
+  'est.issue',
+  'est.share',
+  'est.outcome.record',
+  'est.template.read',
+] as const;
+
+const SCHEME_DESK = [
+  'scheme.read',
+  'scheme.list',
+  'scheme.package.read',
+  'scheme.beneficiary.read',
+  'scheme.beneficiary.capture',
+  'scheme.beneficiary.verify',
+  'scheme.case.read',
+  'scheme.case.list',
+  'scheme.case.open',
+  'scheme.case.manage',
+  'scheme.cash.attempt.read',
+  'scheme.claim.read',
+  'scheme.claim.list',
+  'scheme.claim.assemble',
+  'scheme.claim.submit',
+  'scheme.shortfall.read',
+  'scheme.shortfall.appeal',
+] as const;
+
+/**
+ * RC-007 — the finance half. Records what the authority decided and paid,
+ * closes the case, and approves a write-off.
+ */
+const SCHEME_FINANCE = [
+  'scheme.read',
+  'scheme.list',
+  'scheme.configure',
+  'scheme.package.read',
+  'scheme.package.manage',
+  'scheme.package.publish',
+  'scheme.beneficiary.read',
+  'scheme.case.read',
+  'scheme.case.list',
+  'scheme.case.close',
+  'scheme.cash.attempt.read',
+  'scheme.claim.read',
+  'scheme.claim.list',
+  'scheme.claim.decision.record',
+  'scheme.shortfall.read',
+  'scheme.shortfall.writeoff.approve',
+  'scheme.recon.manage',
+] as const;
+
 const CONSIGNMENT_DESK = [
   'inventory.consignment.agreement.read',
   'inventory.consignment.agreement.list',
@@ -1118,6 +1398,32 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'admin-console',
     permissions: [
+      // Phase 5 — RC-003. Holds the *publish* half only. The finance manager
+      // builds and submits a revision; making it live is a second pair of
+      // hands, which is what RC-003 §5's "requester ≠ approver" means in
+      // practice rather than on paper.
+      ...TARIFF_READ,
+      'tariff.version.list',
+      'tariff.version.read',
+      'tariff.version.publish',
+      'tariff.version.withdraw',
+      'tariff.ratecard.publish',
+      'tariff.payer_sheet.publish',
+      'tariff.audit.read',
+      'tariff.missing.read',
+
+      // Phase 5 — NC-034. The checker half of the payout pair, and the same
+      // reasoning: finance computes what each doctor earned, and somebody else
+      // decides the money may leave. Also the payout contracts themselves,
+      // because what a doctor is engaged on is a hospital-level agreement.
+      'payout.contract.read',
+      'payout.contract.manage',
+      'payout.period.read',
+      'payout.statement.read',
+      'payout.statement.list',
+      'payout.statement.approve',
+      'payout.dispute.resolve',
+
       'labq.assessor.grant',
       'rad.pacs.retention',
       'rad.configure',
@@ -1465,6 +1771,7 @@ const templates: readonly RoleTemplate[] = [
       'schedule.publish',
       'consent.override.review',
       ...DOCTOR_CLINICAL,
+      ...PAYOUT_EARNER,
       'rx.schedule_x.prescribe',
       'opd.department.view',
       'opd.template.publish',
@@ -1528,6 +1835,7 @@ const templates: readonly RoleTemplate[] = [
       'consent.request',
       'consent.read',
       ...DOCTOR_CLINICAL,
+      ...PAYOUT_EARNER,
       'rx.schedule_x.prescribe',
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
@@ -1550,6 +1858,7 @@ const templates: readonly RoleTemplate[] = [
       ...DIAGNOSTIC_ORDERING,
 
       ...DOCTOR_CLINICAL,
+      ...PAYOUT_EARNER,
       'rx.schedule_x.prescribe',
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
@@ -1576,6 +1885,7 @@ const templates: readonly RoleTemplate[] = [
       'patient.record.create_override',
 
       ...DOCTOR_CLINICAL,
+      ...PAYOUT_EARNER,
       'rx.schedule_x.prescribe',
       'cdss.emergency.declare',
       'vitals.escalate.er',
@@ -1606,6 +1916,7 @@ const templates: readonly RoleTemplate[] = [
       ...DIAGNOSTIC_ORDERING,
 
       ...DOCTOR_CLINICAL,
+      ...PAYOUT_EARNER,
       'rx.schedule_x.prescribe',
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
@@ -1637,6 +1948,7 @@ const templates: readonly RoleTemplate[] = [
       ...DIAGNOSTIC_ORDERING,
 
       ...DOCTOR_CLINICAL,
+      ...PAYOUT_EARNER,
       'rx.schedule_x.prescribe',
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
@@ -1658,6 +1970,7 @@ const templates: readonly RoleTemplate[] = [
       ...DIAGNOSTIC_ORDERING,
 
       ...DOCTOR_CLINICAL,
+      ...PAYOUT_EARNER,
       'rx.schedule_x.prescribe',
       ...BASE_CLINICAL,
       ...BREAK_GLASS,
@@ -2109,6 +2422,20 @@ const templates: readonly RoleTemplate[] = [
     permissions: [
       ...PATIENT_READ,
       ...CASHIER_BASE,
+      ...TARIFF_READ,
+      // Phase 5 — OP-005. Assembles, finalises and invoices. Approving a
+      // discount and raising a credit note are the accountant's keys, so the
+      // person who gave the discount is never the person who allowed it.
+      ...BILLING_DESK,
+      ...PAYMENT_DESK,
+      ...PACKAGE_DESK,
+      // Phase 5 — RC-008. The billing desk quotes as well as bills; the price a
+      // family is given and the bill they get should come from one set of hands
+      // that can see both.
+      ...ESTIMATE_DESK,
+      // RC-006 — the read side. They raise the charge once finance accepts a
+      // finding, and they run the pre-discharge check.
+      ...LEAKAGE_DESK,
       'receipt.refund.pay',
       ...BASE_STAFF,
       'barcode.scan',
@@ -2131,6 +2458,18 @@ const templates: readonly RoleTemplate[] = [
     homeWorkspace: 'insurance-queue',
     permissions: [
       ...BASE_STAFF,
+      // Phase 5 — EN-002 / RC-002. Assembles and submits; recording the payer's
+      // decision is finance's key, so an approval nobody received cannot be
+      // typed in by the person waiting for it.
+      ...INSURANCE_DESK,
+      // Phase 5 — RC-007. The same counter works government schemes: the desk
+      // verifies the card, opens the case and submits the claim, but never
+      // records what the authority paid.
+      ...SCHEME_DESK,
+      ...PATIENT_READ,
+      ...TARIFF_READ,
+      'bill.read',
+      'bill.list',
       'tpl.render',
       'tpl.response.read',
       'org.patient.locate',
@@ -2596,6 +2935,70 @@ const templates: readonly RoleTemplate[] = [
       // therefore never posts the goods receipt (NC-005 §12), and approves a
       // vendor's bank change but never maintains the vendor record that
       // proposed it (NC-021 §5).
+      // Phase 5 — RC-003. Builds the price list and submits it. Publishing is
+      // the hospital admin's key, so the person who revises a rate is never the
+      // person who makes it live (RC-003 §5).
+      ...TARIFF_DESK,
+      // Phase 5 — OP-005, the checker half of the maker-checker pair.
+      ...BILLING_APPROVER,
+      ...PAYMENT_FINANCE,
+      // OP-023's checker half: deciding who pays an overrun on a fixed-price
+      // promise is finance's call, never the desk that sold the package.
+      'pkg.read',
+      'pkg.list',
+      'pkg.configure',
+      'pkg.version.publish',
+      'pkg.price.update',
+      'pkg.booking.read',
+      'pkg.booking.list',
+      'pkg.booking.cancel',
+      'pkg.activation.read',
+      'pkg.activation.close',
+      'pkg.variance.approve',
+      'pkg.report.read',
+
+      // EN-002 / RC-002 — the checker half. Finance records what the payer
+      // decided and owns the empanelment contracts behind it. Deliberately not
+      // `preauth.submit`: the desk assembles, finance records the answer.
+      'ins.payer.read',
+      'ins.payer.list',
+      'ins.payer.configure',
+      'ins.empanelment.read',
+      'ins.empanelment.manage',
+      'ins.case.read',
+      'ins.case.list',
+      'preauth.read',
+      'preauth.list',
+      'preauth.decision.record',
+      'preauth.withdraw',
+      'preauth.sla.read',
+
+      // RC-007 — the checker half again. Finance records what the authority
+      // paid, closes the case (which lifts the cash block), and is the second
+      // pair of hands on a write-off.
+      ...SCHEME_FINANCE,
+
+      // RC-008 — finance owns the standing line sets and the measurement.
+      // Reading estimate-versus-actual is how a hospital learns its quotes run
+      // light, which is not something to leave with the people writing them.
+      'est.read',
+      'est.list',
+      'est.template.read',
+      'est.template.manage',
+      'est.variance.read',
+      'est.variance.record',
+
+      // RC-006 — the whole audit. "Never auto-post" only means something if the
+      // person accepting a finding is accountable for the charge that follows.
+      ...LEAKAGE_FINANCE,
+
+      // NC-034 — finance computes and pays. Approving is the hospital admin's,
+      // so the calculation and its release are never the same hands.
+      ...PAYOUT_FINANCE,
+
+      'billing.gst.configure',
+      'billing.discount_matrix.configure',
+
       'inventory.invoice.capture',
       'inventory.invoice.match',
       'inventory.invoice.approve',

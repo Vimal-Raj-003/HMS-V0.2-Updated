@@ -548,3 +548,158 @@ export interface CreateVendorRequest {
   readonly leadTimeDaysAvg?: number;
   readonly notes?: string;
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// NC-007 — consignment
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * A row of stock standing on our shelf that the hospital does not own.
+ *
+ * `value` is what the vendor will invoice if it is used, not what the hospital
+ * has spent — nothing here has been paid for yet. It is a decimal string for the
+ * reason every money field on this wire is: a number round-trips through
+ * IEEE-754 and ₹1,234.55 comes back as 1234.5499999999999.
+ */
+export interface ConsignmentStockRow {
+  readonly storeId: string;
+  readonly itemId: string;
+  readonly itemCode: string;
+  readonly batchId: string | null;
+  readonly batchNo: string | null;
+  readonly expiryDate: string | null;
+  readonly qtyOnHand: string;
+  readonly vendorId: string | null;
+  readonly value: string;
+}
+
+export interface ConsignmentAgreementLineRequest {
+  readonly itemId: string;
+  readonly vendorPrice: number;
+  readonly mrp?: number;
+  readonly gstRate?: number;
+  readonly minStockBase?: number;
+  readonly udiDi?: string;
+}
+
+export interface CreateConsignmentAgreementRequest {
+  readonly vendorId: string;
+  readonly agreementNo: string;
+  readonly startDate: string;
+  readonly endDate: string;
+  readonly invoicingCycle?: string;
+  readonly paymentTermsDays?: number;
+  readonly expiryReturnDaysBefore?: number;
+  readonly replenishmentSlaDays?: number;
+  readonly wastagePolicy?: 'hospital' | 'vendor' | 'case_by_case';
+  readonly items: readonly ConsignmentAgreementLineRequest[];
+}
+
+/**
+ * The scan at the operating table.
+ *
+ * `status: 'wasted'` is not an error path: an implant opened and not used is a
+ * routine event with a liability question attached, which is why
+ * `wasteLiability` defaults to `pending` rather than silently to the hospital.
+ */
+export interface RecordConsignmentUsageRequest {
+  readonly agreementId: string;
+  readonly storeId: string;
+  readonly itemId: string;
+  readonly batchId: string;
+  readonly serialId?: string;
+  readonly qtyEntered: number;
+  readonly uomId?: string;
+  readonly patientId?: string;
+  readonly encounterId?: string;
+  readonly surgeonUserId?: string;
+  readonly side?: 'left' | 'right' | 'bilateral' | 'not_applicable';
+  readonly site?: string;
+  readonly status?: 'used' | 'wasted';
+  readonly wasteReason?: string;
+  readonly wasteLiability?: 'hospital' | 'vendor' | 'pending';
+}
+
+export interface CreateConsignmentReturnRequest {
+  readonly agreementId: string;
+  readonly vendorId: string;
+  readonly storeId: string;
+  readonly reason: 'near_expiry' | 'expired' | 'excess' | 'recall' | 'agreement_end' | 'damaged';
+  readonly lines: readonly {
+    readonly itemId: string;
+    readonly batchId: string;
+    readonly qtyEntered: number;
+    readonly uomId?: string;
+  }[];
+}
+
+export interface CreateConsignmentReconciliationRequest {
+  readonly vendorId: string;
+  readonly agreementId: string;
+  /** `YYYY-MM`. */
+  readonly period: string;
+}
+
+export interface SignReconciliationRequest {
+  readonly vendorSignedBy: string;
+  readonly agreed: boolean;
+  readonly note?: string;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// NC-008 — consumption and cost centres
+// ═════════════════════════════════════════════════════════════════════════════
+
+export interface CostCentreView {
+  readonly id: string;
+  readonly code: string;
+  readonly name: string;
+  readonly centreType: string;
+  readonly parentId: string | null;
+  readonly branchId: string | null;
+  readonly ownerUserId: string | null;
+  readonly allocationBasis: string;
+  readonly active: boolean;
+}
+
+/** One period's consumption rolled up per cost centre. */
+export interface CostCentreConsumptionRow {
+  readonly costCentreId: string | null;
+  readonly code: string | null;
+  readonly name: string | null;
+  readonly entries: number;
+  readonly value: string;
+}
+
+export interface RecordConsumptionRequest {
+  readonly storeId: string;
+  readonly entryType: string;
+  readonly costCentreId?: string;
+  readonly patientId?: string;
+  readonly encounterId?: string;
+  readonly performedBy?: string;
+  readonly source?: 'manual_scan' | 'kit' | 'bom' | 'auto_billing' | 'import';
+  readonly lines: readonly {
+    readonly itemId: string;
+    readonly batchId?: string;
+    readonly qtyEntered: number;
+    readonly uomId?: string;
+    readonly isBillable?: boolean;
+    readonly expenseHead?: string;
+  }[];
+}
+
+export interface CreateCostCentreRequest {
+  readonly code: string;
+  readonly name: string;
+  readonly centreType: string;
+  readonly parentId?: string;
+  readonly branchId?: string;
+  readonly ownerUserId?: string;
+  readonly allocationBasis?: string;
+}
+
+/** Every write that only needs a reason. Reversal is never an edit (NC-008 §5). */
+export interface ReverseRequest {
+  readonly reason: string;
+}

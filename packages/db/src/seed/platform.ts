@@ -40,6 +40,27 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   ['RECEIPT', '{BR}/RCP/{FY}/{SEQ:6}', true, 'fy'],
   ['REFUND', '{BR}/REF/{FY}/{SEQ:6}', true, 'fy'],
   ['CREDIT_NOTE', '{BR}/CN/{FY}/{SEQ:6}', true, 'fy'],
+  // OP-005 §4/§5: GST documents are numbered gaplessly **per series per FY**,
+  // and that is only true if they have a series of their own. Sharing `BILL_OP`
+  // would interleave bill numbers and invoice numbers in one counter, so the
+  // invoice register would show gaps wherever a bill took the next number —
+  // which is precisely the defect gapless numbering exists to prevent.
+  // A tax invoice and a bill of supply are separate registers under GST.
+  ['TAX_INVOICE', '{BR}/INV/{FY}/{SEQ:6}', true, 'fy'],
+  ['BILL_SUPPLY', '{BR}/BOS/{FY}/{SEQ:6}', true, 'fy'],
+  // RC-007 §5.6: a scheme case and its claim carry the authority's reference on
+  // every document and every appeal. Gapless, because a missing claim number in
+  // a settlement batch is a claim the authority will say it never received.
+  ['SCHEME_CASE', '{BR}/SCH/{FY}/{SEQ:6}', true, 'fy'],
+  ['SCHEME_CLAIM', '{BR}/SCLM/{FY}/{SEQ:6}', true, 'fy'],
+  // RC-008 §5.7: an estimate is a document a family keeps and brings back. Not
+  // gapless — an abandoned draft must not burn a number, and nothing legal
+  // depends on the sequence being unbroken.
+  ['ESTIMATE', '{BR}/EST/{FY}/{SEQ:6}', false, 'fy'],
+  // NC-034 §5.7: a payout statement is a document a doctor keeps and a figure
+  // that appears on a TDS return. Gapless per branch per FY, because a missing
+  // statement number in a 26Q filing is a question somebody has to answer.
+  ['PAYOUT', '{BR}/PAY/{FY}/{SEQ:6}', true, 'fy'],
   // OP-002 §5: "Numbering: `RX`, `ORD` per hospital/branch/FY (non-gapless)."
   // Not gapless — an abandoned prescription draft must not burn a number an
   // auditor will later ask about, and nothing legal depends on the sequence

@@ -8,7 +8,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsx watch src/main.ts",
+    "dev": "dotenv -e ../../.env -v PORT=4002 -- tsx watch src/main.ts",
     "start": "node dist/main.js",
     "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
     "typecheck": "tsc --noEmit",
@@ -29,6 +29,7 @@
     "@types/pg": "^8.11.10",
     "@vims/i18n": "workspace:*",
     "@vims/testing": "workspace:*",
+    "dotenv-cli": "^8.0.0",
     "tsx": "^4.19.2",
     "vitest": "^4.1.10"
   }

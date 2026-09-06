@@ -3,6 +3,19 @@ import type { NextConfig } from 'next';
 
 const config: NextConfig = {
   reactStrictMode: true,
+  /**
+   * The browser suite builds and serves from its own directory.
+   *
+   * `next dev` and `next start` both own `.next`, and the dev server rewrites it
+   * continuously. A developer with `pnpm dev` running — or a second agent
+   * session doing the same — silently replaces the production build underneath
+   * `pnpm test:e2e`, which then serves 400s for every client chunk: the page
+   * renders server-side, nothing hydrates, the login form falls back to a native
+   * GET, and every authenticated test fails with "still on /login". That reads
+   * exactly like an authentication bug and is not one. Overriding the directory
+   * makes the two builds unable to touch each other.
+   */
+  distDir: process.env['NEXT_DIST_DIR'] ?? '.next',
   // The workspace packages ship TypeScript source rather than build output, so
   // Next must compile them itself. This is what lets a Zod schema be literally
   // the same object in the browser and in the API (docs/09 §4) instead of two

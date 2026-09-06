@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { delay, IDS } from '../__tests__/harness.js';
 import { rooms, type RoomName } from '../rooms/rooms.js';
 import {
@@ -53,47 +53,61 @@ describe('backpressure — docs/01 §6: max 1 push/sec per room, coalesced', () 
     expect(first?.message.seq).toBe(1);
   });
 
+  /**
+   * Fake timers, deliberately. The real-clock version of this test drove a
+   * 10 ms ticker for 2.6 s and asserted that ~260 source updates had actually
+   * happened; on a box running the other nineteen packages' vitest workers the
+   * event loop starves, the ticker coalesces, and the assertion fails without
+   * anything being wrong with the emitter. Virtual time fires all 260 ticks
+   * exactly, so the freshness and spacing assertions below become exact
+   * statements about the emitter rather than about the machine's load.
+   */
   it('emits at most once per second while updates keep arriving', async () => {
-    const { emitter, sent } = harness(1_000);
-    const startedAt = Date.now();
+    vi.useFakeTimers();
+    try {
+      const { emitter, sent } = harness(1_000);
+      const startedAt = Date.now();
 
-    let i = 0;
-    const ticker = setInterval(() => {
-      i += 1;
-      emitter.push(wardBoard, bed('bed-12', `state-${i}`));
-    }, 10);
-    await delay(2_600);
-    clearInterval(ticker);
-    emitter.close(false);
+      let i = 0;
+      const ticker = setInterval(() => {
+        i += 1;
+        emitter.push(wardBoard, bed('bed-12', `state-${i}`));
+      }, 10);
+      await vi.advanceTimersByTimeAsync(2_600);
+      clearInterval(ticker);
+      emitter.close(false);
 
-    const elapsedSeconds = (Date.now() - startedAt) / 1_000;
-    // ~260 source updates in the window; the room must not have seen more than
-    // one push per second of it.
-    expect(i).toBeGreaterThan(100);
-    expect(sent.length).toBeLessThanOrEqual(Math.ceil(elapsedSeconds));
+      const elapsedSeconds = (Date.now() - startedAt) / 1_000;
+      // 260 source updates in the window; the room must not have seen more than
+      // one push per second of it.
+      expect(i).toBeGreaterThan(100);
+      expect(sent.length).toBeLessThanOrEqual(Math.ceil(elapsedSeconds));
 
-    for (let n = 1; n < sent.length; n += 1) {
-      const previous = sent[n - 1];
-      const current = sent[n];
-      expect(current !== undefined && previous !== undefined).toBe(true);
-      // Timer resolution jitter is a few ms; the floor is the interval.
-      expect((current?.at ?? 0) - (previous?.at ?? 0)).toBeGreaterThanOrEqual(990);
+      for (let n = 1; n < sent.length; n += 1) {
+        const previous = sent[n - 1];
+        const current = sent[n];
+        expect(current !== undefined && previous !== undefined).toBe(true);
+        // Timer resolution jitter is a few ms; the floor is the interval.
+        expect((current?.at ?? 0) - (previous?.at ?? 0)).toBeGreaterThanOrEqual(990);
+      }
+
+      // Every push carries the newest state known *at its flush time*, never a
+      // stale one. With one source update every 10 ms, the state number a flush
+      // at t carries must be ~t/10 — a leading-edge throttle would carry ~1.
+      const stateOf = (m: Captured): number =>
+        Number(String((m.message.diff.changed['bed-12'] as { status: string }).status).replace('state-', ''));
+
+      expect(sent.length).toBeGreaterThan(1);
+      expect(stateOf(sent[0] as Captured)).toBeGreaterThan(50);
+      for (const message of sent) {
+        const expectedAtFlush = (message.at - startedAt) / 10;
+        expect(stateOf(message)).toBeGreaterThan(expectedAtFlush - 25);
+      }
+      // Monotonic: a push never carries an older state than the one before it.
+      expect(sent.map(stateOf)).toEqual([...sent.map(stateOf)].sort((a, b) => a - b));
+    } finally {
+      vi.useRealTimers();
     }
-
-    // Every push carries the newest state known *at its flush time*, never a
-    // stale one. With one source update every 10 ms, the state number a flush
-    // at t carries must be ~t/10 — a leading-edge throttle would carry ~1.
-    const stateOf = (m: Captured): number =>
-      Number(String((m.message.diff.changed['bed-12'] as { status: string }).status).replace('state-', ''));
-
-    expect(sent.length).toBeGreaterThan(1);
-    expect(stateOf(sent[0] as Captured)).toBeGreaterThan(50);
-    for (const message of sent) {
-      const expectedAtFlush = (message.at - startedAt) / 10;
-      expect(stateOf(message)).toBeGreaterThan(expectedAtFlush - 25);
-    }
-    // Monotonic: a push never carries an older state than the one before it.
-    expect(sent.map(stateOf)).toEqual([...sent.map(stateOf)].sort((a, b) => a - b));
   });
 
   it('keeps rooms independent — a busy ward cannot starve the OT board', async () => {

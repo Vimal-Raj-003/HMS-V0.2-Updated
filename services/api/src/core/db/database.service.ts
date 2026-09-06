@@ -1,4 +1,4 @@
-import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { applyTenantContext, type TenantContext } from '@vims/db/tenancy';
 import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
 import { ENV, type Env } from '../config/env.js';
@@ -26,6 +26,7 @@ const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
  */
 @Injectable()
 export class DatabaseService implements OnModuleDestroy {
+  private readonly logger = new Logger(DatabaseService.name);
   private readonly pool: Pool;
 
   constructor(@Inject(ENV) env: Env) {
@@ -38,6 +39,23 @@ export class DatabaseService implements OnModuleDestroy {
       statement_timeout: env.DATABASE_STATEMENT_TIMEOUT_MS,
       idle_in_transaction_session_timeout: 30_000,
       application_name: 'vims-api',
+    });
+
+    // An *idle* pooled client can be terminated by the server at any time —
+    // a failover, a `pg_terminate_backend`, an administrator restart (57P01),
+    // an idle-session timeout. `pg` surfaces that on the pool rather than on
+    // any one query, and an EventEmitter 'error' with no listener is an
+    // unhandled exception: the whole API process dies because a connection
+    // nobody was using went away. The pool already replaces dead clients on
+    // its own, so the correct handling is to record it and carry on.
+    //
+    // No connection string in the log line — it carries the database password
+    // (docs/04 §4: no secrets in logs).
+    this.pool.on('error', (error: Error) => {
+      this.logger.warn(
+        { err: error.message, code: (error as { code?: string }).code ?? null },
+        'idle pooled connection lost; the pool will replace it',
+      );
     });
   }
 

@@ -13,10 +13,19 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe('the poll loop', () => {
+  /**
+   * Both properties are read off the tick counter rather than off a wall-clock
+   * window: under a loaded CI box a "run it for 60 ms" version starves and
+   * reports one tick, which fails the assertion without anything being wrong.
+   * Waiting for the third tick proves the loop re-enters, and `maxConcurrent`
+   * proves it never re-enters *while the previous tick is still inside*.
+   */
   it('never overlaps a tick with itself', async () => {
+    const TARGET_TICKS = 3;
     let concurrent = 0;
     let maxConcurrent = 0;
     let ticks = 0;
+    const reachedTarget = deferred();
 
     const loop = createPollLoop({
       name: 'test.overlap',
@@ -28,16 +37,17 @@ describe('the poll loop', () => {
         await new Promise<void>((r) => setTimeout(r, 5));
         concurrent -= 1;
         ticks += 1;
+        if (ticks === TARGET_TICKS) reachedTarget.resolve();
         return false;
       },
     });
 
     loop.start();
-    await new Promise<void>((r) => setTimeout(r, 60));
+    await reachedTarget.promise;
     await loop.stop();
 
     expect(maxConcurrent).toBe(1);
-    expect(ticks).toBeGreaterThan(1);
+    expect(ticks).toBeGreaterThanOrEqual(TARGET_TICKS);
   });
 
   /**

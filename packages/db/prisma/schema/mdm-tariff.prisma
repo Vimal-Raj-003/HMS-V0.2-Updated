@@ -1,0 +1,646 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// RC-003 — Tariff management (schema `mdm`, prefix `tariff_`)
+//
+// The pricing authority. Every bill line in OP-005, IP-005, RC-008 and RC-002
+// resolves its rate through here, and `phase-05 §5.1` builds it FIRST for that
+// reason: a billing module written against a tariff that does not exist ends up
+// with a price column somebody types into, which is how a hospital acquires two
+// prices for one service.
+//
+//   tariff_plans           the pricing authorities: self-pay, corporate, TPA,
+//                          scheme, staff, camp
+//   tariff_versions        effective-dated, approved, published — and provably
+//                          non-overlapping while published
+//   tariff_items           the rate grid: service × bed class × time band
+//   tariff_packages        package pricing and its cap rules
+//   tariff_discount_rules  negotiated discounts attached to a plan
+//   tariff_payer_sheets    an insurer's spreadsheet, and
+//   tariff_sheet_rows      its rows mid-mapping
+//   tariff_scheme_imports  a PMJAY/CGHS/ECHS/ESIC circular, applied
+//   tariff_change_log      append-only: every rate change, for ever
+//   tariff_missing_rates   the worklist of services a bill could not price
+//   tariff_rate_cards      the statutory public display
+//   tariff_benchmarks      peer rates, for comparison only — never billable
+//
+// ── Three decisions worth reading before changing anything here ─────────────
+//
+// **1. A published version is immutable, and the database says so.**
+// `tariff_versions` carries an exclusion constraint so two published versions of
+// one plan can never overlap in time, and a trigger refuses any UPDATE to a
+// `tariff_items` row whose version is published. Together they mean a historical
+// bill can always be re-explained: the rate that priced it still exists, exactly
+// as it was. RC-003 §5. Neither can be expressed in Prisma, so both live in the
+// migration's hand-written section.
+//
+// **2. Nothing here falls back to zero.** When resolution fails the service
+// returns `MISSING_RATE` and the bill line is held. `tariff_missing_rates` is
+// the read model behind that worklist. A ₹0 fallback is indistinguishable from a
+// free service, and the difference is only discovered at the month-end
+// reconciliation that does not balance.
+//
+// **3. Forward references are deliberately un-FK'd.** `payer_id`, `scheme_id`,
+// `corporate_id` and `bed_class_id` name rows that Phase 5's later modules
+// (EN-002, RC-007) and Phase 7 (IP-002 bed classes) have not created yet. The
+// build order in `phase-05` puts RC-003 first, so these are nullable UUIDs with
+// no foreign key and a comment, and the FKs land with the tables they point at.
+// The alternative — building the payer master early, badly, to satisfy a
+// constraint — is how a module ends up owning a table it does not understand.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Which pricing authority a plan represents. Order matters at resolution time:
+/// RC-003 §5 resolves scheme > tpa/insurer > corporate > staff/category >
+/// self_pay, and `tariff_plans.priority` breaks ties inside a band.
+enum TariffPlanType {
+  self_pay
+  corporate
+  tpa
+  insurer
+  /// PMJAY, CGHS, ECHS, ESIC or a state scheme. Rates are import-owned.
+  government_scheme
+  staff
+  camp
+
+  @@schema("mdm")
+}
+
+/// How widely a plan applies. A branch plan beats a hospital plan, which beats
+/// a group plan, for the same payer.
+enum TariffPlanScope {
+  branch
+  hospital
+  group
+
+  @@schema("mdm")
+}
+
+enum TariffPlanStatus {
+  active
+  inactive
+
+  @@schema("mdm")
+}
+
+/// The life of a version. Only `published` prices anything — a draft that could
+/// price a bill would make the approval step decorative.
+enum TariffVersionStatus {
+  draft
+  pending_approval
+  approved
+  published
+  superseded
+  withdrawn
+
+  @@schema("mdm")
+}
+
+/// Time-of-day banding. A rate may differ after hours without being a different
+/// service, and `normal` is the fallback the resolution ladder lands on.
+enum TariffTimeBand {
+  normal
+  after_hours
+  night
+  holiday
+  emergency
+
+  @@schema("mdm")
+}
+
+/// GST treatment. `docs/04 §1`: healthcare services are largely exempt, but
+/// pharmacy retail, cosmetic procedures and room rent above the threshold are
+/// not, and the item must say which it is rather than leaving OP-005 to guess.
+enum TariffTaxTreatment {
+  exempt
+  taxable
+  nil_rated
+
+  @@schema("mdm")
+}
+
+enum TariffDiscountScope {
+  all
+  department
+  service_group
+  service
+
+  @@schema("mdm")
+}
+
+enum TariffDiscountType {
+  pct
+  amount
+  formula
+
+  @@schema("mdm")
+}
+
+/// What happens when a package is exceeded. `cap_alert` warns and continues;
+/// `itemise` bills the excess at plan rates; `absorb` is the hospital's cost.
+enum TariffExcessRule {
+  itemise
+  absorb
+  cap_alert
+
+  @@schema("mdm")
+}
+
+enum TariffSheetStatus {
+  uploaded
+  mapping
+  review
+  approved
+  published
+  rejected
+
+  @@schema("mdm")
+}
+
+/// How a payer's line was matched to one of our services. `fuzzy` and `prior`
+/// are suggestions a human accepts; they never publish themselves.
+enum TariffMatchMethod {
+  code
+  rohini
+  fuzzy
+  prior
+  manual
+
+  @@schema("mdm")
+}
+
+enum TariffRowDecision {
+  accept
+  edit
+  reject
+  pending
+
+  @@schema("mdm")
+}
+
+enum TariffSchemeSource {
+  pmjay_hbp
+  cghs
+  echs
+  esic
+  state
+  custom
+
+  @@schema("mdm")
+}
+
+/// What produced a change-log row. `formula` and `scheme_import` are machine
+/// origins and are the ones an auditor asks about first.
+enum TariffChangeSource {
+  manual
+  bulk
+  import
+  formula
+  scheme_import
+
+  @@schema("mdm")
+}
+
+enum TariffMissingRateStatus {
+  open
+  priced
+  waived
+
+  @@schema("mdm")
+}
+
+/// A pricing authority. Exactly one plan wins for a given encounter, and
+/// `resolveRate` explains which and why.
+model TariffPlan {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  /// Null = applies to every branch of the hospital.
+  branchId   String? @map("branch_id") @db.Uuid
+  code       String  @db.VarChar(32)
+  name       String  @db.VarChar(200)
+  planType   TariffPlanType @map("plan_type")
+  currency   String  @default("INR") @db.Char(3)
+
+  /// EN-002's payer, RC-007's scheme, NC-012's corporate. No FK yet — those
+  /// tables arrive later in Phase 5 (see the header note).
+  payerId     String? @map("payer_id") @db.Uuid
+  schemeId    String? @map("scheme_id") @db.Uuid
+  corporateId String? @map("corporate_id") @db.Uuid
+
+  scope TariffPlanScope @default(hospital)
+
+  /// A derived plan computes from another plan's resolved rate instead of
+  /// holding its own grid — "CGHS + 10 %" is one row, not ten thousand.
+  derivedFromPlanId String?  @map("derived_from_plan_id") @db.Uuid
+  derivationFormula Json?    @map("derivation_formula")
+  /// How the computed number is rounded. Stated once here and applied
+  /// everywhere, because two rounding rules is two totals.
+  roundingRule      Json     @default("{\"mode\":\"half_up\",\"decimals\":2}") @map("rounding_rule")
+
+  /// Tie-break inside a resolution band. Higher wins.
+  priority         Int     @default(0) @db.SmallInt
+  isDefaultSelfPay Boolean @default(false) @map("is_default_self_pay")
+  /// Government scheme rates are import-owned: only the mapping and the
+  /// NABH/non-NABH column selection are editable (RC-003 §5).
+  isRateEditable   Boolean @default(true) @map("is_rate_editable")
+
+  status TariffPlanStatus @default(active)
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?   @map("updated_by") @db.Uuid
+  version   Int       @default(1)
+
+  versions       TariffVersion[]
+  discountRules  TariffDiscountRule[]
+
+  @@unique([hospitalId, branchId, code])
+  @@index([hospitalId, planType, status])
+  @@index([hospitalId, payerId])
+  @@map("tariff_plans")
+  @@schema("mdm")
+}
+
+/// One effective-dated revision of a plan.
+///
+/// The migration adds:
+///   EXCLUDE USING gist (plan_id WITH =, daterange(effective_from, effective_to, '[)') WITH &&)
+///     WHERE (status = 'published')
+/// so two published versions of one plan can never overlap. Without it, "which
+/// rate applied on the 3rd" has two answers and the bill is indefensible.
+model TariffVersion {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  planId     String @map("plan_id") @db.Uuid
+  versionNo  Int    @map("version_no")
+
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  /// Null = open-ended. Closed when a later version is published.
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  status TariffVersionStatus @default(draft)
+
+  /// What this revision was based on: a circular, a negotiation, an uplift.
+  basis            Json?
+  changeNote       String? @map("change_note") @db.Text
+  /// Output of `POST /versions/{id}/simulate` — revenue impact against
+  /// historical volumes, so nobody publishes a 30 % cut by accident.
+  simulationResult Json?   @map("simulation_result")
+
+  /// EN-038 approval instance.
+  approvalId  String?   @map("approval_id") @db.Uuid
+  submittedBy String?   @map("submitted_by") @db.Uuid
+  submittedAt DateTime? @map("submitted_at") @db.Timestamptz(6)
+  approvedBy  String?   @map("approved_by") @db.Uuid
+  approvedAt  DateTime? @map("approved_at") @db.Timestamptz(6)
+  publishedBy String?   @map("published_by") @db.Uuid
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(6)
+  withdrawnBy String?   @map("withdrawn_by") @db.Uuid
+  withdrawnAt DateTime? @map("withdrawn_at") @db.Timestamptz(6)
+  withdrawReason String? @map("withdraw_reason") @db.Text
+
+  sourceFileId String? @map("source_file_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  plan     TariffPlan       @relation(fields: [planId], references: [id], onDelete: Restrict)
+  items    TariffItem[]
+  packages TariffPackage[]
+
+  @@unique([planId, versionNo])
+  @@index([hospitalId, planId, effectiveFrom(sort: Desc)])
+  @@index([hospitalId, status])
+  @@map("tariff_versions")
+  @@schema("mdm")
+}
+
+/// One priced row. The grid `resolveRate` walks.
+///
+/// The unique key uses coalesced sentinels for the two nullable discriminators,
+/// added in the migration — Prisma cannot express a partial/expression unique
+/// index, and without it one service could hold two "no bed class, normal band"
+/// rates and resolution would be non-deterministic.
+model TariffItem {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  versionId  String @map("version_id") @db.Uuid
+
+  serviceId String @map("service_id") @db.Uuid
+  /// IP-002 bed class (Phase 7). No FK yet — see the header note.
+  bedClassId String? @map("bed_class_id") @db.Uuid
+  timeBand   TariffTimeBand? @map("time_band")
+
+  unit     String  @default("each") @db.VarChar(32)
+  baseRate Decimal @map("base_rate") @db.Decimal(14, 2)
+  minRate  Decimal? @map("min_rate") @db.Decimal(14, 2)
+  maxRate  Decimal? @map("max_rate") @db.Decimal(14, 2)
+
+  /// Mandatory on every item: RC-003 §5 rejects a taxable item with no rate.
+  hsnSac       String? @map("hsn_sac") @db.VarChar(16)
+  taxTreatment TariffTaxTreatment @default(exempt) @map("tax_treatment")
+  gstRate      Decimal @default(0) @map("gst_rate") @db.Decimal(5, 2)
+
+  /// What the payer calls it — ROHINI, CGHS or scheme-specific.
+  payerCode        String? @map("payer_code") @db.VarChar(64)
+  payerServiceName String? @map("payer_service_name") @db.VarChar(255)
+
+  /// Present where the hospital has costed the service. Publishing below cost
+  /// is legitimate (scheme plans routinely are) but must be acknowledged.
+  costAmount    Decimal? @map("cost_amount") @db.Decimal(14, 2)
+  revenueHeadId String?  @map("revenue_head_id") @db.Uuid
+  /// NC-034 fee-share rule. Phase 5 later; no FK yet.
+  doctorShareRuleId String? @map("doctor_share_rule_id") @db.Uuid
+
+  isNegotiable Boolean @default(false) @map("is_negotiable")
+  notes        String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  tariffVersion TariffVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  /// The covering index for the hot path. `resolveRate` filters on exactly
+  /// these three, in this order.
+  @@index([hospitalId, serviceId, versionId])
+  @@index([versionId, bedClassId])
+  @@map("tariff_items")
+  @@schema("mdm")
+}
+
+/// Package pricing. `componentSplit` must total 100.00 ± 0.01 — enforced in the
+/// migration, because a split that does not add up silently misallocates
+/// revenue across heads for as long as nobody reconciles.
+model TariffPackage {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  versionId  String @map("version_id") @db.Uuid
+
+  /// OP-023 / IP-008 / OP-014 / RC-007 package. No FK yet.
+  packageId  String  @map("package_id") @db.Uuid
+  bedClassId String? @map("bed_class_id") @db.Uuid
+
+  packageRate Decimal @map("package_rate") @db.Decimal(14, 2)
+
+  /// los_days, room_class, blood_units, implant_included, investigations_cap.
+  capRules   Json  @default("{}") @map("cap_rules")
+  exclusions Json  @default("[]")
+  excessRule TariffExcessRule @default(cap_alert) @map("excess_rule")
+  /// revenue_head → percent. Must total 100.
+  componentSplit Json @default("{}") @map("component_split")
+
+  preHospDays  Int @default(0) @map("pre_hosp_days")
+  postHospDays Int @default(0) @map("post_hosp_days")
+
+  schemePackageCode String?  @map("scheme_package_code") @db.VarChar(64)
+  /// PMJAY/CGHS pay accredited hospitals more. Driven by NC-015's live
+  /// accreditation record, which is why an expired certificate is a revenue
+  /// leak rather than a paperwork problem.
+  nabhMultiplier    Decimal? @map("nabh_multiplier") @db.Decimal(5, 3)
+  notes             String?  @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  tariffVersion TariffVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, packageId, bedClassId])
+  @@index([hospitalId, packageId])
+  @@map("tariff_packages")
+  @@schema("mdm")
+}
+
+/// A negotiated discount attached to a plan. Distinct from OP-005's ad-hoc
+/// discount, which needs an approval each time; this one is contractual.
+model TariffDiscountRule {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  planId     String @map("plan_id") @db.Uuid
+  versionId  String? @map("version_id") @db.Uuid
+
+  scope    TariffDiscountScope @default(all)
+  targetId String?             @map("target_id") @db.Uuid
+
+  discountType TariffDiscountType @map("discount_type")
+  value        Decimal            @db.Decimal(14, 4)
+  /// Whether the percentage bites on the gross or only the taxable portion.
+  appliesTo    String             @default("gross") @map("applies_to") @db.VarChar(16)
+
+  excludedItemTypes String[] @default([]) @map("excluded_item_types")
+  volumeTiers       Json?    @map("volume_tiers")
+  capAmount         Decimal? @map("cap_amount") @db.Decimal(14, 2)
+
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  plan TariffPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, planId, effectiveFrom(sort: Desc)])
+  @@map("tariff_discount_rules")
+  @@schema("mdm")
+}
+
+/// An insurer's rate spreadsheet, mid-ingestion.
+model TariffPayerSheet {
+  id            String @id @db.Uuid
+  hospitalId    String @map("hospital_id") @db.Uuid
+  payerId       String @map("payer_id") @db.Uuid
+  empanelmentId String? @map("empanelment_id") @db.Uuid
+
+  fileId     String  @map("file_id") @db.Uuid
+  templateId String? @map("template_id") @db.Uuid
+
+  uploadedBy String   @map("uploaded_by") @db.Uuid
+  uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+
+  rowsTotal     Int @default(0) @map("rows_total")
+  rowsMatched   Int @default(0) @map("rows_matched")
+  rowsUnmatched Int @default(0) @map("rows_unmatched")
+
+  status    TariffSheetStatus @default(uploaded)
+  versionId String?           @map("version_id") @db.Uuid
+  diffReportFileId String?    @map("diff_report_file_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  rows TariffSheetRow[]
+
+  @@index([hospitalId, payerId, status])
+  @@map("tariff_payer_sheets")
+  @@schema("mdm")
+}
+
+/// One row of that spreadsheet and what a human decided about it.
+model TariffSheetRow {
+  id      String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  sheetId String @map("sheet_id") @db.Uuid
+  rowNo   Int    @map("row_no")
+
+  payerCode        String? @map("payer_code") @db.VarChar(64)
+  payerDescription String? @map("payer_description") @db.VarChar(500)
+  payerRate        Decimal? @map("payer_rate") @db.Decimal(14, 2)
+  bedClassCol      String? @map("bed_class_col") @db.VarChar(64)
+
+  matchServiceId String?            @map("match_service_id") @db.Uuid
+  matchMethod    TariffMatchMethod? @map("match_method")
+  matchScore     Decimal?           @map("match_score") @db.Decimal(5, 4)
+
+  decision   TariffRowDecision @default(pending)
+  editedRate Decimal?          @map("edited_rate") @db.Decimal(14, 2)
+  remarks    String?           @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  sheet TariffPayerSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+
+  @@unique([sheetId, rowNo])
+  @@index([hospitalId, sheetId, decision])
+  @@map("tariff_sheet_rows")
+  @@schema("mdm")
+}
+
+/// A government circular, applied.
+model TariffSchemeImport {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  schemeId   String @map("scheme_id") @db.Uuid
+
+  circularRef  String   @map("circular_ref") @db.VarChar(128)
+  circularDate DateTime @map("circular_date") @db.Date
+  source       TariffSchemeSource
+
+  fileId String? @map("file_id") @db.Uuid
+
+  packagesAdded    Int @default(0) @map("packages_added")
+  packagesRemoved  Int @default(0) @map("packages_removed")
+  packagesRepriced Int @default(0) @map("packages_repriced")
+
+  versionId    String? @map("version_id") @db.Uuid
+  diffFileId   String? @map("diff_file_id") @db.Uuid
+
+  importedBy String   @map("imported_by") @db.Uuid
+  importedAt DateTime @default(now()) @map("imported_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, schemeId, circularDate(sort: Desc)])
+  @@map("tariff_scheme_imports")
+  @@schema("mdm")
+}
+
+/// Append-only. Every rate change, for ever.
+///
+/// This is the audit of record for pricing. The migration revokes UPDATE and
+/// DELETE on it and partitions it monthly — RC-003 §5 keeps 8 years, and a
+/// table that large without partitions makes the eventual purge a table rewrite.
+model TariffChangeLog {
+  id         String @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  versionId  String @map("version_id") @db.Uuid
+
+  itemId    String? @map("item_id") @db.Uuid
+  packageId String? @map("package_id") @db.Uuid
+  serviceId String? @map("service_id") @db.Uuid
+
+  field    String  @db.VarChar(64)
+  oldValue String? @map("old_value") @db.Text
+  newValue String? @map("new_value") @db.Text
+
+  changedBy  String   @map("changed_by") @db.Uuid
+  changedAt  DateTime @default(now()) @map("changed_at") @db.Timestamptz(6)
+  reason     String?  @db.Text
+  approvalId String?  @map("approval_id") @db.Uuid
+  source     TariffChangeSource @default(manual)
+
+  @@id([id, changedAt])
+  @@index([hospitalId, versionId, changedAt(sort: Desc)])
+  @@index([hospitalId, serviceId, changedAt(sort: Desc)])
+  @@map("tariff_change_log")
+  @@schema("mdm")
+}
+
+/// The worklist behind `MISSING_RATE`.
+///
+/// Written by the resolver when it cannot price a line. Aggregated rather than
+/// one row per attempt: a service missing from a plan generates a row per bill
+/// line otherwise, and the desk needs the service, not the noise.
+model TariffMissingRate {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  serviceId  String  @map("service_id") @db.Uuid
+  planId     String? @map("plan_id") @db.Uuid
+  bedClassId String? @map("bed_class_id") @db.Uuid
+
+  firstSeenAt DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  occurrences Int      @default(1)
+  sampleBillLineIds String[] @default([]) @map("sample_bill_line_ids") @db.Uuid
+
+  status     TariffMissingRateStatus @default(open)
+  resolvedBy String?   @map("resolved_by") @db.Uuid
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolutionNote String? @map("resolution_note") @db.Text
+
+  @@unique([hospitalId, branchId, serviceId, planId, bedClassId])
+  @@index([hospitalId, status, lastSeenAt(sort: Desc)])
+  @@map("tariff_missing_rates")
+  @@schema("mdm")
+}
+
+/// The statutory public rate display (Clinical Establishments Act).
+model TariffRateCard {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  versionId  String @map("version_id") @db.Uuid
+
+  language String @default("en-IN") @db.VarChar(16)
+  fileId   String? @map("file_id") @db.Uuid
+
+  publishedAt      DateTime @default(now()) @map("published_at") @db.Timestamptz(6)
+  publishedBy      String   @map("published_by") @db.Uuid
+  displayLocations String[] @default([]) @map("display_locations")
+
+  @@index([hospitalId, branchId, publishedAt(sort: Desc)])
+  @@map("tariff_rate_cards")
+  @@schema("mdm")
+}
+
+/// A peer's published rate, for comparison only.
+///
+/// `isBillable` is hard-coded false in RC-003 §4 and there is no column for it
+/// here on purpose: a benchmark that could be billed is a benchmark that will
+/// be, and this table has no path into resolution.
+model TariffBenchmark {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  serviceId  String @map("service_id") @db.Uuid
+
+  sourceName String  @map("source_name") @db.VarChar(200)
+  peerRate   Decimal @map("peer_rate") @db.Decimal(14, 2)
+  city       String? @db.VarChar(120)
+  asOf       DateTime @map("as_of") @db.Date
+  fileId     String? @map("file_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@index([hospitalId, serviceId, asOf(sort: Desc)])
+  @@map("tariff_benchmarks")
+  @@schema("mdm")
+}

@@ -303,9 +303,15 @@ describe('a saved reading', () => {
     fireEvent.change(screen.getByTestId('vitals-systolic'), { target: { value: '190' } });
     fireEvent.click(screen.getByTestId('vitals-save'));
 
-    const badge = await screen.findByTestId('news2-badge');
-    expect(badge).toHaveTextContent('NEWS2 6');
-    expect(badge).toHaveTextContent('urgent doctor review');
+    // The screen now renders the design system's `EwsBadge` (docs/06 §5.2 #5)
+    // rather than a local chip, so the query is by role and the assertion covers
+    // the part §5.2 makes non-optional: the score is never shown without the
+    // action it obliges.
+    const badge = await screen.findByRole('group', { name: /NEWS2 6/ });
+    expect(badge).toHaveTextContent('NEWS2');
+    expect(badge).toHaveTextContent('6');
+    expect(badge).toHaveAccessibleName(/medium risk/);
+    expect(badge).toHaveAccessibleName(/Urgent review by a clinician competent in acute illness/);
   });
 });
 

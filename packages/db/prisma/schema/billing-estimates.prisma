@@ -1,0 +1,387 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// RC-008 — cost estimator (schema `billing`)
+//
+// `phase-05` §5.7, exit gate 8. NABH cost-transparency requirement.
+//
+//   est_templates            a reusable line set per procedure
+//   est_template_lines       what that procedure normally involves
+//   est_estimates            the quote, immutable once issued
+//   est_estimate_lines       what it is made of, and how sure each line is
+//   est_estimate_scenarios   the same procedure priced by room class
+//   est_estimate_events      issued, shared, viewed, accepted, converted
+//   est_variance_samples     one row per estimate that became an admission
+//   est_variance_summaries   what the samples have taught us, per procedure
+//
+// ── What an estimate actually is ────────────────────────────────────────────
+//
+// It is a number a family plans around. They borrow against it, sell against it,
+// and decide whether to be treated here or somewhere else. When the discharge
+// bill is 40% higher, the money usually is not there — and the argument happens
+// at the counter, with a sick relative in a bed upstairs.
+//
+// So this module's job is not to produce a number. It is to produce a number
+// that can be **held to**:
+//
+// **1. An issued estimate is immutable.** A revision is a new estimate that
+// supersedes the old one, and both survive. "We told them ₹1,80,000" must remain
+// answerable months later, and an answer that could have been edited answers
+// nothing — the same reasoning as `preauth_status_history` in RC-002.
+//
+// **2. The patient's share is its own column.** A family quoted a gross of
+// ₹2,40,000 against an insurer paying ₹1,90,000 does not care about the gross.
+// `patient_share` is what they will actually be asked for, and the constraint
+// keeps it and `payer_share` summing to the total, so the two numbers can never
+// tell different stories.
+//
+// **3. Every estimate that becomes an admission is scored.** `est_variance_samples`
+// records estimated against actual, and `est_variance_summaries` turns that into
+// what to tell the next family. An estimator nobody measures drifts, and the
+// drift is always in the same direction.
+//
+// ── Room-class scenarios are rows, not a recalculation ──────────────────────
+//
+// "What if we take a general ward bed instead?" is the most common question a
+// family asks, and the answer changes the bed charge, the nursing charge and, in
+// most tariffs, the surgeon's fee band. Precomputing the scenarios at issue means
+// the comparison is part of the quote the family takes home rather than
+// something they have to come back and ask for.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum EstimateStatus {
+  draft
+  issued
+  accepted
+  declined
+  expired
+  converted
+  superseded
+
+  @@schema("billing")
+}
+
+/// How firm a line is. A family reads a total; this is what lets the desk say
+/// which parts of it could move.
+enum EstimateLineConfidence {
+  /// Priced from a published tariff item. This number is the number.
+  firm
+  /// Priced from a package or scheme rate that caps it. Cannot exceed.
+  capped
+  /// A typical quantity for this procedure. The commonest source of variance.
+  indicative
+  /// Included only if it happens — an ICU day, a second unit of blood.
+  contingent
+
+  @@schema("billing")
+}
+
+enum EstimateSource {
+  tariff
+  package
+  scheme
+  template
+  manual
+
+  @@schema("billing")
+}
+
+enum EstimateEventKind {
+  created
+  issued
+  shared
+  viewed
+  accepted
+  declined
+  expired
+  superseded
+  converted
+
+  @@schema("billing")
+}
+
+/// What a procedure normally involves, so the desk is not rebuilding the same
+/// quote from memory each time — and so two desks quote the same procedure the
+/// same way.
+model EstimateTemplate {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  code      String  @db.VarChar(40)
+  name      String  @db.VarChar(200)
+  specialty String? @db.VarChar(120)
+  /// The procedure this quotes, for the variance summary to group by.
+  procedureCode String? @map("procedure_code") @db.VarChar(40)
+
+  /// Days of stay assumed by the indicative lines below.
+  assumedLosDays Int     @default(1) @map("assumed_los_days")
+  notes          String? @db.Text
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  lines     EstimateTemplateLine[]
+  estimates Estimate[]
+
+  @@unique([hospitalId, code])
+  @@index([hospitalId, isActive])
+  @@map("est_templates")
+  @@schema("billing")
+}
+
+model EstimateTemplateLine {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  templateId String @map("template_id") @db.Uuid
+
+  serviceId   String? @map("service_id") @db.Uuid
+  description String  @db.VarChar(300)
+  quantity    Decimal @default(1) @db.Decimal(12, 3)
+  /// Per day of stay rather than per admission — a bed charge, nursing, ICU.
+  perDay      Boolean @default(false) @map("per_day")
+
+  confidence EstimateLineConfidence @default(firm)
+  sortOrder  Int                    @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  template EstimateTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, templateId])
+  @@map("est_template_lines")
+  @@schema("billing")
+}
+
+/// The quote. Immutable from `issued` onward — see the header.
+model Estimate {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  estimateNo String @map("estimate_no") @db.VarChar(40)
+
+  /// Nullable: a walk-in enquiry is quoted before anyone is registered, and
+  /// refusing to quote until then is how a family goes to the hospital that
+  /// would.
+  patientId   String? @map("patient_id") @db.Uuid
+  enquirerName  String? @map("enquirer_name") @db.VarChar(200)
+  enquirerPhone String? @map("enquirer_phone") @db.VarChar(20)
+
+  encounterId String? @map("encounter_id") @db.Uuid
+  templateId  String? @map("template_id") @db.Uuid
+
+  /// The payer context the quote was priced under. All nullable: self-pay.
+  payerId   String? @map("payer_id") @db.Uuid
+  planId    String? @map("plan_id") @db.Uuid
+  schemeId  String? @map("scheme_id") @db.Uuid
+  packageId String? @map("package_id") @db.Uuid
+  /// Which room class this estimate assumes; scenarios price the alternatives.
+  bedClassId String? @map("bed_class_id") @db.Uuid
+
+  procedureCode String? @map("procedure_code") @db.VarChar(40)
+  title         String  @db.VarChar(300)
+  losDays       Int     @default(1) @map("los_days")
+
+  status EstimateStatus @default(draft)
+
+  /// Gross, less discount, is what the episode is expected to cost. The split
+  /// below says who pays which part of it.
+  totalGross    Decimal @default(0) @map("total_gross") @db.Decimal(14, 2)
+  totalDiscount Decimal @default(0) @map("total_discount") @db.Decimal(14, 2)
+  totalPayable  Decimal @default(0) @map("total_payable") @db.Decimal(14, 2)
+
+  /// What the family will actually be asked for. The only number most of them
+  /// read, and the one the constraint protects.
+  patientShare Decimal @default(0) @map("patient_share") @db.Decimal(14, 2)
+  payerShare   Decimal @default(0) @map("payer_share") @db.Decimal(14, 2)
+
+  coPayPct   Decimal @default(0) @map("co_pay_pct") @db.Decimal(5, 2)
+  deductible Decimal @default(0) @db.Decimal(14, 2)
+  currency   String  @default("INR") @db.Char(3)
+
+  /// An estimate with no expiry is a price the hospital is held to for ever.
+  validTill DateTime? @map("valid_till") @db.Date
+
+  issuedAt DateTime? @map("issued_at") @db.Timestamptz(6)
+  issuedBy String?   @map("issued_by") @db.Uuid
+
+  /// A revision supersedes rather than overwrites. Both survive.
+  supersedesId String? @map("supersedes_id") @db.Uuid
+
+  /// Conversion tracking (§5.7). Set when the estimate became an admission.
+  convertedAt          DateTime? @map("converted_at") @db.Timestamptz(6)
+  convertedEncounterId String?   @map("converted_encounter_id") @db.Uuid
+  declineReason        String?   @map("decline_reason") @db.Text
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  template  EstimateTemplate?   @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  lines     EstimateLine[]
+  scenarios EstimateScenario[]
+  events    EstimateEvent[]
+  samples   EstimateVarianceSample[]
+
+  @@unique([hospitalId, estimateNo])
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, procedureCode])
+  @@map("est_estimates")
+  @@schema("billing")
+}
+
+model EstimateLine {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  estimateId String @map("estimate_id") @db.Uuid
+
+  serviceId   String? @map("service_id") @db.Uuid
+  description String  @db.VarChar(300)
+
+  quantity  Decimal @default(1) @db.Decimal(12, 3)
+  unitRate  Decimal @map("unit_rate") @db.Decimal(14, 2)
+  amount    Decimal @db.Decimal(14, 2)
+  discount  Decimal @default(0) @db.Decimal(14, 2)
+
+  confidence EstimateLineConfidence @default(firm)
+  source     EstimateSource         @default(tariff)
+
+  /// Which tariff version priced this. An estimate that cannot say where its
+  /// price came from cannot be defended when the bill differs.
+  tariffVersionId String? @map("tariff_version_id") @db.Uuid
+  taxTreatment    String  @default("exempt") @map("tax_treatment") @db.VarChar(16)
+  gstRate         Decimal @default(0) @map("gst_rate") @db.Decimal(5, 2)
+
+  sortOrder Int @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  estimate Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, estimateId])
+  @@map("est_estimate_lines")
+  @@schema("billing")
+}
+
+/// The same procedure priced in a different room class. See the header for why
+/// these are stored rather than recomputed on demand.
+model EstimateScenario {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  estimateId String @map("estimate_id") @db.Uuid
+
+  bedClassId String? @map("bed_class_id") @db.Uuid
+  label      String  @db.VarChar(120)
+
+  totalPayable Decimal @map("total_payable") @db.Decimal(14, 2)
+  patientShare Decimal @map("patient_share") @db.Decimal(14, 2)
+  /// Signed, against the estimate's own class: negative is cheaper.
+  deltaVsChosen Decimal @default(0) @map("delta_vs_chosen") @db.Decimal(14, 2)
+
+  isChosen Boolean @default(false) @map("is_chosen")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  estimate Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, estimateId])
+  @@map("est_estimate_scenarios")
+  @@schema("billing")
+}
+
+/// Append-only. What was quoted, when, to whom, and what they did about it —
+/// which is both the conversion funnel and the answer to "nobody told us".
+model EstimateEvent {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  estimateId String @map("estimate_id") @db.Uuid
+
+  kind EstimateEventKind
+  /// `whatsapp` | `sms` | `email` | `print` | `portal` | `counter`.
+  channel String? @db.VarChar(24)
+  note    String? @db.Text
+
+  at   DateTime @default(now()) @db.Timestamptz(6)
+  byId String?  @map("by_id") @db.Uuid
+
+  estimate Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, estimateId, at(sort: Desc)])
+  @@map("est_estimate_events")
+  @@schema("billing")
+}
+
+/// One row per estimate that became a real admission with a real bill.
+/// Exit gate 8: this is where estimate-vs-actual lives.
+model EstimateVarianceSample {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  estimateId String @map("estimate_id") @db.Uuid
+
+  procedureCode String? @map("procedure_code") @db.VarChar(40)
+  templateId    String? @map("template_id") @db.Uuid
+  bedClassId    String? @map("bed_class_id") @db.Uuid
+
+  billId String? @map("bill_id") @db.Uuid
+
+  estimatedTotal Decimal @map("estimated_total") @db.Decimal(14, 2)
+  actualTotal    Decimal @map("actual_total") @db.Decimal(14, 2)
+  estimatedPatientShare Decimal @map("estimated_patient_share") @db.Decimal(14, 2)
+  actualPatientShare    Decimal @map("actual_patient_share") @db.Decimal(14, 2)
+
+  /// Signed: positive means the bill exceeded the quote, which is the direction
+  /// that costs a family money they had not planned for.
+  varianceAmount Decimal @map("variance_amount") @db.Decimal(14, 2)
+  variancePct    Decimal @map("variance_pct") @db.Decimal(8, 2)
+
+  estimatedLos Int  @map("estimated_los")
+  actualLos    Int? @map("actual_los")
+
+  /// Free text from whoever reconciled it: "second unit of blood", "converted
+  /// to open". The raw material for improving the template.
+  explanation String? @db.Text
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String?  @map("recorded_by") @db.Uuid
+
+  estimate Estimate @relation(fields: [estimateId], references: [id], onDelete: Restrict)
+
+  @@unique([estimateId])
+  @@index([hospitalId, procedureCode, recordedAt(sort: Desc)])
+  @@map("est_variance_samples")
+  @@schema("billing")
+}
+
+/// What the samples have taught us, per procedure. Refreshed by a job; read by
+/// the estimator so the next quote starts from what actually happened.
+model EstimateVarianceSummary {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  procedureCode String  @map("procedure_code") @db.VarChar(40)
+  bedClassId    String? @map("bed_class_id") @db.Uuid
+
+  sampleCount Int @default(0) @map("sample_count")
+
+  meanVariancePct   Decimal @default(0) @map("mean_variance_pct") @db.Decimal(8, 2)
+  medianVariancePct Decimal @default(0) @map("median_variance_pct") @db.Decimal(8, 2)
+  p90VariancePct    Decimal @default(0) @map("p90_variance_pct") @db.Decimal(8, 2)
+  /// How often the bill came in above the quote at all.
+  overrunRatePct    Decimal @default(0) @map("overrun_rate_pct") @db.Decimal(5, 2)
+
+  windowFrom DateTime @map("window_from") @db.Date
+  windowTo   DateTime @map("window_to") @db.Date
+
+  computedAt DateTime @default(now()) @map("computed_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, procedureCode, bedClassId, windowFrom, windowTo], map: "uq_est_variance_summary")
+  @@index([hospitalId, computedAt(sort: Desc)])
+  @@map("est_variance_summaries")
+  @@schema("billing")
+}

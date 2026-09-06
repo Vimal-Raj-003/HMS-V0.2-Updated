@@ -1,0 +1,308 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// RC-006 — revenue leakage audit (schema `billing`)
+//
+// `phase-05` §5.7, exit gate 9.
+//
+//   leak_rules             which reconciliation runs, at what threshold
+//   leak_scans             one run of them, and what it found
+//   leak_findings          one suspected gap, always a proposal
+//   leak_finding_actions   append-only: who proposed, accepted, dismissed
+//   leak_discharge_checks  the gate before a patient leaves
+//   leak_recoveries        money that actually came back
+//
+// ── The rule that shapes every table here: never auto-post ──────────────────
+//
+// `phase-05` §5.7 is explicit — "Never auto-post — propose to a human." A
+// reconciliation that bills what it thinks it found is a reconciliation that
+// bills a patient for a test that was cancelled, a consumable that was wasted,
+// or a visit the consultant waived. It would be right most of the time, and the
+// times it was wrong would land on families as charges nobody can explain.
+//
+// So a finding is a **proposal**. `leak_findings.status` cannot reach
+// `recovered` without an `accepted` action by a named person first, and the
+// trigger in §B.1 enforces that rather than trusting the service. The audit's
+// output is a worklist, not a journal entry.
+//
+// ── Why the discharge check is its own table ────────────────────────────────
+//
+// Exit gate 9 is "the leakage audit finds a deliberately unbilled test before
+// discharge clearance". Before, not after — a missed charge found the next
+// morning is a phone call to a family who has gone home and a debt they did not
+// agree to. `leak_discharge_checks` is the record that somebody looked, what was
+// open when they did, and — if they cleared it anyway — who and why.
+//
+// ── Findings are idempotent ─────────────────────────────────────────────────
+//
+// A scan runs nightly and again on demand. The partial unique index in §B.3
+// means rescanning the same unbilled test finds the same row rather than
+// producing a second one, so a real gap does not become a pile of duplicates
+// nobody works through.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The built-in reconciliations. Which ones run and at what threshold is
+/// configuration; the joins themselves are code, because a comparison between
+/// two schemas is not something a settings screen can express.
+enum LeakReconciler {
+  /// A delivered order line with no charge against it — the classic missed test.
+  orders_vs_charges
+  /// Drugs handed over the counter and never billed.
+  dispense_vs_charges
+  /// An implant scanned into a patient and not charged. Individually the
+  /// largest leak in most hospitals.
+  consignment_vs_charges
+  /// A discount on a bill with no approved request behind it.
+  discount_without_approval
+
+  @@schema("billing")
+}
+
+enum LeakSeverity {
+  low
+  medium
+  high
+
+  @@schema("billing")
+}
+
+enum LeakScanStatus {
+  running
+  complete
+  failed
+
+  @@schema("billing")
+}
+
+enum LeakFindingStatus {
+  /// Proposed. Nothing has been billed and nothing will be without a person.
+  open
+  /// A human agreed it is a real gap. Still not billed — this is the permission
+  /// to bill, not the billing.
+  accepted
+  /// A human said it is not a gap, and said why.
+  dismissed
+  /// Billed and collected. Requires an `accepted` action first (§B.1).
+  recovered
+  /// The encounter closed and the window to bill it passed.
+  expired
+
+  @@schema("billing")
+}
+
+enum LeakActionKind {
+  proposed
+  accepted
+  dismissed
+  billed
+  recovered
+  reopened
+
+  @@schema("billing")
+}
+
+/// Which reconciliation runs, and how much of a gap is worth somebody's time.
+model LeakRule {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  reconciler LeakReconciler
+  name       String         @db.VarChar(200)
+
+  /// Below this the finding is not raised at all. A ₹5 gap costs more to work
+  /// than it recovers, and a worklist full of them is a worklist nobody opens.
+  minGapAmount Decimal      @default(0) @map("min_gap_amount") @db.Decimal(14, 2)
+  severity     LeakSeverity @default(medium)
+
+  /// How far back a scan looks when no explicit window is given.
+  lookbackDays Int @default(30) @map("lookback_days")
+
+  isActive Boolean @default(true) @map("is_active")
+  notes    String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  findings LeakFinding[]
+
+  @@unique([hospitalId, reconciler])
+  @@index([hospitalId, isActive])
+  @@map("leak_rules")
+  @@schema("billing")
+}
+
+model LeakScan {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  /// `nightly` | `on_demand` | `pre_discharge`. A pre-discharge scan is narrow
+  /// and synchronous; the nightly one is broad.
+  trigger String @default("on_demand") @db.VarChar(24)
+
+  /// Narrowed to one encounter for a discharge check, null for a sweep.
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  windowFrom DateTime? @map("window_from") @db.Date
+  windowTo   DateTime? @map("window_to") @db.Date
+
+  status LeakScanStatus @default(running)
+
+  rulesRun      Int     @default(0) @map("rules_run")
+  rowsExamined  Int     @default(0) @map("rows_examined")
+  findingsNew   Int     @default(0) @map("findings_new")
+  findingsTotal Int     @default(0) @map("findings_total")
+  gapTotal      Decimal @default(0) @map("gap_total") @db.Decimal(14, 2)
+
+  error String? @db.Text
+
+  startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+  startedBy  String?   @map("started_by") @db.Uuid
+
+  findings LeakFinding[]
+
+  @@index([hospitalId, startedAt(sort: Desc)])
+  @@index([hospitalId, encounterId])
+  @@map("leak_scans")
+  @@schema("billing")
+}
+
+/// One suspected gap. Always a proposal — see the header.
+model LeakFinding {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  scanId String @map("scan_id") @db.Uuid
+  ruleId String @map("rule_id") @db.Uuid
+
+  reconciler LeakReconciler
+  severity   LeakSeverity
+
+  patientId   String? @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+  billId      String? @map("bill_id") @db.Uuid
+
+  /// The row that should have been charged: `clinical.order_item`,
+  /// `pharmacy.dispense`, `inventory.csn_usage`, `billing.bill`.
+  sourceRefType String @map("source_ref_type") @db.VarChar(40)
+  sourceRefId   String @map("source_ref_id") @db.Uuid
+
+  description String  @db.VarChar(400)
+  /// What was delivered, in the words of the record that says so.
+  serviceName String? @map("service_name") @db.VarChar(300)
+
+  expectedAmount Decimal @map("expected_amount") @db.Decimal(14, 2)
+  billedAmount   Decimal @default(0) @map("billed_amount") @db.Decimal(14, 2)
+  gapAmount      Decimal @map("gap_amount") @db.Decimal(14, 2)
+
+  /// When the thing that should have been billed happened. Drives the expiry.
+  occurredAt DateTime? @map("occurred_at") @db.Timestamptz(6)
+
+  status LeakFindingStatus @default(open)
+
+  acceptedBy  String?   @map("accepted_by") @db.Uuid
+  acceptedAt  DateTime? @map("accepted_at") @db.Timestamptz(6)
+  dismissedBy String?   @map("dismissed_by") @db.Uuid
+  dismissedAt DateTime? @map("dismissed_at") @db.Timestamptz(6)
+  /// A dismissal without a reason is indistinguishable from ignoring it.
+  dismissReason String? @map("dismiss_reason") @db.Text
+
+  recoveredAmount Decimal @default(0) @map("recovered_amount") @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  scan       LeakScan             @relation(fields: [scanId], references: [id], onDelete: Restrict)
+  rule       LeakRule             @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  actions    LeakFindingAction[]
+  recoveries LeakRecovery[]
+
+  @@index([hospitalId, status, gapAmount(sort: Desc)])
+  @@index([hospitalId, encounterId, status])
+  @@index([hospitalId, scanId])
+  @@map("leak_findings")
+  @@schema("billing")
+}
+
+/// Append-only. Who proposed it, who agreed, who said no and why.
+///
+/// This is what makes "never auto-post" checkable rather than asserted: an
+/// audit can read the trail and see a human between every finding and every
+/// rupee that was billed because of it.
+model LeakFindingAction {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  findingId  String @map("finding_id") @db.Uuid
+
+  kind   LeakActionKind
+  reason String?        @db.Text
+  /// Set on `billed` / `recovered`: the document the money went onto.
+  billId String?        @map("bill_id") @db.Uuid
+  amount Decimal?       @db.Decimal(14, 2)
+
+  at   DateTime @default(now()) @db.Timestamptz(6)
+  byId String?  @map("by_id") @db.Uuid
+
+  finding LeakFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, findingId, at(sort: Desc)])
+  @@map("leak_finding_actions")
+  @@schema("billing")
+}
+
+/// The gate before a patient leaves. Exit gate 9.
+model LeakDischargeCheck {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  encounterId String  @map("encounter_id") @db.Uuid
+  patientId   String? @map("patient_id") @db.Uuid
+  scanId      String? @map("scan_id") @db.Uuid
+
+  openFindings Int     @default(0) @map("open_findings")
+  gapTotal     Decimal @default(0) @map("gap_total") @db.Decimal(14, 2)
+
+  /// True only when nothing is outstanding, or when somebody overrode it and
+  /// said why.
+  cleared      Boolean   @default(false)
+  clearedAt    DateTime? @map("cleared_at") @db.Timestamptz(6)
+  clearedBy    String?   @map("cleared_by") @db.Uuid
+  /// Set when a check was cleared with findings still open. The hospital is
+  /// choosing to let the money go; that is a decision with a name on it.
+  overrideReason String? @map("override_reason") @db.Text
+
+  checkedAt DateTime @default(now()) @map("checked_at") @db.Timestamptz(6)
+  checkedBy String?  @map("checked_by") @db.Uuid
+
+  @@index([hospitalId, encounterId, checkedAt(sort: Desc)])
+  @@index([hospitalId, cleared, checkedAt(sort: Desc)])
+  @@map("leak_discharge_checks")
+  @@schema("billing")
+}
+
+/// Money that actually came back. The denominator of "was this worth running".
+model LeakRecovery {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  findingId  String @map("finding_id") @db.Uuid
+
+  billId String? @map("bill_id") @db.Uuid
+  amount Decimal @db.Decimal(14, 2)
+  /// `billed_to_patient` | `billed_to_payer` | `absorbed` | `written_off`.
+  route  String  @default("billed_to_patient") @db.VarChar(32)
+  note   String? @db.Text
+
+  recoveredAt DateTime @default(now()) @map("recovered_at") @db.Timestamptz(6)
+  recoveredBy String?  @map("recovered_by") @db.Uuid
+
+  finding LeakFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, recoveredAt(sort: Desc)])
+  @@index([hospitalId, findingId])
+  @@map("leak_recoveries")
+  @@schema("billing")
+}

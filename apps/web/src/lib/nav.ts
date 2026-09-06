@@ -3,6 +3,7 @@ import { ADMIN_SCREENS } from '@/features/admin/screens';
 import { DIAGNOSTICS_SCREENS } from '@/features/diagnostics/screens';
 import { INVENTORY_SCREENS } from '@/features/inventory/screens';
 import { PHARMACY_SCREENS } from '@/features/pharmacy/screens';
+import { RCM_SCREENS } from '@/features/rcm/screens';
 
 /**
  * The Phase-0 navigation.
@@ -88,6 +89,21 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
     label: 'Stores & purchase',
     href: '/inventory',
     children: INVENTORY_SCREENS.map((screen) => ({
+      key: screen.key,
+      label: screen.label,
+      href: screen.href,
+      permission: screen.permission,
+    })),
+  },
+  /**
+   * Phase 5. Pricing sits above administration and below the operational
+   * consoles: a biller reaches it several times a day, an administrator rarely.
+   */
+  {
+    key: 'rcm',
+    label: 'Revenue cycle',
+    href: '/rcm/billing',
+    children: RCM_SCREENS.map((screen) => ({
       key: screen.key,
       label: screen.label,
       href: screen.href,

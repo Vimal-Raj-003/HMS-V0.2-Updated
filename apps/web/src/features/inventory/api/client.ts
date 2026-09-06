@@ -7,8 +7,15 @@ import type {
   BatchTraceView,
   CaptureInvoiceRequest,
   ComparativeView,
+  ConsignmentStockRow,
+  CostCentreConsumptionRow,
+  CostCentreView,
   CountLinesRequest,
   CreateAdjustmentRequest,
+  CreateConsignmentAgreementRequest,
+  CreateConsignmentReconciliationRequest,
+  CreateConsignmentReturnRequest,
+  CreateCostCentreRequest,
   CreateCountPlanRequest,
   CreateGrnRequest,
   CreateIssueRequest,
@@ -27,7 +34,11 @@ import type {
   RateContractView,
   ReceiveIssueRequest,
   ReceiveLinesRequest,
+  RecordConsignmentUsageRequest,
+  RecordConsumptionRequest,
+  ReverseRequest,
   ScanResolution,
+  SignReconciliationRequest,
   StockBalanceView,
   StoreView,
   SubstituteView,
@@ -824,4 +835,222 @@ export async function listRateContracts(
   options: Signal = {},
 ): Promise<{ readonly items: readonly RateContractView[] }> {
   return request(`${V1}/vendors/${vendorId}/rate-contracts`, withSignal(options));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// NC-007 §3 — consignment
+//
+// Every write here is `@Idempotent()` on the API, and one of them matters more
+// than the rest: `recordUsage` is the scan at the operating table, and a retried
+// scan that recorded a second usage would raise a second replenishment order and
+// bill the patient for an implant they have one of. The key is minted once per
+// intent by the caller, not per attempt.
+// ═════════════════════════════════════════════════════════════════════════════
+
+export async function listConsignmentAgreements(
+  filters: { readonly storeId?: string | undefined; readonly cursor?: string | undefined } = {},
+  options: Signal = {},
+): Promise<Page<DocumentView>> {
+  return request(
+    `${V1}/inventory/consignment/agreements${queryString({
+      storeId: filters.storeId,
+      cursor: filters.cursor,
+      limit: PAGE_LIMIT,
+    })}`,
+    withSignal(options),
+  );
+}
+
+export async function getConsignmentAgreement(id: string, options: Signal = {}): Promise<DocumentView> {
+  return request(`${V1}/inventory/consignment/agreements/${id}`, withSignal(options));
+}
+
+export async function createConsignmentAgreement(
+  body: CreateConsignmentAgreementRequest,
+  idempotencyKey: string = newIdempotencyKey(),
+): Promise<DocumentView> {
+  return request(`${V1}/inventory/consignment/agreements`, {
+    method: 'POST',
+    body,
+    idempotencyKey,
+  });
+}
+
+export async function approveConsignmentAgreement(
+  id: string,
+  idempotencyKey: string = newIdempotencyKey(),
+): Promise<DocumentView> {
+  return request(`${V1}/inventory/consignment/agreements/${id}/approve`, {
+    method: 'POST',
+    body: {},
+    idempotencyKey,
+  });
+}
+
+/** Stock standing on our shelves that belongs to the vendor until it is used. */
+export async function listConsignmentStock(
+  storeId: string | undefined,
+  options: Signal = {},
+): Promise<{ readonly items: readonly ConsignmentStockRow[] }> {
+  return request(`${V1}/inventory/consignment/stock${queryString({ storeId })}`, withSignal(options));
+}
+
+export async function recordConsignmentUsage(
+  body: RecordConsignmentUsageRequest,
+  idempotencyKey: string = newIdempotencyKey(),
+): Promise<DocumentView> {
+  return request(`${V1}/inventory/consignment/usages`, { method: 'POST', body, idempotencyKey });
+}
+
+export async function listConsignmentUsages(
+  filters: {
+    readonly agreementId?: string | undefined;
+    readonly vendorId?: string | undefined;
+    readonly patientId?: string | undefined;
+    readonly status?: string | undefined;
+    readonly cursor?: string | undefined;
+  } = {},
+  options: Signal = {},
+): Promise<Page<DocumentView>> {
+  return request(
+    `${V1}/inventory/consignment/usages${queryString({
+      agreementId: filters.agreementId,
+      vendorId: filters.vendorId,
+      patientId: filters.patientId,
+      status: filters.status,
+      cursor: filters.cursor,
+      limit: PAGE_LIMIT,
+    })}`,
+    withSignal(options),
+  );
+}
+
+export async function getConsignmentUsage(id: string, options: Signal = {}): Promise<DocumentView> {
+  return request(`${V1}/inventory/consignment/usages/${id}`, withSignal(options));
+}
+
+/** Never an edit: the ledger half is a compensating entry (NC-007 §5). */
+export async function reverseConsignmentUsage(
+  id: string,
+  body: ReverseRequest,
+  idempotencyKey: string = newIdempotencyKey(),
+): Promise<DocumentView> {
+  return request(`${V1}/inventory/consignment/usages/${id}/reverse`, {
+    method: 'POST',
+    body,
+    idempotencyKey,
+  });
+}
+
+export async function createConsignmentReturn(
+  body: CreateConsignmentReturnRequest,
+  idempotencyKey: string = newIdempotencyKey(),
+): Promise<DocumentView> {
+  return request(`${V1}/inventory/consignment/returns`, { method: 'POST', body, idempotencyKey });
+}
+
+export async function createConsignmentReconciliation(
+  body: CreateConsignmentReconciliationRequest,
+  idempotencyKey: string = newIdempotencyKey(),
+): Promise<DocumentView> {
+  return request(`${V1}/inventory/consignment/reconciliations`, {
+    method: 'POST',
+    body,
+    idempotencyKey,
+  });
+}
+
+export async function getConsignmentReconciliation(id: string, options: Signal = {}): Promise<DocumentView> {
+  return request(`${V1}/inventory/consignment/reconciliations/${id}`, withSignal(options));
+}
+
+export async function signConsignmentReconciliation(
+  id: string,
+  body: SignReconciliationRequest,
+  idempotencyKey: string = newIdempotencyKey(),
+): Promise<DocumentView> {
+  return request(`${V1}/inventory/consignment/reconciliations/${id}/sign`, {
+    method: 'POST',
+    body,
+    idempotencyKey,
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// NC-008 §3 — consumption entry and cost centres
+// ═════════════════════════════════════════════════════════════════════════════
+
+export async function recordConsumption(
+  body: RecordConsumptionRequest,
+  idempotencyKey: string = newIdempotencyKey(),
+): Promise<DocumentView> {
+  return request(`${V1}/inventory/consumption`, { method: 'POST', body, idempotencyKey });
+}
+
+export async function listConsumption(
+  filters: {
+    readonly storeId?: string | undefined;
+    readonly costCentreId?: string | undefined;
+    readonly patientId?: string | undefined;
+    readonly entryType?: string | undefined;
+    readonly cursor?: string | undefined;
+  } = {},
+  options: Signal = {},
+): Promise<Page<DocumentView>> {
+  return request(
+    `${V1}/inventory/consumption${queryString({
+      storeId: filters.storeId,
+      costCentreId: filters.costCentreId,
+      patientId: filters.patientId,
+      entryType: filters.entryType,
+      cursor: filters.cursor,
+      limit: PAGE_LIMIT,
+    })}`,
+    withSignal(options),
+  );
+}
+
+export async function getConsumption(id: string, options: Signal = {}): Promise<DocumentView> {
+  return request(`${V1}/inventory/consumption/${id}`, withSignal(options));
+}
+
+export async function reverseConsumption(
+  id: string,
+  body: ReverseRequest,
+  idempotencyKey: string = newIdempotencyKey(),
+): Promise<DocumentView> {
+  return request(`${V1}/inventory/consumption/${id}/reverse`, {
+    method: 'POST',
+    body,
+    idempotencyKey,
+  });
+}
+
+export async function listCostCentres(
+  filters: { readonly centreType?: string | undefined; readonly cursor?: string | undefined } = {},
+  options: Signal = {},
+): Promise<Page<CostCentreView>> {
+  return request(
+    `${V1}/finance/cost-centres${queryString({
+      centreType: filters.centreType,
+      cursor: filters.cursor,
+      limit: PAGE_LIMIT,
+    })}`,
+    withSignal(options),
+  );
+}
+
+/** `period` is `YYYY-MM`; the API rejects anything else with a 400 that says so. */
+export async function listCostCentreConsumption(
+  period: string,
+  options: Signal = {},
+): Promise<{ readonly items: readonly CostCentreConsumptionRow[] }> {
+  return request(`${V1}/finance/cost-centres/consumption${queryString({ period })}`, withSignal(options));
+}
+
+export async function createCostCentre(
+  body: CreateCostCentreRequest,
+  idempotencyKey: string = newIdempotencyKey(),
+): Promise<CostCentreView> {
+  return request(`${V1}/finance/cost-centres`, { method: 'POST', body, idempotencyKey });
 }

@@ -31,8 +31,12 @@ describe('event registry', () => {
   });
 
   it('rejects an unregistered type with an actionable message', () => {
-    expect(() => assertRegisteredEvent('bill.finalized')).toThrow(
-      /Unregistered event type "bill\.finalized"/,
+    // Deliberately a type no phase will ever register. This assertion used
+    // `bill.finalized` until Phase 5 registered it for real (OP-005) — a
+    // placeholder that becomes a genuine event turns the test green for the
+    // wrong reason, so the fixture is now nonsense by construction.
+    expect(() => assertRegisteredEvent('never.going.to.exist')).toThrow(
+      /Unregistered event type "never\.going\.to\.exist"/,
     );
     expect(assertRegisteredEvent('admin.user.created').module).toBe('EN-007');
   });

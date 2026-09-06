@@ -5,7 +5,7 @@ node_modules/
 # builds
 dist/
 build/
-.next/
+.next*/
 out/
 generated/
 *.tsbuildinfo
@@ -34,6 +34,12 @@ apps/web/lighthouse-report/
 coverage/
 playwright-report/
 test-results/
+# Handoff written by apps/web/e2e/stack.mts at run time (origins + hospital id).
+# Untracked but unignored, it dirtied the tree after every e2e run and CI's
+# `prettier --check` glob picked it up.
+apps/web/e2e/.stack.json
+# `.next*/` above already covers the browser suite's `.next-e2e` (D-50) and any
+# other dist directory a dev server is pointed at.
 blob-report/
 .nyc_output/
 

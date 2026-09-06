@@ -1,0 +1,417 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-034 — doctor payouts (schema `billing`)
+//
+// `phase-05` §5.7.
+//
+//   payout_contracts    a doctor's arrangement with the hospital
+//   payout_rules        what they earn, on what, and at what rate
+//   payout_slabs        tiered shares within a rule
+//   payout_periods      a month
+//   payout_statements   one doctor's earnings for one month
+//   payout_lines        one earning, traced to something they *performed*
+//   payout_tds_entries  section 194J, and what happens with no PAN
+//   payout_disputes     "that consultation was mine" — and its resolution
+//
+// ── The NMC anti-kickback guard is structural, not a validation ─────────────
+//
+// §5.7 asks that "no per-referral payment to registered practitioners is
+// representable in the schema". Representable is a strong word and it is meant
+// literally: this is not a rule a service checks, it is a shape the database
+// does not have.
+//
+// Three things together make it true:
+//
+// **1. There is no referral basis.** `PayoutBasis` has four members —
+// percent of net, flat per service, per session, monthly retainer. "Per
+// referral" is not one of them and cannot be written.
+//
+// **2. There is no referral source.** `PayoutSourceType` names the things a
+// doctor can be paid for: a bill item, a procedure, a session, a retainer
+// period. A referral is not among them.
+//
+// **3. An earning must trace to something the earner performed.** This is the
+// one that matters, because the other two only stop somebody being honest about
+// it. `billing.bill_items` records `performing_doctor_id` and
+// `referring_doctor_id` separately, and the trigger in the migration's §B.1
+// refuses a payout line whose bill item names the statement's doctor as the
+// *referrer* and somebody else as the performer. That is the kickback, however
+// it is labelled: money to the doctor who sent the patient, for work another
+// doctor did.
+//
+// Indian Medical Council (Professional Conduct) Regulations 6.4 and the NMC's
+// 2023 Ethics regulations both prohibit it, and the reason is not paperwork: a
+// physician paid per referral has a financial interest in sending patients for
+// investigations they may not need.
+//
+// ── TDS is a running total, not a per-payment rate ──────────────────────────
+//
+// Section 194J deducts at 10% on professional fees, but the threshold is
+// annual (₹30,000 per FY per payee) and the rate jumps to 20% where no PAN is on
+// record (section 206AA). Both need the year to date, so `payout_tds_entries`
+// carries the cumulative figure rather than recomputing it from a sum every
+// month and drifting.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// How a doctor is engaged. What they can be paid *for* follows from this.
+enum PayoutModel {
+  /// A fixed monthly amount regardless of volume.
+  retainer
+  /// A share of what the hospital collected for work they performed.
+  fee_share
+  /// Paid per clinic session attended.
+  visiting_session
+  /// Salaried; payouts are incentive only, if any.
+  salaried
+
+  @@map("PayoutModel")
+  @@schema("billing")
+}
+
+/// What an earning is calculated from.
+///
+/// There is deliberately no `per_referral`. See the header — this enum is one
+/// of the three things that make a referral commission unrepresentable.
+enum PayoutBasis {
+  /// A percentage of the net collected on a service they performed.
+  percent_of_net
+  /// A fixed amount per service they performed.
+  flat_per_service
+  /// A fixed amount per clinic session attended.
+  per_session
+  /// The monthly retainer, independent of volume.
+  monthly_retainer
+
+  @@map("PayoutBasis")
+  @@schema("billing")
+}
+
+/// What a payout line points at.
+///
+/// Also deliberately without a referral member. Everything here is something the
+/// earning doctor did.
+enum PayoutSourceType {
+  bill_item
+  procedure
+  session
+  retainer
+
+  @@map("PayoutSourceType")
+  @@schema("billing")
+}
+
+enum PayoutPeriodStatus {
+  open
+  computing
+  computed
+  approved
+  paid
+  closed
+
+  @@schema("billing")
+}
+
+enum PayoutStatementStatus {
+  draft
+  computed
+  disputed
+  approved
+  paid
+  cancelled
+
+  @@schema("billing")
+}
+
+enum PayoutDisputeStatus {
+  open
+  upheld
+  rejected
+  withdrawn
+
+  @@schema("billing")
+}
+
+/// A doctor's arrangement with the hospital, effective-dated.
+model PayoutContract {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  doctorId String @map("doctor_id") @db.Uuid
+  /// NMC / state council registration. Required, because the anti-kickback rule
+  /// is specifically about *registered practitioners*.
+  registrationNo String? @map("registration_no") @db.VarChar(64)
+
+  model PayoutModel
+
+  /// Set only for `retainer` and `salaried`.
+  monthlyRetainer Decimal? @map("monthly_retainer") @db.Decimal(14, 2)
+  sessionRate     Decimal? @map("session_rate") @db.Decimal(14, 2)
+
+  /// Section 194J. `pan_on_record` false means 20% under section 206AA.
+  panOnRecord Boolean  @default(false) @map("pan_on_record")
+  tdsRatePct  Decimal  @default(10) @map("tds_rate_pct") @db.Decimal(5, 2)
+  /// A doctor with a lower-deduction certificate under section 197.
+  tdsExemptionRef String? @map("tds_exemption_ref") @db.VarChar(64)
+
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  isActive      Boolean   @default(true) @map("is_active")
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  rules      PayoutRule[]
+  statements PayoutStatement[]
+
+  @@index([hospitalId, doctorId, isActive])
+  @@index([hospitalId, branchId, effectiveFrom(sort: Desc)])
+  @@map("payout_contracts")
+  @@schema("billing")
+}
+
+/// What the doctor earns, on what, at what rate.
+model PayoutRule {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+
+  name  String      @db.VarChar(200)
+  basis PayoutBasis
+
+  /// Scope. All null means "everything this doctor performs".
+  serviceId    String? @map("service_id") @db.Uuid
+  departmentId String? @map("department_id") @db.Uuid
+  /// Different share for insurance work than for self-pay is normal and legal.
+  payerType    String? @map("payer_type") @db.VarChar(24)
+  itemType     String? @map("item_type") @db.VarChar(24)
+
+  /// For `percent_of_net`.
+  sharePct Decimal? @map("share_pct") @db.Decimal(5, 2)
+  /// For `flat_per_service` and `per_session`.
+  flatAmount Decimal? @map("flat_amount") @db.Decimal(14, 2)
+
+  /// Higher number wins where two rules both match.
+  priority Int @default(0)
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  contract PayoutContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  slabs    PayoutSlab[]
+  lines    PayoutLine[]
+
+  @@index([hospitalId, contractId, isActive])
+  @@map("payout_rules")
+  @@schema("billing")
+}
+
+/// A tiered share: the first ₹2 lakh at 30%, the rest at 40%.
+model PayoutSlab {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  ruleId     String @map("rule_id") @db.Uuid
+
+  fromAmount Decimal  @map("from_amount") @db.Decimal(14, 2)
+  toAmount   Decimal? @map("to_amount") @db.Decimal(14, 2)
+  sharePct   Decimal  @map("share_pct") @db.Decimal(5, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  rule PayoutRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, ruleId])
+  @@map("payout_slabs")
+  @@schema("billing")
+}
+
+model PayoutPeriod {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  label     String   @db.VarChar(24)
+  periodFrom DateTime @map("period_from") @db.Date
+  periodTo   DateTime @map("period_to") @db.Date
+
+  status PayoutPeriodStatus @default(open)
+
+  statementCount Int     @default(0) @map("statement_count")
+  grossTotal     Decimal @default(0) @map("gross_total") @db.Decimal(14, 2)
+  tdsTotal       Decimal @default(0) @map("tds_total") @db.Decimal(14, 2)
+  netTotal       Decimal @default(0) @map("net_total") @db.Decimal(14, 2)
+
+  computedAt DateTime? @map("computed_at") @db.Timestamptz(6)
+  paidAt     DateTime? @map("paid_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  statements PayoutStatement[]
+
+  @@unique([hospitalId, branchId, periodFrom, periodTo])
+  @@index([hospitalId, status, periodFrom(sort: Desc)])
+  @@map("payout_periods")
+  @@schema("billing")
+}
+
+/// One doctor's earnings for one month.
+model PayoutStatement {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  statementNo String @map("statement_no") @db.VarChar(40)
+  periodId    String @map("period_id") @db.Uuid
+  contractId  String @map("contract_id") @db.Uuid
+  doctorId    String @map("doctor_id") @db.Uuid
+
+  status PayoutStatementStatus @default(draft)
+
+  grossEarnings Decimal @default(0) @map("gross_earnings") @db.Decimal(14, 2)
+  /// Advances, equipment share, anything agreed in the contract.
+  otherDeductions Decimal @default(0) @map("other_deductions") @db.Decimal(14, 2)
+  tdsAmount     Decimal @default(0) @map("tds_amount") @db.Decimal(14, 2)
+  netPayable    Decimal @default(0) @map("net_payable") @db.Decimal(14, 2)
+
+  lineCount Int @default(0) @map("line_count")
+
+  /// Maker-checker: the person who ran the calculation is not the person who
+  /// releases the money.
+  preparedBy String?   @map("prepared_by") @db.Uuid
+  preparedAt DateTime? @map("prepared_at") @db.Timestamptz(6)
+  approvedBy String?   @map("approved_by") @db.Uuid
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  paidAt    DateTime? @map("paid_at") @db.Timestamptz(6)
+  paymentRef String?  @map("payment_ref") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  period   PayoutPeriod    @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  contract PayoutContract  @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  lines    PayoutLine[]
+  disputes PayoutDispute[]
+  tds      PayoutTdsEntry[]
+
+  @@unique([hospitalId, statementNo])
+  @@unique([periodId, doctorId], map: "uq_payout_statement_per_doctor_per_period")
+  @@index([hospitalId, doctorId, createdAt(sort: Desc)])
+  @@index([hospitalId, status])
+  @@map("payout_statements")
+  @@schema("billing")
+}
+
+/// One earning, traced to something the doctor performed.
+///
+/// The trigger on this table is the anti-kickback guard. See the header.
+model PayoutLine {
+  id          String @id @db.Uuid
+  hospitalId  String @map("hospital_id") @db.Uuid
+  statementId String @map("statement_id") @db.Uuid
+  ruleId      String @map("rule_id") @db.Uuid
+
+  sourceType  PayoutSourceType @map("source_type")
+  sourceRefId String?          @map("source_ref_id") @db.Uuid
+
+  description String  @db.VarChar(300)
+  serviceName String? @map("service_name") @db.VarChar(300)
+  patientId   String? @map("patient_id") @db.Uuid
+
+  /// What the hospital collected on the underlying service.
+  baseAmount Decimal  @map("base_amount") @db.Decimal(14, 2)
+  sharePct   Decimal? @map("share_pct") @db.Decimal(5, 2)
+  /// What the doctor earns from it.
+  earnedAmount Decimal @map("earned_amount") @db.Decimal(14, 2)
+
+  occurredAt DateTime? @map("occurred_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  statement PayoutStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  rule      PayoutRule      @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+
+  @@unique([statementId, sourceType, sourceRefId], map: "uq_payout_line_per_source")
+  @@index([hospitalId, statementId])
+  @@map("payout_lines")
+  @@schema("billing")
+}
+
+/// Section 194J, tracked cumulatively. See the header for why.
+model PayoutTdsEntry {
+  id          String @id @db.Uuid
+  hospitalId  String @map("hospital_id") @db.Uuid
+  statementId String @map("statement_id") @db.Uuid
+  doctorId    String @map("doctor_id") @db.Uuid
+
+  /// Indian financial year, `2026-27`.
+  financialYear String @map("financial_year") @db.VarChar(9)
+
+  /// This statement's professional fees, and the year's before it.
+  grossThisPeriod  Decimal @map("gross_this_period") @db.Decimal(14, 2)
+  grossYearToDate  Decimal @map("gross_year_to_date") @db.Decimal(14, 2)
+
+  /// ₹30,000 per FY under 194J. Below it, nothing is deducted.
+  thresholdAmount Decimal @default(30000) @map("threshold_amount") @db.Decimal(14, 2)
+  /// 10% normally; 20% under section 206AA where no PAN is on record.
+  rateApplied     Decimal @map("rate_applied") @db.Decimal(5, 2)
+  panOnRecord     Boolean @default(false) @map("pan_on_record")
+
+  deducted Decimal @db.Decimal(14, 2)
+
+  challanNo   String?   @map("challan_no") @db.VarChar(40)
+  depositedAt DateTime? @map("deposited_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  statement PayoutStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@unique([statementId])
+  @@index([hospitalId, doctorId, financialYear])
+  @@map("payout_tds_entries")
+  @@schema("billing")
+}
+
+/// "That consultation was mine." A statement under dispute is not paid.
+model PayoutDispute {
+  id          String @id @db.Uuid
+  hospitalId  String @map("hospital_id") @db.Uuid
+  statementId String @map("statement_id") @db.Uuid
+
+  raisedBy String   @map("raised_by") @db.Uuid
+  raisedAt DateTime @default(now()) @map("raised_at") @db.Timestamptz(6)
+
+  /// `missing_line` | `wrong_rate` | `wrong_patient` | `deduction` | `other`.
+  category String @db.VarChar(24)
+  claim    String @db.Text
+  /// What the doctor says they are owed, where they have put a number on it.
+  claimedAmount Decimal? @map("claimed_amount") @db.Decimal(14, 2)
+
+  status PayoutDisputeStatus @default(open)
+
+  resolution   String?   @db.Text
+  adjustment   Decimal?  @db.Decimal(14, 2)
+  resolvedBy   String?   @map("resolved_by") @db.Uuid
+  resolvedAt   DateTime? @map("resolved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  statement PayoutStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, status, raisedAt(sort: Desc)])
+  @@index([hospitalId, statementId])
+  @@map("payout_disputes")
+  @@schema("billing")
+}

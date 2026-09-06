@@ -1,0 +1,452 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-023 — packages (schema `billing`, prefix `package_`)
+//
+// `phase-05` §5.4. A package is a promise: "this operation costs ₹85,000, and
+// here is what that includes." Everything in this module exists to keep that
+// promise checkable — what was included, what was used, what went over, and who
+// agreed to bill the difference.
+//
+// ── The three states a package moves through ────────────────────────────────
+//
+//   package_versions      what was promised, frozen at a version
+//   package_bookings      a patient took the promise, and paid an advance
+//   package_activations   the promise is being consumed, and the caps are ticking
+//
+// Keeping them apart matters. A booking that never activates is a lost sale; an
+// activation with no booking is a walk-in converted at the counter. Collapsing
+// the two would make both invisible.
+//
+// ── Why every charge is evaluated, and the decision stored ──────────────────
+//
+// `package_charge_evaluations` records what the package did to each bill line:
+// covered, capped, excluded, or over the cap and awaiting somebody's approval.
+// Without it, "why is this on the patient's bill when they bought a package?" has
+// no answer, and that question is asked at the discharge counter with the family
+// present. `phase-05` §5.4 wants variance tracking with alerts at 80 % and
+// 100 %; that is only possible if consumption is measured line by line.
+//
+// ── Excess is never billed silently ─────────────────────────────────────────
+//
+// §5.4: "excess-charge approval before billing beyond the package". A line over
+// the cap becomes a `package_variance_request` and waits. The alternative — bill
+// it and let the family discover it — is the single most common complaint
+// against package pricing in Indian hospitals, and it is a design choice rather
+// than an accident.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PackageKind {
+  surgical
+  maternity
+  health_checkup
+  dialysis
+  chemotherapy
+  physiotherapy
+  diagnostic
+  wellness
+  other
+
+  @@schema("billing")
+}
+
+enum PackageScope {
+  op
+  ip
+  day_care
+  any
+
+  @@schema("billing")
+}
+
+enum PackageStatus {
+  draft
+  pending_approval
+  active
+  retired
+
+  @@schema("billing")
+}
+
+enum PackageBookingStatus {
+  booked
+  confirmed
+  activated
+  completed
+  cancelled
+  expired
+  /// Converted to itemised billing — the package was abandoned mid-course.
+  converted
+
+  @@schema("billing")
+}
+
+enum PackageActivationStatus {
+  active
+  closed
+  converted_itemised
+
+  @@schema("billing")
+}
+
+/// What the package did to one bill line. `excess_pending` is the state that
+/// holds a charge off the patient's bill until somebody decides.
+enum PackageChargeDecision {
+  covered
+  capped
+  excluded
+  excess_pending
+  excess_approved
+  excess_absorbed
+
+  @@schema("billing")
+}
+
+enum PackageVarianceReason {
+  complication
+  patient_choice
+  upgrade
+  clinical_need
+  error
+  other
+
+  @@schema("billing")
+}
+
+enum PackageVarianceStatus {
+  pending
+  approved
+  rejected
+  absorbed
+
+  @@schema("billing")
+}
+
+/// Who pays for the overrun.
+enum PackageBillAction {
+  bill_patient
+  bill_insurer
+  absorb
+  convert
+
+  @@schema("billing")
+}
+
+model Package {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  /// Null = every branch.
+  branchId   String? @map("branch_id") @db.Uuid
+
+  code String @db.VarChar(32)
+  name String @db.VarChar(200)
+  kind PackageKind
+  scope PackageScope @default(any)
+
+  departmentId String? @map("department_id") @db.Uuid
+  specialty    String? @db.VarChar(64)
+
+  /// Eligibility. A maternity package for a male patient is a data-entry error
+  /// the booking path refuses rather than a filter somebody remembers to apply.
+  gender String? @db.VarChar(16)
+  ageMin Int?    @map("age_min")
+  ageMax Int?    @map("age_max")
+
+  losDaysIncluded Int?    @map("los_days_included")
+  roomClassId     String? @map("room_class_id") @db.Uuid
+  validityDays    Int     @default(365) @map("validity_days")
+  /// Sessions or cycles, for a package consumed over time.
+  maxUnits        Int?    @map("max_units")
+
+  description String? @db.Text
+  terms       String? @db.Text
+  /// Shown on the public rate card and the website.
+  isPublic    Boolean @default(false) @map("is_public")
+
+  status         PackageStatus @default(draft)
+  currentVersion Int           @default(0) @map("current_version")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  versions    PackageVersion[]
+  schemeMaps  PackageSchemeMap[]
+
+  @@unique([hospitalId, code])
+  @@index([hospitalId, status, kind])
+  @@map("packages")
+  @@schema("billing")
+}
+
+/// What was promised, frozen.
+///
+/// A booking points at a *version*, never at the package, for the same reason a
+/// bill line points at a tariff version: the promise a patient bought must stay
+/// readable after the package is repriced.
+model PackageVersion {
+  id        String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  packageId String @map("package_id") @db.Uuid
+  version   Int
+
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  /// [{type, ref_id, qty, cap_amount, cap_qty, notes}]
+  components Json @default("[]")
+  exclusions Json @default("[]")
+  /// beyond_cap, extra_day_charge, upgrade_rule, preop_window_days,
+  /// post_followups, complication_policy.
+  rules      Json @default("{}")
+
+  /// What the same care would cost line by line. The difference is the saving
+  /// the patient is being offered, and it is stored rather than recomputed so a
+  /// historical quote can be defended.
+  aLaCarteTotal Decimal? @map("a_la_carte_total") @db.Decimal(14, 2)
+  costBasis     Decimal? @map("cost_basis") @db.Decimal(14, 2)
+  gstSplit      Json     @default("{}") @map("gst_split")
+
+  approvedBy String?   @map("approved_by") @db.Uuid
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(6)
+  sha256     String?   @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  packageRef  Package           @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  prices      PackagePrice[]
+  bookings    PackageBooking[]
+  activations PackageActivation[]
+
+  @@unique([packageId, version])
+  @@index([hospitalId, packageId, effectiveFrom(sort: Desc)])
+  @@map("package_versions")
+  @@schema("billing")
+}
+
+/// One price per payer plan. Linked to RC-003 so the same authority prices a
+/// package and the services inside it.
+model PackagePrice {
+  id               String @id @db.Uuid
+  hospitalId       String @map("hospital_id") @db.Uuid
+  packageVersionId String @map("package_version_id") @db.Uuid
+
+  /// RC-003's `tariff_plans`. No FK: a scheme plan may not exist yet.
+  payerPlanId String? @map("payer_plan_id") @db.Uuid
+
+  price    Decimal @db.Decimal(14, 2)
+  currency String  @default("INR") @db.Char(3)
+  savings  Decimal? @db.Decimal(14, 2)
+
+  schemeCode    String? @map("scheme_code") @db.VarChar(64)
+  dynamicRuleId String? @map("dynamic_rule_id") @db.Uuid
+
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  packageVersion PackageVersion @relation(fields: [packageVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([packageVersionId, payerPlanId, effectiveFrom])
+  @@index([hospitalId, packageVersionId])
+  @@map("package_prices")
+  @@schema("billing")
+}
+
+model PackageSchemeMap {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  packageId  String @map("package_id") @db.Uuid
+
+  payerId      String? @map("payer_id") @db.Uuid
+  scheme       String  @db.VarChar(24)
+  externalCode String  @map("external_code") @db.VarChar(64)
+  externalRate Decimal? @map("external_rate") @db.Decimal(14, 2)
+  inclusionsNote String? @map("inclusions_note") @db.Text
+
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  packageRef Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@unique([packageId, scheme, externalCode, effectiveFrom])
+  @@index([hospitalId, scheme])
+  @@map("package_scheme_maps")
+  @@schema("billing")
+}
+
+/// A patient took the promise.
+model PackageBooking {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  bookingNo  String @map("booking_no") @db.VarChar(40)
+
+  patientId        String @map("patient_id") @db.Uuid
+  packageVersionId String @map("package_version_id") @db.Uuid
+  payerPlanId      String? @map("payer_plan_id") @db.Uuid
+  doctorId         String? @map("doctor_id") @db.Uuid
+
+  plannedDate DateTime? @map("planned_date") @db.Date
+  channel     String    @default("counter") @db.VarChar(24)
+  estimateId  String?   @map("estimate_id") @db.Uuid
+
+  advanceRequired  Decimal  @default(0) @map("advance_required") @db.Decimal(14, 2)
+  advancePaid      Decimal  @default(0) @map("advance_paid") @db.Decimal(14, 2)
+  advanceReceiptIds String[] @default([]) @map("advance_receipt_ids") @db.Uuid
+
+  status     PackageBookingStatus @default(booked)
+  validUntil DateTime?            @map("valid_until") @db.Date
+
+  instructionsSentAt DateTime? @map("instructions_sent_at") @db.Timestamptz(6)
+  preauthId          String?   @map("preauth_id") @db.Uuid
+  cancelReason       String?   @map("cancel_reason") @db.Text
+  refundId           String?   @map("refund_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  packageVersion PackageVersion      @relation(fields: [packageVersionId], references: [id], onDelete: Restrict)
+  activations    PackageActivation[]
+
+  @@unique([hospitalId, bookingNo])
+  @@index([hospitalId, status, plannedDate])
+  @@index([hospitalId, patientId])
+  @@map("package_bookings")
+  @@schema("billing")
+}
+
+/// The promise is being consumed, and the caps are ticking.
+model PackageActivation {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  bookingId  String? @map("booking_id") @db.Uuid
+
+  packageVersionId String @map("package_version_id") @db.Uuid
+  patientId        String @map("patient_id") @db.Uuid
+  encounterId      String? @map("encounter_id") @db.Uuid
+  admissionId      String? @map("admission_id") @db.Uuid
+  daycareId        String? @map("daycare_id") @db.Uuid
+
+  activatedAt DateTime @default(now()) @map("activated_at") @db.Timestamptz(6)
+  activatedBy String   @map("activated_by") @db.Uuid
+  status      PackageActivationStatus @default(active)
+
+  unitsTotal Int @default(1) @map("units_total")
+  unitsUsed  Int @default(0) @map("units_used")
+  /// implant_used, pharmacy_used, days_used — what the 80 % alert watches.
+  capsState  Json @default("{}") @map("caps_state")
+
+  coveredAmount    Decimal @default(0) @map("covered_amount") @db.Decimal(14, 2)
+  excessAmount     Decimal @default(0) @map("excess_amount") @db.Decimal(14, 2)
+  exclusionsAmount Decimal @default(0) @map("exclusions_amount") @db.Decimal(14, 2)
+
+  closedAt        DateTime? @map("closed_at") @db.Timestamptz(6)
+  closureBillId   String?   @map("closure_bill_id") @db.Uuid
+  varianceSummary Json?     @map("variance_summary")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  booking        PackageBooking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  packageVersion PackageVersion  @relation(fields: [packageVersionId], references: [id], onDelete: Restrict)
+
+  evaluations       PackageChargeEvaluation[]
+  varianceRequests  PackageVarianceRequest[]
+  followups         PackageFollowupEntitlement[]
+
+  @@index([hospitalId, status])
+  @@index([hospitalId, admissionId])
+  @@index([hospitalId, encounterId])
+  @@index([hospitalId, patientId])
+  @@map("package_activations")
+  @@schema("billing")
+}
+
+/// What the package did to each bill line, and why.
+///
+/// The answer to "why is this on my bill when I bought a package?", asked at the
+/// discharge counter with the family present. One row per charge, forever.
+model PackageChargeEvaluation {
+  id           String @id @db.Uuid
+  hospitalId   String @map("hospital_id") @db.Uuid
+  activationId String @map("activation_id") @db.Uuid
+
+  /// The `billing.bill_items` row this decision applies to.
+  chargeEventId String? @map("charge_event_id") @db.Uuid
+  serviceId     String? @map("service_id") @db.Uuid
+
+  amount         Decimal @db.Decimal(14, 2)
+  decision       PackageChargeDecision
+  coveredAmount  Decimal @default(0) @map("covered_amount") @db.Decimal(14, 2)
+  patientAmount  Decimal @default(0) @map("patient_amount") @db.Decimal(14, 2)
+  ruleRef        String? @map("rule_ref") @db.VarChar(120)
+  evaluatedAt    DateTime @default(now()) @map("evaluated_at") @db.Timestamptz(6)
+
+  activation PackageActivation @relation(fields: [activationId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, activationId, evaluatedAt(sort: Desc)])
+  @@index([hospitalId, decision])
+  @@map("package_charge_evaluations")
+  @@schema("billing")
+}
+
+/// A charge over the cap, waiting for somebody to decide who pays.
+model PackageVarianceRequest {
+  id           String @id @db.Uuid
+  hospitalId   String @map("hospital_id") @db.Uuid
+  activationId String @map("activation_id") @db.Uuid
+
+  itemRef       String? @map("item_ref") @db.Uuid
+  amount        Decimal @db.Decimal(14, 2)
+  reasonCode    PackageVarianceReason @map("reason_code")
+  justification String? @db.Text
+
+  requestedBy   String @map("requested_by") @db.Uuid
+  approverChain Json   @default("[]") @map("approver_chain")
+
+  status     PackageVarianceStatus @default(pending)
+  decisionBy String?   @map("decision_by") @db.Uuid
+  decidedAt  DateTime? @map("decided_at") @db.Timestamptz(6)
+  billAction PackageBillAction? @map("bill_action")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  activation PackageActivation @relation(fields: [activationId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@map("package_variance_requests")
+  @@schema("billing")
+}
+
+/// Post-operative follow-ups the package includes. Counted down, so a patient
+/// turned away for a visit they already paid for is a bug rather than a policy.
+model PackageFollowupEntitlement {
+  id           String @id @db.Uuid
+  hospitalId   String @map("hospital_id") @db.Uuid
+  activationId String @map("activation_id") @db.Uuid
+
+  kind       String   @db.VarChar(48)
+  countTotal Int      @map("count_total")
+  countUsed  Int      @default(0) @map("count_used")
+  validUntil DateTime? @map("valid_until") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  activation PackageActivation @relation(fields: [activationId], references: [id], onDelete: Cascade)
+
+  @@unique([activationId, kind])
+  @@index([hospitalId, validUntil])
+  @@map("package_followup_entitlements")
+  @@schema("billing")
+}

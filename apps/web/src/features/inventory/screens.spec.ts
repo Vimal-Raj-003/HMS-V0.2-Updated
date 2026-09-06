@@ -27,6 +27,14 @@ describe('the inventory screen catalogue', () => {
     expect(inventoryScreen('inventory-grn').permission).toBe('inventory.grn.list');
     expect(inventoryScreen('inventory-invoices').permission).toBe('inventory.invoice.list');
     expect(inventoryScreen('inventory-vendors').permission).toBe('vendor.master.list');
+    // NC-007 opens on the agreements list; NC-008 on the consumption list. The
+    // cost-centre roll-up on the same screen is a *finance* key, so gating the
+    // screen on it would hide consumption from the storekeeper who records it.
+    expect(inventoryScreen('inventory-consignment').permission).toBe('inventory.consignment.agreement.list');
+    expect(inventoryScreen('inventory-consumption').permission).toBe('inventory.consumption.list');
+    // NC-008's two halves are two screens: the transaction is a stores key, the
+    // roll-up a finance one. One screen carrying both was unreachable by finance.
+    expect(inventoryScreen('inventory-cost-centres').permission).toBe('finance.costcentre.read');
   });
 
   it('explains every denial in plain words', () => {
@@ -53,10 +61,11 @@ describe('the inventory screen catalogue', () => {
     }
   });
 
-  it('groups the screens into the three consoles the nav renders', () => {
+  it('groups the screens into the four consoles the nav renders', () => {
     expect(inventoryScreensInArea('stores')).toHaveLength(2);
     expect(inventoryScreensInArea('movements')).toHaveLength(3);
     expect(inventoryScreensInArea('purchase')).toHaveLength(4);
+    expect(inventoryScreensInArea('consignment')).toHaveLength(3);
   });
 
   it('exports the route list for whoever wires navigation', () => {
@@ -71,6 +80,9 @@ describe('the inventory screen catalogue', () => {
       '/inventory/grn',
       '/inventory/invoices',
       '/inventory/vendors',
+      '/inventory/consignment',
+      '/inventory/consumption',
+      '/inventory/cost-centres',
     ]) {
       expect(INVENTORY_ROUTES).toContain(route);
     }

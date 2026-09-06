@@ -11,6 +11,7 @@
     "./tokens.css": "./src/tokens/index.css",
     "./primitives": "./src/primitives/index.ts",
     "./clinical": "./src/clinical/index.ts",
+    "./stories": "./src/stories/catalogue.ts",
     "./shell": "./src/shell/index.ts",
     "./hooks": "./src/hooks/index.ts",
     "./lib": "./src/lib/index.ts",

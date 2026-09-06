@@ -1,0 +1,643 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// RC-007 — government schemes (schema `billing`)
+//
+// `phase-05` §5.6. PMJAY/Ayushman, CGHS, ECHS, ESIC and state schemes.
+//
+//   scheme_masters              which scheme, whose authority, and how strict
+//   scheme_package_versions     the HBP rate list, effective-dated
+//   scheme_packages             one procedure at one rate, with its implant cap
+//   scheme_beneficiaries        this patient's entitlement under this scheme
+//   scheme_verifications        every check against the authority, append-only
+//   scheme_cases                one scheme's involvement in one episode
+//   scheme_case_packages        what is being claimed, at the rate on the day
+//   scheme_cash_attempts        every refused rupee, append-only
+//   scheme_claims               the claim, its format, and what came back
+//   scheme_claim_lines          what was claimed and what was disallowed
+//   scheme_claim_documents      the checklist a claim cannot be submitted without
+//   scheme_shortfalls           claimed − paid, and who decided to stop chasing it
+//   scheme_reconciliations      the authority's settlement batch
+//
+// ── The one rule this module exists to enforce ──────────────────────────────
+//
+// A scheme beneficiary must not be charged cash. Not "should not" — an empanelled
+// hospital that takes ₹500 from an Ayushman cardholder for a covered admission is
+// in breach of its empanelment, and the patient has no way to know that. So the
+// block is a **database trigger on `billing.payment_lines`**, not a check in a
+// service. Every collection point in this system — the cash counter, the pharmacy
+// window, an IP deposit, an advance, a forex tender — writes a payment line, and
+// that trigger sees all of them. A future module that collects money and forgets
+// this rule is refused by Postgres rather than by code review.
+//
+// Gateway tenders need no equivalent: `billing.PayMethod` has no `cash` member,
+// so a gateway cannot take a note in the first place.
+//
+// ── Why the block is scoped to an open case, not to the person ──────────────
+//
+// The literal reading of §5.6 is "no cash from a scheme beneficiary, anywhere".
+// Applied to the person rather than the episode, that refuses a PMJAY cardholder
+// buying a strip of paracetamol at the retail window — a legal cash sale that has
+// nothing to do with the scheme. Cashiers who meet a rule they know is wrong
+// route around it, and a control that gets routed around protects nobody.
+//
+// So the default scope is `active_case`: from the moment a scheme case opens
+// until it closes, every tender from that patient is cash-free. `scheme_masters`
+// carries the scope per scheme, so a state scheme whose MoU really is absolute
+// can be set to `always` without a migration. See `docs/adr/`.
+//
+// ── Why the rate is snapshotted onto the case ───────────────────────────────
+//
+// The HBP master is revised by the NHA mid-year. A claim is settled at the rate
+// in force on the date of admission, so `scheme_case_packages` copies the rate at
+// selection time. Reading it live would silently re-price a claim already
+// submitted, and the shortfall that produced would look like a deduction by the
+// authority rather than our own bug.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum SchemeType {
+  pmjay
+  cghs
+  echs
+  esic
+  state
+  other
+
+  @@schema("billing")
+}
+
+/// How far the cash block reaches. See the header.
+enum SchemeCashBlockScope {
+  /// Cash-free from the moment a case opens until it closes. The default.
+  active_case
+  /// Cash-free for this patient at all times, case or no case.
+  always
+  /// Advisory only: the attempt is recorded, the tender is allowed.
+  off
+
+  @@schema("billing")
+}
+
+enum SchemeVersionStatus {
+  draft
+  published
+  superseded
+
+  @@schema("billing")
+}
+
+enum SchemeBeneficiaryStatus {
+  unverified
+  verified
+  mismatch
+  expired
+  rejected
+
+  @@schema("billing")
+}
+
+enum SchemeVerificationMethod {
+  portal
+  api
+  biometric
+  otp
+  card
+  manual
+
+  @@schema("billing")
+}
+
+enum SchemeVerificationOutcome {
+  verified
+  not_found
+  mismatch
+  expired
+  exhausted
+  error
+
+  @@schema("billing")
+}
+
+enum SchemeCaseStatus {
+  open
+  preauth_pending
+  approved
+  in_treatment
+  discharged
+  claim_submitted
+  settled
+  rejected
+  closed
+
+  @@schema("billing")
+}
+
+enum SchemeClaimStatus {
+  draft
+  assembled
+  submitted
+  queried
+  approved
+  partially_approved
+  rejected
+  paid
+  closed
+
+  @@schema("billing")
+}
+
+enum SchemeClaimFormat {
+  pmjay_json
+  cghs_pdf
+  echs_xml
+  esic_csv
+  state_csv
+  manual
+
+  @@schema("billing")
+}
+
+enum SchemeShortfallStatus {
+  open
+  appealed
+  recovered
+  written_off
+
+  @@schema("billing")
+}
+
+/// Which scheme, whose authority, and how strict the cash rule is.
+model SchemeMaster {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  code String     @db.VarChar(24)
+  name String     @db.VarChar(160)
+  type SchemeType
+
+  /// NHA, CGHS Bangalore, ECHS Regional Centre, ESIC Sub-Regional Office…
+  authority String? @db.VarChar(160)
+  /// For state schemes: the ISO 3166-2:IN subdivision (`KA`, `TN`…).
+  stateCode String? @map("state_code") @db.VarChar(8)
+  /// Our empanelment id with the authority; printed on every claim.
+  empanelmentNo String? @map("empanelment_no") @db.VarChar(64)
+
+  cashBlockScope SchemeCashBlockScope @default(active_case) @map("cash_block_scope")
+  requiresPreauth Boolean             @default(true) @map("requires_preauth")
+  claimFormat    SchemeClaimFormat    @default(manual) @map("claim_format")
+  /// Days from discharge within which the authority accepts a claim.
+  claimWindowDays Int                 @default(30) @map("claim_window_days")
+
+  isActive      Boolean   @default(true) @map("is_active")
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  versions      SchemePackageVersion[]
+  beneficiaries SchemeBeneficiary[]
+  cases         SchemeCase[]
+  recons        SchemeReconciliation[]
+
+  @@unique([hospitalId, code])
+  @@index([hospitalId, isActive, type])
+  @@map("scheme_masters")
+  @@schema("billing")
+}
+
+/// The HBP rate list as published on a date. Versioned for the same reason
+/// `mdm.tariff_versions` is: a claim is settled at the rate in force then.
+model SchemePackageVersion {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  schemeId   String @map("scheme_id") @db.Uuid
+
+  versionNo Int    @map("version_no")
+  label     String @db.VarChar(120)
+  /// "HBP 2.2", "CGHS 2023 revision" — the authority's own name for it.
+  authorityRef String? @map("authority_ref") @db.VarChar(80)
+
+  status        SchemeVersionStatus @default(draft)
+  effectiveFrom DateTime            @map("effective_from") @db.Date
+  effectiveTo   DateTime?           @map("effective_to") @db.Date
+
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(6)
+  publishedBy String?   @map("published_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  scheme   SchemeMaster    @relation(fields: [schemeId], references: [id], onDelete: Restrict)
+  packages SchemePackage[]
+
+  @@unique([schemeId, versionNo])
+  @@index([hospitalId, schemeId, status])
+  @@map("scheme_package_versions")
+  @@schema("billing")
+}
+
+/// One procedure at one rate. `stratification` holds the authority's own tiers
+/// (city class, hospital grade, ICU vs ward) as published, because they differ
+/// per scheme and inventing a common shape for them would lose information.
+model SchemePackage {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  versionId  String @map("version_id") @db.Uuid
+
+  packageCode String @map("package_code") @db.VarChar(40)
+  name        String @db.VarChar(300)
+  specialty   String? @db.VarChar(120)
+  /// `medical` | `surgical` | `daycare` | `unspecified`.
+  procedureType String @default("unspecified") @map("procedure_type") @db.VarChar(24)
+
+  baseRate       Decimal @map("base_rate") @db.Decimal(14, 2)
+  stratification Json    @default("{}")
+
+  implantAllowed Boolean  @default(false) @map("implant_allowed")
+  implantCap     Decimal? @map("implant_cap") @db.Decimal(14, 2)
+
+  preAuthRequired Boolean @default(true) @map("pre_auth_required")
+  losDays         Int?    @map("los_days")
+  /// The scheme forbids claiming these alongside this package.
+  incompatibleWith String[] @map("incompatible_with")
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  version SchemePackageVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, packageCode])
+  @@index([hospitalId, packageCode])
+  @@index([hospitalId, versionId, isActive])
+  @@map("scheme_packages")
+  @@schema("billing")
+}
+
+/// This patient's entitlement. `memberId` is the card number and is masked on
+/// read by the service — `docs/04` keeps scheme identifiers out of the payloads
+/// a support engineer reads.
+model SchemeBeneficiary {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  schemeId   String @map("scheme_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  memberId   String  @map("member_id") @db.VarChar(64)
+  familyId   String? @map("family_id") @db.VarChar(64)
+  nameOnCard String? @map("name_on_card") @db.VarChar(200)
+  /// `self` | `spouse` | `child` | `parent` | `dependent`.
+  relation   String  @default("self") @db.VarChar(24)
+
+  /// The family floater for the year, and what is left of it.
+  entitlementAmount  Decimal @default(0) @map("entitlement_amount") @db.Decimal(14, 2)
+  entitlementBalance Decimal @default(0) @map("entitlement_balance") @db.Decimal(14, 2)
+
+  validFrom DateTime? @map("valid_from") @db.Date
+  validTill DateTime? @map("valid_till") @db.Date
+
+  status             SchemeBeneficiaryStatus   @default(unverified)
+  verifiedAt         DateTime?                 @map("verified_at") @db.Timestamptz(6)
+  verifiedBy         String?                   @map("verified_by") @db.Uuid
+  verificationMethod SchemeVerificationMethod? @map("verification_method")
+  verificationRef    String?                   @map("verification_ref") @db.VarChar(120)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  scheme        SchemeMaster         @relation(fields: [schemeId], references: [id], onDelete: Restrict)
+  verifications SchemeVerification[]
+  cases         SchemeCase[]
+
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, schemeId, memberId])
+  @@map("scheme_beneficiaries")
+  @@schema("billing")
+}
+
+/// Every check against the authority, append-only. When a claim is rejected for
+/// "beneficiary not eligible", this is the row that says the portal told us
+/// otherwise on the day of admission, and what it said.
+model SchemeVerification {
+  id            String @id @db.Uuid
+  hospitalId    String @map("hospital_id") @db.Uuid
+  beneficiaryId String @map("beneficiary_id") @db.Uuid
+
+  method  SchemeVerificationMethod
+  outcome SchemeVerificationOutcome
+
+  requestRef String? @map("request_ref") @db.VarChar(120)
+  /// The authority's reply, with identifiers redacted before it is stored.
+  response   Json    @default("{}")
+  message    String? @db.Text
+
+  balanceReported Decimal? @map("balance_reported") @db.Decimal(14, 2)
+
+  at   DateTime @default(now()) @db.Timestamptz(6)
+  byId String?  @map("by_id") @db.Uuid
+
+  beneficiary SchemeBeneficiary @relation(fields: [beneficiaryId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, beneficiaryId, at(sort: Desc)])
+  @@map("scheme_verifications")
+  @@schema("billing")
+}
+
+/// One scheme's involvement in one episode. While this is open, the patient
+/// tenders nothing.
+model SchemeCase {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  caseNo        String  @map("case_no") @db.VarChar(40)
+  schemeId      String  @map("scheme_id") @db.Uuid
+  beneficiaryId String  @map("beneficiary_id") @db.Uuid
+  patientId     String  @map("patient_id") @db.Uuid
+  encounterId   String? @map("encounter_id") @db.Uuid
+  admissionId   String? @map("admission_id") @db.Uuid
+
+  status SchemeCaseStatus @default(open)
+
+  /// The authority's own case/TMS id, once it exists.
+  authorityCaseNo String? @map("authority_case_no") @db.VarChar(64)
+
+  admittedAt   DateTime? @map("admitted_at") @db.Timestamptz(6)
+  dischargedAt DateTime? @map("discharged_at") @db.Timestamptz(6)
+  closedAt     DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  packageAmount  Decimal @default(0) @map("package_amount") @db.Decimal(14, 2)
+  claimedAmount  Decimal @default(0) @map("claimed_amount") @db.Decimal(14, 2)
+  settledAmount  Decimal @default(0) @map("settled_amount") @db.Decimal(14, 2)
+  shortfallAmount Decimal @default(0) @map("shortfall_amount") @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  scheme      SchemeMaster        @relation(fields: [schemeId], references: [id], onDelete: Restrict)
+  beneficiary SchemeBeneficiary   @relation(fields: [beneficiaryId], references: [id], onDelete: Restrict)
+  packages    SchemeCasePackage[]
+  claims      SchemeClaim[]
+
+  @@unique([hospitalId, caseNo])
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, branchId, status, createdAt(sort: Desc)])
+  @@map("scheme_cases")
+  @@schema("billing")
+}
+
+/// What is being claimed, at the rate that applied on the day. See the header
+/// for why the rate is copied rather than joined.
+model SchemeCasePackage {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  packageId   String @map("package_id") @db.Uuid
+  packageCode String @map("package_code") @db.VarChar(40)
+  packageName String @map("package_name") @db.VarChar(300)
+
+  /// Snapshotted from `scheme_packages.base_rate` at selection.
+  rate     Decimal @db.Decimal(14, 2)
+  quantity Int     @default(1)
+  amount   Decimal @db.Decimal(14, 2)
+
+  /// Implants are claimed on top of the package, up to its cap.
+  implantAmount Decimal @default(0) @map("implant_amount") @db.Decimal(14, 2)
+
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  approved      Boolean   @default(false)
+  approvalRef   String?   @map("approval_ref") @db.VarChar(64)
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  case SchemeCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId])
+  @@map("scheme_case_packages")
+  @@schema("billing")
+}
+
+/// Every rupee the system refused to take, append-only.
+///
+/// The trigger that blocks the tender cannot also record it — a raised exception
+/// takes the whole transaction with it. So the service writes this row first, in
+/// its own transaction, and then lets the tender fail. The count of these is
+/// what an NHA audit asks for: not "we do not take cash" but "we were asked
+/// eleven times and refused eleven times, here they are".
+model SchemeCashAttempt {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId String  @map("patient_id") @db.Uuid
+  schemeId  String  @map("scheme_id") @db.Uuid
+  caseId    String? @map("case_id") @db.Uuid
+
+  /// `cash_counter` | `pharmacy` | `advance` | `ip_deposit` | `api` — where the
+  /// hand went into the pocket.
+  collectionPoint String  @map("collection_point") @db.VarChar(32)
+  mode            String  @db.VarChar(24)
+  amount          Decimal @db.Decimal(14, 2)
+
+  /// `blocked` always today; `allowed_advisory` when the scheme's scope is `off`.
+  outcome String @default("blocked") @db.VarChar(24)
+  reason  String @db.Text
+
+  attemptedAt DateTime @default(now()) @map("attempted_at") @db.Timestamptz(6)
+  attemptedBy String?  @map("attempted_by") @db.Uuid
+
+  @@index([hospitalId, patientId, attemptedAt(sort: Desc)])
+  @@index([hospitalId, schemeId, attemptedAt(sort: Desc)])
+  @@map("scheme_cash_attempts")
+  @@schema("billing")
+}
+
+model SchemeClaim {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  claimNo String @map("claim_no") @db.VarChar(40)
+  caseId  String @map("case_id") @db.Uuid
+
+  format SchemeClaimFormat
+  status SchemeClaimStatus @default(draft)
+
+  claimedAmount    Decimal @default(0) @map("claimed_amount") @db.Decimal(14, 2)
+  approvedAmount   Decimal @default(0) @map("approved_amount") @db.Decimal(14, 2)
+  paidAmount       Decimal @default(0) @map("paid_amount") @db.Decimal(14, 2)
+  shortfallAmount  Decimal @default(0) @map("shortfall_amount") @db.Decimal(14, 2)
+
+  /// The claim window closes `claim_window_days` after discharge; past this the
+  /// authority pays nothing and the shortfall is the hospital's.
+  windowClosesOn DateTime? @map("window_closes_on") @db.Date
+
+  submittedAt DateTime? @map("submitted_at") @db.Timestamptz(6)
+  submittedBy String?   @map("submitted_by") @db.Uuid
+  decidedAt   DateTime? @map("decided_at") @db.Timestamptz(6)
+  paidAt      DateTime? @map("paid_at") @db.Timestamptz(6)
+
+  authorityClaimNo String? @map("authority_claim_no") @db.VarChar(64)
+  utr              String? @db.VarChar(60)
+  remarks          String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  case       SchemeCase            @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  lines      SchemeClaimLine[]
+  documents  SchemeClaimDocument[]
+  shortfalls SchemeShortfall[]
+
+  @@unique([hospitalId, claimNo])
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, caseId])
+  @@map("scheme_claims")
+  @@schema("billing")
+}
+
+model SchemeClaimLine {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  claimId    String @map("claim_id") @db.Uuid
+
+  packageCode String  @map("package_code") @db.VarChar(40)
+  description String  @db.VarChar(300)
+  quantity    Int     @default(1)
+  rate        Decimal @db.Decimal(14, 2)
+
+  claimedAmount    Decimal @map("claimed_amount") @db.Decimal(14, 2)
+  approvedAmount   Decimal @default(0) @map("approved_amount") @db.Decimal(14, 2)
+  disallowedAmount Decimal @default(0) @map("disallowed_amount") @db.Decimal(14, 2)
+  disallowReason   String? @map("disallow_reason") @db.Text
+
+  /// When the authority ruled on this line. Null means undecided, and the
+  /// "approved + disallowed = claimed" rule is gated on it: an assembled line
+  /// has claimed everything and settled nothing.
+  decidedAt DateTime? @map("decided_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  claim SchemeClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, claimId])
+  @@map("scheme_claim_lines")
+  @@schema("billing")
+}
+
+/// The checklist. A claim cannot leave `draft` while a mandatory document is
+/// missing — enforced by trigger, because a claim rejected for a missing
+/// discharge summary is 30 days of working capital.
+model SchemeClaimDocument {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  claimId    String @map("claim_id") @db.Uuid
+
+  /// `discharge_summary` | `case_sheet` | `investigation` | `implant_invoice` |
+  /// `photo` | `id_proof` | `referral` | `death_summary`.
+  docType     String  @map("doc_type") @db.VarChar(40)
+  fileId      String? @map("file_id") @db.Uuid
+  isMandatory Boolean @default(true) @map("is_mandatory")
+
+  uploadedAt DateTime? @map("uploaded_at") @db.Timestamptz(6)
+  uploadedBy String?   @map("uploaded_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  claim SchemeClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@unique([claimId, docType])
+  @@index([hospitalId, claimId])
+  @@map("scheme_claim_documents")
+  @@schema("billing")
+}
+
+/// Claimed minus paid, and who decided to stop chasing it. A write-off is
+/// maker-checker: the person who worked the claim is not the person who agrees
+/// the money is gone.
+model SchemeShortfall {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  claimId    String @map("claim_id") @db.Uuid
+
+  amount Decimal @db.Decimal(14, 2)
+  /// `deduction` | `disallowance` | `rate_difference` | `non_payable` |
+  /// `window_missed` | `document_deficiency`.
+  category   String @db.VarChar(32)
+  reasonCode String @map("reason_code") @db.VarChar(40)
+  narrative  String? @db.Text
+
+  status SchemeShortfallStatus @default(open)
+
+  appealRef  String?   @map("appeal_ref") @db.VarChar(64)
+  appealedAt DateTime? @map("appealed_at") @db.Timestamptz(6)
+
+  recoveredAmount Decimal @default(0) @map("recovered_amount") @db.Decimal(14, 2)
+
+  writeOffRequestedBy String?   @map("write_off_requested_by") @db.Uuid
+  writeOffRequestedAt DateTime? @map("write_off_requested_at") @db.Timestamptz(6)
+  writeOffApprovedBy  String?   @map("write_off_approved_by") @db.Uuid
+  writeOffApprovedAt  DateTime? @map("write_off_approved_at") @db.Timestamptz(6)
+  writeOffReason      String?   @map("write_off_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  claim SchemeClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, claimId])
+  @@map("scheme_shortfalls")
+  @@schema("billing")
+}
+
+/// The authority's settlement batch, against which claims are ticked off.
+model SchemeReconciliation {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  schemeId   String @map("scheme_id") @db.Uuid
+
+  batchRef    String   @map("batch_ref") @db.VarChar(64)
+  periodFrom  DateTime @map("period_from") @db.Date
+  periodTo    DateTime @map("period_to") @db.Date
+
+  totalClaimed   Decimal @default(0) @map("total_claimed") @db.Decimal(14, 2)
+  totalPaid      Decimal @default(0) @map("total_paid") @db.Decimal(14, 2)
+  totalShortfall Decimal @default(0) @map("total_shortfall") @db.Decimal(14, 2)
+  claimCount     Int     @default(0) @map("claim_count")
+
+  fileId     String?   @map("file_id") @db.Uuid
+  receivedAt DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+  /// `received` | `matched` | `disputed` | `closed`.
+  status     String    @default("received") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  scheme SchemeMaster @relation(fields: [schemeId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, schemeId, batchRef])
+  @@index([hospitalId, status, receivedAt(sort: Desc)])
+  @@map("scheme_reconciliations")
+  @@schema("billing")
+}

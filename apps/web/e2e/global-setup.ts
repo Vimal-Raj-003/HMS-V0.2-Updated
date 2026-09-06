@@ -24,9 +24,13 @@ export default async function globalSetup(): Promise<void> {
   stack = spawn('npx', ['tsx', 'e2e/stack.mts'], { cwd: process.cwd(), stdio: 'inherit' });
   (globalThis as Record<string, unknown>)['__vimsStackPid'] = stack.pid;
 
-  let exited: number | null = null;
+  // On an object rather than a bare `let`: TypeScript's control-flow analysis
+  // cannot see the assignment inside the `exit` callback, so it narrows a plain
+  // binding to `null` and the check below becomes `never`. A property read is
+  // re-widened across the intervening await, which is the truth here.
+  const outcome: { exited: number | null } = { exited: null };
   stack.on('exit', (code) => {
-    exited = code ?? 1;
+    outcome.exited = code ?? 1;
   });
 
   const deadline = Date.now() + 300_000;
@@ -35,7 +39,9 @@ export default async function globalSetup(): Promise<void> {
       const handoff = JSON.parse(readFileSync(HANDOFF, 'utf8')) as StackHandoff;
       if (handoff.hospitalId.length > 0) return;
     }
-    if (exited !== null) throw new Error(`e2e stack exited early with code ${exited}`);
+    if (outcome.exited !== null) {
+      throw new Error(`e2e stack exited early with code ${String(outcome.exited)}`);
+    }
     await new Promise((r) => setTimeout(r, 500));
   }
   throw new Error('e2e stack did not become ready within 300s');

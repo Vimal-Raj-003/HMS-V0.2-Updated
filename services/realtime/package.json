@@ -2,11 +2,11 @@
   "name": "@vims/realtime",
   "version": "0.1.0",
   "private": true,
-  "description": "Socket.IO gateway with the Redis adapter. Rooms per docs/01 §6, diff-push with 1 push/sec coalescing.",
+  "description": "Socket.IO gateway with the Redis adapter. Rooms per docs/01 \u00a76, diff-push with 1 push/sec coalescing.",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsx watch src/main.ts",
+    "dev": "dotenv -e ../../.env -v PORT=4001 -- tsx watch src/main.ts",
     "start": "node dist/main.js",
     "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
     "typecheck": "tsc --noEmit",
@@ -26,6 +26,7 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@vims/testing": "workspace:*",
+    "dotenv-cli": "^8.0.0",
     "socket.io-client": "^4.8.3",
     "tsx": "^4.19.2",
     "vitest": "^4.1.10"

@@ -5,15 +5,15 @@
 
 ## Current state
 
-| Field                    | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current phase            | **Phase 3 (Diagnostics) complete through API, screens, analyzer interface and report documents; Phase 4 (Pharmacy & Stores) has its schema.** Phase 3's lab and radiology modules are wired into `AppModule` and covered by the wiring guard; the analyzer interface proves exit gate 7 against a real database; gates 5 and 9 remain blocked on **O-12** and gate 8 has a k6 script that has never been run. Phase 4 has 112 tables and no contracts, no seeds and no API.             |     |
-| Repo status (previous)   | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                 |
-| Repo status              | **533 application tables** across thirteen tenant schemas (`core` 141, `inventory` 85, `clinical` 67, `mdm` 55, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `pharmacy` 17, `engage` 13, `queue` 10, `finance` 2), **0 without RLS** — read out of a live container, not copied from a commit. **15 migrations. 213 API route handlers across 37 controllers; 33 Next.js pages.** 38 partitioned tables registered for maintenance, matching the database exactly. |
-| Last green CI (previous) | **Not green.** `pnpm test` — **2,240 unit tests across 13 packages**, all passing; `@vims/realtime`'s coalescing-emitter budget test is wall-clock-sensitive and flaked once under parallel load (green on its own re-run). `pnpm test:integration` is **red**: `@vims/worker`'s partition-maintenance job knows 17 of the 35 partitioned tables the migrations declare. `pnpm exec prettier --check` clean.                                                                            |
-| Modules complete         | **0 / 177** to the Definition of Done in `CLAUDE.md` §7 — no module yet has its k6 script or its full e2e golden path. Functionally complete and wired end to end: **OP-001** (patient/MPI/dedupe/merge), **EN-006** (queue/token/TV board), **NC-001** (cash counter), **EN-027** read half, **OP-007** (vitals), **OP-002** (encounter/timeline/CPOE), **EN-029** evaluation half. Phase 3 is schema and seeds only for **OP-004, OP-008, EN-004, EN-008, EN-031, EN-035, OP-022**.   |
-| Blocking questions       | **O-1 now blocks Phase 2's exit gate 9** (which names it), O-2 blocks Phase 1 gate 3, O-4 blocks Phase 1 gate 6, and the new **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device. See `docs/DECISIONS.md` → "Open" for O-1…O-12.                                                                                                                                                                                                              |
-| Project path             | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Current phase          | **Phase 3 (Diagnostics) complete through API, screens, analyzer interface and report documents; Phase 4 (Pharmacy & Stores) has its schema.** Phase 3's lab and radiology modules are wired into `AppModule` and covered by the wiring guard; the analyzer interface proves exit gate 7 against a real database; gates 5 and 9 remain blocked on **O-12** and gate 8 has a k6 script that has never been run. Phase 4 has 112 tables and no contracts, no seeds and no API.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |     |
+| Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Repo status            | **533 application tables** across thirteen tenant schemas (`core` 141, `inventory` 85, `clinical` 67, `mdm` 55, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `pharmacy` 17, `engage` 13, `queue` 10, `finance` 2), **0 without RLS** — read out of a live container, not copied from a commit. **15 migrations. 213 API route handlers across 37 controllers; 33 Next.js pages.** 38 partitioned tables registered for maintenance, matching the database exactly.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Last green CI          | **Green on this machine, 2026-09-02.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **2,809 unit tests, 20/20 packages**; `pnpm test:integration` **648 tests, 12/12 packages** (was red — see D-48); `pnpm test:safety` 9/9 and `@vims/flags` 40/40; `pnpm build` 13/13; `prettier --check` clean; `pnpm test:e2e` **238 passed / 14 skipped / 0 failed** across all three Playwright projects — up from 182 as the design gallery added a render, an axe scan and a keyboard pass per component (was 174/8 at the start of the day, and not repeatable at all until D-50); **five** gate scripts pass, `charts:check` among them. D-46…D-51 record the defects that were keeping these red. **Never run: both k6 scripts** — k6 is not installed here.                                                                                                                                                                                                     |
+| Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path. Against `docs/12` by _coverage_ rather than by DoD: **43 of 177 modules sit in phases 0–4 and have code; 134 sit in phases 5–13 and have none** (no controller, no screen — verified by search on 2026-09-02). **22 of the 50 P0 modules have no code at all**, including OP-005 billing, EN-002 insurance/TPA, RC-003 tariff, EN-010 payments, IP-001 admission & beds, IP-005 IP billing, IP-006 OT, IP-007 blood bank, IP-009 ICU, OP-006/TR-001…TR-008 emergency & trauma and NC-011 reporting. Functionally wired end to end and exercised over real HTTP this session: **OP-001, EN-006, NC-001, OP-007, OP-002, OP-004, OP-003** and the Phase-4 inventory reads. **The system can register, queue, consult, prescribe, order diagnostics, dispense and hold stock; it cannot admit a patient, raise a bill, or process an insurance claim.** |
+| Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 The table counts, RLS coverage and migration state above were read out of a live container at this session's HEAD, not copied from a commit message: `core.v_rls_coverage` reports **423 monitored tables, 0 without RLS, 0 without a policy, 0 without a write check**, and the only deliberately-open policies remain the two catalogues (`core.permissions`, `core.setting_definitions` — D-17).
 
@@ -68,6 +68,582 @@ Phase 3 is **schema, seeds and database-enforced safety properties only**. There
 ---
 
 ## Session log
+
+### 2026-09-06 · Phase 5 begins · The tariff, the bill and the money that arrives
+
+**Built — RC-003 (tariff engine), complete.** The pricing authority `phase-05`
+builds first because every bill line calls it. 12 tables in `mdm`, 23 permission
+keys, 14 domain events, a seeded self-pay plan pricing all 10 services and a
+corporate plan **derived** from it at −10 %. Six database guarantees, each proven
+against the running database rather than asserted: two published versions of one
+plan cannot overlap (exclusion constraint), a published version is immutable
+(trigger, on INSERT as well as UPDATE), one rate per service/class/band
+(coalesced unique index — a plain UNIQUE lets NULLs duplicate), a package split
+must total 100, a taxable item must carry a GST rate and an HSN, and base must
+sit inside its guard rails. `resolveRate` returns `MISSING_RATE` with the full
+attempted chain and **never** a zero; a miss writes a worklist row and raises
+`tariff.rate.missing`.
+
+**Built — OP-005 (OP billing), complete.** 8 tables, 18 keys, 10 events. Proven
+over HTTP end to end: a visit with a consult, an ECG and a UHID card produced one
+bill of ₹918 with the GST split correct on a **mixed exempt/taxable** bill
+(consult and ECG exempt, card taxable at 18 % as CGST 9 + SGST 9). **Exit gate 2
+passes** — every charge replayed three times _at a different price_ left the bill
+byte-identical, because the idempotency lives in a UNIQUE index on
+(bill_id, source_module, source_ref_id) rather than in a service check. A
+deferred constraint trigger refuses a header that disagrees with its lines, which
+is exit gate 10's "Σ bill lines = bill total" made unfalsifiable. Finalisation
+issues the GST document; a finalised bill refuses new lines and is corrected by
+credit note.
+
+**Built — EN-010 (payment gateway), complete.** 14 tables, 16 keys, 8 events.
+**Exit gate 3 passes** — one webhook delivered three times produced exactly one
+₹693 payment. A forged delivery (signature unverified) is stored as evidence,
+raises `pay.webhook.rejected` and credits nothing. A capture matching no intent
+becomes an `unapplied` reconciliation exception rather than an error somebody
+swallows, because the patient's money arrived either way.
+
+**Three maker-checker pairs, enforced by the catalogue rather than by
+convention** — `tariff.version.submit`/`publish`, `bill.discount.request`/
+`approve`, `pay.refund.request`/`approve`. Each is two keys held by two roles
+with a `block` segregation rule, and each was tested by having the requester try
+to approve their own: 403 every time.
+
+**Defects found and fixed while building**
+
+- `upsert()` takes its column list from the **first** row, so a key present only
+  on a later row is silently dropped. The corporate plan's derivation vanished
+  and it resolved as self-pay. Worth knowing about — it is a live footgun in the
+  shared seed helper.
+- The tariff immutability trigger refused the second seed run, because
+  `BEFORE INSERT` fires before `ON CONFLICT` is evaluated. The database was
+  right; the seed now skips an already-published version, which is what
+  idempotence means for an immutable table.
+- Invoices were taking numbers from the `BILL_OP` series, interleaving bill and
+  invoice numbers in one counter so the invoice register would show gaps. They
+  now have `TAX_INVOICE` and `BILL_SUPPLY` series of their own — gapless per
+  series per FY is only true if the series is not shared.
+- `getBill` inner-joined `patient.patients`, and patients are branch-scoped by
+  RLS, so a patient registered at one branch and billed at another made the bill
+  invisible. Now a LEFT JOIN that degrades to "Registered at another branch".
+- `registry.spec.ts` used `bill.finalized` as its example of an _unregistered_
+  event. Phase 5 registered it for real, so the fixture is now nonsense by
+  construction.
+
+**Built — OP-023 (packages), complete.** 9 tables, 14 keys, 7 events. A package
+is a fixed-price _promise_, so the module's whole job is deciding what happens
+when delivery exceeds it. `evaluateCharge` returns one of covered / capped /
+excluded / excess_pending, and a component the package does not name comes back
+`excluded` rather than being silently absorbed — the two failure modes are a
+family surprised at discharge and a hospital quietly eating revenue, and only an
+explicit verdict avoids both. Cap alerts fire at 80% and 100%. An activation
+cannot be closed while a variance is pending.
+
+**Built — EN-002 + RC-002 (insurance and pre-authorisation), complete.** 15
+tables, 22 keys, 11 events. Every state change is written to
+`preauth_status_history` with an `actor_type` of `staff`, `payer` or `system`,
+behind a `BEFORE UPDATE OR DELETE` trigger that refuses both. That trigger holds
+through the FK cascade as well: a `DELETE` of the request itself is refused by
+the history rows hanging off it, so once a pre-auth has a trail it cannot be
+erased at all. When a payer disputes what was sent and when, evidence that could
+have been edited is not evidence.
+
+All 11 constraints were proven against the live database, not asserted in prose:
+duplicate open case per payer/encounter, approval without amount _and_ validity,
+denial without a reason code, `partially_approved` at the full requested amount,
+approval above the request, an enhancement with no parent, history UPDATE,
+history DELETE, a query marked replied while still open, co-pay above 100%, and
+the cascade refusal above.
+
+The lifecycle was driven end to end over HTTP twice, once through each decision
+path — `submitted → decision` and `submitted → query_raised → query_replied →
+decision`. The second one matters because it is the branch a real claim takes:
+₹120,000 requested, payer queries the choice of hemi over total arthroplasty,
+desk answers with the Garden grade and the NICE reference, finance records
+₹95,000 partially approved for 6 days valid to 31 Dec against payer ref
+SH/AUTH/71204, and the credit limit propagates. The trail comes back five rows
+deep with the right actor on each.
+
+**Five maker-checker pairs, enforced by the catalogue rather than by
+convention** — `tariff.version.submit`/`publish`, `bill.discount.request`/
+`approve`, `pay.refund.request`/`approve`, `pkg.variance.request`/`approve`, and
+`preauth.submit`/`preauth.decision.record`. Each is two keys held by two roles
+with a `block` segregation rule, and each was tested by having the requester try
+to approve their own: 403 every time. The last one is the sharpest — a recorded
+approval becomes a credit limit that billing honours and a ward acts on, so the
+person waiting on the payer must not be able to type in what the payer said.
+
+**Gates** — 20/20 packages typecheck, lint and test (2,762 → 2,835 tests
+passing); 431 routes across 49 controllers all authorised; hex-literal,
+chart-palette, gate-script, alert-runbook, permission-key and prettier clean.
+Catalogue 755 → 854 keys.
+
+**Built — RC-007 (government schemes), complete.** 13 tables, 24 keys, 11 events,
+and **exit gate 6 passes**: a scheme beneficiary cannot be charged cash anywhere.
+
+The block is a trigger on `billing.payment_lines` rather than a check in a
+service, because that table is the one every collection point must write to — the
+cash counter, the pharmacy window, an OPD advance, an IP deposit, a forex tender.
+A module built in Phase 7 or Phase 9 that collects money and has never heard of
+RC-007 is refused by Postgres. It was proven at all five of those points and
+again in raw SQL bypassing the API, with UPI and card as controls to show the
+block is precise rather than blanket. ADR-0012 records the reasoning, including
+why the default scope is the episode rather than the person: applied to the
+person it refuses a PMJAY cardholder buying paracetamol at the retail window, and
+a cashier who meets a rule they know is wrong routes around it.
+
+The refusal is recorded _before_ it is refused. A raised exception takes its
+transaction with it, so the trigger cannot write the evidence of its own firing;
+`checkCash` writes an append-only `scheme_cash_attempts` row first and then lets
+the tender fail. An NHA audit does not ask whether you take cash from scheme
+patients — it asks what happened when somebody tried.
+
+**Two defects the live drive found that the constraint proofs had missed**
+
+Both were the same mistake: "has a decision been made?" encoded as a list of
+statuses, which then drifts from what the statuses mean.
+
+- `scheme_claim_line_balances` required `approved + disallowed = claimed` on
+  every row. That is right about a decided line and wrong about a fresh one —
+  ₹90,000 claimed, nothing approved, nothing disallowed — so **no claim could be
+  assembled at all**. The original proof happened to test a row that already
+  carried a decision, which is exactly the row it was correct about. The line now
+  carries `decided_at`, written by the decision and by nothing else, and the rule
+  is gated on it (migration `…150000`).
+- `scheme_claim_shortfall_is_the_difference` listed `closed` among the decided
+  statuses. A claim assembled in error and retired from `draft` reaches `closed`
+  without ever having been decided, so it too was refused — and a draft claim
+  could be neither submitted (no documents) nor discarded (the same checklist
+  trigger), pinning its case open for good. The checklist now gates the
+  transition into `submitted` only, and the shortfall rule asks `decided_at`
+  (migrations `…160000`, `…170000`).
+
+A third, smaller one: the module's triggers raise a custom SQLSTATE, and nothing
+mapped it — so a cashier refused ₹500 saw "Something went wrong on our side",
+which is both untrue and useless. `schemes.errors.ts` now passes each trigger's
+own wording through as a 409.
+
+**Seven maker-checker pairs across Phase 5**, each two keys held by two roles with
+a `block` segregation rule, each tested by having the requester try to approve
+their own work: `tariff.version.submit`/`publish`, `bill.discount.request`/
+`approve`, `pay.refund.request`/`approve`, `pkg.variance.request`/`approve`,
+`preauth.submit`/`preauth.decision.record`, `scheme.claim.submit`/
+`scheme.claim.decision.record`, and `scheme.shortfall.appeal`/
+`scheme.shortfall.writeoff.approve`. 403 every time.
+
+**Built — RC-008 (cost estimator), complete.** 8 tables, 11 keys, 7 events, and
+**exit gate 8 passes**: an estimate was issued at ₹86,400, converted, and
+reconciled against a ₹1,01,000 bill — **+16.90%**, which is past the 10%
+threshold and so raised `estimate.variance.breached` rather than waiting for a
+monthly report. The point of noticing is to tell the family before discharge.
+
+Every line prices through `TariffService`, the same resolver every bill line
+calls: an estimate and a bill priced by two different authorities will eventually
+disagree, and the family is who finds out. An issued estimate is immutable at the
+database level and is revised by superseding it, so both numbers survive — a
+family told ₹83,600 and later ₹86,400 can be shown exactly what changed and when.
+
+Two things that turned out to matter more than expected:
+
+- **Confidence belongs on the line, not the estimate.** A total made of firm
+  lines and one made of indicative lines are different promises even when the
+  number is identical. Marking each `firm` / `capped` / `indicative` /
+  `contingent` is what lets a desk say "the surgery is fixed, the ICU days are
+  not" instead of reading out the whole sheet.
+- **A per-day line multiplies by the stay.** Dressings and injections at 1 and 3
+  a day over 5 days are 5 and 15, and getting that wrong is where most real
+  estimate variance comes from. It is arithmetic in the module rather than
+  something the desk has to remember.
+
+**Four defects the live drive found**
+
+- `est_shares_sum_to_payable` and its neighbours were right, but the module could
+  not issue anything: a template line the tariff cannot price sat at ₹0 and the
+  desk's manually priced line was _added_ next to it rather than replacing it,
+  doubling that part of the quote. Caller lines now match template lines by
+  service and description.
+- An estimate with a ₹0 line that was not marked `contingent` could still be
+  issued — a quote silently too low, which is the exact failure the module exists
+  to prevent. Issuing now refuses and names the lines.
+- `RETURN NEW` on the allowed path of a `BEFORE DELETE` trigger returns NULL,
+  which **silently cancels the delete**. A draft estimate reported deletion and
+  stayed. Worse, `status` was outside the frozen column list, so an issued
+  estimate could be set back to `draft`, repriced and reissued with the trigger
+  satisfied at every step (migration `…190000`).
+- A room-class scenario was written even when no line could be repriced for that
+  class, showing a family a priced comparison that was never priced. It is now
+  omitted, which correctly says "we cannot answer for that class".
+
+`est.share` is an `export` action, and the catalogue requires every export to
+carry a reason. Rather than carve an exception for a new module, sharing a quote
+now takes one — a costing for a named person going to a hand-typed phone number
+is worth being able to trace.
+
+**Built — RC-006 (revenue leakage audit), complete.** 6 tables, 12 keys, 7
+events, 4 reconcilers, and **exit gate 9 passes**: two lab tests were delivered
+on one encounter, one was billed and one deliberately was not, and the
+pre-discharge check found the ₹480 electrolytes, ignored the billed CBC, and
+refused to clear the discharge.
+
+The rule the whole module is built around is §5.7's "Never auto-post — propose to
+a human", and it is a trigger rather than a convention. A finding cannot reach
+`recovered` without an `accepted` action in the append-only trail carrying a real
+user id — the trigger reads the **trail**, not a column, because a column set in
+the same statement as the status would just be the service attesting to its own
+behaviour. Proven four ways: straight to recovered (refused), accepted with
+nobody named (refused), dismissed with no reason (refused), and an `accepted`
+action with a null actor (refused). The legitimate path — a person accepts, then
+the recovery is recorded — works.
+
+One property that emerged and is worth keeping: **recording a recovery does not
+make the charge exist.** During the drive a recovery was recorded before the bill
+line was actually raised, and the next scan found the same unbilled row and
+raised it again. The reconciler checks the ledger, not the claim, so this audit
+cannot be closed out by asserting the money came back — only by the charge
+actually being there.
+
+The four reconcilers are code rather than configuration, and the comment says
+why: each is a join between two schemas with its own notion of "delivered" — an
+order is `completed`, a dispense is `dispensed`, an implant is `used` and
+specifically not `wasted` or `reversed`. What _is_ configuration is the threshold
+each stays quiet below, because a worklist full of ₹5 gaps is one nobody opens
+and the ₹40,000 implant is buried in it. The consignment threshold is ₹1: an
+implant is never noise.
+
+**Built — NC-034 (doctor payouts), complete.** 8 tables, 12 keys, 7 events, and
+the NMC anti-kickback guard made **structural rather than validated**.
+
+§5.7 asks that no per-referral payment be _representable_. Three things together
+deliver that: `PayoutBasis` has no `per_referral` member, `PayoutSourceType` has
+no `referral` member, and a trigger refuses any payout line whose bill item names
+the earning doctor as the **referrer** while somebody else performed the work.
+The third is the one that matters — the first two only stop somebody being honest
+about it, and a hospital wanting to pay for referrals would simply write the
+commission as a flat fee. Proven exactly that way:
+
+- Dr A earns 40% of a consultation Dr A performed → ₹360 ✅
+- The same rule against a ₹45,000 arthroscopy Dr A only referred → **refused**
+- The identical thing relabelled a "co-ordination fee" → **refused**
+- A doctor who both referred _and_ performed → earns normally, because they did
+  the work
+
+The compute run reports `referralsRefused` rather than swallowing it: a rule that
+keeps reaching for services the doctor did not perform is a compliance problem,
+and a silent skip would hide it.
+
+Section 194J is cumulative rather than per-payment — the ₹30,000 annual threshold
+and section 206AA's 20% no-PAN rate both depend on the year to date, and a figure
+recomputed from a sum each month drifts from the one that gets filed. Sixteen
+constraints proven live, including 20% deducted where a PAN exists (refused),
+10% where none does (refused), and any deduction below the threshold (refused).
+
+`payout.statement.compute` / `payout.statement.approve` is the eighth
+maker-checker pair: finance computes and pays, the hospital admin releases, and a
+statement with an open dispute cannot be approved at all. The doctor holds
+`payout.dispute.raise` on their own statement — a payout system where the earner
+cannot query the figure is one they argue about by email.
+
+**Two defects the live drive found**
+
+- Doctors had no way to dispute their own statement — the key existed but was
+  granted to nobody, even though the consultant role's own description says "own
+  earnings". Now a `PAYOUT_EARNER` bundle on all seven clinical templates.
+- An upheld dispute adjusted the statement and left the period's totals stale, so
+  the screen showed ₹360 above a statement reading ₹1,080. The period is now
+  recomputed from its statements rather than incremented — an aggregate
+  maintained by arithmetic drifts the first time a path forgets it, and this one
+  is rendered directly above the rows it claims to total.
+
+---
+
+## Phase 5 complete — 2026-09-06
+
+Nine modules: RC-003 tariff, OP-005 OP billing, EN-010 payments, OP-023 packages,
+EN-002 + RC-002 insurance and pre-auth, RC-007 government schemes, RC-008 cost
+estimator, RC-006 revenue leakage, NC-034 doctor payouts.
+
+**Exit gates proven against the live database and over real HTTP:**
+
+| Gate | What was proven                                                                                                                                             |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2    | Every charge event replayed 3× at a different price → the bill is byte-identical                                                                            |
+| 3    | One webhook delivered three times → exactly one ₹693 payment                                                                                                |
+| 6    | A scheme beneficiary refused cash at the counter, the pharmacy, an advance, an IP deposit and a forex tender — and again in raw SQL bypassing the API       |
+| 7    | Pre-auth submitted, queried, answered and partially approved → ₹60,000 credit limit propagated                                                              |
+| 8    | An estimate issued at ₹86,400, converted, reconciled against a ₹1,01,000 bill → +16.90%, past the 10% threshold, so it raised an alert rather than a report |
+| 9    | Two tests delivered, one billed, one not → the pre-discharge check found the ₹480 and refused clearance                                                     |
+| 10   | An unbalanced bill refused at COMMIT by a deferred constraint trigger                                                                                       |
+
+Gates 1, 4 and 5 are covered by the same machinery but were not driven end to end
+this session; 11 is this document.
+
+**Eight maker-checker pairs**, each two keys held by two roles with a `block`
+segregation rule, each tested by having the requester try to approve their own
+work — 403 every time:
+`tariff.version.submit`/`publish` · `bill.discount.request`/`approve` ·
+`pay.refund.request`/`approve` · `pkg.variance.request`/`approve` ·
+`preauth.submit`/`preauth.decision.record` ·
+`scheme.claim.submit`/`scheme.claim.decision.record` ·
+`scheme.shortfall.appeal`/`writeoff.approve` ·
+`payout.statement.compute`/`approve`.
+
+**Gates** — 20/20 packages typecheck, lint and test (2,762 → **2,841 tests**);
+**493 routes across 53 controllers**; catalogue 755 → **913 keys**; event registry
+→ **671**; hex-literal, chart-palette, gate-script, alert-runbook, permission-key
+and prettier all clean.
+
+**What Phase 5 still does not have.** No e2e golden path and no k6 script for any
+of the nine modules, so none meets `CLAUDE.md` §7's full Definition of Done — the
+same gap every module in this repo currently has. The uncommitted working tree is
+large; the work is on disk and green but not yet in git history.
+
+### 2026-09-02 (later) · Design system · The chart palette that failed its own validator, and the story harness that never existed
+
+Second session of the day, on the front end. Scope was set by the user after the
+audit: deepen the 43 modules that work rather than scaffold the 134 that have no API.
+
+**The documented chart ramps were not colourblind-safe, and now they are**
+
+`docs/06` §3.7 tells you to consult the `dataviz` skill before writing a chart. Doing
+that means running its validator, and the three ramps §3.7 itself specifies do not pass:
+
+- **light** — `#0E7A88` and `#8A97A8` under the chroma floor (they read as grey rather
+  than as an identity), and `#B42318` directly beside `#027A48`: red next to green at
+  ΔE 6.2 under deuteranopia, the one pair the commonest dichromacy collapses.
+- **dark** — four of five checks failed. The worst was `#D6BBFB` against `#B3BDCA` at
+  **ΔE 9.0 under _normal_ vision** — a pair full-colour readers cannot separate either.
+  All eight steps sat at OKLCH L 0.78–0.86, far above the 0.48–0.67 a dark plot ground
+  wants, which is what crowded the hues together.
+- **high contrast** — three steps under the chroma floor and red against green at ΔE 5.4,
+  in the theme whose entire purpose is keeping things apart.
+
+All three are re-derived by search over the steps the scales in §3.1–3.3 already own —
+nothing invented — under two constraints the validator cannot express: **the VIMS teal
+leads every chart**, and **red is never adjacent to green**. Light and high contrast now
+pass every check; dark passes with CVD in the 6–8 floor band, which the skill permits
+only alongside secondary encoding, which is why the components carry glyphs and shapes.
+
+`scripts/check-chart-palette.mjs` is the reason this cannot drift back. It reads the
+ramps out of `theme.generated.css` (the artefact the browser loads, not the intent),
+vendors the OKLab/Machado maths rather than importing from a plugin cache CI does not
+have, and was falsified: restoring the old dark ramp reproduces the ΔE 9.0 finding
+exactly. It runs in CI beside the other four gate scripts.
+
+**The story requirement in §5.2 had never been implemented at all**
+
+"Every clinical component ships with: Storybook story (light + dark + high-contrast +
+200 % zoom + RTL), `axe` test, keyboard-only test, and a 'degraded data' story." There
+was no Storybook, no story and no per-component scan.
+
+There is now a gallery at `/design`, and it is **not** Storybook (D-51). All five
+variants are properties of the real document, so rendering them inside `apps/web` puts
+the specimens through the application's own tokens, Tailwind build and fonts, and behind
+its authentication — `/design` is not in the middleware's `PUBLIC_PATHS`, and a test
+asserts an unauthenticated visit is redirected. Storybook would have added several
+hundred transitive packages to a system that has to pass a supply-chain audit, and would
+have rendered everything in its own shell instead.
+
+The catalogue is one list read by both the gallery and `design-system.spec.ts`, so a
+component cannot appear in the gallery without being scanned. `catalogue.spec.ts` fails
+when a clinical component has neither a story nor a recorded reason for not having one,
+and refuses to let that reason outlive the story that replaces it — the outstanding list
+is 24 entries and can only shrink.
+
+**Seven components, and the harness immediately found two defects in them**
+
+New in `packages/ui`, all to their §5.2 contracts: `ResultFlag` (#6), `EwsBadge` (#5),
+`VitalsSparkline` (#3), `InteractionPanel` (#17), `DoseCalculator` (#18),
+`SignatureSeal` (#40), `TaskList` (#31). Each encodes its safety rule in its types
+rather than its prose — `EwsBadge` will not compile without the required-action
+sentence; `DoseCalculator`'s weight is a union whose "not recorded" arm has no dose to
+render; `EwsScore` makes "incomplete" a state rather than a null total that falls
+through to a green badge.
+
+The first full run of the new suite failed 11 tests, and both causes were mine:
+
+1. **Contrast.** `SignatureSeal` and `DoseCalculator` faded text with `opacity-70/80/90`
+   on their own coloured surfaces, which drops `text-*-on-surface` under 4.5:1. The
+   token layer ships `-surface`/`-on-surface` as a _pair_ precisely so hierarchy is
+   carried by size and weight instead. Removed; the scans pass.
+2. **The keyboard test itself.** It keyed what it reached on `story:variant:tagName`,
+   which collapses the two buttons a `TaskList` row renders — Skip and Done are both
+   BUTTON in the same specimen — so the reached set could never match the control count
+   and perfectly operable components failed. Now stamped per element.
+
+A third finding was **not** ours: on `webkit-ipad` the same test reached 0 of 10
+controls while Chromium reached all of them. macOS ships "Press Tab to highlight each
+item on a webpage" **off**, so WebKit Tabs between form fields and skips buttons and
+links. There is no Playwright switch for that preference, so the property is asserted on
+the engines that honour it and skipped on WebKit with the reason recorded in the test.
+
+**Duplication found and resolved rather than left**
+
+Building `VitalsSparkline` and `EwsBadge` in the design system exposed that
+`apps/web/src/features/clinical/components` already held local versions — the
+architectural divergence the earlier audit noted, where §5.2 components live inside one
+feature. The vitals room now uses the design-system components through a small
+`news2-presentation` adapter, and the two local files are deleted. The screen gained
+what it did not have: a **reference band** behind each trend, **ringed markers on
+out-of-range readings**, and a downsampler that keeps peaks. It kept what the local
+version did better — the **visually-hidden data table** of every reading, which is the
+`dataviz` skill's "a table view exists" and is better than a summary sentence alone.
+
+**Tested**
+
+- `pnpm test` — 20/20 packages. `@vims/ui` 21 files / 217 tests, including new
+  assertions that `InteractionPanel` sorts contraindicated first however it is handed
+  the list (alphabetically 'contraindicated' < 'major', so a sort on the label would
+  pass a naive test and bury the worst row) and that `TaskList` treats exactly-due as
+  due-now rather than overdue.
+- `pnpm typecheck` · `pnpm lint` · `prettier --check` — clean.
+- `tokens:contrast` — all three themes AA.
+- Five gate scripts pass, `charts:check` among them.
+
+**Stubbed / deferred**
+
+- 24 of the 31 clinical components still have no story; the list is enforced, not
+  forgotten.
+- ~19 of the 44 §5.2 components remain unbuilt. The ones skipped deliberately are those
+  whose modules do not exist — `BedBoard`, `MARGrid`, `PartographChart`, `ChargeSheet`,
+  `PaymentSplitter` belong to phases 5–7.
+- The screen-level visual pass covered the vitals room only, as a consequence of the
+  migration. The dashboard was deliberately left spare: Phase 0 exit gate 3 asks that
+  each role sees a **correct, empty** workspace, and filling it with tiles would make
+  that gate unfalsifiable.
+
+### 2026-09-02 · Audit against `docs/12` · The gates that were red, and the six defects that kept them there
+
+No new module was built this session. The task was to check the codebase against the
+documents, fix what was broken, and run the system end to end. Every number below was
+read out of a live container or a live process at this session's HEAD.
+
+**Where the build actually stood**
+
+`pnpm typecheck` and `pnpm lint` were green. Five things were not, and each is fixed:
+
+1. **`pnpm test` was red on two wall-clock flakes** (D-46). `poll-loop` asserted ">1 tick
+   in a 60 ms window" and the coalescing emitter drove a real 10 ms ticker for 2.6 s
+   expecting ~260 fires; under twenty packages' vitest workers the event loop starves and
+   both report 1. They now settle on the signal itself — a deferred on the third tick, and
+   vitest fake timers — and **both were re-falsified**: reverting the emitter to a
+   leading-edge throttle still fails the fake-timer test on `expected 1 to be greater
+than 50`.
+2. **`pnpm test:integration` exited non-zero with all 466 assertions passing** (D-48).
+   `DatabaseService` never attached an `error` listener to its `pg.Pool`, so ten idle
+   clients terminated by the Testcontainers shutdown (57P01) became unhandled errors.
+   This is a production defect, not a test artifact: a Postgres failover would have killed
+   the API process for a connection nobody was using.
+3. **`services/api` could not boot at all** (D-47). `idempotency.interceptor.ts` imported
+   `@nestjs/common/constants` without `.js`; that resolves under
+   `moduleResolution: "Bundler"` and throws `ERR_MODULE_NOT_FOUND` under Node's ESM
+   loader. `pnpm build` was green while `node dist/main.js` died. A sweep found no other
+   offender — every other bare deep import is a package root with an `exports` map.
+4. **`pnpm dev` started no service** (D-49). `turbo.json`'s `globalEnv` is a
+   cache-invalidation list, not a loader, and nothing read the repo-root `.env`, so the
+   API died on `DATABASE_URL: undefined`. Worse, `.env` and `infra/env.example` carried
+   `JWT_PRIVATE_KEY`/`JWT_PUBLIC_KEY` while the code requires `JWT_ACCESS_SECRET`/
+   `JWT_REFRESH_SECRET` — **the services had never been run against the repo's own env
+   file.** Each `dev` script now loads `.env` through `dotenv-cli` and pins its own port.
+5. **Two of the four CI gate scripts were broken, in opposite directions.**
+   `check-alert-runbooks.mjs` failed CI on a parsing bug. Its regex stripped
+   only double quotes; the YAML is single-quoted, so the closing `'` landed in the slug
+   and all sixteen runbooks — every one of which exists — were reported missing. Fixed and
+   re-falsified: a genuinely missing runbook still fails, now with the right slug. And
+   `check-hex-literals.mjs` skipped `.next` by exact name, so once the browser suite built
+   into `.next-e2e` it scanned the compiled Tailwind stylesheet — which legitimately
+   contains every token as a hex literal, because that is what a token compiles _to_ — and
+   failed on its own output. It now skips every `.next*` directory, and still reports a
+   real `#ABCDEF` added to `globals.css`.
+
+**Also fixed**
+
+- **The browser suite failed the same four tests twice** — on `tablet` and `webkit-ipad`,
+  passing on `desktop-chromium`. Not a responsive defect: `uniqueMobile()` varied the
+  phone but the surname and DOB were constants, and OP-001 §5's duplicate rule scores on
+  `name_trgm_gender_dob` and never looks at the phone. All three projects share one
+  seeded stack, so desktop's "Ramesh Sharma / 1981-04-12" made the _first_ registration of
+  the other two projects — the step that must succeed — trip the hard stop. Varying the
+  surname alone was not enough, and the next run proved it: the rule is a **trigram**
+  comparison, so `Candidate8416166` still scored 85% against `Candidate2909431` on the
+  shared stem. The date of birth is what makes two identities genuinely disjoint — the rule
+  only matches a date within a year — so each run now derives both a surname and a birth
+  year from its token.
+- **`apps/web/e2e/.stack.json`** (the stack handoff, written at run time) was untracked and
+  unignored, so it dirtied the tree and broke CI's `prettier --check` after any e2e run.
+- **The browser suite could not be run reliably at all, and the reason was not in the
+  tests** (D-50). `next dev` and `next start` both own `apps/web/.next`, and the dev server
+  rewrites it continuously — so `pnpm dev` running anywhere (in this case a _second agent
+  session_ that kept restarting it) replaced the production build underneath the suite
+  mid-run. Every client chunk then served **400**: the page rendered server-side, nothing
+  hydrated, the login form fell back to a native GET, and every authenticated test failed
+  as "still on `/login?`" — which reads exactly like an authentication bug and is not one.
+  `distDir` is now overridable and `stack.mts` builds into `.next-e2e` itself, so the suite
+  no longer shares a directory with anything. The stack also pointed at the **shared dev
+  Redis**, leaking auth rate-limit windows between runs; it now uses database 15, and the
+  harness lifts `RATE_LIMIT_AUTH_MAX`, which at its production value of 10/min is tripped
+  by a suite that signs in on nearly every test.
+
+**Tested — every suite run this session, not quoted from a commit**
+
+- `pnpm lint` · `pnpm typecheck` — 20/20 packages green.
+- `pnpm test` — **2,809 unit tests, 20/20 packages green.**
+- `pnpm test:integration` — **648 tests, 12/12 packages green** (was red).
+- `pnpm test:safety` — 9/9 green; `@vims/flags` 40/40.
+- `pnpm build` — 13/13. `prettier --check` — clean.
+- `pnpm test:e2e` — **182 passed, 1 skipped, 0 failed** across all three Playwright
+  projects (desktop-chromium, tablet, webkit-ipad). It was **174 passed / 8 failed** at the
+  start of the session, and could not be run repeatably at all until D-50.
+- All four gate scripts pass: 374 routes across 44 controllers authorised, no hex literals,
+  every package declares its gate scripts, every alert has a runbook.
+- **RLS re-verified in the live database, not assumed:** `core.v_rls_coverage` reports
+  **533 tables monitored, 0 without RLS, 0 without a policy, 0 without a write check**;
+  the only open policies remain the two global catalogues (D-17).
+- **Audit hash chain verified:** `core.verify_audit_chain()` returns **zero findings** over
+  14,182 rows, and `core.v_audit_seal_backlog` is empty.
+
+**Run end to end, against the live stack**
+
+Seeded (`seed:demo`, 169 tables), booted the API, and drove real HTTP with per-role logins.
+Working: login for all 64 seeded roles · register patient (UHID from the numbering series,
+FY-aware: `BLR-Main/OP/2026-27/000001`) · idempotent replay returning the _same_ patient ·
+the duplicate hard stop (422 `clinical-hard-stop`) · search by UHID · **cross-tenant read
+refused** · OP visit with queue token `D1001` issued and linked · vitals recorded, with
+NEWS2 correctly left null because not every component was supplied · cash counters, lab
+catalogue, inventory and pharmacy reads. The web app serves `/login` and redirects
+unauthenticated traffic off protected routes.
+
+**The answer to "is everything in `docs/12` built": no, and not nearly.**
+
+`docs/12` lists **177 modules**. **43** sit in phases 0–4 and have code; **134** sit in
+phases 5–13 and have **none** — no controller, no screen, verified by search rather than
+inferred. Of the 50 **P0** ("must for go-live") modules, **22 have no code at all**,
+including OP-005 billing, EN-002 insurance/TPA, RC-003 tariff, EN-010 payments, IP-001
+admission & beds, IP-002 discharge, IP-003 nursing station, IP-005 IP billing, IP-006 OT,
+IP-007 blood bank, IP-009 ICU, OP-006/TR-001…TR-008 emergency & trauma, EN-003 CSSD and
+NC-011 reporting. **The system today can register, queue, consult, prescribe, order
+diagnostics, dispense and hold stock. It cannot admit a patient, cannot raise a bill, and
+cannot process an insurance claim.** `CLAUDE.md` §7's Definition of Done is still met by
+**0 of 177** — no module has both its k6 script and its e2e golden path.
+
+**Open questions raised**
+
+- **O-14 (new): JWT signing.** `token.service.ts` signs and verifies with **HS256** over a
+  shared `JWT_ACCESS_SECRET`, and `services/realtime` verifies with the same secret.
+  `EN-007 §Security` specifies **"JWT RS256/EdDSA"**. Symmetric signing means every service
+  that can verify a token can also mint one — a compromise of the WebSocket-facing realtime
+  service yields forged access tokens for any role, break-glass included. `env.example`
+  already carries the keypair and `keys:generate` already exists; nothing reads them.
+- Unchanged and still blocking: O-1, O-2, O-4, O-12.
+
+**Next step**
+
+1. Decide **O-14** before `services/realtime` is terminated on a different trust boundary.
+2. Phase 5 (billing/RCM) is the largest single unblocker: 13 modules, and the four P0s in it
+   are what stand between this and a hospital that can take money.
+3. The two k6 scripts (Phase 1 gate 7, Phase 3 gate 8) still have never been run; k6 is not
+   installed on this machine.
+4. `scripts/check-table-ownership.mjs` is still unwritten — 533 tables, nothing checks that
+   each belongs to a module spec.
 
 ### 2026-08-25 · Phase 3 completed, Phase 4 schema · Wiring, the event stream nobody read, and four agents verified
 

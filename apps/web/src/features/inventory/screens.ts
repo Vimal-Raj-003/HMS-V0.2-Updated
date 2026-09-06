@@ -27,7 +27,7 @@ export interface InventoryScreen {
   readonly key: string;
   readonly label: string;
   readonly href: Route;
-  readonly area: 'stores' | 'movements' | 'purchase';
+  readonly area: 'stores' | 'movements' | 'purchase' | 'consignment';
   /** The **API's** permission key, so the screen is offered when its list would load. */
   readonly permission: string;
   readonly summary: string;
@@ -186,6 +186,81 @@ export const INVENTORY_SCREENS: readonly InventoryScreen[] = [
     ],
     entitlement: 'module.inventory.enabled',
   },
+  {
+    key: 'inventory-consignment',
+    label: 'Consignment',
+    href: '/inventory/consignment',
+    area: 'consignment',
+    permission: 'inventory.consignment.agreement.list',
+    summary:
+      'Stock on our shelves that is not ours: the vendor agreements behind it, what the theatre used, and the monthly reconciliation both sides sign before an invoice is raised.',
+    deniedExplanation:
+      'Consignment is held by stores, theatre and the purchase department. Recording a usage, approving an agreement and signing a reconciliation are four different permissions, because the usage is what creates the liability to pay.',
+    keywords: [
+      'consignment',
+      'implant',
+      'agreement',
+      'vendor stock',
+      'usage',
+      'reconciliation',
+      'auto po',
+      'replenishment',
+      'udi',
+      'theatre',
+    ],
+    entitlement: 'module.inventory.enabled',
+  },
+  {
+    key: 'inventory-consumption',
+    label: 'Consumption entry',
+    href: '/inventory/consumption',
+    area: 'consignment',
+    permission: 'inventory.consumption.list',
+    summary:
+      'What each ward, theatre and department actually took off the shelf. Entries are reversed with a reason, never edited — the ledger behind them is append-only.',
+    deniedExplanation:
+      'Consumption entry is held by the ward or department that draws the stock. Reversing an entry is a separate permission, because a reversal moves a quantity back.',
+    keywords: [
+      'consumption',
+      'cost centre',
+      'cost center',
+      'department',
+      'ward',
+      'expense',
+      'issue',
+      'usage',
+      'roll-up',
+      'period',
+    ],
+    entitlement: 'module.inventory.enabled',
+  },
+  {
+    key: 'inventory-cost-centres',
+    label: 'Cost centres',
+    href: '/inventory/cost-centres',
+    area: 'consignment',
+    // A finance key, not a stores one. The consumption console next door is
+    // gated on `inventory.consumption.list`, which finance does not hold — the
+    // two halves of NC-008 are two screens for exactly that reason.
+    permission: 'finance.costcentre.read',
+    summary:
+      'What each ward, theatre and department consumed in a period, and the cost-centre master behind the attribution — including the consumption nobody costed.',
+    deniedExplanation:
+      'The cost-centre roll-up is held by accounts and department heads. It is a finance permission rather than a stores one, so holding the consumption list does not grant it.',
+    keywords: [
+      'cost centre',
+      'cost center',
+      'roll-up',
+      'rollup',
+      'period',
+      'expense',
+      'department',
+      'allocation',
+      'finance',
+      'month end',
+    ],
+    entitlement: 'module.inventory.enabled',
+  },
 ];
 
 export function inventoryScreen(key: string): InventoryScreen {
@@ -202,6 +277,7 @@ export const INVENTORY_AREA_LABELS: Readonly<Record<InventoryScreen['area'], str
   stores: 'Masters & stock',
   movements: 'Stock movements',
   purchase: 'Purchase to pay',
+  consignment: 'Consignment & consumption',
 };
 
 /** The hub. No permission of its own — it renders only the tiles you can open. */

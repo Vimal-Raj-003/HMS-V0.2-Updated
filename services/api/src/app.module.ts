@@ -62,6 +62,7 @@ import {
 } from './modules/diagnostics/radiology/radiology.module.js';
 // Phase 4 (OP-003, NC-005..NC-008, NC-021). Same spread-not-import treatment.
 import { INVENTORY_CONTROLLERS, INVENTORY_PROVIDERS } from './modules/inventory/inventory.module.js';
+import { RCM_CONTROLLERS, RCM_PROVIDERS } from './modules/rcm/rcm.module.js';
 import { PHARMACY_CONTROLLERS, PHARMACY_PROVIDERS } from './modules/pharmacy/pharmacy.module.js';
 import { CashController } from './modules/frontoffice/cash/cash.controller.js';
 import { CoSignService } from './modules/frontoffice/cash/cosign.service.js';
@@ -122,6 +123,7 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     ...RADIOLOGY_CONTROLLERS,
     // Phase 4 — stores, purchase, pharmacy dispensing and the registers.
     ...INVENTORY_CONTROLLERS,
+    ...RCM_CONTROLLERS,
     ...PHARMACY_CONTROLLERS,
   ],
   providers: [
@@ -172,6 +174,9 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     ...PHARMACY_PROVIDERS.filter(
       (provider) => provider !== NumberingService && !INVENTORY_PROVIDERS.includes(provider),
     ),
+    // Phase 5. RC-003 depends only on the core services AppModule already
+    // provides, so nothing needs filtering out of it yet.
+    ...RCM_PROVIDERS.filter((provider) => provider !== NumberingService),
     { provide: APP_FILTER, useClass: ProblemFilter },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: TenantGuard },

@@ -68,7 +68,12 @@ for (const file of readdirSync(RULES_DIR).filter((f) => f.endsWith('.yml') || f.
       problems.push(`${where}: severity "${severity}" is not one of P1/P2/P3`);
     }
 
-    const runbook = /runbook_url\s*:\s*"?([^"\n]+)"?/.exec(body)?.[1]?.trim();
+    // YAML allows the value bare, single-quoted or double-quoted, and this file
+    // uses single quotes throughout. Matching only `"` captured the closing `'`
+    // into the slug, so every one of the sixteen runbooks — all of which exist —
+    // was reported missing, and this check failed CI on a parsing bug rather
+    // than on anything about the alert rules.
+    const runbook = /runbook_url\s*:\s*(['"]?)([^'"\n]+)\1/.exec(body)?.[2]?.trim();
     if (runbook) {
       const slug = runbook.replace(/\/+$/, '').split('/').pop() ?? '';
       // Deliberately NOT guarded on `runbooks.size > 0`. An empty runbook

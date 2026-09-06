@@ -37,6 +37,9 @@ import { seedClinical } from './clinical.js';
 import { seedDiagnostics } from './diagnostics.js';
 import { seedSupplyChain } from './inventory.js';
 import { seedPharmacy } from './pharmacy.js';
+import { seedLeakage } from './leakage.js';
+import { seedSchemes } from './schemes.js';
+import { seedTariff } from './tariff.js';
 
 interface Args {
   readonly tier: Tier;
@@ -112,6 +115,12 @@ export async function runSeed(db: Pool, tier: Tier): Promise<ReturnType<typeof t
     // supply-chain seed has to have created first.
     await seedSupplyChain(ctx, tenancy);
     await seedPharmacy(ctx, tenancy);
+    // Phase 5. After the Phase-1 masters, because a tariff item prices a row of
+    // `mdm_services` and takes its SAC code and GST rate from it. Before any
+    // billing seed: a charge that cannot be priced is held, not zero-rated.
+    await seedTariff(ctx, tenancy);
+    await seedSchemes(ctx, tenancy);
+    await seedLeakage(ctx, tenancy);
   }
   await seedActivity(ctx, tenancy);
   await seedPatientPopulation(ctx, tenancy);

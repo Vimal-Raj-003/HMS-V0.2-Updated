@@ -5,7 +5,13 @@ import {
   type ExecutionContext,
   type NestInterceptor,
 } from '@nestjs/common';
-import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
+// `.js` is required, not optional: this compiles under `moduleResolution:
+// "Bundler"` either way, but the emitted code is run by Node's ESM loader
+// against a CommonJS package that publishes no `exports` map, so the
+// extensionless form resolves at build time and throws ERR_MODULE_NOT_FOUND
+// at boot. `HTTP_CODE_METADATA` is not re-exported from the package root,
+// so the deep import itself has to stay.
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants.js';
 import { Reflector } from '@nestjs/core';
 import { ProblemType } from '@vims/contracts';
 import type { FastifyReply, FastifyRequest } from 'fastify';

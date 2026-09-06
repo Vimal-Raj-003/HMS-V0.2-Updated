@@ -84,6 +84,31 @@ export function inventoryKeys(hospitalId: string) {
     vendorsRoot: () => [...root, 'vendors'] as const,
     vendor: (id: string) => [...root, 'vendor', id] as const,
     rateContracts: (vendorId: string) => [...root, 'vendor', vendorId, 'rate-contracts'] as const,
+
+    // NC-007 — consignment. The vendor filter is part of the key because a
+    // materials manager switching vendors must not be served the last one's
+    // usages from cache: a usage attributed to the wrong vendor is an invoice
+    // dispute.
+    agreements: (storeId: string, cursor: string) => [...root, 'cn-agreements', storeId, cursor] as const,
+    agreementsRoot: () => [...root, 'cn-agreements'] as const,
+    agreement: (id: string) => [...root, 'cn-agreement', id] as const,
+    consignmentStock: (storeId: string) => [...root, 'cn-stock', storeId] as const,
+    consignmentStockRoot: () => [...root, 'cn-stock'] as const,
+    usages: (agreementId: string, vendorId: string, status: string, cursor: string) =>
+      [...root, 'cn-usages', agreementId, vendorId, status, cursor] as const,
+    usagesRoot: () => [...root, 'cn-usages'] as const,
+    usage: (id: string) => [...root, 'cn-usage', id] as const,
+    reconciliation: (id: string) => [...root, 'cn-reconciliation', id] as const,
+
+    // NC-008 — consumption and cost centres.
+    consumption: (storeId: string, costCentreId: string, entryType: string, cursor: string) =>
+      [...root, 'consumption', storeId, costCentreId, entryType, cursor] as const,
+    consumptionRoot: () => [...root, 'consumption'] as const,
+    consumptionEntry: (id: string) => [...root, 'consumption-entry', id] as const,
+    costCentres: (centreType: string, cursor: string) =>
+      [...root, 'cost-centres', centreType, cursor] as const,
+    costCentresRoot: () => [...root, 'cost-centres'] as const,
+    costCentreConsumption: (period: string) => [...root, 'cost-centre-consumption', period] as const,
   };
 }
 

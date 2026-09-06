@@ -1,0 +1,480 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-005 — OP billing (schema `billing`)
+//
+// Where a delivered service becomes money. Phases 1–4 have been writing
+// `billing.charge_intents` since Phase 2; this is what turns them into a bill,
+// a GST document and a collectable balance.
+//
+//   bills                the master, one per OP visit
+//   bill_items           the lines, idempotent on their source event
+//   invoices             the GST document: tax invoice, bill of supply, credit
+//                        note — gapless per series per financial year
+//   discount_requests    the approval trail; requester ≠ approver
+//   payer_bill_splits    who owes which part of one bill
+//   gst_profiles         the branch's GSTIN and e-invoice posture
+//   discount_matrix      how much each role may give away
+//   billing_exceptions   RC-006's read model, written here
+//
+// `payments`, `payment_lines`, `advances` and `refunds` already exist — Phase 1
+// built them for NC-001's cash counter. This migration extends `refunds` rather
+// than creating a second one, because two tables called "the refund" is exactly
+// the fork `docs/03 §Shared platform-owned tables` exists to prevent.
+//
+// ── Four decisions worth reading before changing anything here ──────────────
+//
+// **1. A bill line is idempotent on its source event.** `phase-05 §Constraints`
+// is unambiguous: "One charge, one bill line, once. Charge intents carry an
+// idempotency key from the source event; a replayed event must never
+// double-bill." That is a UNIQUE index on (bill_id, source_module,
+// source_ref_id), not a check in a service — a replay arrives at 3 a.m. through
+// a queue retry nobody is watching, and exit gate 2 replays every charge event
+// three times and expects the bill unchanged.
+//
+// **2. Totals are computed, then verified by the database.** The service
+// computes; a trigger re-adds the lines and refuses a header that disagrees.
+// Exit gate 10 asks for "Σ bill lines = bill total" and this is where that stops
+// being a report somebody runs and becomes something that cannot be false.
+//
+// **3. Nothing is deleted, ever.** `CLAUDE.md §4`: financial rows are never
+// hard-deleted. A cancelled bill keeps its number and its lines and gains a
+// status; a corrected invoice gets a credit note pointing at it. The migration
+// revokes DELETE on all four money tables.
+//
+// **4. Money is `numeric(14,2)` and a decimal string on the wire.** Never a
+// float, never a JS number in an event payload. ₹1,234.55 through IEEE-754 is
+// ₹1,234.5499999999999, and a paisa per line is a reconciliation that never
+// balances.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum BillType {
+  op
+  ip
+  er
+  daycare
+  pharmacy_otc
+  lab_walkin
+  package
+  misc
+
+  @@schema("billing")
+}
+
+/// `draft` accumulates, `open` is presented, `finalized` is immutable and
+/// carries a GST document. There is no path from `finalized` back to `open`:
+/// corrections are credit notes (OP-005 §5).
+enum BillStatus {
+  draft
+  open
+  finalized
+  partially_paid
+  paid
+  cancelled
+  void
+
+  @@schema("billing")
+}
+
+enum BillPayerType {
+  self
+  insurance
+  corporate
+  scheme
+  staff
+  charity
+
+  @@schema("billing")
+}
+
+/// The GST document types. `bill_of_supply` is what an exempt healthcare
+/// service gets — issuing a tax invoice for it would claim tax that was never
+/// charged.
+enum InvoiceDocType {
+  tax_invoice
+  bill_of_supply
+  credit_note
+  debit_note
+  advance_receipt_voucher
+
+  @@schema("billing")
+}
+
+enum InvoiceStatus {
+  issued
+  cancelled
+
+  @@schema("billing")
+}
+
+enum EInvoiceStatus {
+  na
+  pending
+  generated
+  failed
+  cancelled
+
+  @@schema("billing")
+}
+
+enum BillItemType {
+  consult
+  lab
+  rad
+  pharmacy
+  procedure
+  consumable
+  package
+  room
+  other
+
+  @@schema("billing")
+}
+
+enum BillItemStatus {
+  unpaid
+  paid
+  credit
+  waived
+  cancelled
+  refunded
+
+  @@schema("billing")
+}
+
+/// Whether the line carries a real resolved rate.
+///
+/// `missing` is the state RC-003 returns `MISSING_RATE` for, and OP-005 §5
+/// refuses to finalise a bill that holds one. It exists as a column rather than
+/// as an absent row because a service delivered and not billed must be visible,
+/// not invisible.
+enum BillPriceStatus {
+  priced
+  missing
+  manual
+
+  @@schema("billing")
+}
+
+enum DiscountRequestStatus {
+  pending
+  approved
+  rejected
+  withdrawn
+
+  @@schema("billing")
+}
+
+/// One master bill. One per OP visit — enforced by a partial unique index in the
+/// migration, because a second bill for one visit splits a patient's money
+/// across two documents nobody reconciles.
+model Bill {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  billNo     String  @map("bill_no") @db.VarChar(40)
+
+  patientId   String  @map("patient_id") @db.Uuid
+  visitId     String? @map("visit_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+
+  billType BillType   @map("bill_type")
+  status   BillStatus @default(draft)
+
+  payerType BillPayerType @default(self) @map("payer_type")
+  /// EN-002's payer. No FK yet — that master lands later in Phase 5.
+  payerId    String? @map("payer_id") @db.Uuid
+  policyRef  String? @map("policy_ref") @db.VarChar(64)
+  preauthRef String? @map("preauth_ref") @db.VarChar(64)
+
+  currency String @default("INR") @db.Char(3)
+
+  /// Every one of these is recomputed server-side and verified by a trigger.
+  /// `docs/04`: totals are never trusted from a client.
+  grossAmount    Decimal @default(0) @map("gross_amount") @db.Decimal(14, 2)
+  discountAmount Decimal @default(0) @map("discount_amount") @db.Decimal(14, 2)
+  taxableAmount  Decimal @default(0) @map("taxable_amount") @db.Decimal(14, 2)
+  cgst           Decimal @default(0) @db.Decimal(14, 2)
+  sgst           Decimal @default(0) @db.Decimal(14, 2)
+  igst           Decimal @default(0) @db.Decimal(14, 2)
+  cess           Decimal @default(0) @db.Decimal(14, 2)
+  /// Section 170: an invoice rounds to the nearest rupee and records the delta.
+  roundOff       Decimal @default(0) @map("round_off") @db.Decimal(14, 2)
+  netAmount      Decimal @default(0) @map("net_amount") @db.Decimal(14, 2)
+  paidAmount     Decimal @default(0) @map("paid_amount") @db.Decimal(14, 2)
+  balanceAmount  Decimal @default(0) @map("balance_amount") @db.Decimal(14, 2)
+  patientShare   Decimal @default(0) @map("patient_share") @db.Decimal(14, 2)
+  payerShare     Decimal @default(0) @map("payer_share") @db.Decimal(14, 2)
+
+  estimateId String? @map("estimate_id") @db.Uuid
+  packageId  String? @map("package_id") @db.Uuid
+
+  finalizedAt DateTime? @map("finalized_at") @db.Timestamptz(6)
+  finalizedBy String?   @map("finalized_by") @db.Uuid
+  cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelledBy String?   @map("cancelled_by") @db.Uuid
+  cancelReason String?  @map("cancel_reason") @db.Text
+
+  remarks String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(1)
+
+  items            BillItem[]
+  invoices         Invoice[]
+  discountRequests DiscountRequest[]
+  payerSplits      PayerBillSplit[]
+
+  @@unique([hospitalId, billNo])
+  @@index([hospitalId, branchId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, visitId])
+  @@map("bills")
+  @@schema("billing")
+}
+
+/// One line. Idempotent on the event that produced it.
+model BillItem {
+  id        String  @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  billId    String  @map("bill_id") @db.Uuid
+  invoiceId String? @map("invoice_id") @db.Uuid
+
+  departmentId String?      @map("department_id") @db.Uuid
+  serviceId    String?      @map("service_id") @db.Uuid
+  itemType     BillItemType @map("item_type")
+  description  String       @db.VarChar(300)
+  hsnSac       String?      @map("hsn_sac") @db.VarChar(16)
+
+  qty       Decimal @default(1) @db.Decimal(14, 3)
+  unitPrice Decimal @map("unit_price") @db.Decimal(14, 2)
+  mrp       Decimal? @db.Decimal(14, 2)
+
+  /// The rate snapshot. RC-003 §5: "Every bill line stores `tariff_version_id` +
+  /// `tariff_item_id` + resolved rate, so a historical bill can always be
+  /// explained even after 10 revisions."
+  tariffVersionId String? @map("tariff_version_id") @db.Uuid
+  tariffItemId    String? @map("tariff_item_id") @db.Uuid
+
+  gross            Decimal @default(0) @db.Decimal(14, 2)
+  discountAmount   Decimal @default(0) @map("discount_amount") @db.Decimal(14, 2)
+  discountReasonId String? @map("discount_reason_id") @db.Uuid
+  discountApprovedBy String? @map("discount_approved_by") @db.Uuid
+
+  taxableValue Decimal @default(0) @map("taxable_value") @db.Decimal(14, 2)
+  gstRate      Decimal @default(0) @map("gst_rate") @db.Decimal(5, 2)
+  cgst         Decimal @default(0) @db.Decimal(14, 2)
+  sgst         Decimal @default(0) @db.Decimal(14, 2)
+  igst         Decimal @default(0) @db.Decimal(14, 2)
+  cess         Decimal @default(0) @db.Decimal(14, 2)
+  isExempt     Boolean @default(true) @map("is_exempt")
+  net          Decimal @default(0) @db.Decimal(14, 2)
+
+  status      BillItemStatus  @default(unpaid)
+  priceStatus BillPriceStatus @default(priced) @map("price_status")
+
+  performingDoctorId String? @map("performing_doctor_id") @db.Uuid
+  referringDoctorId  String? @map("referring_doctor_id") @db.Uuid
+  orderingDoctorId   String? @map("ordering_doctor_id") @db.Uuid
+
+  /// The identity of the clinical event this line bills. The UNIQUE index over
+  /// (bill_id, source_module, source_ref_id) is what makes a replayed event a
+  /// no-op instead of a second charge.
+  sourceModule String  @map("source_module") @db.VarChar(32)
+  sourceRefId  String  @map("source_ref_id") @db.Uuid
+
+  packageComponent Boolean @default(false) @map("package_component")
+  payerCovered     Boolean @default(false) @map("payer_covered")
+  patientShare     Decimal @default(0) @map("patient_share") @db.Decimal(14, 2)
+  payerShare       Decimal @default(0) @map("payer_share") @db.Decimal(14, 2)
+
+  performedAt DateTime? @map("performed_at") @db.Timestamptz(6)
+  postedAt    DateTime  @default(now()) @map("posted_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Restrict)
+
+  @@unique([billId, sourceModule, sourceRefId])
+  @@index([hospitalId, billId])
+  @@index([hospitalId, performingDoctorId, performedAt])
+  @@index([hospitalId, priceStatus])
+  @@map("bill_items")
+  @@schema("billing")
+}
+
+/// The GST document. Numbered gaplessly per series per financial year.
+model Invoice {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  invoiceNo String @map("invoice_no") @db.VarChar(40)
+  seriesKey String @map("series_key") @db.VarChar(40)
+  billId    String @map("bill_id") @db.Uuid
+
+  docType InvoiceDocType @map("doc_type")
+
+  isB2b               Boolean @default(false) @map("is_b2b")
+  recipientName       String? @map("recipient_name") @db.VarChar(200)
+  recipientGstin      String? @map("recipient_gstin") @db.VarChar(20)
+  placeOfSupplyState  String? @map("place_of_supply_state") @db.VarChar(2)
+  reverseCharge       Boolean @default(false) @map("reverse_charge")
+
+  irn            String?        @db.VarChar(80)
+  irnAckNo       String?        @map("irn_ack_no") @db.VarChar(40)
+  irnAckDate     DateTime?      @map("irn_ack_date") @db.Timestamptz(6)
+  signedQr       String?        @map("signed_qr") @db.Text
+  einvoiceStatus EInvoiceStatus @default(na) @map("einvoice_status")
+
+  status          InvoiceStatus @default(issued)
+  issuedAt        DateTime      @default(now()) @map("issued_at") @db.Timestamptz(6)
+  cancelledReason String?       @map("cancelled_reason") @db.Text
+  /// A credit note points at what it reverses.
+  originalInvoiceId String? @map("original_invoice_id") @db.Uuid
+
+  pdfFileId String? @map("pdf_file_id") @db.Uuid
+  sha256    String? @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, seriesKey, invoiceNo])
+  @@index([hospitalId, branchId, issuedAt(sort: Desc)])
+  @@index([hospitalId, billId])
+  @@map("invoices")
+  @@schema("billing")
+}
+
+/// The discount approval trail. Requester and approver are different people,
+/// and the migration's trigger refuses a row where they are not.
+model DiscountRequest {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  billId     String @map("bill_id") @db.Uuid
+  billItemId String? @map("bill_item_id") @db.Uuid
+
+  requestedBy String  @map("requested_by") @db.Uuid
+  pct         Decimal? @db.Decimal(5, 2)
+  amount      Decimal? @db.Decimal(14, 2)
+  /// A coded reason, not free text: `phase-05 §5.2` requires "mandatory coded
+  /// reasons", because a discount register full of "as discussed" is not one.
+  reasonCode    String  @map("reason_code") @db.VarChar(40)
+  justification String? @db.Text
+
+  approverRole String?               @map("approver_role") @db.VarChar(64)
+  approvedBy   String?               @map("approved_by") @db.Uuid
+  decidedAt    DateTime?             @map("decided_at") @db.Timestamptz(6)
+  status       DiscountRequestStatus @default(pending)
+
+  beforeSnapshot Json? @map("before_snapshot")
+  afterSnapshot  Json? @map("after_snapshot")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, billId])
+  @@map("discount_requests")
+  @@schema("billing")
+}
+
+/// Who owes which part of one bill.
+model PayerBillSplit {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  billId     String @map("bill_id") @db.Uuid
+
+  payerId       String? @map("payer_id") @db.Uuid
+  coveredAmount Decimal @default(0) @map("covered_amount") @db.Decimal(14, 2)
+  copay         Decimal @default(0) @db.Decimal(14, 2)
+  deductible    Decimal @default(0) @db.Decimal(14, 2)
+  preauthId     String? @map("preauth_id") @db.Uuid
+  claimId       String? @map("claim_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, billId])
+  @@map("payer_bill_splits")
+  @@schema("billing")
+}
+
+/// The branch's GST identity and e-invoice posture.
+model GstProfile {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  gstin      String @db.VarChar(20)
+  legalName  String @map("legal_name") @db.VarChar(200)
+  tradeName  String? @map("trade_name") @db.VarChar(200)
+  address    String @db.Text
+  stateCode  String @map("state_code") @db.VarChar(2)
+
+  /// Turnover-driven. Below the threshold a hospital neither can nor must
+  /// generate an IRN, and pretending otherwise fails at the portal.
+  einvoiceEnabled Boolean @default(false) @map("einvoice_enabled")
+  dynamicQr       Boolean @default(false) @map("dynamic_qr")
+
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, branchId, effectiveFrom])
+  @@map("gst_profiles")
+  @@schema("billing")
+}
+
+/// How much each role may give away before somebody else has to agree.
+model DiscountMatrix {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  roleKey           String   @map("role_key") @db.VarChar(64)
+  maxPct            Decimal  @default(0) @map("max_pct") @db.Decimal(5, 2)
+  maxAmount         Decimal  @default(0) @map("max_amount") @db.Decimal(14, 2)
+  needsApprovalFrom String?  @map("needs_approval_from") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, roleKey])
+  @@map("discount_matrix")
+  @@schema("billing")
+}
+
+/// RC-006's read model, written here as billing notices things.
+model BillingException {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  exceptionType String   @map("exception_type") @db.VarChar(48)
+  refId         String?  @map("ref_id") @db.Uuid
+  amount        Decimal? @db.Decimal(14, 2)
+  detail        String?  @db.Text
+
+  detectedAt DateTime  @default(now()) @map("detected_at") @db.Timestamptz(6)
+  status     String    @default("open") @db.VarChar(24)
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy String?   @map("resolved_by") @db.Uuid
+
+  @@index([hospitalId, status, detectedAt(sort: Desc)])
+  @@map("billing_exceptions")
+  @@schema("billing")
+}

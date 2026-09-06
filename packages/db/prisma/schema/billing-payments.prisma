@@ -1,0 +1,551 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-010 — payment gateway (schema `billing`, prefix `pay_`)
+//
+// `docs/prompts/phase-05-billing-rcm.md` §5.3. The path money actually takes:
+// an intent, a provider order, a webhook that confirms it, a settlement file
+// that proves it arrived, and a reconciliation that says which of those three
+// disagree.
+//
+// ── The one rule this module exists to enforce ──────────────────────────────
+//
+// **A payment is confirmed by the provider, never by the client.** OP-005 §5:
+// "Payment confirmation only on gateway webhook/POS response (never on client
+// claim)". A browser saying "I paid" is a claim; a signed webhook is evidence.
+// So `pay_intents` and `pay_payments` are separate tables — the intent is what
+// we asked for, the payment is what the provider says happened, and only the
+// second creates a receipt.
+//
+// ── And the one that stops it being enforced twice ──────────────────────────
+//
+// Providers redeliver webhooks. Razorpay retries for 24 hours; a redelivery
+// during a deploy is routine. `pay_webhook_events.event_id` is UNIQUE, so the
+// second delivery of one event conflicts instead of crediting a second time.
+// `phase-05` exit gate 3 tests exactly this: "a webhook replay does not
+// double-credit". The uniqueness is the guarantee; the handler is the mechanism.
+//
+// ── §269ST ──────────────────────────────────────────────────────────────────
+//
+// Aggregate cash from one person in one day of ₹2,00,000 or more is an offence
+// under the Income Tax Act, and the penalty falls on the *recipient*. That is a
+// cash-counter rule (NC-001 owns the till) but the limit is configured here with
+// the rest of the payment policy so there is one number, not two that drift.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PayProvider {
+  razorpay
+  phonepe
+  payu
+  cashfree
+  stripe
+  bank_pg
+
+  @@schema("billing")
+}
+
+enum PayMode {
+  sandbox
+  live
+
+  @@schema("billing")
+}
+
+/// What the money is for.
+enum PayIntentKind {
+  bill
+  advance
+  deposit
+  link
+  kiosk
+  portal
+  website
+  mandate
+
+  @@schema("billing")
+}
+
+/// `unapplied` is money that arrived and matches no bill — a real and common
+/// state, and the one that must never be silently dropped.
+enum PayIntentStatus {
+  created
+  pending
+  paid
+  partially_paid
+  expired
+  failed
+  cancelled
+  unapplied
+
+  @@schema("billing")
+}
+
+enum PayMethod {
+  upi
+  card
+  netbanking
+  wallet
+  emi
+  bnpl
+  international
+  pos
+
+  @@schema("billing")
+}
+
+enum PayPaymentStatus {
+  authorized
+  captured
+  failed
+  refunded
+  partially_refunded
+  disputed
+
+  @@schema("billing")
+}
+
+enum PayRefundStatus {
+  requested
+  approved
+  initiated
+  processed
+  failed
+
+  @@schema("billing")
+}
+
+enum PayWebhookStatus {
+  received
+  processed
+  ignored
+  failed
+
+  @@schema("billing")
+}
+
+enum PaySettlementStatus {
+  fetched
+  matched
+  posted
+  exception
+
+  @@schema("billing")
+}
+
+/// The kinds of disagreement reconciliation can find. Named rather than free
+/// text because each one has a different owner and a different fix, and a queue
+/// of "mismatch" tells nobody what to do.
+enum PayReconExceptionType {
+  captured_no_receipt
+  receipt_no_payment
+  amount_mismatch
+  fee_variance
+  missing_settlement
+  refund_pending
+  unapplied
+  duplicate
+
+  @@schema("billing")
+}
+
+model PayGatewayAccount {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String? @map("branch_id") @db.Uuid
+
+  provider PayProvider
+  mode     PayMode     @default(sandbox)
+  keyId    String      @map("key_id") @db.VarChar(120)
+
+  /// A Vault path, never the secret. `docs/04 §2`: nothing that can authorise a
+  /// charge is stored in a column a backup can leak.
+  secretRef        String @map("secret_ref") @db.VarChar(200)
+  webhookSecretRef String @map("webhook_secret_ref") @db.VarChar(200)
+
+  settlementBankAccountId String? @map("settlement_bank_account_id") @db.Uuid
+
+  methods               Json   @default("[]")
+  mdrSchedule           Json   @default("{}") @map("mdr_schedule")
+  convenienceFeePolicy  Json   @default("{}") @map("convenience_fee_policy")
+  currencyDefault       String @default("INR") @map("currency_default") @db.Char(3)
+
+  /// §269ST. Configured with the rest of the payment policy so the limit is one
+  /// number rather than two that drift apart.
+  cashAggregateLimit Decimal @default(200000) @map("cash_aggregate_limit") @db.Decimal(14, 2)
+
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  intents     PayIntent[]
+  settlements PaySettlement[]
+
+  @@unique([hospitalId, branchId, provider, mode])
+  @@map("pay_gateway_accounts")
+  @@schema("billing")
+}
+
+/// A card machine on a counter.
+model PayTerminal {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  provider      PayProvider
+  tid           String  @db.VarChar(40)
+  serial        String? @db.VarChar(60)
+  counterId     String? @map("counter_id") @db.Uuid
+  workstationId String? @map("workstation_id") @db.Uuid
+  /// `cloud_push` sends the amount to the terminal; `standalone` needs it typed,
+  /// which is where amount mismatches come from.
+  mode          String  @default("cloud_push") @db.VarChar(20)
+  status        String  @default("active") @db.VarChar(20)
+  lastSeen      DateTime? @map("last_seen") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, provider, tid])
+  @@map("pay_terminals")
+  @@schema("billing")
+}
+
+/// What we asked the provider for. Not money yet.
+model PayIntent {
+  id               String @id @db.Uuid
+  hospitalId       String @map("hospital_id") @db.Uuid
+  branchId         String @map("branch_id") @db.Uuid
+  gatewayAccountId String @map("gateway_account_id") @db.Uuid
+
+  providerOrderId String? @map("provider_order_id") @db.VarChar(120)
+
+  kind    PayIntentKind
+  refType String  @map("ref_type") @db.VarChar(24)
+  refId   String  @map("ref_id") @db.Uuid
+
+  patientId  String? @map("patient_id") @db.Uuid
+  /// Masked at write time. `docs/04`: no unmasked contact detail in a table a
+  /// support engineer reads to debug a failed payment.
+  payerName  String? @map("payer_name") @db.VarChar(120)
+  payerPhone String? @map("payer_phone") @db.VarChar(20)
+
+  amount     Decimal @db.Decimal(14, 2)
+  currency   String  @default("INR") @db.Char(3)
+  methodHint String  @default("any") @map("method_hint") @db.VarChar(20)
+
+  status PayIntentStatus @default(created)
+
+  qrId        String?   @map("qr_id") @db.VarChar(120)
+  qrImageUrl  String?   @map("qr_image_url") @db.Text
+  linkId      String?   @map("link_id") @db.VarChar(120)
+  linkUrl     String?   @map("link_url") @db.Text
+  terminalId  String?   @map("terminal_id") @db.Uuid
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  attempts Int  @default(0)
+  meta     Json @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  gatewayAccount PayGatewayAccount @relation(fields: [gatewayAccountId], references: [id], onDelete: Restrict)
+  payments       PayPayment[]
+  links          PayLink[]
+
+  @@unique([gatewayAccountId, providerOrderId])
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, refType, refId])
+  @@map("pay_intents")
+  @@schema("billing")
+}
+
+/// What the provider says happened. The only thing that creates a receipt.
+model PayPayment {
+  id       String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  intentId String @map("intent_id") @db.Uuid
+
+  /// UNIQUE: the provider's own id for this payment. A redelivered webhook
+  /// carrying the same id conflicts here rather than crediting twice.
+  providerPaymentId String @map("provider_payment_id") @db.VarChar(120)
+
+  method     PayMethod
+  /// vpa, bank, card network, last4, issuer — masked.
+  instrument Json      @default("{}")
+
+  amount Decimal @db.Decimal(14, 2)
+  fee    Decimal @default(0) @db.Decimal(14, 2)
+  tax    Decimal @default(0) @db.Decimal(14, 2)
+
+  capturedAt DateTime? @map("captured_at") @db.Timestamptz(6)
+  rrn        String?   @db.VarChar(60)
+  utr        String?   @db.VarChar(60)
+
+  status PayPaymentStatus @default(authorized)
+
+  /// NC-001's receipt, once the money is real.
+  receiptId String? @map("receipt_id") @db.Uuid
+
+  errorCode String? @map("error_code") @db.VarChar(60)
+  errorDesc String? @map("error_desc") @db.Text
+  rawRef    String? @map("raw_ref") @db.VarChar(200)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  intent  PayIntent   @relation(fields: [intentId], references: [id], onDelete: Restrict)
+  refunds PayRefund[]
+
+  @@unique([providerPaymentId])
+  @@index([hospitalId, status, capturedAt(sort: Desc)])
+  @@index([hospitalId, intentId])
+  @@map("pay_payments")
+  @@schema("billing")
+}
+
+/// A refund goes back through the instrument it came from (OP-005 §5).
+model PayRefund {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  paymentId  String @map("payment_id") @db.Uuid
+
+  amount     Decimal @db.Decimal(14, 2)
+  reasonCode String  @map("reason_code") @db.VarChar(40)
+
+  requestedBy String  @map("requested_by") @db.Uuid
+  approvalId  String? @map("approval_id") @db.Uuid
+  approvedBy  String? @map("approved_by") @db.Uuid
+
+  providerRefundId String? @map("provider_refund_id") @db.VarChar(120)
+  speed            String  @default("normal") @db.VarChar(12)
+  status           PayRefundStatus @default(requested)
+  arn              String? @db.VarChar(60)
+  processedAt      DateTime? @map("processed_at") @db.Timestamptz(6)
+
+  creditNoteId        String? @map("credit_note_id") @db.Uuid
+  receiptReversalId   String? @map("receipt_reversal_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  payment PayPayment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@map("pay_refunds")
+  @@schema("billing")
+}
+
+model PayLink {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  intentId   String @map("intent_id") @db.Uuid
+
+  providerLinkId String  @map("provider_link_id") @db.VarChar(120)
+  shortUrl       String  @map("short_url") @db.Text
+  expiresAt      DateTime? @map("expires_at") @db.Timestamptz(6)
+  reminders      Json    @default("[]")
+  /// Sent through EN-009, not the provider: one messaging trail, one DLT
+  /// template register, one place a patient's consent is checked.
+  sentVia        String? @map("sent_via") @db.VarChar(20)
+  status         String  @default("active") @db.VarChar(20)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  intent PayIntent @relation(fields: [intentId], references: [id], onDelete: Cascade)
+
+  @@unique([providerLinkId])
+  @@index([hospitalId, status])
+  @@map("pay_links")
+  @@schema("billing")
+}
+
+/// Every webhook, kept.
+///
+/// `event_id` is UNIQUE and that is the whole of exit gate 3: a redelivered
+/// webhook conflicts here and the handler never runs twice. Partitioned monthly
+/// because a busy gateway delivers a lot and the table is append-only evidence.
+model PayWebhookEvent {
+  id         String @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  provider PayProvider
+  /// The provider's own event id. The idempotency key of the whole module.
+  eventId  String @map("event_id") @db.VarChar(160)
+  type     String @db.VarChar(80)
+  payload  Json
+
+  /// False means the signature did not verify. The row is still written —
+  /// a forged webhook is evidence of an attack and must not be discarded.
+  signatureOk Boolean  @default(false) @map("signature_ok")
+  receivedAt  DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(6)
+  status      PayWebhookStatus @default(received)
+  error       String? @db.Text
+
+  @@id([id, receivedAt])
+  @@index([hospitalId, provider, eventId])
+  @@index([hospitalId, status, receivedAt(sort: Desc)])
+  @@map("pay_webhook_events")
+  @@schema("billing")
+}
+
+model PaySettlement {
+  id               String @id @db.Uuid
+  hospitalId       String @map("hospital_id") @db.Uuid
+  gatewayAccountId String @map("gateway_account_id") @db.Uuid
+
+  providerSettlementId String   @map("provider_settlement_id") @db.VarChar(120)
+  utr                  String?  @db.VarChar(60)
+  amount               Decimal  @db.Decimal(14, 2)
+  fees                 Decimal  @default(0) @db.Decimal(14, 2)
+  tax                  Decimal  @default(0) @db.Decimal(14, 2)
+  settledAt            DateTime @map("settled_at") @db.Timestamptz(6)
+  status               PaySettlementStatus @default(fetched)
+  journalId            String?  @map("journal_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  gatewayAccount PayGatewayAccount    @relation(fields: [gatewayAccountId], references: [id], onDelete: Restrict)
+  lines          PaySettlementLine[]
+
+  @@unique([providerSettlementId])
+  @@index([hospitalId, settledAt(sort: Desc)])
+  @@map("pay_settlements")
+  @@schema("billing")
+}
+
+model PaySettlementLine {
+  id           String @id @db.Uuid
+  hospitalId   String @map("hospital_id") @db.Uuid
+  settlementId String @map("settlement_id") @db.Uuid
+
+  entityType       String  @map("entity_type") @db.VarChar(20)
+  providerEntityId String  @map("provider_entity_id") @db.VarChar(120)
+  amount           Decimal @db.Decimal(14, 2)
+  fee              Decimal @default(0) @db.Decimal(14, 2)
+  tax              Decimal @default(0) @db.Decimal(14, 2)
+  matchedReceiptId String? @map("matched_receipt_id") @db.Uuid
+  status           String  @default("unmatched") @db.VarChar(20)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  settlement PaySettlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, settlementId, status])
+  @@map("pay_settlement_lines")
+  @@schema("billing")
+}
+
+/// The queue of disagreements. Every row has an owner and a fix.
+model PayReconException {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  exceptionType PayReconExceptionType @map("exception_type")
+  refs          Json    @default("{}")
+  amount        Decimal? @db.Decimal(14, 2)
+  ownerId       String? @map("owner_id") @db.Uuid
+  status        String  @default("open") @db.VarChar(20)
+  notes         String? @db.Text
+  resolvedAt    DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy    String?   @map("resolved_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, exceptionType, status])
+  @@map("pay_recon_exceptions")
+  @@schema("billing")
+}
+
+model PayDispute {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  paymentId  String @map("payment_id") @db.Uuid
+
+  providerDisputeId String   @map("provider_dispute_id") @db.VarChar(120)
+  amount            Decimal  @db.Decimal(14, 2)
+  reason            String?  @db.VarChar(200)
+  phase             String   @default("chargeback") @db.VarChar(24)
+  evidenceFiles     String[] @default([]) @map("evidence_files") @db.Uuid
+  dueAt             DateTime? @map("due_at") @db.Timestamptz(6)
+  outcome           String?  @db.VarChar(40)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([providerDisputeId])
+  @@index([hospitalId, dueAt])
+  @@map("pay_disputes")
+  @@schema("billing")
+}
+
+model PayMandate {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  providerMandateId String   @map("provider_mandate_id") @db.VarChar(120)
+  maxAmount         Decimal  @map("max_amount") @db.Decimal(14, 2)
+  frequency         String   @db.VarChar(20)
+  schedule          Json     @default("{}")
+  status            String   @default("active") @db.VarChar(20)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  debits PayMandateDebit[]
+
+  @@unique([providerMandateId])
+  @@index([hospitalId, patientId, status])
+  @@map("pay_mandates")
+  @@schema("billing")
+}
+
+model PayMandateDebit {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  mandateId  String @map("mandate_id") @db.Uuid
+
+  amount    Decimal  @db.Decimal(14, 2)
+  dueAt     DateTime @map("due_at") @db.Timestamptz(6)
+  status    String   @default("scheduled") @db.VarChar(20)
+  paymentId String?  @map("payment_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mandate PayMandate @relation(fields: [mandateId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, status, dueAt])
+  @@map("pay_mandate_debits")
+  @@schema("billing")
+}
+
+/// The bridge to NC-009's general ledger (Phase 9).
+///
+/// `idempotency_key` is UNIQUE so a retried posting is refused rather than
+/// double-entered. The ledger is the one place a duplicate is unrecoverable
+/// without a manual journal, so the guard belongs in the schema.
+model PayLedgerPosting {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  entity   String   @db.VarChar(20)
+  entityId String   @map("entity_id") @db.Uuid
+  journalId String? @map("journal_id") @db.Uuid
+  postedAt DateTime @default(now()) @map("posted_at") @db.Timestamptz(6)
+
+  idempotencyKey String @map("idempotency_key") @db.VarChar(160)
+
+  @@unique([idempotencyKey])
+  @@index([hospitalId, entity, entityId])
+  @@map("pay_ledger_postings")
+  @@schema("billing")
+}

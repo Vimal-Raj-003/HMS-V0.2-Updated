@@ -36,6 +36,7 @@
     "infra:nuke": "docker compose -f infra/docker/docker-compose.dev.yml down -v",
     "permissions:check": "node scripts/check-permission-keys.mjs",
     "tokens:check": "node scripts/check-hex-literals.mjs",
+    "charts:check": "node scripts/check-chart-palette.mjs",
     "prepare": "husky || true"
   },
   "devDependencies": {

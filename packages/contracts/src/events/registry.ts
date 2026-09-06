@@ -7607,6 +7607,1145 @@ const pharmacyEvents: readonly EventDefinition[] = [
   ),
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// RC-003 — tariff.*  (Phase 5)
+//
+// None of these carries PHI: a tariff is a price list, not a patient. They are
+// retained far longer than the 7-day default because a published rate is the
+// evidence behind every bill priced from it, and GST and contract audits reach
+// back years (RC-003 §5 sets 8 years).
+// ─────────────────────────────────────────────────────────────────────────────
+const TARIFF_RETENTION_DAYS = 2920; // 8 years
+
+const tariffEvents: readonly EventDefinition[] = [
+  ev(
+    'tariff.plan.created',
+    'tariff_plan',
+    'RC-003',
+    'A rate plan was created — a payer, scheme, corporate or self-pay pricing authority.',
+    z.object({
+      planId: uuid,
+      code: z.string(),
+      planType: z.string(),
+      payerId: uuid.nullable(),
+      branchId: uuid.nullable(),
+    }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  ev(
+    'tariff.plan.updated',
+    'tariff_plan',
+    'RC-003',
+    'A rate plan header changed — derivation, rounding, priority or status.',
+    z.object({ planId: uuid, changedFields: z.array(z.string()) }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  ev(
+    'tariff.version.created',
+    'tariff_version',
+    'RC-003',
+    'A draft tariff version was opened. A draft prices nothing.',
+    z.object({ planId: uuid, versionId: uuid, versionNo: z.number().int(), effectiveFrom: z.string() }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  ev(
+    'tariff.version.submitted',
+    'tariff_version',
+    'RC-003',
+    'A draft was submitted for approval (EN-038).',
+    z.object({ planId: uuid, versionId: uuid, submittedBy: uuid, itemsChanged: z.number().int() }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  ev(
+    'tariff.version.approved',
+    'tariff_version',
+    'RC-003',
+    'A submitted version was approved and may now be published.',
+    z.object({ planId: uuid, versionId: uuid, approvedBy: uuid }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  /**
+   * The one every consumer waits for: from `effectiveFrom` this version is the
+   * price. It invalidates the resolution cache, re-bases open estimates and
+   * refreshes the public rate card.
+   */
+  ev(
+    'tariff.version.published',
+    'tariff_version',
+    'RC-003',
+    'A version was published and now prices every bill line in its window.',
+    z.object({
+      planId: uuid,
+      versionId: uuid,
+      versionNo: z.number().int(),
+      effectiveFrom: z.string(),
+      effectiveTo: z.string().nullable(),
+      itemsChanged: z.number().int(),
+      publishedBy: uuid,
+    }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  ev(
+    'tariff.version.superseded',
+    'tariff_version',
+    'RC-003',
+    'A published version was closed out by a later one taking effect.',
+    z.object({ planId: uuid, versionId: uuid, supersededByVersionId: uuid }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  ev(
+    'tariff.version.withdrawn',
+    'tariff_version',
+    'RC-003',
+    'A published version that had priced nothing was withdrawn.',
+    z.object({ planId: uuid, versionId: uuid, withdrawnBy: uuid, reason: z.string() }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  ev(
+    'tariff.payer_sheet.published',
+    'tariff_payer_sheet',
+    'RC-003',
+    'A mapped payer rate sheet became a plan version.',
+    z.object({ payerId: uuid, sheetId: uuid, versionId: uuid, unmappedCount: z.number().int() }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  ev(
+    'tariff.scheme.imported',
+    'tariff_scheme_import',
+    'RC-003',
+    'A government scheme package list was imported from a circular.',
+    z.object({
+      schemeId: uuid,
+      importId: uuid,
+      packagesAdded: z.number().int(),
+      packagesRemoved: z.number().int(),
+      packagesRepriced: z.number().int(),
+    }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  /**
+   * The revenue-leakage signal. A bill line that could not be priced is held,
+   * never zero-rated, and this is what tells the tariff desk and RC-006 that a
+   * service is being delivered for nothing.
+   */
+  ev(
+    'tariff.rate.missing',
+    'tariff_missing_rate',
+    'RC-003',
+    'A rate could not be resolved. The bill line is held; nothing is billed at zero.',
+    z.object({
+      serviceId: uuid,
+      planId: uuid.nullable(),
+      bedClassId: uuid.nullable(),
+      branchId: uuid,
+      sampleLineId: uuid.nullable(),
+      attemptedAt: iso,
+    }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  ev(
+    'tariff.rate.below_cost',
+    'tariff_item',
+    'RC-003',
+    'A rate was published below its recorded cost — legitimate for scheme plans, and always visible.',
+    z.object({
+      serviceId: uuid,
+      planId: uuid,
+      versionId: uuid,
+      rate: money,
+      cost: money,
+      acceptedReason: z.string(),
+    }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  ev(
+    'tariff.package.repriced',
+    'tariff_package',
+    'RC-003',
+    'A package price or its cap rules changed.',
+    z.object({ packageId: uuid, versionId: uuid, oldRate: money.nullable(), newRate: money }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+  ev(
+    'tariff.ratecard.published',
+    'tariff_rate_card',
+    'RC-003',
+    'The statutory public rate card was republished (Clinical Establishments Act).',
+    z.object({
+      rateCardId: uuid,
+      branchId: uuid,
+      versionId: uuid,
+      language: z.string(),
+      publishedAt: iso,
+    }),
+    { retentionDays: TARIFF_RETENTION_DAYS },
+  ),
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-005 — bill.* / invoice.*  (Phase 5)
+//
+// Every one of these carries a patient, so `containsPhi` is true throughout and
+// the retention is the GST retention rather than the 7-day default: an invoice
+// is evidence for eight years, and the event that announced it is part of the
+// trail an auditor follows.
+// ─────────────────────────────────────────────────────────────────────────────
+const GST_RETENTION_DAYS = 2920; // 8 years
+
+const billingEvents: readonly EventDefinition[] = [
+  ev(
+    'bill.opened',
+    'bill',
+    'OP-005',
+    'A bill was opened for a visit. Charges accumulate onto it until it is finalised.',
+    z.object({
+      billId: uuid,
+      billNo: z.string(),
+      patientId: uuid,
+      visitId: uuid.nullable(),
+      billType: z.string(),
+    }),
+    { containsPhi: true, retentionDays: GST_RETENTION_DAYS },
+  ),
+  ev(
+    'bill.item.posted',
+    'bill',
+    'OP-005',
+    'A charge became a bill line, priced through RC-003.',
+    z.object({
+      billId: uuid,
+      billItemId: uuid,
+      sourceModule: z.string(),
+      sourceRefId: uuid,
+      net: money,
+      priceStatus: z.enum(['priced', 'missing', 'manual']),
+    }),
+    { containsPhi: true, retentionDays: GST_RETENTION_DAYS },
+  ),
+  /**
+   * The moment a draft becomes a demand for money. Downstream: NC-009's ledger,
+   * NC-034's doctor payout, RC-006's leakage sweep and the patient's statement.
+   */
+  ev(
+    'bill.finalized',
+    'bill',
+    'OP-005',
+    'A bill was finalised. Its amounts are now immutable and it is collectable.',
+    z.object({
+      billId: uuid,
+      billNo: z.string(),
+      patientId: uuid,
+      netAmount: money,
+      taxableAmount: money,
+      cgst: money,
+      sgst: money,
+      igst: money,
+      payerType: z.string(),
+      finalizedBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: GST_RETENTION_DAYS },
+  ),
+  ev(
+    'bill.cancelled',
+    'bill',
+    'OP-005',
+    'A bill was cancelled. The row and its number are retained.',
+    z.object({ billId: uuid, billNo: z.string(), reason: z.string(), cancelledBy: uuid }),
+    { containsPhi: true, retentionDays: GST_RETENTION_DAYS },
+  ),
+  ev(
+    'bill.discount.requested',
+    'discount_request',
+    'OP-005',
+    'A discount was asked for, with a coded reason.',
+    z.object({
+      requestId: uuid,
+      billId: uuid,
+      requestedBy: uuid,
+      pct: z.string().nullable(),
+      amount: money.nullable(),
+      reasonCode: z.string(),
+    }),
+    { containsPhi: true, retentionDays: GST_RETENTION_DAYS },
+  ),
+  ev(
+    'bill.discount.decided',
+    'discount_request',
+    'OP-005',
+    'A discount was approved or refused by somebody other than the requester.',
+    z.object({
+      requestId: uuid,
+      billId: uuid,
+      approvedBy: uuid,
+      decision: z.enum(['approved', 'rejected']),
+      reason: z.string(),
+    }),
+    { containsPhi: true, retentionDays: GST_RETENTION_DAYS },
+  ),
+  ev(
+    'invoice.issued',
+    'invoice',
+    'OP-005',
+    'A GST document was issued against a finalised bill.',
+    z.object({
+      invoiceId: uuid,
+      invoiceNo: z.string(),
+      seriesKey: z.string(),
+      billId: uuid,
+      docType: z.string(),
+      isB2b: z.boolean(),
+      netAmount: money,
+    }),
+    { containsPhi: true, retentionDays: GST_RETENTION_DAYS },
+  ),
+  ev(
+    'invoice.credit_note.issued',
+    'invoice',
+    'OP-005',
+    'A credit note reversed part or all of an issued invoice.',
+    z.object({
+      invoiceId: uuid,
+      invoiceNo: z.string(),
+      originalInvoiceId: uuid,
+      billId: uuid,
+      amount: money,
+      reason: z.string(),
+    }),
+    { containsPhi: true, retentionDays: GST_RETENTION_DAYS },
+  ),
+  ev(
+    'invoice.cancelled',
+    'invoice',
+    'OP-005',
+    'An issued invoice was cancelled. Its number is retained and shown as cancelled.',
+    z.object({ invoiceId: uuid, invoiceNo: z.string(), reason: z.string(), cancelledBy: uuid }),
+    { containsPhi: true, retentionDays: GST_RETENTION_DAYS },
+  ),
+  /**
+   * A charge that could not be priced. RC-003 raised `tariff.rate.missing` for
+   * the *rate*; this one says a specific patient's line is being held, which is
+   * what RC-006 sweeps for and what stops a bill being finalised.
+   */
+  ev(
+    'bill.line.unpriced',
+    'bill',
+    'OP-005',
+    'A bill line could not be priced and is held. Nothing was billed at zero.',
+    z.object({ billId: uuid, billItemId: uuid, serviceId: uuid.nullable(), sourceModule: z.string() }),
+    { containsPhi: true, retentionDays: GST_RETENTION_DAYS },
+  ),
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-010 — pay.*  (Phase 5)
+// ─────────────────────────────────────────────────────────────────────────────
+const paymentEvents: readonly EventDefinition[] = [
+  ev(
+    'pay.intent.created',
+    'pay_intent',
+    'EN-010',
+    'A payment was asked for: a QR, a link or a card-machine order.',
+    z.object({
+      intentId: uuid,
+      refType: z.string(),
+      refId: uuid,
+      amount: money,
+      kind: z.string(),
+      methodHint: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  /**
+   * The only event that means money arrived. Raised from a verified webhook,
+   * never from a client claim — OP-005 §5, and the reason `pay_intents` and
+   * `pay_payments` are two tables rather than one with a status column.
+   */
+  ev(
+    'pay.payment.captured',
+    'pay_payment',
+    'EN-010',
+    'The provider confirmed a payment. This is the only event that means money arrived.',
+    z.object({
+      paymentId: uuid,
+      intentId: uuid,
+      providerPaymentId: z.string(),
+      method: z.string(),
+      amount: money,
+      fee: money,
+      capturedAt: iso,
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'pay.payment.failed',
+    'pay_payment',
+    'EN-010',
+    'A payment attempt failed. The bill remains unpaid and the intent may be retried.',
+    z.object({ paymentId: uuid, intentId: uuid, errorCode: z.string().nullable() }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'pay.refund.requested',
+    'pay_refund',
+    'EN-010',
+    'A refund was asked for, through the instrument the money came in on.',
+    z.object({ refundId: uuid, paymentId: uuid, amount: money, reasonCode: z.string(), requestedBy: uuid }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'pay.refund.processed',
+    'pay_refund',
+    'EN-010',
+    'The provider confirmed the refund reached the payer.',
+    z.object({ refundId: uuid, paymentId: uuid, amount: money, arn: z.string().nullable() }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'pay.settlement.fetched',
+    'pay_settlement',
+    'EN-010',
+    'A settlement file arrived from the provider.',
+    z.object({
+      settlementId: uuid,
+      providerSettlementId: z.string(),
+      amount: money,
+      fees: money,
+      settledAt: iso,
+    }),
+    { retentionDays: 2920 },
+  ),
+  /**
+   * The signal that money and records disagree. RC-006 sweeps these, and an
+   * unattended queue here is the shape revenue leakage takes in a gateway.
+   */
+  ev(
+    'pay.recon.exception',
+    'pay_recon_exception',
+    'EN-010',
+    'A payment, a receipt and a settlement disagree. Somebody has to decide which is right.',
+    z.object({
+      exceptionId: uuid,
+      exceptionType: z.string(),
+      amount: money.nullable(),
+      refs: z.record(z.string(), z.unknown()),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'pay.webhook.rejected',
+    'pay_webhook_event',
+    'EN-010',
+    'A webhook failed signature verification. Kept as evidence, never processed.',
+    z.object({ provider: z.string(), eventId: z.string(), type: z.string(), receivedAt: iso }),
+    { retentionDays: 2920 },
+  ),
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-023 — package.*  (Phase 5)
+// ─────────────────────────────────────────────────────────────────────────────
+const packageEvents: readonly EventDefinition[] = [
+  ev(
+    'package.defined',
+    'package',
+    'OP-023',
+    'A package version was published. From its effective date this is what a patient buys.',
+    z.object({ packageId: uuid, versionId: uuid, version: z.number().int(), effectiveFrom: z.string() }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'package.booked',
+    'package_booking',
+    'OP-023',
+    'A patient booked a package and an advance was taken.',
+    z.object({
+      bookingId: uuid,
+      bookingNo: z.string(),
+      patientId: uuid,
+      packageVersionId: uuid,
+      advanceRequired: money,
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'package.activated',
+    'package_activation',
+    'OP-023',
+    'A package was activated. Charges now consume it against its caps.',
+    z.object({
+      activationId: uuid,
+      bookingId: uuid.nullable(),
+      patientId: uuid,
+      packageVersionId: uuid,
+      unitsTotal: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  /**
+   * The 80 % and 100 % alerts §5.4 asks for. Raised as consumption crosses a
+   * threshold, so the ward hears about an overrun before the family does.
+   */
+  ev(
+    'package.cap.threshold',
+    'package_activation',
+    'OP-023',
+    'A package cap crossed a warning threshold. The overrun is visible before it is billed.',
+    z.object({ activationId: uuid, capName: z.string(), pctUsed: z.number(), threshold: z.number() }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'package.variance.requested',
+    'package_variance_request',
+    'OP-023',
+    'A charge beyond the package needs a decision about who pays.',
+    z.object({
+      requestId: uuid,
+      activationId: uuid,
+      amount: money,
+      reasonCode: z.string(),
+      requestedBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'package.variance.decided',
+    'package_variance_request',
+    'OP-023',
+    'Somebody decided who pays for an overrun: the patient, the insurer, or the hospital.',
+    z.object({
+      requestId: uuid,
+      activationId: uuid,
+      decision: z.string(),
+      billAction: z.string(),
+      decisionBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'package.closed',
+    'package_activation',
+    'OP-023',
+    'An activation was closed and the difference between promise and delivery settled.',
+    z.object({
+      activationId: uuid,
+      coveredAmount: money,
+      excessAmount: money,
+      exclusionsAmount: money,
+      closureBillId: uuid.nullable(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-002 + RC-002 — insurance.* / preauth.*  (Phase 5)
+// ─────────────────────────────────────────────────────────────────────────────
+const insuranceEvents: readonly EventDefinition[] = [
+  ev(
+    'insurance.case.opened',
+    'ins_case',
+    'EN-002',
+    'A payer was attached to an encounter. One case per payer; two payers means two cases.',
+    z.object({
+      caseId: uuid,
+      patientId: uuid,
+      payerId: uuid,
+      mode: z.string(),
+      encounterId: uuid.nullable(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'insurance.eligibility.checked',
+    'ins_patient_policy',
+    'EN-002',
+    'The payer was asked whether this policy covers this patient today.',
+    z.object({
+      policyId: uuid,
+      result: z.string(),
+      sumInsuredRemaining: money.nullable(),
+      channel: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'insurance.empanelment.expiring',
+    'ins_empanelment',
+    'EN-002',
+    'An empanelment contract is close to expiry. Cashless stops the day it lapses.',
+    z.object({ empanelmentId: uuid, payerId: uuid, validTo: z.string(), daysRemaining: z.number().int() }),
+    { retentionDays: 2920 },
+  ),
+
+  ev(
+    'preauth.submitted',
+    'preauth_request',
+    'RC-002',
+    'A pre-authorisation was sent to the payer. The decision clock starts now.',
+    z.object({
+      requestId: uuid,
+      preauthNo: z.string(),
+      caseId: uuid,
+      patientId: uuid,
+      requestedAmount: money,
+      channel: z.string(),
+      decisionDueAt: iso.nullable(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'preauth.query.raised',
+    'preauth_query',
+    'RC-002',
+    'The payer asked something. Until it is answered the decision clock is theirs, not ours.',
+    z.object({
+      queryId: uuid,
+      requestId: uuid,
+      queryNo: z.number().int(),
+      category: z.string(),
+      slaDueAt: iso.nullable(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  /**
+   * The event billing waits for. Carries the amount, the room class and the
+   * expiry, because "approved" on its own is not something a biller can act on.
+   */
+  ev(
+    'preauth.decided',
+    'preauth_request',
+    'RC-002',
+    'The payer decided. An approval is an amount, a room class and a deadline — never just a yes.',
+    z.object({
+      requestId: uuid,
+      preauthNo: z.string(),
+      caseId: uuid,
+      status: z.string(),
+      approvedAmount: money.nullable(),
+      approvedRoomClassId: uuid.nullable(),
+      validTill: z.string().nullable(),
+      denialReasonCode: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'preauth.credit_limit.propagated',
+    'preauth_credit_limit',
+    'RC-002',
+    'Billing was told what the payer will cover, and until when.',
+    z.object({
+      requestId: uuid,
+      admissionId: uuid.nullable(),
+      approvedAmount: money,
+      validTill: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  /**
+   * A missed SLA is the moment a cashless case silently becomes a reimbursement
+   * one the patient has to fund. It is an event, not a report somebody runs.
+   */
+  ev(
+    'preauth.sla.breached',
+    'preauth_sla_event',
+    'RC-002',
+    'A pre-authorisation stage missed its deadline. Cashless is at risk of becoming reimbursement.',
+    z.object({ requestId: uuid, stage: z.string(), dueAt: iso, escalationLevel: z.number().int() }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+];
+
+/**
+ * RC-007 — government schemes.
+ *
+ * `scheme.cash.refused` is the one that matters downstream: it is how quality
+ * and finance learn that a counter tried to take money from a scheme patient,
+ * without either of them having to read a table.
+ */
+const schemeEvents: readonly EventDefinition[] = [
+  ev(
+    'scheme.beneficiary.verified',
+    'scheme_beneficiary',
+    'RC-007',
+    "The authority confirmed this patient's entitlement. From here the cash block is live.",
+    z.object({
+      beneficiaryId: uuid,
+      patientId: uuid,
+      schemeId: uuid,
+      schemeCode: z.string(),
+      entitlementBalance: money,
+      method: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'scheme.beneficiary.rejected',
+    'scheme_beneficiary',
+    'RC-007',
+    'The authority did not recognise the card. The patient is not covered and must be told before treatment, not at discharge.',
+    z.object({
+      beneficiaryId: uuid,
+      patientId: uuid,
+      schemeCode: z.string(),
+      outcome: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'scheme.case.opened',
+    'scheme_case',
+    'RC-007',
+    'A scheme is now paying for this episode. Every collection point stops accepting cash from this patient.',
+    z.object({
+      caseId: uuid,
+      caseNo: z.string(),
+      patientId: uuid,
+      schemeId: uuid,
+      schemeCode: z.string(),
+      encounterId: uuid.nullable(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'scheme.case.closed',
+    'scheme_case',
+    'RC-007',
+    'The scheme case is finished. The cash block lifts, so this is a fact billing and the counters need.',
+    z.object({
+      caseId: uuid,
+      caseNo: z.string(),
+      patientId: uuid,
+      settledAmount: money,
+      shortfallAmount: money,
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'scheme.cash.refused',
+    'scheme_cash_attempt',
+    'RC-007',
+    'A collection point tried to take cash from a scheme beneficiary and was refused. Repeated refusals at one counter are a training problem, not a system one.',
+    z.object({
+      attemptId: uuid,
+      patientId: uuid,
+      schemeCode: z.string(),
+      collectionPoint: z.string(),
+      mode: z.string(),
+      amount: money,
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'scheme.claim.submitted',
+    'scheme_claim',
+    'RC-007',
+    'A claim went to the authority. The clock on the settlement window starts here.',
+    z.object({
+      claimId: uuid,
+      claimNo: z.string(),
+      caseId: uuid,
+      schemeCode: z.string(),
+      claimedAmount: money,
+      format: z.string(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'scheme.claim.decided',
+    'scheme_claim',
+    'RC-007',
+    'The authority answered. A partial approval is the common case, and the difference is a shortfall somebody must work.',
+    z.object({
+      claimId: uuid,
+      claimNo: z.string(),
+      status: z.string(),
+      claimedAmount: money,
+      approvedAmount: money,
+      shortfallAmount: money,
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'scheme.claim.paid',
+    'scheme_claim',
+    'RC-007',
+    'The money arrived, with its UTR. NC-009 posts it to the ledger from here.',
+    z.object({
+      claimId: uuid,
+      claimNo: z.string(),
+      paidAmount: money,
+      utr: z.string().nullable(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'scheme.shortfall.raised',
+    'scheme_shortfall',
+    'RC-007',
+    'The authority paid less than was claimed. Until somebody appeals or writes it off, this is money the hospital is still owed.',
+    z.object({
+      shortfallId: uuid,
+      claimId: uuid,
+      amount: money,
+      category: z.string(),
+      reasonCode: z.string(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'scheme.shortfall.written_off',
+    'scheme_shortfall',
+    'RC-007',
+    'A shortfall was given up on, by two people. Revenue leaves the books here, so it is a fact the ledger and the leakage report both need.',
+    z.object({
+      shortfallId: uuid,
+      claimId: uuid,
+      amount: money,
+      requestedBy: uuid,
+      approvedBy: uuid,
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'scheme.claim.window.closing',
+    'scheme_claim',
+    'RC-007',
+    'A claim is close to the end of the window in which the authority still accepts it. After that the shortfall is entirely ours.',
+    z.object({
+      claimId: uuid,
+      claimNo: z.string(),
+      windowClosesOn: z.string(),
+      daysLeft: z.number().int(),
+      claimedAmount: money,
+    }),
+    { retentionDays: 2920 },
+  ),
+];
+
+/**
+ * RC-008 — cost estimator.
+ *
+ * `estimate.variance.recorded` is the one with teeth. It fires for every
+ * estimate that became a real bill, so a procedure whose quotes run light shows
+ * up as a trend rather than as a series of arguments at the discharge counter.
+ */
+const estimateEvents: readonly EventDefinition[] = [
+  ev(
+    'estimate.issued',
+    'estimate',
+    'RC-008',
+    'A family was given a price. From here the hospital is held to it, and the number is immutable.',
+    z.object({
+      estimateId: uuid,
+      estimateNo: z.string(),
+      patientId: uuid.nullable(),
+      totalPayable: money,
+      patientShare: money,
+      validTill: z.string(),
+      procedureCode: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'estimate.shared',
+    'estimate',
+    'RC-008',
+    'The estimate was sent to the family. "Nobody told us the cost" is answered by this or by nothing.',
+    z.object({
+      estimateId: uuid,
+      estimateNo: z.string(),
+      channel: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'estimate.superseded',
+    'estimate',
+    'RC-008',
+    'A revised estimate replaced an earlier one. Both survive, so the family can be shown what changed.',
+    z.object({
+      estimateId: uuid,
+      supersedesId: uuid,
+      previousPayable: money,
+      newPayable: money,
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'estimate.converted',
+    'estimate',
+    'RC-008',
+    'The family went ahead. The quote is now something the discharge bill will be measured against.',
+    z.object({
+      estimateId: uuid,
+      estimateNo: z.string(),
+      encounterId: uuid,
+      totalPayable: money,
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'estimate.declined',
+    'estimate',
+    'RC-008',
+    'The family did not go ahead, and said why. A run of declines on one procedure is a pricing signal, not a sales one.',
+    z.object({
+      estimateId: uuid,
+      estimateNo: z.string(),
+      reason: z.string(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'estimate.variance.recorded',
+    'estimate_variance',
+    'RC-008',
+    'An estimate was reconciled against the bill it became. Exit gate 8.',
+    z.object({
+      estimateId: uuid,
+      estimateNo: z.string(),
+      estimatedTotal: money,
+      actualTotal: money,
+      varianceAmount: money,
+      variancePct: z.string(),
+      procedureCode: z.string().nullable(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'estimate.variance.breached',
+    'estimate_variance',
+    'RC-008',
+    'A bill came in materially above the estimate the family was given. The number they planned around was wrong, and somebody has to tell them before discharge.',
+    z.object({
+      estimateId: uuid,
+      estimateNo: z.string(),
+      patientId: uuid.nullable(),
+      variancePct: z.string(),
+      varianceAmount: money,
+      thresholdPct: z.number(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+];
+
+/**
+ * RC-006 — revenue leakage audit.
+ *
+ * `leakage.discharge.blocked` is the one that has to reach somebody quickly. It
+ * fires while the patient is still in the building, which is the only moment a
+ * missed charge can be settled without a phone call to a family who has gone
+ * home.
+ */
+const leakageEvents: readonly EventDefinition[] = [
+  ev(
+    'leakage.scan.completed',
+    'leak_scan',
+    'RC-006',
+    'A reconciliation sweep finished. The gap total is what it thinks was delivered and never charged.',
+    z.object({
+      scanId: uuid,
+      trigger: z.string(),
+      rulesRun: z.number().int(),
+      findingsNew: z.number().int(),
+      findingsTotal: z.number().int(),
+      gapTotal: money,
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'leakage.finding.raised',
+    'leak_finding',
+    'RC-006',
+    'Something was delivered and not charged. A proposal, not a posting — nothing is billed until a person accepts it.',
+    z.object({
+      findingId: uuid,
+      reconciler: z.string(),
+      severity: z.string(),
+      encounterId: uuid.nullable(),
+      gapAmount: money,
+      description: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'leakage.finding.accepted',
+    'leak_finding',
+    'RC-006',
+    'A named person agreed the gap is real. This is the permission to bill it, and the reason the audit is allowed to affect money at all.',
+    z.object({
+      findingId: uuid,
+      gapAmount: money,
+      acceptedBy: uuid,
+      reason: z.string(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'leakage.finding.dismissed',
+    'leak_finding',
+    'RC-006',
+    'A named person said it was not a gap, and why. A reconciler dismissed often is a reconciler that needs fixing.',
+    z.object({
+      findingId: uuid,
+      reconciler: z.string(),
+      gapAmount: money,
+      reason: z.string(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'leakage.recovered',
+    'leak_recovery',
+    'RC-006',
+    'Money the audit found actually came back.',
+    z.object({
+      recoveryId: uuid,
+      findingId: uuid,
+      amount: money,
+      route: z.string(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'leakage.discharge.blocked',
+    'leak_discharge_check',
+    'RC-006',
+    'A patient is being discharged with charges still unbilled. This is the last moment it can be settled without chasing a family who has gone home.',
+    z.object({
+      checkId: uuid,
+      encounterId: uuid,
+      patientId: uuid.nullable(),
+      openFindings: z.number().int(),
+      gapTotal: money,
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'leakage.discharge.overridden',
+    'leak_discharge_check',
+    'RC-006',
+    'A discharge was cleared with a gap still open. The hospital chose to lose that money, and this is who chose.',
+    z.object({
+      checkId: uuid,
+      encounterId: uuid,
+      openFindings: z.number().int(),
+      gapTotal: money,
+      clearedBy: uuid,
+      reason: z.string(),
+    }),
+    { retentionDays: 2920 },
+  ),
+];
+
+/**
+ * NC-034 — doctor payouts.
+ *
+ * `payout.referral.refused` is the one worth watching. It fires when a payout
+ * line was attempted against a service the earning doctor only referred — which
+ * the database refuses outright, so the event is not a failure notice but a
+ * compliance signal: somebody's rules are trying to pay for referrals.
+ */
+const payoutEvents: readonly EventDefinition[] = [
+  ev(
+    'payout.statement.computed',
+    'payout_statement',
+    'NC-034',
+    "A doctor's earnings for the period were calculated from what they performed.",
+    z.object({
+      statementId: uuid,
+      statementNo: z.string(),
+      doctorId: uuid,
+      periodId: uuid,
+      grossEarnings: money,
+      lineCount: z.number().int(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'payout.statement.approved',
+    'payout_statement',
+    'NC-034',
+    'A second pair of hands released the statement for payment.',
+    z.object({
+      statementId: uuid,
+      statementNo: z.string(),
+      netPayable: money,
+      approvedBy: uuid,
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'payout.statement.paid',
+    'payout_statement',
+    'NC-034',
+    'The money left, with its reference. NC-009 posts it to the ledger from here.',
+    z.object({
+      statementId: uuid,
+      statementNo: z.string(),
+      doctorId: uuid,
+      netPayable: money,
+      tdsAmount: money,
+      paymentRef: z.string(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'payout.dispute.raised',
+    'payout_dispute',
+    'NC-034',
+    'A doctor says the statement is wrong. Until it is settled, nothing is paid.',
+    z.object({
+      disputeId: uuid,
+      statementId: uuid,
+      category: z.string(),
+      claimedAmount: money.nullable(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'payout.dispute.resolved',
+    'payout_dispute',
+    'NC-034',
+    'The dispute was settled, with the adjustment that followed.',
+    z.object({
+      disputeId: uuid,
+      statementId: uuid,
+      status: z.string(),
+      adjustment: money.nullable(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'payout.referral.refused',
+    'payout_line',
+    'NC-034',
+    'A payout line was attempted against a service the earning doctor only referred. The database refused it; this is the compliance signal that somebody\u2019s rules are trying to pay for referrals.',
+    z.object({
+      statementId: uuid,
+      doctorId: uuid,
+      billItemId: uuid,
+      attemptedAmount: money,
+    }),
+    { retentionDays: 3650 },
+  ),
+  ev(
+    'payout.tds.deducted',
+    'payout_tds_entry',
+    'NC-034',
+    'Section 194J was deducted. The figure has to match what is filed, so it is a fact rather than a calculation somebody repeats.',
+    z.object({
+      entryId: uuid,
+      statementId: uuid,
+      financialYear: z.string(),
+      rateApplied: z.string(),
+      deducted: money,
+      panOnRecord: z.boolean(),
+    }),
+    { retentionDays: 3650 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -7655,6 +8794,17 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...consignmentEvents,
   ...consumptionEvents,
   ...pharmacyEvents,
+
+  // Phase 5
+  ...tariffEvents,
+  ...billingEvents,
+  ...paymentEvents,
+  ...packageEvents,
+  ...insuranceEvents,
+  ...schemeEvents,
+  ...estimateEvents,
+  ...leakageEvents,
+  ...payoutEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

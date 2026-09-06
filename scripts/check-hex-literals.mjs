@@ -19,14 +19,37 @@ const ALLOWED_PREFIXES = [
 ];
 const EXTENSIONS = new Set(['.css', '.scss', '.svg', '.html']);
 const HEX = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/;
-const SKIP_DIRS = new Set(['node_modules', 'dist', '.next', '.turbo', 'coverage', 'generated']);
+const SKIP_DIRS = new Set([
+  'node_modules',
+  'dist',
+  '.turbo',
+  'coverage',
+  'generated',
+  // Playwright output. Traces embed a snapshot of the rendered page, so a
+  // trace of any screen contains the compiled stylesheet — every token as a
+  // hex literal, which is what a token compiles *to*. Scanning it fails this
+  // check on its own evidence, and only after a test run, which makes it look
+  // like the last commit caused it.
+  'test-results',
+  'playwright-report',
+]);
+/**
+ * Every Next build directory, not just `.next`.
+ *
+ * `distDir` is overridable (`apps/web/next.config.ts`), so the browser suite
+ * builds into `.next-e2e` and a dev server can be pointed anywhere. Naming only
+ * `.next` meant the compiled Tailwind stylesheet — which legitimately contains
+ * every token as a hex literal, because that is what a token compiles *to* —
+ * was scanned as if it were source, and the check failed on its own output.
+ */
+const SKIP_DIR_PATTERN = /^\.next(?:[-.].*)?$/;
 
 const offenders = [];
 
 function walk(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(entry.name)) continue;
+      if (SKIP_DIRS.has(entry.name) || SKIP_DIR_PATTERN.test(entry.name)) continue;
       walk(join(dir, entry.name));
       continue;
     }
@@ -38,7 +61,8 @@ function walk(dir) {
 
     const lines = readFileSync(path, 'utf8').split('\n');
     lines.forEach((line, i) => {
-      if (HEX.test(line)) offenders.push(`${relative(process.cwd(), path)}:${i + 1}  ${line.trim().slice(0, 90)}`);
+      if (HEX.test(line))
+        offenders.push(`${relative(process.cwd(), path)}:${i + 1}  ${line.trim().slice(0, 90)}`);
     });
   }
 }

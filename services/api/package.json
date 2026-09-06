@@ -5,7 +5,7 @@
   "description": "NestJS 11 modular monolith on Fastify. /api/v1 with the full tenancy, policy, idempotency, audit and outbox interceptor chain.",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "nest start --watch",
+    "dev": "dotenv -e ../../.env -v PORT=4000 -- nest start --watch",
     "start": "node dist/main.js",
     "lint": "eslint src --max-warnings=0 --no-error-on-unmatched-pattern",
     "typecheck": "tsc --noEmit",
@@ -60,6 +60,7 @@
     "@types/web-push": "^3.6.4",
     "@vims/testing": "workspace:*",
     "@vitest/coverage-v8": "^4.1.10",
+    "dotenv-cli": "^8.0.0",
     "supertest": "^7.0.0",
     "tsx": "^4.19.2",
     "unplugin-swc": "^1.5.1",

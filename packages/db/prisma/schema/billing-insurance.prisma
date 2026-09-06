@@ -1,0 +1,672 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// EN-002 + RC-002 — insurance, TPA and pre-authorisation (schema `billing`)
+//
+// `phase-05` §5.5. Built as one unit because RC-002's case header *is* EN-002's
+// `ins_cases`: a pre-auth without a payer, a policy and an empanelment is a form
+// nobody can submit, and splitting them across two migrations would mean one of
+// them briefly references a table that does not exist.
+//
+//   ins_payers, ins_tpas, ins_plans      who pays, and under what product
+//   ins_empanelments                     our contract with them, and its SLA
+//   ins_patient_policies                 this patient's cover
+//   ins_eligibility_checks               what the payer said about it, and when
+//   ins_cases                            one payer's involvement in one encounter
+//   ins_non_payable_items                what no policy covers (IRDAI list)
+//   preauth_requests                     the state machine RC-002 owns
+//   preauth_status_history               append-only, every transition
+//   preauth_queries                      the payer asked something; the clock runs
+//   preauth_documents                    the checklist
+//   preauth_transmissions                every attempt to reach the payer
+//   preauth_sla_events                   what was due, what breached
+//   preauth_credit_limits                what IP-005 was told, and when
+//
+// ── The two facts this module exists to keep straight ───────────────────────
+//
+// **1. An approval is an amount, a room class and a deadline — not a yes.**
+// `preauth_credit_limits` records exactly what was propagated to billing and
+// when, with a revocation trail. "The insurer approved it" is not a number a
+// biller can act on; ₹85,000 in a semi-private room until the 14th is.
+//
+// **2. The clock is the product.** A pre-auth that misses its SLA becomes a
+// reimbursement claim the patient funds up front, which is the difference
+// between cashless and not. `preauth_sla_events` exists so the breach is a row
+// with an escalation level rather than something discovered at discharge.
+//
+// ── Why `ins_cases` is one per payer per encounter ──────────────────────────
+//
+// A patient may hold a corporate policy and a personal top-up, and both may pay
+// part of one admission. Modelling the case as one-per-encounter would force the
+// two payers into one row and make the split unrepresentable; modelling it
+// per-payer makes the priority order explicit and the claim pack separable.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum InsPayerType {
+  insurer
+  tpa
+  corporate
+  government_scheme
+  embassy
+  other
+
+  @@schema("billing")
+}
+
+enum InsNetworkType {
+  cashless
+  reimbursement
+  ppn
+
+  @@schema("billing")
+}
+
+enum InsEmpanelmentStatus {
+  active
+  expiring
+  expired
+  suspended
+  blacklisted
+
+  @@schema("billing")
+}
+
+enum InsCaseMode {
+  cashless
+  reimbursement
+  corporate_credit
+  scheme
+
+  @@schema("billing")
+}
+
+enum InsCaseStatus {
+  open
+  preauth_pending
+  preauth_approved
+  preauth_denied
+  in_treatment
+  claim_ready
+  claim_submitted
+  settled
+  closed
+
+  @@schema("billing")
+}
+
+/// RC-002's state machine. `partially_approved` is a distinct outcome from
+/// `approved` because the difference is the patient's to fund, and collapsing
+/// them is how a family learns at discharge that ₹40,000 of ₹85,000 was refused.
+enum PreauthStatus {
+  draft
+  pending_signature
+  ready
+  submitted
+  query_raised
+  query_replied
+  approved
+  partially_approved
+  denied
+  cancelled
+  expired
+  withdrawn
+  final_authorised
+
+  @@schema("billing")
+}
+
+enum PreauthType {
+  initial
+  enhancement
+  extension
+  final_authorisation
+  retrospective
+
+  @@schema("billing")
+}
+
+enum PreauthChannel {
+  portal
+  email
+  api
+  nhcx
+  fax
+  courier
+
+  @@schema("billing")
+}
+
+enum PreauthTransmissionStatus {
+  queued
+  sent
+  delivered
+  failed
+  acknowledged
+
+  @@schema("billing")
+}
+
+enum PreauthSlaStage {
+  submit
+  decision
+  query_reply
+  final_auth
+
+  @@schema("billing")
+}
+
+enum PreauthEligibilityResult {
+  eligible
+  not_eligible
+  inconclusive
+
+  @@schema("billing")
+}
+
+model InsPayer {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  code        String       @db.VarChar(32)
+  name        String       @db.VarChar(200)
+  payerType   InsPayerType @map("payer_type")
+  irdaiRegNo  String?      @map("irdai_reg_no") @db.VarChar(40)
+  gstin       String?      @db.VarChar(20)
+  pan         String?      @db.VarChar(20)
+  address     String?      @db.Text
+  contacts    Json         @default("{}")
+  portalUrl   String?      @map("portal_url") @db.Text
+  /// Which adapter in `packages/payers` talks to them, when one exists.
+  apiAdapterKey String?    @map("api_adapter_key") @db.VarChar(48)
+  active      Boolean      @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  plans        InsPlan[]
+  empanelments InsEmpanelment[]
+  policies     InsPatientPolicy[]
+  cases        InsCase[]
+
+  @@unique([hospitalId, code])
+  @@index([hospitalId, payerType, active])
+  @@map("ins_payers")
+  @@schema("billing")
+}
+
+model InsTpa {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  name             String  @db.VarChar(200)
+  irdaiTpaLicence  String? @map("irdai_tpa_licence") @db.VarChar(40)
+  contacts         Json    @default("{}")
+  portalUrl        String? @map("portal_url") @db.Text
+  active           Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, name])
+  @@map("ins_tpas")
+  @@schema("billing")
+}
+
+/// A product, with the caps that decide what the patient actually pays.
+model InsPlan {
+  id      String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  payerId String @map("payer_id") @db.Uuid
+
+  name       String  @db.VarChar(200)
+  /// IRDAI Unique Identification Number for the product.
+  productUin String? @map("product_uin") @db.VarChar(40)
+
+  sumInsuredBands Json    @default("[]") @map("sum_insured_bands")
+  /// `pct_of_si`, `fixed` or `none`. Room rent is the commonest cause of a
+  /// patient owing money they did not expect: exceed the cap and many policies
+  /// proportionately reduce *every* associated charge, not just the room.
+  roomRentCapRule String? @map("room_rent_cap_rule") @db.VarChar(24)
+  icuCapRule      String? @map("icu_cap_rule") @db.VarChar(24)
+  copayPct        Decimal @default(0) @map("copay_pct") @db.Decimal(5, 2)
+  deductible      Decimal @default(0) @db.Decimal(14, 2)
+  waitingPeriods  Json    @default("{}") @map("waiting_periods")
+  exclusions      Json    @default("[]")
+  networkType     InsNetworkType @default(cashless) @map("network_type")
+
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  payer    InsPayer           @relation(fields: [payerId], references: [id], onDelete: Restrict)
+  policies InsPatientPolicy[]
+
+  @@unique([payerId, name, effectiveFrom])
+  @@index([hospitalId, payerId])
+  @@map("ins_plans")
+  @@schema("billing")
+}
+
+/// Our contract with a payer, and the SLA the pre-auth clock is measured against.
+model InsEmpanelment {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  payerId    String  @map("payer_id") @db.Uuid
+  tpaId      String? @map("tpa_id") @db.Uuid
+
+  contractNo String   @map("contract_no") @db.VarChar(64)
+  validFrom  DateTime @map("valid_from") @db.Date
+  validTo    DateTime @map("valid_to") @db.Date
+
+  hospitalCodeAtPayer String? @map("hospital_code_at_payer") @db.VarChar(64)
+  rohiniId            String? @map("rohini_id") @db.VarChar(40)
+  /// RC-003's tariff version this contract prices against.
+  tariffVersionId     String? @map("tariff_version_id") @db.Uuid
+
+  discountPct Decimal @default(0) @map("discount_pct") @db.Decimal(5, 2)
+  creditDays  Int     @default(45) @map("credit_days")
+  tdsPct      Decimal @default(0) @map("tds_pct") @db.Decimal(5, 2)
+
+  contactsMatrix Json @default("{}") @map("contacts_matrix")
+  /// preauth_hours, final_auth_hours, settlement_days. The clock RC-002 runs.
+  sla            Json @default("{}")
+  documents      String[] @default([]) @db.Uuid
+
+  status InsEmpanelmentStatus @default(active)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  payer InsPayer @relation(fields: [payerId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, branchId, payerId, tpaId, contractNo])
+  @@index([hospitalId, status, validTo])
+  @@map("ins_empanelments")
+  @@schema("billing")
+}
+
+/// What no policy covers. The IRDAI standard list plus payer additions.
+model InsNonPayableItem {
+  id         String  @id @db.Uuid
+  /// Null = the IRDAI standard list, shared by every tenant.
+  hospitalId String? @map("hospital_id") @db.Uuid
+
+  listName  String  @map("list_name") @db.VarChar(120)
+  itemCode  String? @map("item_code") @db.VarChar(64)
+  serviceId String? @map("service_id") @db.Uuid
+  category  String  @db.VarChar(32)
+  rule      String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, listName])
+  @@map("ins_non_payable_items")
+  @@schema("billing")
+}
+
+/// This patient's cover.
+model InsPatientPolicy {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  payerId String  @map("payer_id") @db.Uuid
+  tpaId   String? @map("tpa_id") @db.Uuid
+  planId  String? @map("plan_id") @db.Uuid
+
+  policyNo     String  @map("policy_no") @db.VarChar(64)
+  memberId     String? @map("member_id") @db.VarChar(64)
+  holderName   String? @map("holder_name") @db.VarChar(200)
+  relationship String? @db.VarChar(32)
+
+  sumInsured Decimal? @map("sum_insured") @db.Decimal(14, 2)
+  validFrom  DateTime? @map("valid_from") @db.Date
+  validTo    DateTime? @map("valid_to") @db.Date
+
+  corporateId String? @map("corporate_id") @db.Uuid
+  employeeId  String? @map("employee_id") @db.VarChar(64)
+  cardFileId  String? @map("card_file_id") @db.Uuid
+  consentId   String? @map("consent_id") @db.Uuid
+
+  verifiedStatus     String?   @map("verified_status") @db.VarChar(24)
+  verifiedAt         DateTime? @map("verified_at") @db.Timestamptz(6)
+  verifiedBy         String?   @map("verified_by") @db.Uuid
+  verificationSource String?   @map("verification_source") @db.VarChar(32)
+  /// Falls as claims settle. Never authoritative — the payer's figure wins, and
+  /// this is what we were last told.
+  remainingSi        Decimal?  @map("remaining_si") @db.Decimal(14, 2)
+  notes              String?   @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  payer InsPayer @relation(fields: [payerId], references: [id], onDelete: Restrict)
+  plan  InsPlan? @relation(fields: [planId], references: [id], onDelete: SetNull)
+  cases InsCase[]
+
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, policyNo])
+  @@map("ins_patient_policies")
+  @@schema("billing")
+}
+
+model InsEligibilityCheck {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  policyId   String @map("policy_id") @db.Uuid
+
+  encounterId String? @map("encounter_id") @db.Uuid
+  channel     String  @default("manual") @db.VarChar(16)
+  request     Json    @default("{}")
+  response    Json    @default("{}")
+  result      PreauthEligibilityResult @default(inconclusive)
+
+  checkedAt DateTime @default(now()) @map("checked_at") @db.Timestamptz(6)
+  checkedBy String?  @map("checked_by") @db.Uuid
+
+  @@index([hospitalId, policyId, checkedAt(sort: Desc)])
+  @@map("ins_eligibility_checks")
+  @@schema("billing")
+}
+
+/// One payer's involvement in one encounter. See the header note on why this is
+/// per-payer rather than per-encounter.
+model InsCase {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  encounterId String? @map("encounter_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+
+  policyId String? @map("policy_id") @db.Uuid
+  payerId  String  @map("payer_id") @db.Uuid
+  tpaId    String? @map("tpa_id") @db.Uuid
+
+  mode   InsCaseMode   @default(cashless)
+  status InsCaseStatus @default(open)
+  /// When two payers cover one encounter, who is billed first.
+  priority Int         @default(0) @db.SmallInt
+
+  slaDeadlines        Json     @default("{}") @map("sla_deadlines")
+  assignedTo          String?  @map("assigned_to") @db.Uuid
+  estimateId          String?  @map("estimate_id") @db.Uuid
+  approvedAmountTotal Decimal  @default(0) @map("approved_amount_total") @db.Decimal(14, 2)
+  notes               String?  @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  payer    InsPayer          @relation(fields: [payerId], references: [id], onDelete: Restrict)
+  policy   InsPatientPolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  preauths PreauthRequest[]
+
+  @@index([hospitalId, status])
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, encounterId])
+  @@map("ins_cases")
+  @@schema("billing")
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// RC-002 — the pre-authorisation state machine
+// ═════════════════════════════════════════════════════════════════════════════
+
+model PreauthRequest {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  encounterId String? @map("encounter_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  payerId     String  @map("payer_id") @db.Uuid
+  tpaId       String? @map("tpa_id") @db.Uuid
+  policyId    String? @map("policy_id") @db.Uuid
+  schemeId    String? @map("scheme_id") @db.Uuid
+
+  preauthNo  String  @map("preauth_no") @db.VarChar(40)
+  type       PreauthType @default(initial)
+  sequenceNo Int     @default(1) @map("sequence_no")
+  /// An enhancement points at the request it enhances, so the approved total is
+  /// a sum over a chain rather than a number somebody maintains by hand.
+  parentRequestId String? @map("parent_request_id") @db.Uuid
+
+  status      PreauthStatus @default(draft)
+  isEmergency Boolean       @default(false) @map("is_emergency")
+
+  diagnosisCodes String[] @default([]) @map("diagnosis_codes")
+  procedureCodes String[] @default([]) @map("procedure_codes")
+  estimateId     String?  @map("estimate_id") @db.Uuid
+
+  requestedAmount     Decimal  @map("requested_amount") @db.Decimal(14, 2)
+  approvedAmount      Decimal? @map("approved_amount") @db.Decimal(14, 2)
+  approvedAmountTotal Decimal  @default(0) @map("approved_amount_total") @db.Decimal(14, 2)
+  approvedRoomClassId String?  @map("approved_room_class_id") @db.Uuid
+  approvedLosDays     Int?     @map("approved_los_days")
+  coPayPct            Decimal  @default(0) @map("co_pay_pct") @db.Decimal(5, 2)
+  deductible          Decimal  @default(0) @db.Decimal(14, 2)
+
+  validFrom DateTime? @map("valid_from") @db.Date
+  validTill DateTime? @map("valid_till") @db.Date
+
+  payerRefNo String?        @map("payer_ref_no") @db.VarChar(64)
+  channel    PreauthChannel @default(portal)
+
+  submittedAt   DateTime? @map("submitted_at") @db.Timestamptz(6)
+  decidedAt     DateTime? @map("decided_at") @db.Timestamptz(6)
+  submitDueAt   DateTime? @map("submit_due_at") @db.Timestamptz(6)
+  decisionDueAt DateTime? @map("decision_due_at") @db.Timestamptz(6)
+  slaBreached   Boolean   @default(false) @map("sla_breached")
+
+  denialReasonCode String? @map("denial_reason_code") @db.VarChar(40)
+
+  doctorId     String?   @map("doctor_id") @db.Uuid
+  signedBy     String?   @map("signed_by") @db.Uuid
+  signedAt     DateTime? @map("signed_at") @db.Timestamptz(6)
+  signatureRef String?   @map("signature_ref") @db.VarChar(120)
+
+  formFileId           String? @map("form_file_id") @db.Uuid
+  decisionLetterFileId String? @map("decision_letter_file_id") @db.Uuid
+  consentId            String? @map("consent_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  version   Int      @default(1)
+
+  insCase       InsCase                @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  history       PreauthStatusHistory[]
+  queries       PreauthQuery[]
+  documents     PreauthDocument[]
+  transmissions PreauthTransmission[]
+  slaEvents     PreauthSlaEvent[]
+  creditLimits  PreauthCreditLimit[]
+
+  @@unique([hospitalId, preauthNo])
+  @@index([hospitalId, status, submitDueAt])
+  @@index([hospitalId, caseId])
+  @@index([hospitalId, encounterId])
+  @@map("preauth_requests")
+  @@schema("billing")
+}
+
+/// Append-only. Every transition, with who caused it.
+model PreauthStatusHistory {
+  id        String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  requestId String @map("request_id") @db.Uuid
+
+  fromStatus String? @map("from_status") @db.VarChar(32)
+  toStatus   String  @map("to_status") @db.VarChar(32)
+  actorId    String? @map("actor_id") @db.Uuid
+  /// `payer` matters: a status the insurer set is evidence, a status we set is
+  /// a claim, and an audit cannot tell them apart without this.
+  actorType  String  @default("staff") @map("actor_type") @db.VarChar(16)
+  at         DateTime @default(now()) @db.Timestamptz(6)
+  payerRef   String? @map("payer_ref") @db.VarChar(64)
+  reason     String? @db.Text
+  documentFileId String? @map("document_file_id") @db.Uuid
+  notes      String? @db.Text
+
+  request PreauthRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, requestId, at(sort: Desc)])
+  @@map("preauth_status_history")
+  @@schema("billing")
+}
+
+model PreauthQuery {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  requestId  String @map("request_id") @db.Uuid
+
+  queryNo   Int     @map("query_no")
+  direction String  @default("inbound") @db.VarChar(12)
+  category  String  @default("medical") @db.VarChar(16)
+
+  raisedAt         DateTime @default(now()) @map("raised_at") @db.Timestamptz(6)
+  raisedByPayerUser String? @map("raised_by_payer_user") @db.VarChar(120)
+  text             String   @db.Text
+  attachments      Json     @default("[]")
+
+  assignedTo   String?   @map("assigned_to") @db.Uuid
+  assignedRole String?   @map("assigned_role") @db.VarChar(64)
+  slaDueAt     DateTime? @map("sla_due_at") @db.Timestamptz(6)
+
+  repliedAt        DateTime? @map("replied_at") @db.Timestamptz(6)
+  replyText        String?   @map("reply_text") @db.Text
+  replyAttachments Json      @default("[]") @map("reply_attachments")
+  repliedBy        String?   @map("replied_by") @db.Uuid
+  isOpen           Boolean   @default(true) @map("is_open")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  request PreauthRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, queryNo])
+  @@index([hospitalId, isOpen, slaDueAt])
+  @@map("preauth_queries")
+  @@schema("billing")
+}
+
+model PreauthDocument {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  requestId  String @map("request_id") @db.Uuid
+
+  docType   String  @map("doc_type") @db.VarChar(40)
+  fileId    String? @map("file_id") @db.Uuid
+  required  Boolean @default(false)
+  received  Boolean @default(false)
+
+  verifiedBy String?   @map("verified_by") @db.Uuid
+  verifiedAt DateTime? @map("verified_at") @db.Timestamptz(6)
+  uploadedBy String?   @map("uploaded_by") @db.Uuid
+  sourceModule String? @map("source_module") @db.VarChar(32)
+  pageCount  Int?      @map("page_count")
+  sha256     String?   @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  request PreauthRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, docType])
+  @@index([hospitalId, requestId, required])
+  @@map("preauth_documents")
+  @@schema("billing")
+}
+
+/// Every attempt to reach the payer, including the ones that failed.
+///
+/// A pre-auth that "was submitted" according to a status column and never left
+/// the building is the failure this table exists to make impossible to hide.
+model PreauthTransmission {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  requestId  String @map("request_id") @db.Uuid
+
+  attemptNo   Int            @map("attempt_no")
+  channel     PreauthChannel
+  endpointRef String?        @map("endpoint_ref") @db.VarChar(200)
+
+  payloadFileId     String? @map("payload_file_id") @db.Uuid
+  requestBody       Json?   @map("request_body")
+  responseBody      Json?   @map("response_body")
+  httpStatus        Int?    @map("http_status")
+  nhcxCorrelationId String? @map("nhcx_correlation_id") @db.VarChar(120)
+
+  sentAt  DateTime  @default(now()) @map("sent_at") @db.Timestamptz(6)
+  status  PreauthTransmissionStatus @default(queued)
+  error   String?   @db.Text
+  retryAt DateTime? @map("retry_at") @db.Timestamptz(6)
+
+  request PreauthRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, attemptNo])
+  @@index([hospitalId, status, retryAt])
+  @@map("preauth_transmissions")
+  @@schema("billing")
+}
+
+/// What was due, and what breached. Drives EN-037's escalation ladder.
+model PreauthSlaEvent {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  requestId  String @map("request_id") @db.Uuid
+
+  stage           PreauthSlaStage
+  dueAt           DateTime  @map("due_at") @db.Timestamptz(6)
+  breachedAt      DateTime? @map("breached_at") @db.Timestamptz(6)
+  escalationLevel Int       @default(0) @map("escalation_level") @db.SmallInt
+  escalatedTo     String?   @map("escalated_to") @db.Uuid
+  notifiedAt      DateTime? @map("notified_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  request PreauthRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, stage])
+  @@index([hospitalId, dueAt])
+  @@map("preauth_sla_events")
+  @@schema("billing")
+}
+
+/// The audit trail of what billing was told, and when it stopped being true.
+///
+/// "The insurer approved it" is not actionable. ₹85,000 in a semi-private room
+/// until the 14th is, and this is the row that says so.
+model PreauthCreditLimit {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  requestId  String @map("request_id") @db.Uuid
+
+  admissionId    String?   @map("admission_id") @db.Uuid
+  approvedAmount Decimal   @map("approved_amount") @db.Decimal(14, 2)
+  validTill      DateTime? @map("valid_till") @db.Date
+  roomClassId    String?   @map("room_class_id") @db.Uuid
+
+  propagatedAt DateTime  @default(now()) @map("propagated_at") @db.Timestamptz(6)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokeReason String?   @map("revoke_reason") @db.Text
+
+  request PreauthRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, requestId, propagatedAt(sort: Desc)])
+  @@index([hospitalId, admissionId])
+  @@map("preauth_credit_limits")
+  @@schema("billing")
+}

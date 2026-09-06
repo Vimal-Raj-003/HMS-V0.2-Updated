@@ -155,7 +155,21 @@ Weights: 400 body · 500 labels/table headers · 600 headings & mono display · 
 - **Elevation (light only)**: `--e-1 0 1px 2px rgb(16 24 40/.06), 0 1px 3px rgb(16 24 40/.10)` · `--e-2 0 2px 4px -2px rgb(16 24 40/.06), 0 4px 8px -2px rgb(16 24 40/.10)` · `--e-3 0 4px 6px -2px rgb(16 24 40/.03), 0 12px 16px -4px rgb(16 24 40/.08)` · `--e-4` dialogs · `--e-5` critical alert. **Dark theme uses layers + hairlines, `--e-*` collapse to `none` except dialogs.**
 - **Motion**: `--dur-instant 0 · --dur-fast 120ms · --dur-base 180ms · --dur-slow 240ms · --dur-deliberate 320ms · --dur-tv 400ms` (EN-018 cap). Easing `--ease-standard cubic-bezier(.2,0,0,1)`, `--ease-decel cubic-bezier(0,0,0,1)`, `--ease-accel cubic-bezier(.3,0,1,1)`. `prefers-reduced-motion: reduce` → all durations `1ms`, transforms disabled, only opacity cross-fades; pulsing "live" dots become a static ring.
 - **Z-index**: `base 0 · sticky 100 · appbar 150 · banner 200 · dropdown 300 · rail-overlay 400 · scrim 900 · dialog 1000 · popover 1100 · toast 1200 · critical-alert 1300 · emergency-code-overlay 1400` (EN-018 code banner outranks everything, cannot be dismissed at the device).
-- **Chart ramps** (see the `dataviz` skill before writing any chart): light categorical `#0E7A88 #6938EF #DC6803 #175CD3 #027A48 #B42318 #8A97A8 #5925DC`; dark categorical `#5FC9D2 #BDB4FE #FEC84B #84CAFF #6CE9A6 #FDA29B #B3BDCA #D6BBFB`. Sequential (occupancy/heat) `--p-50 → --p-900`; diverging (variance, delta) `--in-700 ↔ --n-200 ↔ --da-700`.
+- **Chart ramps** (see the `dataviz` skill before writing any chart; enforced by `scripts/check-chart-palette.mjs`, which runs in CI):
+  - light & high-contrast categorical: `#1596A5 #5925DC #B54708 #027A48 #175CD3 #B42318 #DD2590 #93370D`
+  - dark categorical: `#1596A5 #B98246 #1570EF #DC6803 #039855 #DD2590 #7A5AF8 #F04438`
+  - Sequential (occupancy/heat) `--p-50 → --p-900`; diverging (variance, delta) `--in-700 ↔ --n-200 ↔ --da-700`.
+
+  **These replace the ramps this section carried until 2026-09-02, which did not pass the validator.** The
+  old light ramp put `#B42318` next to `#027A48` — red beside green, ΔE 6.2 under deuteranopia — and read two
+  steps as grey. The old dark ramp failed four of five checks; the worst pair, `#D6BBFB` against `#B3BDCA`,
+  was ΔE 9.0 under **normal** vision, so full-colour readers could not separate it either. Every step above is
+  one the scales in §3.1–3.3 already own; only the step and the order changed. Two rules the numbers do not
+  express and the check enforces anyway: **the VIMS teal always leads**, and **red is never adjacent to green**.
+
+  The dark ramp sits in the CVD 6–8 "floor" band, which is permitted _only_ alongside secondary encoding — so
+  on dark surfaces a legend is mandatory above one series, up to four series are also direct-labelled, and a
+  texture fill is available. Colour is never the only carrier of identity.
 
 ---
 
