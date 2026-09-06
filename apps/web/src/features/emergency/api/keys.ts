@@ -21,6 +21,13 @@ export function erKeys(hospitalId: string) {
     injuries: (visitId: string) => [...root, 'trauma', 'injuries', visitId] as const,
     scores: (visitId: string) => [...root, 'trauma', 'scores', visitId] as const,
     mci: () => [...root, 'trauma', 'mci'] as const,
+
+    // ── TR-008 ───────────────────────────────────────────────────────────────
+    mlcRegister: (scope: string) => [...root, 'mlc', 'register', scope] as const,
+    mlcRegisterRoot: () => [...root, 'mlc', 'register'] as const,
+    mlcCase: (id: string) => [...root, 'mlc', 'case', id] as const,
+    mlcWorklist: (kind: string) => [...root, 'mlc', 'worklist', kind] as const,
+    mlcGate: (erVisitId: string) => [...root, 'mlc', 'gate', erVisitId] as const,
   };
 }
 

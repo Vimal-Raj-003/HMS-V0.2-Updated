@@ -133,6 +133,41 @@ async function seedRoleTemplates(ctx: SeedContext): Promise<void> {
 
   await ctx.write({ table: 'core.roles', conflict: ['id'] }, roles);
   await ctx.write({ table: 'core.role_permissions', conflict: ['role_id', 'permission_key'] }, grants);
+
+  // ── Withdraw what the templates no longer grant ────────────────────────────
+  //
+  // The upsert above only ever adds. Without this, a permission *removed* from
+  // a system template stays granted in every seeded database for ever, and
+  // nothing reports it — which is the wrong direction for a mistake to fail in.
+  //
+  // It happened: a scripted edit anchored on `permissions: [` skipped a role
+  // whose array is written on one line, and `mlc.evidence.handover` landed on
+  // kitchen staff. Moving it in code fixed the template and left the database
+  // exactly as wrong as before.
+  //
+  // Scoped hard to system templates (`is_system` and `hospital_id IS NULL`), so
+  // a hospital's own custom-role grants are never touched by a seed run.
+  const withdrawn = await ctx.db.query<{ role_key: string; permission_key: string }>(
+    `DELETE FROM core.role_permissions rp
+      USING core.roles r
+      WHERE r.id = rp.role_id
+        AND r.is_system AND r.hospital_id IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM unnest($1::uuid[], $2::text[]) AS intended(role_id, permission_key)
+           WHERE intended.role_id = rp.role_id
+             AND intended.permission_key = rp.permission_key
+        )
+      RETURNING r.key AS role_key, rp.permission_key`,
+    // `SeedRow` values are a union; these two are known strings because the
+    // loop above writes them, so narrow rather than stringify.
+    [grants.map((g) => g['role_id'] as string), grants.map((g) => g['permission_key'] as string)],
+  );
+
+  for (const row of withdrawn.rows) {
+    // Loud on purpose. A grant disappearing is worth a line in the log even
+    // when it is exactly what was intended.
+    process.stdout.write(`  withdrawn: ${row.role_key} no longer holds ${row.permission_key}\n`);
+  }
 }
 
 /**

@@ -342,6 +342,77 @@ const ER_FLOOR = [
  * the algorithm is wrong about them, and an override that needs a supervisor is
  * an override that becomes a level nobody corrected.
  */
+/**
+ * TR-008 — the medico-legal floor.
+ *
+ * Opening a case, documenting injuries and sealing evidence. Held by everybody
+ * who is in the room when an assault victim arrives, because an MLC nobody
+ * opened is a case the hospital cannot later prove it saw. Nothing in this
+ * bundle discloses, releases or closes anything.
+ */
+const MLC_FLOOR = [
+  'mlc.case.create',
+  'mlc.case.read',
+  'mlc.case.update',
+  'mlc.intimation.create',
+  'mlc.injury.write',
+  'mlc.evidence.capture',
+  'mlc.evidence.read',
+  'mlc.custody.transfer',
+] as const;
+
+/** The designated medico-legal officer: everything the floor has, plus the pen. */
+const MLC_OFFICER = [
+  ...MLC_FLOOR,
+  'mlc.register.read',
+  'mlc.intimation.dispatch',
+  'mlc.report.create',
+  'mlc.report.read',
+  'mlc.report.sign',
+  'mlc.death.write',
+] as const;
+
+/**
+ * TR-008 — the records office.
+ *
+ * Reads the register, issues certified copies, answers requisitions, and holds
+ * MRD custody of evidence. Deliberately cannot open a case or write an injury:
+ * a coder is not a witness.
+ */
+const MLC_RECORDS = [
+  'mlc.case.read',
+  'mlc.register.read',
+  'mlc.evidence.read',
+  'mlc.custody.transfer',
+  'mlc.report.read',
+  'mlc.report.export',
+  'mlc.request.manage',
+] as const;
+
+/**
+ * TR-008 — security.
+ *
+ * Carries the intimation to the station and captures the constable's signature;
+ * witnesses a custody transfer; witnesses a handover. Reads nothing clinical.
+ */
+const MLC_SECURITY = ['mlc.intimation.dispatch', 'mlc.custody.transfer', 'mlc.evidence.handover'] as const;
+
+/**
+ * TR-008 — the four keys that only the Medical Superintendent holds.
+ *
+ * Cancelling a case, letting a patient leave with the set incomplete, reading a
+ * sensitive case, and issuing a certified copy. Each carries a reason, and
+ * `sensitiveGrant` means granting any of them needs two approvers.
+ */
+const MLC_OVERSIGHT = [
+  'mlc.case.cancel',
+  'mlc.discharge.override',
+  'mlc.sensitive.read',
+  'mlc.report.export',
+  'mlc.request.manage',
+  'mlc.register.read',
+] as const;
+
 const TRIAGE_FLOOR = [
   'triage.record.create',
   'triage.record.read',
@@ -1474,6 +1545,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'admin-console',
     permissions: [
+      'mlc.configure',
       ...MCI_COMMAND,
       // Phase 5 — RC-003. Holds the *publish* half only. The finance manager
       // builds and submits a revision; making it live is a second pair of
@@ -1748,6 +1820,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      ...MLC_OVERSIGHT,
+      'mlc.case.read',
+      'mlc.report.read',
+      'mlc.evidence.read',
       ...MCI_COMMAND,
       ...DIAGNOSTIC_RESULTS_READER,
       'rad.peer_review.read',
@@ -1901,6 +1977,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'doctor-opd',
     permissions: [
+      'mlc.case.read',
       ...DIAGNOSTIC_ORDERING,
       ...INVESTIGATION_REPORTER,
 
@@ -1933,6 +2010,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      'mlc.case.read',
+      'mlc.injury.write',
       ...DIAGNOSTIC_ORDERING,
 
       ...DOCTOR_CLINICAL,
@@ -1956,6 +2035,15 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...MLC_OFFICER,
+      // Both halves, not just the write. A clinician who may record the MoHFW
+      // protocol but not read it back is a clinician examining a survivor
+      // blind, and would be re-taking a history the survivor has already
+      // given once. The restriction that matters is that this is a separate,
+      // reason-required, two-approver key that the rest of the floor does not
+      // hold — not that the examiner cannot see their own examination.
+      'mlc.sensitive.write',
+      'mlc.sensitive.read',
       ...ER_FLOOR,
       ...TRIAGE_FLOOR,
       ...TRAUMA_LEAD,
@@ -1997,6 +2085,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      'mlc.case.read',
+      'mlc.injury.write',
       ...TRAUMA_TEAM,
       ...DIAGNOSTIC_ORDERING,
 
@@ -2053,6 +2143,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'icu-board',
     permissions: [
+      'mlc.case.read',
+      'mlc.injury.write',
       ...TRAUMA_TEAM,
       ...DIAGNOSTIC_ORDERING,
 
@@ -2278,6 +2370,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'triage-board',
     permissions: [
+      ...MLC_FLOOR,
       ...ER_FLOOR,
       ...TRIAGE_FLOOR,
       ...TRAUMA_TEAM,
@@ -2882,6 +2975,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'records',
     homeWorkspace: 'mrd-queue',
     permissions: [
+      ...MLC_RECORDS,
       ...TRAUMA_REGISTRY,
       'lab.report.read',
       'lab.report.export',
@@ -3291,7 +3385,7 @@ const templates: readonly RoleTemplate[] = [
     description: 'Gate console: visitors, passes and incident logging.',
     category: 'facilities',
     homeWorkspace: 'gate-console',
-    permissions: [...BASE_STAFF, 'barcode.scan', ...LABEL_PRINTER],
+    permissions: [...BASE_STAFF, 'barcode.scan', ...LABEL_PRINTER, ...MLC_SECURITY],
     abacDefaults: { dataClassMasks: ['aadhaar', 'diagnosis'] },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -3357,6 +3451,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'quality',
     permissions: [
+      'mlc.register.read',
       'trauma.activation.read',
       'trauma.activation.list',
       'trauma.survey.read',

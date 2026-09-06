@@ -120,7 +120,16 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   // restarts each April is an item code that means two different things.
   ['ITEM', 'ITM{SEQ:6}', false, 'never'],
   ['VEND', 'VND{SEQ:5}', false, 'never'],
+  // TR-008 §5: gapless per branch, and never reused — a cancelled case keeps
+  // its number. On the financial year like every other gapless statutory series
+  // here; the spec says "per branch/year" without saying which year, and an MLC
+  // register alone on the calendar year would be the surprise in a hospital
+  // whose invoice, narcotics and blood-bag registers all turn over in April.
   ['MLC', '{BR}/MLC/{FY}/{SEQ:4}', true, 'fy'],
+  // The certified-copy register. Not gapless: a withdrawn copy request must not
+  // burn a number, and nothing legal rests on the sequence being unbroken —
+  // only on each issued copy being individually numbered.
+  ['MLC_COPY', '{BR}/MLC-COPY/{FY}/{SEQ:4}', false, 'fy'],
   ['BLOOD_BAG', '{BR}/BB/{FY}/{SEQ:5}', true, 'fy'],
   ['LIC_INVOICE', 'VIMS/{FY}/{SEQ:5}', true, 'fy'],
 ];

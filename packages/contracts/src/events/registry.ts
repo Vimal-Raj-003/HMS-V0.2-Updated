@@ -8993,6 +8993,194 @@ const traumaEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * TR-008 — the medico-legal record.
+ *
+ * These events carry the *fact* of a case and never its content. A subscriber
+ * learns that MLC 00041 was opened as an assault; it does not learn the
+ * history, the injuries or the survivor's name. That is not privacy theatre —
+ * `mlc.sexual_assault.case_opened` is consumed by billing, and billing has no
+ * business knowing anything except that this episode is free.
+ */
+const mlcEvents: readonly EventDefinition[] = [
+  ev(
+    'mlc.case.opened',
+    'mlc_case',
+    'TR-008',
+    'A medico-legal case was opened. Drives the MLC banner on every screen for this patient and starts the one-hour intimation clock.',
+    z.object({
+      caseId: uuid,
+      mlcNo: z.string(),
+      category: z.string(),
+      patientId: uuid.nullable(),
+      tempTagId: z.string().nullable(),
+      erVisitId: uuid.nullable(),
+      isSensitive: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 36500 },
+  ),
+  ev(
+    'mlc.case.cancelled',
+    'mlc_case',
+    'TR-008',
+    'The Medical Superintendent cancelled a case that should not have been opened. The banner comes down; the number stays burnt.',
+    z.object({
+      caseId: uuid,
+      mlcNo: z.string(),
+      reason: z.string(),
+      cancelledBy: uuid,
+    }),
+    { retentionDays: 36500 },
+  ),
+  ev(
+    'mlc.police.intimated',
+    'mlc_intimation',
+    'TR-008',
+    'The intimation went to the station. The gap between the case opening and this is the KPI a NABH assessor asks for.',
+    z.object({
+      intimationId: uuid,
+      caseId: uuid,
+      mlcNo: z.string(),
+      type: z.string(),
+      psName: z.string(),
+      minutesFromOpening: z.number().int(),
+    }),
+    { retentionDays: 36500 },
+  ),
+  ev(
+    'mlc.police.acknowledged',
+    'mlc_intimation',
+    'TR-008',
+    'An officer signed for the intimation. Until this exists, the hospital has sent a form and can prove nothing.',
+    z.object({
+      intimationId: uuid,
+      caseId: uuid,
+      officerName: z.string(),
+      officerBadge: z.string().nullable(),
+      minutesToAcknowledge: z.number().int(),
+    }),
+    { retentionDays: 36500 },
+  ),
+  ev(
+    'mlc.injury.recorded',
+    'mlc_injury',
+    'TR-008',
+    'An injury was documented on the forensic body map. TR-001 mirrors it when a trauma episode exists — one source, two views.',
+    z.object({
+      injuryId: uuid,
+      caseId: uuid,
+      seq: z.number().int(),
+      kind: z.string(),
+      bnsClass: z.string(),
+      traumaInjuryId: uuid.nullable(),
+    }),
+    { containsPhi: true, retentionDays: 36500 },
+  ),
+  ev(
+    'mlc.evidence.captured',
+    'mlc_evidence',
+    'TR-008',
+    'An item entered the chain: sealed, labelled, and hashed if it is digital.',
+    z.object({
+      evidenceId: uuid,
+      caseId: uuid,
+      itemNo: z.number().int(),
+      kind: z.string(),
+      sealNo: z.string().nullable(),
+      sha256: z.string().nullable(),
+    }),
+    { retentionDays: 36500 },
+  ),
+  ev(
+    'mlc.evidence.custody_transferred',
+    'mlc_evidence',
+    'TR-008',
+    'An item changed hands. A broken seal on arrival raises an NC-015 incident rather than a note somebody may read.',
+    z.object({
+      evidenceId: uuid,
+      caseId: uuid,
+      seq: z.number().int(),
+      locationFrom: z.string(),
+      locationTo: z.string(),
+      sealIntact: z.boolean(),
+      hash: z.string(),
+    }),
+    { retentionDays: 36500 },
+  ),
+  ev(
+    'mlc.evidence.handed_over',
+    'mlc_evidence',
+    'TR-008',
+    'Evidence left the hospital against a requisition, with a signed memo. Digital media goes with its BSA §63 certificate.',
+    z.object({
+      handoverId: uuid,
+      caseId: uuid,
+      mlcNo: z.string(),
+      itemCount: z.number().int(),
+      officer: z.string(),
+      psName: z.string(),
+    }),
+    { retentionDays: 36500 },
+  ),
+  ev(
+    'mlc.report.finalised',
+    'mlc_report',
+    'TR-008',
+    'A certificate or court report was signed and is now immutable. NC-003 seals the record; NC-023 picks up the legal tracker.',
+    z.object({
+      reportId: uuid,
+      caseId: uuid,
+      mlcNo: z.string(),
+      kind: z.string(),
+      versionNo: z.number().int(),
+      wetSigned: z.boolean(),
+    }),
+    { retentionDays: 36500 },
+  ),
+  ev(
+    'mlc.sexual_assault.case_opened',
+    'mlc_case',
+    'TR-008',
+    'The MoHFW protocol was opened. Billing consumes this and waives the episode — BNSS §397 makes the treatment free, so nobody has to remember to.',
+    z.object({
+      caseId: uuid,
+      mlcNo: z.string(),
+      isPocso: z.boolean(),
+      policeInformed: z.string(),
+    }),
+    { retentionDays: 36500 },
+  ),
+  ev(
+    'mlc.death.recorded',
+    'mlc_death',
+    'TR-008',
+    'A brought-dead or in-hospital death on an MLC. The MCCD stays blocked until the inquest or post-mortem decision exists.',
+    z.object({
+      caseId: uuid,
+      mlcNo: z.string(),
+      kind: z.string(),
+      mannerSuspected: z.string(),
+      pmRequired: z.string(),
+      bodyCustody: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 36500 },
+  ),
+  ev(
+    'mlc.discharge_gate.overridden',
+    'mlc_case',
+    'TR-008',
+    'A patient left with the medico-legal set incomplete, on the Medical Superintendent’s authority. The reason is on the case, where the register shows it.',
+    z.object({
+      caseId: uuid,
+      mlcNo: z.string(),
+      reason: z.string(),
+      overriddenBy: uuid,
+      outstanding: z.array(z.string()),
+    }),
+    { retentionDays: 36500 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -9054,6 +9242,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...payoutEvents,
   ...emergencyEvents,
   ...traumaEvents,
+  ...mlcEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

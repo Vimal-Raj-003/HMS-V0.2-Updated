@@ -131,6 +131,61 @@ export const ER_SCREENS: readonly ErScreen[] = [
     ],
     entitlement: 'module.emergency.enabled',
   },
+  {
+    key: 'mlc-register',
+    label: 'Medico-legal register',
+    href: '/er/mlc',
+    area: 'emergency',
+    permission: 'mlc.register.read',
+    summary:
+      'The statutory register, gapless per branch per year, with the intimation clock on every case and the worklists for what is overdue.',
+    deniedExplanation:
+      'The medico-legal register is held by the emergency floor, MRD and the Medical Superintendent. Sexual-assault, POCSO, dowry and custodial cases need a separate key and are not listed or counted without it — showing that a restricted case exists would itself be the disclosure.',
+    keywords: [
+      'mlc',
+      'medico-legal',
+      'medicolegal',
+      'register',
+      'police',
+      'intimation',
+      'forensic',
+      'assault',
+      'rta',
+      'court',
+      'certificate',
+      'evidence',
+      'chain of custody',
+      'inquest',
+      'brought dead',
+    ],
+    entitlement: 'module.emergency.enabled',
+  },
+  {
+    key: 'mlc-case',
+    label: 'Medico-legal case',
+    href: '/er/mlc/case',
+    area: 'emergency',
+    permission: 'mlc.case.read',
+    summary:
+      'One case: the forensic body map, the police intimation and its receipt, the hash-chained evidence log, and what is still holding the patient in the department.',
+    deniedExplanation:
+      'Reading a medico-legal case is held by the clinicians treating the patient, MRD and the Medical Superintendent. A restricted case additionally needs the sensitive-access key, and without it the case reads as though it does not exist.',
+    keywords: [
+      'mlc case',
+      'body map',
+      'injury',
+      'bns',
+      'grievous',
+      'wound certificate',
+      'evidence',
+      'seal',
+      'custody',
+      'handover',
+      'discharge gate',
+      'override',
+    ],
+    entitlement: 'module.emergency.enabled',
+  },
 ];
 
 export function erScreen(key: string): ErScreen {

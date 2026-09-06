@@ -401,6 +401,100 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-06 (later still) · Phase 6 · TR-008 the MLC register, and three defects it found
+
+**Built — TR-008, complete.** 12 tables, 22 permission keys, 12 events, 2 screens.
+**Exit gate 6 passes**: an assault case auto-suggested from the mechanism, the
+police intimation generated, carried and signed for by HC Ramesh Kumar
+(KA-4471) 56 minutes inside the one-hour target, evidence sealed with a
+verifiable hash chain, the wound certificate signed with a DSC and corrected by
+addendum, a certified copy issued into the numbered register — and **discharge
+blocked** until the set was complete, with an MS override that is recorded on
+the case rather than only in an audit row.
+
+**The evidence chain is a chain.** `mlc_custody_log` is append-only with
+`prev_hash` → `hash` computed **by the database** from the row's own content.
+The proof that matters: an insert supplying `seq = 99`, `prev_hash = 000…` and
+`hash = fff…` was stored as `seq = 4` with the real predecessor's hash and a
+digest Postgres computed itself. An application that never supplies a hash
+cannot forge a link, which is a different claim from "our service is
+consistent with itself" — and it is the one a court asks about. UPDATE and
+DELETE are refused by trigger _and_ revoked from `hms_app`.
+
+**Three findings that cannot be recorded.** The sexual-assault proforma has no
+field for a two-finger test, for "virginity", or for "habituated", and a trigger
+refuses a proforma whose JSON carries those keys under any spelling — including
+"per vaginum finger". The two-finger test was held unconstitutional in
+_Lillu v. State of Haryana_ (2013) and its practice criminalised in
+_State of Jharkhand v. Shailendra Kumar Rai_ (2022). A validation warning would
+leave a field somebody can still fill in and a warning somebody can dismiss.
+
+**Twenty-four constraints proven live.** Reopening a cancelled MLC, changing an
+MLC number, deleting a case, cancelling one that already has a final report, a
+sexual-assault case not flagged sensitive, an MLC attached to nobody, editing or
+deleting a custody entry, a transfer with nobody on the receiving end, a
+handover to the police naming no officer, a broken seal with no note, rewriting
+a photograph's hash, replacing the file it names, re-sealing without a custody
+entry, a photograph with no digest, editing a signed certificate, a final report
+signed by nobody, a DSC-final with no certificate reference, an addendum with no
+reason, a POCSO case where the police were not informed, one with no SJPU/CWC
+intimation, billing a sexual-assault survivor, issuing an MCCD before the
+post-mortem decision, releasing a body with no police NOC, and releasing the
+chart with no court order.
+
+**And three defects TR-008 found in code that was already green.**
+
+1. **The seeder never withdrew a grant.** `core.role_permissions` was upserted
+   and never pruned, so a permission removed from a system role template stayed
+   granted in every seeded database for ever, silently. It surfaced because a
+   scripted edit anchored on `permissions: [` skipped a role whose array is
+   written on one line, and `MLC_SECURITY` — which carries
+   `mlc.evidence.handover` — landed on **kitchen staff**. Nothing failed: lint
+   passed, types were fine, the seed wrote the rows. Moving it in code fixed the
+   template and left the database exactly as wrong. The seeder now deletes
+   grants no template names, scoped hard to system roles, and says so in the
+   log. `phase6-grants.spec.ts` is the general form of the check: a PHI-classed
+   medico-legal key on a non-clinical role fails the build, with a named
+   allowance list for the two legitimate exceptions.
+
+2. **A cross-module trigger refusal came back as HTTP 500.** TR-008's discharge
+   gate fires on `er_dispositions`, inside **OP-006's** service, whose error
+   mapper had never heard of SQLSTATE `TR008`. The rule worked perfectly and the
+   person at the desk saw "Something went wrong on our side" instead of the
+   sentence naming exactly what was outstanding. There is now one shared
+   `MODULE_SQLSTATES` set that all seven module mappers consult, because a
+   trigger fires where the write happens and not where the rule lives.
+
+3. **`mlc.sensitive.write` without `read` made the examiner work blind.** The
+   emergency physician could record the MoHFW protocol and then not read it
+   back — which would mean re-taking a history the survivor had already given
+   once. Both halves now, for the roles that examine; the restriction that
+   matters is that it is a separate, reason-required, two-approver key the rest
+   of the floor does not hold. The ER nurse and MRD still get a **404** for a
+   restricted case — deliberately the same answer as for a case that does not
+   exist, because confirming that a sexual-assault case exists for this patient
+   is itself the disclosure.
+
+**Nothing here can gate treatment**, and not by policy: no table in TR-008
+references an order, a prescription, a procedure or a bill, so there is nowhere
+to attach a clinical block. _Parmanand Katara v. Union of India_ (1989) is
+honoured by construction. The one gate sits on the ER **disposition** — the way
+out of the department, never the way in — and death and abscondment are exempt
+from it, because a body and a patient who has already left are not held by
+paperwork.
+
+**Gates** — 20/20 packages typecheck, lint and test (**2,905 tests**); 550
+routes across 70 controllers; catalogue **963 keys**; event registry **699**;
+656 tables, **0 without RLS and 0 without a tenant policy**; 33 migrations.
+
+**Still missing:** no e2e golden path and no k6 script for TR-008. Photographs
+are registered with a client-computed digest and a WORM object key, but the
+upload itself and the S3 object-lock bucket are not wired — the module records
+the hash and the chain, not the bytes.
+
+**Next:** TR-009 + NC-013 (pre-hospital and ambulance), then TR-002 + OP-009,
+TR-003, TR-005, TR-007.
+
 ### 2026-09-06 (later) · Phase 6 · TR-001 triage, the trauma team and the golden hour
 
 **Built — TR-001, complete.** 8 tables, 19 permission keys, 10 events, 3 screens.

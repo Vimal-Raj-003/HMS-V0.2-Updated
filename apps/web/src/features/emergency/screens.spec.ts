@@ -89,6 +89,35 @@ describe('the emergency screen catalogue', () => {
     expect(erScreen('trauma-registry').permission).toBe('trauma.score.read');
   });
 
+  /**
+   * TR-008's disclosure model, asserted rather than described.
+   *
+   * A restricted case is invisible without a second key, and that key is
+   * reason-required and two-approver to grant. The register screen is gated on
+   * the ordinary register key so the desk can work; the restriction lives on
+   * the rows, which is where the disclosure would happen.
+   */
+  it('gates the medico-legal register on the register key, not the sensitive one', () => {
+    expect(erScreen('mlc-register').permission).toBe('mlc.register.read');
+    expect(erScreen('mlc-case').permission).toBe('mlc.case.read');
+
+    const sensitive = PERMISSION_CATALOGUE.find((p) => p.key === 'mlc.sensitive.read');
+    expect(sensitive?.risk).toBe('critical');
+    expect(sensitive?.requiresReason).toBe(true);
+    expect(sensitive?.sensitiveGrant).toBe(true);
+  });
+
+  /**
+   * Opening an MLC has to be as easy as registering an arrival, and for the
+   * same reason: a case nobody opened because the key was awkward is a case the
+   * hospital cannot later prove it saw.
+   */
+  it('keeps opening a medico-legal case a low-risk permission', () => {
+    const open = PERMISSION_CATALOGUE.find((p) => p.key === 'mlc.case.create');
+    expect(open?.risk).toBe('low');
+    expect(open?.requiresReason ?? false).toBe(false);
+  });
+
   it('explains every denial in plain words', () => {
     for (const screen of ER_SCREENS) {
       expect(screen.summary.length).toBeGreaterThan(20);

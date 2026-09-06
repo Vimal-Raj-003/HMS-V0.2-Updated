@@ -1,0 +1,786 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-008 — MLC register, police intimation and the evidence chain (schema `clinical`)
+//
+// `phase-06` §6.6, exit gate 6.
+//
+//   mlc_cases                the register. Gapless per branch per year.
+//   mlc_police_intimations   the form that goes to the station, and its receipt
+//   mlc_injuries             the forensic body map: site, size, class, weapon
+//   mlc_evidence             clothing, projectiles, swabs, photographs
+//   mlc_custody_log          append-only, hash-chained. Every hand from A to B.
+//   mlc_handovers            the memo the police sign for
+//   mlc_reports              wound certificate, court report, §65B certificate
+//   mlc_requests             what the police and the courts asked for
+//   mlc_dying_declarations   the Magistrate came; the doctor certified fitness
+//   mlc_sexual_assault_exams the MoHFW protocol, restricted
+//   mlc_deaths               brought dead, or died here; inquest and PM status
+//   mlc_court_matters        summons, hearings, which doctor is going
+//
+// ── Treatment never waits for any of this ───────────────────────────────────
+//
+// *Parmanand Katara v. Union of India* (1989), and TR-008 §5 says it in the
+// first line: only **discharge, transfer and body release** are gated on the MLC
+// set being complete. Nothing here references an order, a prescription or a
+// procedure, so there is nowhere to hang a clinical block even if somebody
+// wanted one. The gating trigger lives on `er_dispositions`, which is the way
+// out of the department, not the way into treatment.
+//
+// ── The chain is a chain ────────────────────────────────────────────────────
+//
+// `mlc_custody_log` is append-only with `prev_hash` → `hash` computed **by the
+// database** from the row's own content. The application cannot supply a hash,
+// so it cannot forge a link; UPDATE and DELETE are refused by trigger and
+// revoked from `hms_app`. A break in the chain is therefore visible rather than
+// deniable, which is the only property that makes an evidence log worth keeping.
+//
+// ── What deliberately has no column ─────────────────────────────────────────
+//
+// The sexual-assault proforma has no field for a two-finger test, for
+// "virginity", or for whether the survivor is "habituated to sexual
+// intercourse". The Supreme Court held the two-finger test unconstitutional
+// (*Lillu v. State of Haryana*, 2013) and criminalised its practice
+// (*State of Jharkhand v. Shailendra Kumar Rai*, 2022). A validation warning
+// would be a field somebody can still fill in; the trigger below refuses a
+// proforma whose JSON carries those keys at all.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum MlcCategory {
+  rta
+  assault
+  burns
+  poisoning
+  fall_from_height
+  industrial
+  animal_attack
+  firearm
+  sexual_assault
+  self_harm
+  dowry_related
+  custodial
+  unknown_unconscious
+  brought_dead
+  drowning
+  electrocution
+  snake_bite
+  other
+
+  @@schema("clinical")
+}
+
+enum MlcStatus {
+  open
+  report_pending
+  report_final
+  closed
+  /// Un-flagged by the Medical Superintendent with a reason. The number stays
+  /// burnt: a reused MLC number is two cases with one identity in a court file.
+  cancelled
+
+  @@schema("clinical")
+}
+
+enum MlcIntimationType {
+  initial
+  update
+  death
+  inquest
+  absconded
+  transfer
+  discharge
+  dying_declaration_request
+  /// MV Act §134 accident information, which goes to the insurer as well.
+  mv_act_information
+
+  @@schema("clinical")
+}
+
+enum MlcIntimationStatus {
+  generated
+  dispatched
+  acknowledged
+  failed
+
+  @@schema("clinical")
+}
+
+enum InjuryKind {
+  abrasion
+  contusion
+  laceration
+  incised
+  stab
+  chop
+  firearm_entry
+  firearm_exit
+  burn
+  fracture
+  bite
+  ligature
+  defence_wound
+  other
+
+  @@schema("clinical")
+}
+
+/// BNS 2023 §116 replaced IPC §320. Simple, grievous, or dangerous to life.
+enum BnsInjuryClass {
+  simple
+  grievous
+  dangerous_to_life
+  /// Recorded and not yet classified. Blocks report finalisation, by design.
+  not_assessed
+
+  @@schema("clinical")
+}
+
+enum WeaponOpinion {
+  blunt
+  sharp
+  pointed
+  firearm
+  thermal
+  chemical
+  animal
+  ligature
+  other
+  undetermined
+
+  @@schema("clinical")
+}
+
+enum EvidenceKind {
+  photo
+  video
+  clothing
+  belonging
+  sample
+  foreign_body
+  document
+  digital_other
+
+  @@schema("clinical")
+}
+
+enum EvidenceStatus {
+  collected
+  sealed
+  in_lab
+  returned
+  handed_over
+  disposed
+
+  @@schema("clinical")
+}
+
+enum EvidenceLocation {
+  er
+  evidence_locker
+  lab
+  mrd
+  police
+  court
+  disposed
+
+  @@schema("clinical")
+}
+
+enum MlcReportKind {
+  wound_certificate
+  mlc_report
+  age_certificate
+  fitness_certificate
+  intoxication_certificate
+  sexual_assault_report
+  death_summary_court
+  treatment_summary
+  /// BSA 2023 §63 replaced Evidence Act §65B: the electronic-evidence
+  /// certificate that makes a hashed digital copy admissible.
+  bsa_63_certificate
+  other
+
+  @@schema("clinical")
+}
+
+enum MlcReportStatus {
+  draft
+  final
+  /// Signed on paper because the DSC was unavailable. Still final; flagged so
+  /// the DSC can be attached later without pretending it was there.
+  final_wet_signed
+  addendum
+
+  @@schema("clinical")
+}
+
+enum MlcRequestKind {
+  injury_report
+  history
+  certified_copy
+  evidence
+  testimony
+  other
+
+  @@schema("clinical")
+}
+
+enum MlcDeathKind {
+  brought_dead
+  died_in_hospital
+
+  @@schema("clinical")
+}
+
+enum MannerOfDeath {
+  natural
+  accident
+  suicide
+  homicide
+  undetermined
+
+  @@schema("clinical")
+}
+
+enum BodyCustody {
+  mortuary
+  police
+  released_to_relatives_with_noc
+
+  @@schema("clinical")
+}
+
+/// Whether the police were told, and on what footing.
+enum PoliceInformedBasis {
+  /// The adult survivor consented.
+  yes_consent
+  /// The adult survivor declined. BNSS §397 keeps treatment free regardless.
+  declined_adult
+  /// POCSO §19 makes it mandatory. Never available to a minor's record.
+  mandatory_pocso
+
+  @@schema("clinical")
+}
+
+/// The register. One row per case, numbered gaplessly per branch per year.
+model MlcCase {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  /// Gapless per branch per year. A gap in an MLC register is a question in
+  /// court that nobody in the hospital can answer.
+  mlcNo String @map("mlc_no") @db.VarChar(40)
+
+  erVisitId   String? @map("er_visit_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+  patientId   String? @map("patient_id") @db.Uuid
+  /// The ER tag, when the patient still has no name. An MLC opens anyway.
+  tempTagId String? @map("temp_tag_id") @db.VarChar(40)
+
+  category    MlcCategory
+  subCategory String?     @map("sub_category") @db.VarChar(80)
+
+  openedAt DateTime @default(now()) @map("opened_at") @db.Timestamptz(6)
+  openedBy String?  @map("opened_by") @db.Uuid
+  /// The mechanism TR-001 recorded, which is what suggested the MLC.
+  suggestedFrom String? @map("suggested_from") @db.VarChar(40)
+
+  /// `{ type, names, phone, police: { ps, officer, badge, gdNo, firNo } }`.
+  broughtBy Json? @map("brought_by")
+  informant Json?
+  historyAsStated  String?  @map("history_as_stated") @db.Text
+  identificationMarks String[] @default([]) @map("identification_marks")
+  allegedIncidentAt DateTime? @map("alleged_incident_at") @db.Timestamptz(6)
+  incidentPlace     String?   @map("incident_place") @db.VarChar(300)
+
+  /// Per-act consent: examination, photography, samples, informing the police.
+  consent Json?
+  intoxicationAssessment Json? @map("intoxication_assessment")
+
+  /// Sexual assault, POCSO, dowry-related or custodial. Restricts every read.
+  isSensitive Boolean @default(false) @map("is_sensitive")
+
+  status MlcStatus @default(open)
+
+  /// Only the Medical Superintendent, only with a reason, and the number stays
+  /// burnt. §B.1 refuses everything else.
+  unflagReason String?   @map("unflag_reason") @db.Text
+  unflaggedBy  String?   @map("unflagged_by") @db.Uuid
+  unflaggedAt  DateTime? @map("unflagged_at") @db.Timestamptz(6)
+
+  /// The designated medico-legal officer who owns the case.
+  moId            String? @map("mo_id") @db.Uuid
+  forensicReviewBy String? @map("forensic_review_by") @db.Uuid
+
+  closedAt DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  /// Recorded when a discharge went out with the set incomplete. The override
+  /// is the audit trail, so it lives on the case rather than only in the log.
+  gateOverrideBy     String?   @map("gate_override_by") @db.Uuid
+  gateOverrideReason String?   @map("gate_override_reason") @db.Text
+  gateOverriddenAt   DateTime? @map("gate_overridden_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  intimations       MlcPoliceIntimation[]
+  injuries          MlcInjury[]
+  evidence          MlcEvidence[]
+  handovers         MlcHandover[]
+  reports           MlcReport[]
+  requests          MlcRequest[]
+  dyingDeclarations MlcDyingDeclaration[]
+  sexualAssaultExam MlcSexualAssaultExam?
+  death             MlcDeath?
+  courtMatters      MlcCourtMatter[]
+
+  @@unique([hospitalId, branchId, mlcNo], map: "uq_mlc_no_per_branch")
+  @@index([hospitalId, branchId, status, openedAt(sort: Desc)])
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, erVisitId])
+  @@index([hospitalId, category, openedAt(sort: Desc)])
+  @@map("mlc_cases")
+  @@schema("clinical")
+}
+
+/// The form that goes to the station, and the constable's receipt for it.
+model MlcPoliceIntimation {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  type MlcIntimationType @default(initial)
+
+  psName       String  @map("ps_name") @db.VarChar(160)
+  jurisdiction String? @db.VarChar(160)
+  addressedTo  String? @map("addressed_to") @db.VarChar(160)
+
+  generatedAt DateTime @default(now()) @map("generated_at") @db.Timestamptz(6)
+  generatedBy String?  @map("generated_by") @db.Uuid
+  /// The PDF, and its hash. The document that was sent, not a re-render.
+  documentRef String? @map("document_ref") @db.VarChar(300)
+  sha256      String? @db.Char(64)
+
+  /// `[{ channel, sentAt, to, messageId, deliveredAt }]`.
+  channels Json @default("[]")
+
+  status MlcIntimationStatus @default(generated)
+
+  dispatchedAt DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  /// Who signed for it. A dispatch with no receipt is a dispatch nobody made.
+  ackOfficerName  String?   @map("ack_officer_name") @db.VarChar(160)
+  ackOfficerBadge String?   @map("ack_officer_badge") @db.VarChar(60)
+  ackAt           DateTime? @map("ack_at") @db.Timestamptz(6)
+  ackSignatureRef String?   @map("ack_signature_ref") @db.VarChar(300)
+
+  /// One hour from the case opening. A NABH-style KPI and a legal expectation.
+  ackDueAt      DateTime? @map("ack_due_at") @db.Timestamptz(6)
+  failureReason String?   @map("failure_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mlcCase MlcCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId, generatedAt(sort: Desc)])
+  @@index([hospitalId, status, ackDueAt])
+  @@map("mlc_police_intimations")
+  @@schema("clinical")
+}
+
+/// The forensic body map. One row per injury, numbered on the diagram.
+model MlcInjury {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  /// Injury #1, #2… The number the certificate and the photographs refer to.
+  seq Int
+
+  /// Mirrors TR-001's coded injury when a trauma episode exists. One source,
+  /// two views: the clinician codes AIS, the CMO classifies under the BNS.
+  traumaInjuryId String? @map("trauma_injury_id") @db.Uuid
+
+  kind     InjuryKind
+  bodyView String     @map("body_view") @db.VarChar(24)
+  /// Where the pin sits on the SVG, as a percentage. Resolution-independent.
+  xPct Decimal @map("x_pct") @db.Decimal(5, 2)
+  yPct Decimal @map("y_pct") @db.Decimal(5, 2)
+  side String? @db.VarChar(16)
+
+  siteDescription String  @map("site_description") @db.VarChar(300)
+  lengthCm Decimal? @map("length_cm") @db.Decimal(6, 2)
+  breadthCm Decimal? @map("breadth_cm") @db.Decimal(6, 2)
+  depthCm  Decimal? @map("depth_cm") @db.Decimal(6, 2)
+  shape    String?  @db.VarChar(80)
+  edges    String?  @db.VarChar(80)
+  direction String? @db.VarChar(80)
+  /// Colour and healing stage — how the age of the injury was estimated.
+  colourStage String? @map("colour_stage") @db.VarChar(80)
+  ageEstimate String? @map("age_estimate") @db.VarChar(120)
+  foreignBody String? @map("foreign_body") @db.VarChar(200)
+
+  /// Tattooing, singeing, blackening — what the range opinion rests on.
+  firearmFeatures Json? @map("firearm_features")
+
+  bnsClass      BnsInjuryClass @default(not_assessed) @map("bns_class")
+  /// Which limb of BNS §116 makes it grievous. Required when it is.
+  grievousReason String?       @map("grievous_reason") @db.VarChar(120)
+  weaponOpinion  WeaponOpinion @default(undetermined) @map("weapon_opinion")
+  /// `yes` | `no` | `cannot_say`. The question a court actually asks.
+  consistentWithHistory String @default("cannot_say") @map("consistent_with_history") @db.VarChar(16)
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String?  @map("recorded_by") @db.Uuid
+
+  mlcCase MlcCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, seq], map: "uq_mlc_injury_seq")
+  @@index([hospitalId, caseId])
+  @@map("mlc_injuries")
+  @@schema("clinical")
+}
+
+/// Clothing, a projectile, a swab, a photograph. Everything that must be sealed.
+model MlcEvidence {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  /// Item 1, item 2… per case, printed on the label.
+  itemNo      Int    @map("item_no")
+  kind        EvidenceKind
+  description String @db.VarChar(400)
+
+  collectedAt DateTime @default(now()) @map("collected_at") @db.Timestamptz(6)
+  collectedBy String?  @map("collected_by") @db.Uuid
+  consentRef  String?  @map("consent_ref") @db.VarChar(120)
+
+  /// The tamper-evident bag. A mismatch at any handover raises an incident.
+  sealNo      String? @map("seal_no") @db.VarChar(60)
+  bagLabelRef String? @map("bag_label_ref") @db.VarChar(120)
+  /// The OP-004 sample, when the item is a specimen the lab will handle.
+  sampleId String? @map("sample_id") @db.Uuid
+
+  /// The object-lock (WORM) key. There is no delete on that bucket.
+  fileRef String? @map("file_ref") @db.VarChar(400)
+  /// Hashed on the device, before upload. §B.4 refuses it ever changing.
+  sha256        String? @db.Char(64)
+  hashAlgorithm String  @default("sha256") @map("hash_algorithm") @db.VarChar(16)
+  hashVerifiedAt DateTime? @map("hash_verified_at") @db.Timestamptz(6)
+  deviceId      String? @map("device_id") @db.VarChar(64)
+  exif          Json?
+  /// Annotations are separate layers. The original is never modified.
+  annotationRefs String[] @default([]) @map("annotation_refs")
+
+  currentCustodianId String?          @map("current_custodian_id") @db.Uuid
+  currentLocation    EvidenceLocation @default(er) @map("current_location")
+  status             EvidenceStatus   @default(collected)
+
+  disposalAuthority String? @map("disposal_authority") @db.VarChar(200)
+  notes             String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mlcCase    MlcCase          @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  custodyLog MlcCustodyEntry[]
+
+  @@unique([caseId, itemNo], map: "uq_mlc_evidence_item_no")
+  @@index([hospitalId, caseId])
+  @@index([hospitalId, sha256])
+  @@index([hospitalId, status, currentLocation])
+  @@map("mlc_evidence")
+  @@schema("clinical")
+}
+
+/// Append-only, hash-chained. Every hand the item passed through.
+model MlcCustodyEntry {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  evidenceId String @map("evidence_id") @db.Uuid
+
+  /// 1, 2, 3… The chain's position. Unique per item.
+  seq Int
+
+  at DateTime @default(now()) @db.Timestamptz(6)
+
+  fromUserId String? @map("from_user_id") @db.Uuid
+  toUserId   String? @map("to_user_id") @db.Uuid
+  /// `{ officer, badge, ps, firNo }` when the item leaves the hospital.
+  toExternal Json? @map("to_external")
+
+  locationFrom EvidenceLocation @map("location_from")
+  locationTo   EvidenceLocation @map("location_to")
+  purpose      String           @db.VarChar(200)
+
+  /// Checked at the moment of transfer, by the person receiving it. False
+  /// raises an NC-015 incident rather than being a note somebody may read.
+  sealIntact    Boolean @default(true) @map("seal_intact")
+  witnessUserId String? @map("witness_user_id") @db.Uuid
+  signatureRefs Json?   @map("signature_refs")
+  conditionNotes String? @map("condition_notes") @db.Text
+  /// For biological samples that must stay cold.
+  temperatureC Decimal? @map("temperature_c") @db.Decimal(4, 1)
+
+  /// The previous entry's `hash`, or the item's genesis value for seq 1.
+  prevHash String @map("prev_hash") @db.Char(64)
+  /// Computed **by the database** from this row's content plus `prev_hash`.
+  /// The application cannot supply it, so it cannot forge a link.
+  hash String @db.Char(64)
+
+  evidence MlcEvidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+
+  @@unique([evidenceId, seq], map: "uq_mlc_custody_seq")
+  @@index([hospitalId, evidenceId, seq])
+  @@map("mlc_custody_log")
+  @@schema("clinical")
+}
+
+/// The memo the police sign for.
+model MlcHandover {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  /// `{ officer, badge, ps, firNo, caseNo, requisitionRef }`.
+  toExternal Json @map("to_external")
+  /// The evidence ids handed over in this memo.
+  itemIds String[] @default([]) @map("item_ids") @db.Uuid
+
+  memoRef    String? @map("memo_ref") @db.VarChar(300)
+  memoSha256 String? @map("memo_sha256") @db.Char(64)
+
+  signedByHospital String?   @map("signed_by_hospital") @db.Uuid
+  witnessId        String?   @map("witness_id") @db.Uuid
+  signedAt         DateTime? @map("signed_at") @db.Timestamptz(6)
+  ackFileRef       String?   @map("ack_file_ref") @db.VarChar(300)
+  /// BSA §63 certificate for any digital media in the handover.
+  bsa63CertificateRef String? @map("bsa63_certificate_ref") @db.VarChar(300)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  mlcCase MlcCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId, createdAt(sort: Desc)])
+  @@map("mlc_handovers")
+  @@schema("clinical")
+}
+
+/// Certificates and court reports. Final versions are immutable; corrections
+/// are addenda, the same shape as an amended trauma score.
+model MlcReport {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  kind      MlcReportKind
+  versionNo Int             @map("version_no")
+  status    MlcReportStatus @default(draft)
+
+  templateRef String? @map("template_ref") @db.VarChar(120)
+  documentRef String? @map("document_ref") @db.VarChar(300)
+  sha256      String? @db.Char(64)
+  /// Chains a report version to the one it corrects.
+  prevSha256 String? @map("prev_sha256") @db.Char(64)
+
+  /// The structured findings the document was rendered from. Kept so the
+  /// document can be re-derived and compared against its own hash.
+  content Json?
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  dscRef   String?   @map("dsc_ref") @db.VarChar(200)
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+
+  addendumOf   String? @map("addendum_of") @db.Uuid
+  addendumReason String? @map("addendum_reason") @db.Text
+
+  /// `[{ to, at, mode, ack }]` — court, police, patient.
+  dispatches     Json    @default("[]")
+  copyRegisterNo String? @map("copy_register_no") @db.VarChar(60)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mlcCase MlcCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, kind, versionNo], map: "uq_mlc_report_version")
+  @@index([hospitalId, caseId, createdAt(sort: Desc)])
+  @@index([hospitalId, status])
+  @@map("mlc_reports")
+  @@schema("clinical")
+}
+
+/// What the police or a court asked for, and what was actually given.
+model MlcRequest {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  /// `{ name, badge, ps, court, caseNo, designation }`.
+  requester Json
+  kind      MlcRequestKind
+
+  /// The requisition letter or the court order. §B.9 requires it before the
+  /// clinical record can be released at all.
+  authorityRef String? @map("authority_ref") @db.VarChar(300)
+  receivedAt   DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  approvedBy String?   @map("approved_by") @db.Uuid
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(6)
+
+  providedAt      DateTime? @map("provided_at") @db.Timestamptz(6)
+  providedDocRefs String[]  @default([]) @map("provided_doc_refs")
+  deniedReason    String?   @map("denied_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mlcCase MlcCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId, receivedAt(sort: Desc)])
+  @@map("mlc_requests")
+  @@schema("clinical")
+}
+
+/// The Magistrate was called; the doctor certified the patient fit to speak.
+model MlcDyingDeclaration {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  requestedBy String?  @map("requested_by") @db.Uuid
+  /// `{ name, designation, court, phone }`.
+  magistrate Json?
+
+  /// The hospital certifies fitness and nothing else. The declaration itself
+  /// is the Magistrate's document, sealed into evidence.
+  fitnessCertifiedBy String?   @map("fitness_certified_by") @db.Uuid
+  fitnessAt          DateTime? @map("fitness_at") @db.Timestamptz(6)
+  fitnessOpinion     String?   @map("fitness_opinion") @db.VarChar(24)
+  vitalsSnapshot     Json?     @map("vitals_snapshot")
+
+  recordedAt         DateTime? @map("recorded_at") @db.Timestamptz(6)
+  recordedByExternal String?   @map("recorded_by_external") @db.VarChar(200)
+  sealedEvidenceId   String?   @map("sealed_evidence_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  mlcCase MlcCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId])
+  @@map("mlc_dying_declarations")
+  @@schema("clinical")
+}
+
+/// The MoHFW sexual-assault protocol. Restricted, and missing three fields on
+/// purpose — see the header.
+model MlcSexualAssaultExam {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @unique @map("case_id") @db.Uuid
+
+  /// Banded rather than exact: the record does not need a date of birth to
+  /// establish that POCSO applies.
+  survivorAgeBand String  @map("survivor_age_band") @db.VarChar(24)
+  isPocso         Boolean @default(false) @map("is_pocso")
+
+  /// Per-act: examination, evidence collection, informing the police,
+  /// photography. An adult may consent to one and refuse another.
+  consentMatrix Json @map("consent_matrix")
+  chaperoneId   String? @map("chaperone_id") @db.Uuid
+
+  /// The EN-039 proforma response. §B.6 refuses a two-finger or virginity key.
+  examProforma Json? @map("exam_proforma")
+  safeKitChecklist Json? @map("safe_kit_checklist")
+
+  /// Emergency contraception, HIV PEP within 72 h, STI, tetanus, hepatitis B.
+  prophylaxis   Json?
+  pregnancyTest String? @map("pregnancy_test") @db.VarChar(24)
+  referrals     Json?
+  followups     Json?
+
+  policeInformed PoliceInformedBasis @map("police_informed")
+  /// SJPU and CWC, within the POCSO §19 timeframe.
+  sjpuCwcIntimation Json? @map("sjpu_cwc_intimation")
+
+  /// BNSS §397 (formerly CrPC §357C): treatment is free, and the waiver is
+  /// recorded here rather than left to a biller to remember.
+  treatmentWaived   Boolean   @default(true) @map("treatment_waived")
+  waiverRecordedAt  DateTime? @map("waiver_recorded_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mlcCase MlcCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId])
+  @@map("mlc_sexual_assault_exams")
+  @@schema("clinical")
+}
+
+/// Brought dead, or died here. Inquest, post-mortem and body custody.
+model MlcDeath {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @unique @map("case_id") @db.Uuid
+
+  kind       MlcDeathKind
+  declaredAt DateTime     @map("declared_at") @db.Timestamptz(6)
+  declaredBy String?      @map("declared_by") @db.Uuid
+
+  provisionalCause String?       @map("provisional_cause") @db.VarChar(300)
+  mannerSuspected  MannerOfDeath @default(undetermined) @map("manner_suspected")
+
+  inquestIntimationId String? @map("inquest_intimation_id") @db.Uuid
+  /// `yes` | `no` | `pending`. The MCCD is blocked until this resolves.
+  pmRequired String @default("pending") @map("pm_required") @db.VarChar(16)
+
+  bodyCustody BodyCustody @default(mortuary) @map("body_custody")
+  /// The police no-objection number. Required to release a body to relatives.
+  nocNo         String? @map("noc_no") @db.VarChar(60)
+  mortuaryCaseId String? @map("mortuary_case_id") @db.Uuid
+
+  /// `blocked` until the inquest or PM decision is recorded — §B.8.
+  mccdStatus String @default("blocked") @map("mccd_status") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mlcCase MlcCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId])
+  @@map("mlc_deaths")
+  @@schema("clinical")
+}
+
+/// Summons, hearing dates, and which doctor has to be there.
+model MlcCourtMatter {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  court       String  @db.VarChar(200)
+  courtCaseNo String? @map("court_case_no") @db.VarChar(80)
+  summonsRef  String? @map("summons_ref") @db.VarChar(300)
+
+  /// `[{ date, purpose, attended, outcome }]`.
+  hearingDates Json   @default("[]") @map("hearing_dates")
+  nextHearingAt DateTime? @map("next_hearing_at") @db.Timestamptz(6)
+
+  doctorId          String?  @map("doctor_id") @db.Uuid
+  documentsRequired String[] @default([]) @map("documents_required")
+  outcome           String?  @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mlcCase MlcCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, nextHearingAt])
+  @@index([hospitalId, caseId])
+  @@map("mlc_court_matters")
+  @@schema("clinical")
+}

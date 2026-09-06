@@ -1,4 +1,5 @@
 import { ProblemType } from '@vims/contracts';
+import { moduleRefusalMessage } from '../../../core/problem/module-sqlstates.js';
 import { AppError } from '../../../core/problem/app-error.js';
 
 interface PostgresErrorShape {
@@ -141,10 +142,10 @@ export function mapPayoutDatabaseError(error: unknown): unknown {
   const pg = asPostgresError(error);
   if (pg === null) return error;
 
-  if (pg.code === 'NC034') {
-    const detail = pg.message ?? 'This action is not allowed on a payout in its current state.';
-    return new AppError(ProblemType.CONFLICT, detail);
-  }
+  // Any module's SQLSTATE, not just this one: a trigger fires where the
+  // write happens, and TR-008's discharge gate fires inside OP-006.
+  const refusal = moduleRefusalMessage(pg.code, pg.message);
+  if (refusal !== null) return new AppError(ProblemType.CONFLICT, refusal);
 
   if (pg.constraint !== undefined) {
     const byConstraint = CONSTRAINT_TRANSLATIONS[pg.constraint];

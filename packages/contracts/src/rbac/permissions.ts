@@ -7822,6 +7822,208 @@ const TR001 = group('TR-001', 6, [
   ),
 ]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-008 — the MLC register, police intimation and the evidence chain
+//
+// The shape of this group is the opposite of TR-001's. There, calling the team
+// is cheap and standing it down is considered. Here, *opening* a case is cheap
+// — `mlc.case.create` is `low`, because an MLC that nobody opened because the
+// key was hard to reach is a case the hospital cannot later prove it saw — and
+// everything that closes, releases or discloses is high and reasoned.
+//
+// `mlc.sensitive.read` gates sexual-assault, POCSO, dowry and custodial cases.
+// It is a separate key rather than a filter on `mlc.case.read` so that holding
+// the ordinary key grants nothing here: the default for a case nobody has been
+// deliberately given is *no access*, which is the only default that survives a
+// case being discussed on a ward round.
+// ─────────────────────────────────────────────────────────────────────────────
+const TR008 = group('TR-008', 6, [
+  p(
+    'mlc.case.create',
+    'mlc_case',
+    'create',
+    'phi',
+    'low',
+    'Open a medico-legal case. Held widely on purpose — an MLC nobody opened is a case the hospital cannot prove it saw.',
+  ),
+  p('mlc.case.read', 'mlc_case', 'read', 'phi', 'low', 'Read a medico-legal case and its register entry.', {
+    phiRead: true,
+  }),
+  p(
+    'mlc.case.update',
+    'mlc_case',
+    'update',
+    'phi',
+    'low',
+    'Record the history as stated, who brought them, and the consents.',
+  ),
+  p(
+    'mlc.case.cancel',
+    'mlc_case',
+    'cancel',
+    'phi',
+    'critical',
+    'Medical Superintendent only: cancel an MLC that should not have been opened. The number stays burnt and the entry stays in the register.',
+    { requiresReason: true, sensitiveGrant: true },
+  ),
+  p(
+    'mlc.register.read',
+    'mlc_case',
+    'list',
+    'phi',
+    'medium',
+    'Read the medico-legal register for a branch and year.',
+  ),
+  p(
+    'mlc.intimation.create',
+    'mlc_intimation',
+    'create',
+    'phi',
+    'low',
+    'Generate the police intimation in the state format. The clock on it starts when the case opens.',
+  ),
+  p(
+    'mlc.intimation.dispatch',
+    'mlc_intimation',
+    'send',
+    'phi',
+    'low',
+    'Send the intimation and capture the receiving officer’s name, number and signature.',
+  ),
+  p(
+    'mlc.injury.write',
+    'mlc_injury',
+    'record',
+    'phi',
+    'low',
+    'Document an injury on the forensic body map: site, dimensions, BNS classification and weapon opinion.',
+  ),
+  p(
+    'mlc.evidence.capture',
+    'mlc_evidence',
+    'create',
+    'phi',
+    'low',
+    'Register a piece of evidence — clothing, a projectile, a swab, a photograph — with its seal number and hash.',
+  ),
+  p(
+    'mlc.evidence.read',
+    'mlc_evidence',
+    'read',
+    'phi',
+    'medium',
+    'Read the evidence list and verify a custody chain.',
+    {
+      phiRead: true,
+    },
+  ),
+  p(
+    'mlc.custody.transfer',
+    'mlc_evidence',
+    'update',
+    'phi',
+    'medium',
+    'Record a custody transfer. Append-only and hash-chained; the entry cannot be edited afterwards.',
+  ),
+  p(
+    'mlc.evidence.handover',
+    'mlc_evidence',
+    'issue',
+    'phi',
+    'high',
+    'Hand evidence to the police against a requisition, with a signed memo. Evidence leaves the hospital once.',
+    { requiresReason: true },
+  ),
+  p(
+    'mlc.report.create',
+    'mlc_report',
+    'create',
+    'phi',
+    'medium',
+    'Draft a wound certificate, MLC report or court document.',
+  ),
+  p(
+    'mlc.report.read',
+    'mlc_report',
+    'read',
+    'phi',
+    'medium',
+    'Read the certificates and court reports on a case.',
+    {
+      phiRead: true,
+    },
+  ),
+  p(
+    'mlc.report.sign',
+    'mlc_report',
+    'sign',
+    'phi',
+    'high',
+    'Sign a medico-legal report. It becomes immutable; corrections are addenda.',
+  ),
+  p(
+    'mlc.report.export',
+    'mlc_report',
+    'export',
+    'phi',
+    'high',
+    'Issue a certified copy into the copy register. Every issue is numbered and audited.',
+    { requiresReason: true },
+  ),
+  p(
+    'mlc.request.manage',
+    'mlc_request',
+    'manage',
+    'phi',
+    'high',
+    'Register and answer a police or court request. The clinical record leaves only against a written authority.',
+    { requiresReason: true },
+  ),
+  p(
+    'mlc.sensitive.read',
+    'mlc_case',
+    'read',
+    'phi',
+    'critical',
+    'Read a sexual-assault, POCSO, dowry or custodial case. A separate key, so the ordinary one grants nothing here.',
+    { phiRead: true, requiresReason: true, sensitiveGrant: true },
+  ),
+  p(
+    'mlc.sensitive.write',
+    'mlc_case',
+    'update',
+    'phi',
+    'critical',
+    'Record the MoHFW sexual-assault protocol: consent, examination, SAFE kit, prophylaxis, referrals.',
+    { sensitiveGrant: true },
+  ),
+  p(
+    'mlc.death.write',
+    'mlc_death',
+    'record',
+    'phi',
+    'high',
+    'Record a death or a brought-dead case, the inquest intimation and body custody.',
+  ),
+  p(
+    'mlc.discharge.override',
+    'mlc_case',
+    'override',
+    'phi',
+    'critical',
+    'Medical Superintendent only: let a patient leave with the medico-legal set incomplete. The reason is stored on the case, where the register shows it.',
+    { requiresReason: true, sensitiveGrant: true },
+  ),
+  p(
+    'mlc.configure',
+    'mlc_case',
+    'configure',
+    'operational',
+    'medium',
+    'Maintain intimation templates, police stations and the disclosure policy matrix.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -7886,6 +8088,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   // Phase 6
   ...OP006,
   ...TR001,
+  ...TR008,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));
