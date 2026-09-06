@@ -143,6 +143,11 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   // IP-006: the theatre case. Not gapless — a case cancelled before it reaches
   // the table must not burn a number, and nothing legal rests on the sequence.
   ['OT_CASE', '{BR}/OT/{FY}/{SEQ:5}', false, 'fy'],
+  // IP-013 and IP-007. Neither is gapless: a code called and stood down as a
+  // false alarm is still a code, and a blood request cancelled before a sample
+  // is drawn must not burn a number.
+  ['CODE_BLUE', '{BR}/CODE/{FY}/{SEQ:4}', false, 'fy'],
+  ['BLOOD_REQ', '{BR}/BBR/{FY}/{SEQ:5}', false, 'fy'],
   ['LIC_INVOICE', 'VIMS/{FY}/{SEQ:5}', true, 'fy'],
 ];
 

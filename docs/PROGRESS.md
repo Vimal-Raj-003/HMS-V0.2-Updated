@@ -401,6 +401,69 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-08 · Phase 7E + 7F · Intensive care, a code with a real clock, and the two-person check before the first drop
+
+**Built — IP-009, IP-016, IP-013, IP-007, TR-006 (steps 7E and 7F of seven),
+complete.** 12 tables, 17 permission keys, 6 events, 2 screens. **Exit gates 8
+and 9 pass.**
+
+**Gate 8: blood**
+
+| Attempt                                       | What happened                                                          |
+| --------------------------------------------- | ---------------------------------------------------------------------- |
+| A unit released with the screening incomplete | Refused, naming all five outstanding screens                           |
+| Released with HCV still reactive              | Refused, naming HCV                                                    |
+| Issued on one group sample                    | Refused — one sample cannot detect itself being mislabelled            |
+| Issued on two samples that disagree           | Refused — "do not issue, re-draw both"                                 |
+| Both samples drawn by the same person         | Refused — "the point of the second is that a different person drew it" |
+| Issued by one person checking themselves      | Refused                                                                |
+| Transfusion started with no bedside check     | Refused                                                                |
+| One nurse and both scans                      | Refused                                                                |
+| Two nurses but no bag scan                    | Refused                                                                |
+| The same nurse recorded twice                 | Refused                                                                |
+| Two nurses, wristband and bag both scanned    | The transfusion starts                                                 |
+
+`phase-07`: the bedside check "cannot be skipped, deferred or configured away."
+There is no column in the schema that could express doing so, no field in the
+request, and no flag anywhere. The one deliberate exception is the massive
+transfusion protocol, which issues group O negative before any of it — refusing
+there would kill the patient the rule exists to protect, and that exception is
+in the trigger where it can be read.
+
+**Gate 9: the code**
+
+A code called nine minutes ago, eight flowsheet lines written as they happened,
+and the milestones derived by triggers with nobody typing a duration:
+
+```
+  to CPR   20 s
+  to first shock   80 s
+  to first drug   180 s
+  to ROSC         420 s
+```
+
+A shock line with no joules and a drug line with no dose are refused. The code
+cannot close without an outcome, and cannot close at all while the cart it used
+is unrestocked — the next arrest is the reason.
+
+**Four of five is not eighty per cent**
+
+`icu_bundles.complete` is set by a trigger from the elements, and a VAP bundle
+with four of five done comes back `false`. The literature on care bundles is
+unambiguous, and a bundle scored partially is a bundle nobody completes. The
+exceptions field carries _why_ an element was omitted, because a missed element
+with a stated reason and one with none are different problems.
+
+**Tested** — every rule above proved live in both directions, plus one bag
+issued to two patients (refused), a reaction with no management recorded
+(refused), a RASS outside the scale, and two flowsheet rows for one hour.
+
+**Gates** — 20/20 packages typecheck, lint and test (2,953 → **2,956 tests**);
+**723 routes across 65 controllers**; catalogue **1,128 keys**; event registry
+**765**; 745 base tables, 0 without RLS; 45 migrations; 86 screens.
+
+**Next:** 7G — discharge, the summary, the mortuary, and Phase 7 complete.
+
 ### 2026-09-07 (night) · Phase 7D · The theatre, a checklist that is a gate, and a load that failed
 
 **Built — IP-006, IP-024, EN-003, TR-004 (step 7D of seven), complete.** 6

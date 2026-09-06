@@ -389,3 +389,82 @@ export interface RecallResult {
   readonly patientsAffected: number;
   readonly rows: readonly RecallRow[];
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7E + 7F
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CodeRow {
+  readonly id: string;
+  readonly codeNo: string;
+  readonly location: string;
+  readonly patientId: string | null;
+  readonly state: string;
+  readonly calledAt: string;
+  readonly calledBy: string;
+  readonly teamArrivedAt: string | null;
+  readonly cprStartedAt: string | null;
+  readonly firstShockAt: string | null;
+  readonly firstDrugAt: string | null;
+  readonly roscAt: string | null;
+  readonly outcome: string | null;
+  readonly cartRestockedAt: string | null;
+  readonly secondsToFirstShock: number | null;
+  readonly secondsToFirstDrug: number | null;
+  readonly secondsToCpr: number | null;
+  readonly elapsedSeconds: number;
+}
+
+export interface CodeEventRow {
+  readonly id: string;
+  readonly at: string;
+  readonly kind: string;
+  readonly rhythm: string | null;
+  readonly joules: number | null;
+  readonly drug: string | null;
+  readonly dose: string | null;
+  readonly route: string | null;
+  readonly note: string | null;
+  readonly recordedBy: string;
+  readonly secondsFromCall: number;
+}
+
+export interface CodeDetail extends CodeRow {
+  readonly debriefNote: string | null;
+  readonly ceaseReason: string | null;
+  readonly events: readonly CodeEventRow[];
+}
+
+export interface BloodUnitRow {
+  readonly id: string;
+  readonly unitNo: string;
+  readonly component: string;
+  readonly bloodGroup: string;
+  readonly volumeMl: number;
+  readonly collectedOn: string;
+  readonly expiresOn: string;
+  readonly state: string;
+  readonly storageLocation: string | null;
+  readonly temperatureExcursion: boolean;
+  readonly daysToExpiry: number;
+  readonly ttiPending: readonly string[];
+}
+
+export interface BloodIssueRow {
+  readonly id: string;
+  readonly requestId: string;
+  readonly unitId: string;
+  readonly unitNo: string;
+  readonly component: string;
+  readonly bloodGroup: string;
+  readonly patientId: string;
+  readonly issuedAt: string;
+  readonly issuedBy: string;
+  readonly issueCheckedBy: string;
+  readonly bedsideCheckedBy1: string | null;
+  readonly bedsideCheckedBy2: string | null;
+  readonly bedsideCheckedAt: string | null;
+  readonly transfusionStartedAt: string | null;
+  readonly transfusionEndedAt: string | null;
+  readonly blockedBy: string | null;
+}

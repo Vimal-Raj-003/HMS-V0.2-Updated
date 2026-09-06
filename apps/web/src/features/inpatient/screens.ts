@@ -214,6 +214,55 @@ export const IP_SCREENS: readonly IpScreen[] = [
     ],
     entitlement: 'module.inpatient.enabled',
   },
+  {
+    key: 'code-blue',
+    label: 'Code blue',
+    href: '/ip/code',
+    area: 'inpatient',
+    permission: 'code.record',
+    summary:
+      'Call a code and write the flowsheet one tap at a time. Time to first shock and first drug come from the rows, never from anybody’s memory.',
+    deniedExplanation:
+      'The resuscitation flowsheet is held by everybody who might be in the room. Calling a code is held wider still — the person who finds somebody arrested is whoever walked in.',
+    keywords: [
+      'code blue',
+      'arrest',
+      'resuscitation',
+      'cpr',
+      'defibrillation',
+      'shock',
+      'rosc',
+      'crash cart',
+      'acls',
+      'time to first shock',
+    ],
+    entitlement: 'module.inpatient.enabled',
+  },
+  {
+    key: 'blood-bank',
+    label: 'Blood bank',
+    href: '/ip/blood',
+    area: 'inpatient',
+    permission: 'blood.inventory.read',
+    summary:
+      'What is in the fridge by group and component, closest to expiry first, with the outstanding screen named on every quarantined unit.',
+    deniedExplanation:
+      'The inventory is held by the bank, the wards that transfuse and the doctors who request. Issuing a unit and starting a transfusion are separate keys held by separate people.',
+    keywords: [
+      'blood bank',
+      'transfusion',
+      'crossmatch',
+      'group and save',
+      'tti',
+      'donor',
+      'packed cells',
+      'platelets',
+      'plasma',
+      'expiry',
+      'cold chain',
+    ],
+    entitlement: 'module.inpatient.enabled',
+  },
 ];
 
 export function ipScreen(key: string): IpScreen {

@@ -9304,6 +9304,161 @@ const EN003 = group('EN-003', 7, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 7E + 7F — IP-009, IP-016, IP-013, IP-007, TR-006
+//
+// `blood.transfuse` is `low` and held by every bedside nurse for the same
+// reason `mar.administer` is: the control is the two-person check and the two
+// scans, both enforced by the database. A scarce permission would concentrate
+// transfusions on one login, which is how one person ends up doing both halves
+// of a two-person check.
+// ═════════════════════════════════════════════════════════════════════════════
+const IP009 = group('IP-009', 7, [
+  p(
+    'icu.flowsheet.read',
+    'icu_flowsheet',
+    'read',
+    'phi',
+    'low',
+    'Read the hourly ICU chart and the trend behind it.',
+    { phiRead: true },
+  ),
+  p(
+    'icu.flowsheet.record',
+    'icu_flowsheet',
+    'record',
+    'phi',
+    'low',
+    'Record an hour of the chart. Manual entry is always available, whatever the device feed is doing.',
+  ),
+  p(
+    'icu.score.compute',
+    'icu_score',
+    'record',
+    'phi',
+    'low',
+    'Compute and store APACHE II, SOFA or qSOFA with the components behind them.',
+  ),
+  p(
+    'icu.bundle.record',
+    'icu_bundle',
+    'record',
+    'phi',
+    'low',
+    'Record a care bundle for a shift. Complete means every element — four of five is not eighty per cent.',
+  ),
+]);
+
+const IP013 = group('IP-013', 7, [
+  p(
+    'cart.check.record',
+    'crash_cart',
+    'record',
+    'operational',
+    'low',
+    'Check a crash cart: the seal, or the full open-check with expiries.',
+  ),
+  p(
+    'cart.reseal',
+    'crash_cart',
+    'update',
+    'operational',
+    'low',
+    'Restock and re-seal a cart after a code. The next arrest is the reason.',
+  ),
+  p(
+    'code.call',
+    'code_blue',
+    'activate',
+    'phi',
+    'low',
+    'Call a code blue. Held by everybody who might find somebody arrested.',
+  ),
+  p(
+    'code.record',
+    'code_blue',
+    'record',
+    'phi',
+    'low',
+    'Write the resuscitation flowsheet: rhythms, shocks, drugs, cycles, ROSC.',
+  ),
+  p(
+    'code.close',
+    'code_blue',
+    'complete',
+    'phi',
+    'medium',
+    'Close a code with its outcome and debrief. Refused until the cart is restocked.',
+  ),
+]);
+
+const IP007BB = group('IP-007', 7, [
+  p(
+    'blood.donor.manage',
+    'blood_donor',
+    'manage',
+    'phi',
+    'medium',
+    'Register donors, record screening and apply deferrals.',
+  ),
+  p(
+    'blood.unit.manage',
+    'blood_unit',
+    'manage',
+    'phi',
+    'medium',
+    'Book units in, record the TTI screen, and move them out of quarantine.',
+  ),
+  p(
+    'blood.inventory.read',
+    'blood_unit',
+    'list',
+    'phi',
+    'low',
+    'See what is in the fridge, by group and component, with expiries.',
+  ),
+  p(
+    'blood.request.create',
+    'blood_request',
+    'create',
+    'phi',
+    'low',
+    'Request blood with the clinical indication.',
+  ),
+  p(
+    'blood.sample.record',
+    'blood_request',
+    'record',
+    'phi',
+    'low',
+    'Record a group sample. The second must be drawn separately, by a different person.',
+  ),
+  p(
+    'blood.issue',
+    'blood_issue',
+    'issue',
+    'phi',
+    'medium',
+    'Issue a unit. Two people at the bank, and refused without two agreeing group samples.',
+  ),
+  p(
+    'blood.transfuse',
+    'blood_issue',
+    'record',
+    'phi',
+    'low',
+    'Start a transfusion after the two-person bedside check. The control is the check and the scans, not this key.',
+  ),
+  p(
+    'blood.reaction.report',
+    'transfusion_reaction',
+    'record',
+    'phi',
+    'medium',
+    'Report a transfusion reaction to haemovigilance, with what was done about it.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -9388,6 +9543,9 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...IP005,
   ...IP006,
   ...EN003,
+  ...IP009,
+  ...IP013,
+  ...IP007BB,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

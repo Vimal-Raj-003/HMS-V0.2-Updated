@@ -5,6 +5,8 @@ import { BedsController } from './beds/beds.controller.js';
 import { BedsService } from './beds/beds.service.js';
 import { IpBillingController } from './ipbilling/ipbilling.controller.js';
 import { IpBillingService } from './ipbilling/ipbilling.service.js';
+import { CriticalCareController } from './criticalcare/criticalcare.controller.js';
+import { CriticalCareService } from './criticalcare/criticalcare.service.js';
 import { TheatreController } from './theatre/theatre.controller.js';
 import { TheatreService } from './theatre/theatre.service.js';
 import { NursingController } from './nursing/nursing.controller.js';
@@ -28,6 +30,7 @@ export const INPATIENT_CONTROLLERS: Type<unknown>[] = [
   NursingController,
   IpBillingController,
   TheatreController,
+  CriticalCareController,
 ];
 
 /** `NumberingService` because IP-001 burns the gapless `IP_NO` series and IP-006 the `OT_CASE` one. */
@@ -37,12 +40,13 @@ export const INPATIENT_PROVIDERS: Provider[] = [
   NursingService,
   IpBillingService,
   TheatreService,
+  CriticalCareService,
 ];
 
 @Module({
   imports: [forwardRef(() => AppModule)],
   controllers: INPATIENT_CONTROLLERS,
   providers: INPATIENT_PROVIDERS,
-  exports: [BedsService, NursingService, IpBillingService, TheatreService],
+  exports: [BedsService, NursingService, IpBillingService, TheatreService, CriticalCareService],
 })
 export class InpatientModule {}

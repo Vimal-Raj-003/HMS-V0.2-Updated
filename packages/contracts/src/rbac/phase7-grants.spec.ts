@@ -24,6 +24,10 @@ const PHASE_7_PREFIXES = [
   'ipbill',
   'ot',
   'cssd',
+  'icu',
+  'cart',
+  'code',
+  'blood',
 ] as const;
 
 /**
@@ -204,6 +208,43 @@ describe('Phase 7A permission catalogue', () => {
     const recall = permission('cssd.recall.run');
     expect(recall.requiresReason).toBe(true);
     expect(recall.risk).toBe('high');
+  });
+
+  /**
+   * Transfusing is `low` and held widely, for the same reason giving a dose is.
+   * The control is the two-person bedside check and the two scans, both
+   * enforced by the database. A scarce permission would concentrate
+   * transfusions on one login — which is how one person ends up doing both
+   * halves of a two-person check.
+   */
+  it('keeps starting a transfusion a low-risk permission held at the bedside', () => {
+    const transfuse = permission('blood.transfuse');
+    expect(transfuse.risk).toBe('low');
+    for (const nurse of ['nurse_ward', 'nurse_icu', 'nurse_er_triage']) {
+      expect(holdersOf('blood.transfuse'), nurse).toContain(nurse);
+    }
+  });
+
+  /**
+   * Issuing from the bank is not the same act and not the same people. The bank
+   * issues; the ward transfuses; neither does the other's half.
+   */
+  it('keeps issuing from the bank away from the nurses who transfuse', () => {
+    for (const issuer of holdersOf('blood.issue')) {
+      expect(holdersOf('blood.transfuse'), `${issuer} must not also transfuse`).not.toContain(issuer);
+    }
+  });
+
+  /**
+   * Anybody may call a code. The person who finds somebody arrested is whoever
+   * happened to walk in, and a permission check at that moment is a permission
+   * check during a cardiac arrest.
+   */
+  it('lets anybody at the bedside call a code', () => {
+    const call = permission('code.call');
+    expect(call.risk).toBe('low');
+    expect(call.requiresReason ?? false).toBe(false);
+    expect(holdersOf('code.call').length).toBeGreaterThanOrEqual(8);
   });
 
   it('gives every Phase 7 key only to roles that were meant to have it', () => {
@@ -392,6 +433,63 @@ describe('Phase 7A permission catalogue', () => {
         'infection_control_nurse',
         'hospital_admin',
         'medical_superintendent',
+      ],
+      icu: [
+        'anaesthetist',
+        'doctor_emergency',
+        'doctor_ip',
+        'intensivist',
+        'medical_superintendent',
+        'nurse_er_triage',
+        'nurse_icu',
+        'nurse_ot_scrub',
+        'nurse_supervisor',
+        'nurse_ward',
+        'quality_manager',
+        'resident_doctor',
+        'surgeon',
+      ],
+      cart: [
+        'anaesthetist',
+        'doctor_emergency',
+        'intensivist',
+        'nurse_er_triage',
+        'nurse_icu',
+        'nurse_ot_scrub',
+        'nurse_supervisor',
+        'nurse_ward',
+        'resident_doctor',
+      ],
+      code: [
+        'anaesthetist',
+        'doctor_emergency',
+        'doctor_ip',
+        'intensivist',
+        'medical_superintendent',
+        'nurse_er_triage',
+        'nurse_icu',
+        'nurse_ot_scrub',
+        'nurse_supervisor',
+        'nurse_ward',
+        'quality_manager',
+        'resident_doctor',
+        'surgeon',
+      ],
+      blood: [
+        'anaesthetist',
+        'blood_bank_officer',
+        'doctor_emergency',
+        'doctor_ip',
+        'intensivist',
+        'lab_technician',
+        'medical_superintendent',
+        'nurse_er_triage',
+        'nurse_icu',
+        'nurse_ot_scrub',
+        'nurse_ward',
+        'quality_manager',
+        'resident_doctor',
+        'surgeon',
       ],
       census: [
         'hospital_admin',

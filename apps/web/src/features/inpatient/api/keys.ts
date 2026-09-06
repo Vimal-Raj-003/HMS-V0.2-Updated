@@ -35,6 +35,13 @@ export function ipKeys(hospitalId: string) {
     otCase: (id: string) => [...root, 'ot', 'case', id] as const,
     cssdLoads: (scope: string) => [...root, 'cssd', 'loads', scope] as const,
     cssdLoadsRoot: () => [...root, 'cssd', 'loads'] as const,
+
+    // Phase 7E + 7F
+    codes: (scope: string) => [...root, 'codes', scope] as const,
+    codesRoot: () => [...root, 'codes'] as const,
+    code: (id: string) => [...root, 'code', id] as const,
+    bloodInventory: (scope: string) => [...root, 'blood', 'inventory', scope] as const,
+    bloodInventoryRoot: () => [...root, 'blood', 'inventory'] as const,
   };
 }
 

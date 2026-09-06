@@ -648,6 +648,33 @@ const CSSD_FLOOR = [
   'cssd.issue',
 ] as const;
 
+/** Phase 7E — the intensive care bedside. */
+const ICU_BEDSIDE = [
+  'icu.flowsheet.read',
+  'icu.flowsheet.record',
+  'icu.bundle.record',
+  'cart.check.record',
+  'code.call',
+  'code.record',
+] as const;
+
+/** Phase 7F — transfusing at the bedside. */
+const BLOOD_BEDSIDE = [
+  'blood.inventory.read',
+  'blood.sample.record',
+  'blood.transfuse',
+  'blood.reaction.report',
+] as const;
+
+/** The blood bank's own counter. */
+const BLOOD_BANK = [
+  'blood.donor.manage',
+  'blood.unit.manage',
+  'blood.inventory.read',
+  'blood.issue',
+  'blood.reaction.report',
+] as const;
+
 const FLEET_DISPATCH = [
   'fleet.vehicle.read',
   'fleet.request.create',
@@ -2187,6 +2214,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      'icu.flowsheet.read',
+      'code.close',
+      'blood.inventory.read',
       'ot.board.read',
       'ot.case.bump',
       'cssd.recall.run',
@@ -2402,6 +2432,14 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      'icu.flowsheet.read',
+      'icu.bundle.record',
+      'code.call',
+      'code.record',
+      'code.close',
+      'blood.request.create',
+      'blood.inventory.read',
+      'blood.reaction.report',
       'ipbill.clearance.read',
       ...MAR_PRESCRIBER,
       'nursing.assessment.record',
@@ -2445,6 +2483,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...ICU_BEDSIDE,
+      'icu.score.compute',
+      'code.close',
+      'blood.request.create',
+      'blood.inventory.read',
       ...OT_FLOOR,
       'ot.case.bump',
       ...MAR_PRESCRIBER,
@@ -2509,6 +2552,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      'icu.flowsheet.read',
+      'code.call',
+      'blood.request.create',
+      'blood.inventory.read',
       ...OT_SURGEON,
       'cssd.issue',
       ...MAR_PRESCRIBER,
@@ -2557,6 +2604,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'anaesthesia-worklist',
     permissions: [
+      ...ICU_BEDSIDE,
+      'icu.score.compute',
+      'code.close',
+      'blood.request.create',
+      'blood.inventory.read',
       ...OT_FLOOR,
       'ot.case.close',
       'ot.note.write',
@@ -2592,6 +2644,12 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'icu-board',
     permissions: [
+      ...ICU_BEDSIDE,
+      'icu.score.compute',
+      'code.close',
+      'blood.request.create',
+      'blood.inventory.read',
+      'blood.reaction.report',
       'ot.board.read',
       'ot.intraop.record',
       ...MAR_PRESCRIBER,
@@ -2688,6 +2746,9 @@ const templates: readonly RoleTemplate[] = [
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
     permissions: [
+      ...ICU_BEDSIDE,
+      'blood.request.create',
+      'blood.inventory.read',
       ...OT_FLOOR,
       ...MAR_PRESCRIBER,
       ...WARD_FLOOR,
@@ -2793,6 +2854,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...BLOOD_BEDSIDE,
+      'code.call',
+      'code.record',
+      'cart.check.record',
+      'icu.flowsheet.read',
       ...NURSING_BEDSIDE,
       ...WARD_FLOOR,
       'housekeeping.task.read',
@@ -2832,6 +2898,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'icu-flowsheet',
     permissions: [
+      ...ICU_BEDSIDE,
+      ...BLOOD_BEDSIDE,
+      'icu.score.compute',
+      'cart.reseal',
       ...NURSING_BEDSIDE,
       'infection.isolation.manage',
       ...WARD_FLOOR,
@@ -2871,6 +2941,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'triage-board',
     permissions: [
+      ...ICU_BEDSIDE,
+      ...BLOOD_BEDSIDE,
+      'cart.reseal',
       ...NURSING_BEDSIDE,
       ...BED_BOARD_READER,
       'admission.request',
@@ -2919,6 +2992,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'ot-checklist',
     permissions: [
+      ...BLOOD_BEDSIDE,
+      'code.call',
+      'code.record',
       ...OT_FLOOR,
       'cssd.issue',
       ...NURSING_BEDSIDE,
@@ -2970,6 +3046,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-command-centre',
     permissions: [
+      ...ICU_BEDSIDE,
+      'cart.reseal',
+      'code.close',
       'ot.board.read',
       'ot.case.schedule',
       ...IP_BILL_READER,
@@ -3372,6 +3451,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'lab-bench',
     permissions: [
+      'blood.inventory.read',
+      'blood.unit.manage',
       ...LAB_BENCH,
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
@@ -3449,6 +3530,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'blood-bank',
     permissions: [
+      ...BLOOD_BANK,
       'polytrauma.case.read',
       'polytrauma.case.list',
       'polytrauma.blood.plan',
@@ -4072,6 +4154,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'quality',
     permissions: [
+      'icu.flowsheet.read',
+      'blood.inventory.read',
       'ot.board.read',
       'cssd.recall.run',
       'infection.hai.read',

@@ -1,0 +1,578 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7E + 7F · IP-009, IP-016, IP-013, IP-007, TR-006
+//
+// Intensive care, the crash cart, the code, and blood.
+//
+// ── The bedside check is a hard gate, and it is two people ──────────────────
+//
+// `phase-07`: "two-person bedside verification against the wristband before the
+// first drop — this check is a hard gate that cannot be skipped, deferred or
+// configured away."
+//
+// So it is not a boolean and not a checklist row. It is four columns — two
+// nurses, the wristband payload and the bag payload — and a CHECK that refuses
+// a transfusion row claiming a start without all four, plus a trigger refusing
+// two checkers who are one person. There is no column in this file that could
+// express a bypass.
+//
+// ── The clock is what a code is judged on ───────────────────────────────────
+//
+// Time to first shock and time to first drug are the two numbers that predict
+// survival, and both are computed from timestamps on a flowsheet rather than
+// entered as durations. A duration somebody typed is a duration somebody
+// remembered.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum BloodComponent {
+  whole_blood
+  packed_red_cells
+  fresh_frozen_plasma
+  platelet_concentrate
+  single_donor_platelets
+  cryoprecipitate
+
+  @@schema("clinical")
+}
+
+enum BloodUnitState {
+  /// Collected, tests pending.
+  quarantined
+  available
+  reserved
+  /// Cross-matched to a patient.
+  crossmatched
+  issued
+  transfused
+  discarded
+  expired
+  /// Returned to stock after issue, within the cold-chain window.
+  returned
+
+  @@schema("clinical")
+}
+
+enum CodeState {
+  called
+  team_arrived
+  cpr_in_progress
+  rosc
+  ceased
+  closed
+
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7E.1 — intensive care
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One hour of an ICU chart.
+///
+/// A row per hour rather than a wide daily row, because the question asked at
+/// a handover is "what has the last four hours looked like" and a wide row
+/// cannot answer it without unpacking.
+model IcuFlowsheetEntry {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+  patientId   String @map("patient_id") @db.Uuid
+
+  /// The hour this row covers, truncated. One row per admission per hour.
+  atHour DateTime @map("at_hour") @db.Timestamptz(6)
+
+  // Haemodynamics
+  heartRate      Int? @map("heart_rate")
+  systolicBp     Int? @map("systolic_bp")
+  diastolicBp    Int? @map("diastolic_bp")
+  meanArterialBp Int? @map("mean_arterial_bp")
+  cvpMmhg        Int? @map("cvp_mmhg")
+  temperatureC   Decimal? @map("temperature_c") @db.Decimal(4, 1)
+
+  // Respiratory
+  spo2          Int?
+  fio2          Int?
+  respiratoryRate Int? @map("respiratory_rate")
+  /// `spontaneous` | `cpap` | `simv` | `pcv` | `vcv` | `prvc` | `hfnc` | `niv`.
+  ventMode      String? @map("vent_mode") @db.VarChar(20)
+  peepCmH2o     Decimal? @map("peep_cm_h2o") @db.Decimal(4, 1)
+  tidalVolumeMl Int? @map("tidal_volume_ml")
+
+  // Neurology and sedation
+  gcs           Int?
+  /// Richmond Agitation-Sedation Scale, −5 to +4.
+  rass          Int?
+  pupilsLeft    String? @map("pupils_left") @db.VarChar(20)
+  pupilsRight   String? @map("pupils_right") @db.VarChar(20)
+
+  // Renal
+  urineOutputMl Int? @map("urine_output_ml")
+
+  /// Vasoactive and sedative infusions running this hour, with their rates.
+  infusions Json?
+
+  /// Which source each value came from — a monitor, a ventilator, or a nurse.
+  /// Manual entry is always available (EN-042), and knowing which is which
+  /// matters when a number looks wrong.
+  sources Json?
+
+  recordedBy String   @map("recorded_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([admissionId, atHour], map: "uq_icu_flowsheet_hour")
+  @@index([hospitalId, branchId, admissionId, atHour(sort: Desc)])
+  @@map("icu_flowsheet")
+  @@schema("clinical")
+}
+
+/// A severity score, computed and stored with its components.
+model IcuScore {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+
+  /// `apache_ii` | `sofa` | `qsofa` | `saps_ii`.
+  scale String @db.VarChar(20)
+  score Int
+  /// Predicted mortality, where the scale offers one.
+  predictedMortalityPct Decimal? @map("predicted_mortality_pct") @db.Decimal(5, 2)
+
+  components Json
+
+  atHour     DateTime @map("at_hour") @db.Timestamptz(6)
+  computedBy String   @map("computed_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, admissionId, scale, atHour(sort: Desc)])
+  @@map("icu_scores")
+  @@schema("clinical")
+}
+
+/// A care bundle, and whether each element was done this shift.
+model IcuBundle {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+
+  /// `vap` | `clabsi` | `cauti` | `sedation` | `dvt` | `stress_ulcer` | `glycaemic`.
+  bundle String @db.VarChar(20)
+  forDate DateTime @map("for_date") @db.Date
+  shift   String   @db.VarChar(20)
+
+  /// Each element with its state. A bundle is all-or-nothing in the literature:
+  /// four of five elements is not eighty per cent of the benefit.
+  elements Json
+  /// True only when every element is done. Computed, never chosen.
+  complete Boolean @default(false)
+  /// Why an element was omitted, where it was.
+  exceptions String[]
+
+  recordedBy String   @map("recorded_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([admissionId, bundle, forDate, shift], map: "uq_icu_bundle_shift")
+  @@index([hospitalId, admissionId, forDate(sort: Desc)])
+  @@map("icu_bundles")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7E.2 — the crash cart and the code
+// ─────────────────────────────────────────────────────────────────────────────
+
+model CrashCart {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  code     String  @db.VarChar(20)
+  location String  @db.VarChar(160)
+  wardId   String? @map("ward_id") @db.Uuid
+
+  /// The numbered tag through the lock. A cart whose seal is intact has not
+  /// been opened, which is the whole basis of the daily check being quick.
+  sealNo String? @map("seal_no") @db.VarChar(40)
+  sealedAt DateTime? @map("sealed_at") @db.Timestamptz(6)
+  sealedBy String?   @map("sealed_by") @db.Uuid
+
+  /// The earliest expiry inside. Checked at the full open-check, and what makes
+  /// the next full check due.
+  earliestExpiryOn DateTime? @map("earliest_expiry_on") @db.Date
+  lastFullCheckAt  DateTime? @map("last_full_check_at") @db.Timestamptz(6)
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  checks CrashCartCheck[]
+  codes  CodeBlue[]
+
+  @@unique([hospitalId, branchId, code], map: "uq_crash_cart_code")
+  @@map("ip_crash_carts")
+  @@schema("clinical")
+}
+
+/// A seal check or a full open-check.
+model CrashCartCheck {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  cartId String @map("cart_id") @db.Uuid
+
+  /// `seal` is the quick one — is the tag intact and is it the right number.
+  /// `full` opens it and counts everything against the list with expiries.
+  kind String @db.VarChar(10)
+
+  sealIntact Boolean? @map("seal_intact")
+  sealNoSeen String?  @map("seal_no_seen") @db.VarChar(40)
+
+  /// For a full check: the contents against the list.
+  findings Json?
+  /// Anything expired, short or missing. A full check with nothing wrong and
+  /// nothing listed is a check somebody did from the corridor.
+  discrepancies String[]
+
+  checkedAt DateTime @default(now()) @map("checked_at") @db.Timestamptz(6)
+  checkedBy String   @map("checked_by") @db.Uuid
+
+  /// The new seal after a full check or a restock.
+  resealedNo String? @map("resealed_no") @db.VarChar(40)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  cart CrashCart @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, cartId, checkedAt(sort: Desc)])
+  @@map("ip_crash_cart_checks")
+  @@schema("clinical")
+}
+
+/// A code blue, from the call to the debrief.
+model CodeBlue {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  codeNo String @map("code_no") @db.VarChar(60)
+
+  patientId   String? @map("patient_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+  cartId      String? @map("cart_id") @db.Uuid
+  wardId      String? @map("ward_id") @db.Uuid
+  location    String  @db.VarChar(160)
+
+  state CodeState @default(called)
+
+  /// The clock everything else is measured from.
+  calledAt DateTime @default(now()) @map("called_at") @db.Timestamptz(6)
+  calledBy String   @map("called_by") @db.Uuid
+
+  teamArrivedAt DateTime? @map("team_arrived_at") @db.Timestamptz(6)
+  cprStartedAt  DateTime? @map("cpr_started_at") @db.Timestamptz(6)
+  /// The two numbers a code is judged on. Both derived from the flowsheet, so
+  /// neither can be a duration somebody remembered.
+  firstShockAt  DateTime? @map("first_shock_at") @db.Timestamptz(6)
+  firstDrugAt   DateTime? @map("first_drug_at") @db.Timestamptz(6)
+  roscAt        DateTime? @map("rosc_at") @db.Timestamptz(6)
+  ceasedAt      DateTime? @map("ceased_at") @db.Timestamptz(6)
+
+  /// `rosc` | `died` | `transferred` | `false_alarm`.
+  outcome String? @db.VarChar(24)
+  /// Why resuscitation stopped, when it did.
+  ceaseReason String? @map("cease_reason") @db.Text
+
+  teamLeaderId String?  @map("team_leader_id") @db.Uuid
+  attendees    String[] @db.Uuid
+
+  debriefAt   DateTime? @map("debrief_at") @db.Timestamptz(6)
+  debriefNote String?   @map("debrief_note") @db.Text
+
+  /// The cart must be restocked and re-sealed before it counts as available.
+  cartRestockedAt DateTime? @map("cart_restocked_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  cart   CrashCart? @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  events CodeBlueEvent[]
+
+  @@unique([hospitalId, codeNo], map: "uq_code_blue_no")
+  @@index([hospitalId, branchId, state, calledAt(sort: Desc)])
+  @@map("ip_code_blues")
+  @@schema("clinical")
+}
+
+/// One line of the resuscitation flowsheet.
+model CodeBlueEvent {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  codeId String @map("code_id") @db.Uuid
+
+  at DateTime @default(now()) @db.Timestamptz(6)
+
+  /// `rhythm` | `shock` | `drug` | `cpr_cycle` | `airway` | `access` | `rosc` | `note`.
+  kind String @db.VarChar(20)
+
+  /// For a rhythm: `vf` | `pvt` | `asystole` | `pea` | `sinus` | `af` | `other`.
+  rhythm String? @db.VarChar(20)
+  /// For a shock: joules.
+  joules Int?
+  /// For a drug: what and how much.
+  drug   String? @db.VarChar(120)
+  dose   String? @db.VarChar(60)
+  route  String? @db.VarChar(40)
+
+  note String? @db.Text
+
+  recordedBy String   @map("recorded_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  code CodeBlue @relation(fields: [codeId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, codeId, at])
+  @@map("ip_code_blue_events")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7F — the blood bank
+// ─────────────────────────────────────────────────────────────────────────────
+
+model BloodDonor {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  donorNo String @map("donor_no") @db.VarChar(60)
+  patientId String? @map("patient_id") @db.Uuid
+
+  name        String  @db.VarChar(200)
+  bloodGroup  String? @map("blood_group") @db.VarChar(6)
+  phone       String? @db.VarChar(20)
+  dateOfBirth DateTime? @map("date_of_birth") @db.Date
+
+  /// Deferred until, and why. A donor deferred for a year must not be bled in
+  /// six months because somebody did not look.
+  deferredUntil DateTime? @map("deferred_until") @db.Date
+  deferralReason String?  @map("deferral_reason") @db.Text
+  /// Permanent deferral — a positive TTI, a disqualifying history.
+  permanentlyDeferred Boolean @default(false) @map("permanently_deferred")
+
+  lastDonationOn DateTime? @map("last_donation_on") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  units BloodUnit[]
+
+  @@unique([hospitalId, donorNo], map: "uq_blood_donor_no")
+  @@index([hospitalId, bloodGroup])
+  @@map("bb_donors")
+  @@schema("clinical")
+}
+
+/// One bag.
+model BloodUnit {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  /// The bag number. Unique per hospital, and what the bedside check scans.
+  unitNo String @map("unit_no") @db.VarChar(60)
+
+  donorId   String? @map("donor_id") @db.Uuid
+  component BloodComponent
+  bloodGroup String @map("blood_group") @db.VarChar(6)
+  volumeMl  Int     @map("volume_ml")
+
+  collectedOn DateTime @map("collected_on") @db.Date
+  expiresOn   DateTime @map("expires_on") @db.Date
+
+  state BloodUnitState @default(quarantined)
+
+  /// Transfusion-transmissible infection screening. All five must be
+  /// non-reactive before a unit leaves quarantine.
+  ttiHiv      String? @map("tti_hiv") @db.VarChar(16)
+  ttiHbv      String? @map("tti_hbv") @db.VarChar(16)
+  ttiHcv      String? @map("tti_hcv") @db.VarChar(16)
+  ttiSyphilis String? @map("tti_syphilis") @db.VarChar(16)
+  ttiMalaria  String? @map("tti_malaria") @db.VarChar(16)
+  ttiClearedAt DateTime? @map("tti_cleared_at") @db.Timestamptz(6)
+  ttiClearedBy String?   @map("tti_cleared_by") @db.Uuid
+
+  /// Where it is, and whether the cold chain held. An excursion is a fact about
+  /// the bag, not about the fridge.
+  storageLocation String? @map("storage_location") @db.VarChar(120)
+  temperatureExcursion Boolean @default(false) @map("temperature_excursion")
+  excursionNote String? @map("excursion_note") @db.Text
+
+  /// Set on cross-match.
+  reservedForPatientId String? @map("reserved_for_patient_id") @db.Uuid
+  crossmatchedAt DateTime? @map("crossmatched_at") @db.Timestamptz(6)
+  crossmatchResult String? @map("crossmatch_result") @db.VarChar(20)
+
+  discardReason String? @map("discard_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  donor BloodDonor? @relation(fields: [donorId], references: [id], onDelete: SetNull)
+  issues BloodIssue[]
+
+  @@unique([hospitalId, unitNo], map: "uq_blood_unit_no")
+  @@index([hospitalId, branchId, state, component, bloodGroup])
+  @@index([hospitalId, expiresOn])
+  @@map("bb_units")
+  @@schema("clinical")
+}
+
+/// A request for blood, and the sample rule that protects it.
+model BloodRequest {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  requestNo String @map("request_no") @db.VarChar(60)
+
+  patientId   String  @map("patient_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+  otCaseId    String? @map("ot_case_id") @db.Uuid
+  polytraumaCaseId String? @map("polytrauma_case_id") @db.Uuid
+
+  component BloodComponent
+  unitsRequested Int @map("units_requested")
+  /// `routine` | `urgent` | `emergency` | `massive_transfusion`.
+  urgency   String @default("routine") @db.VarChar(24)
+  indication String @db.Text
+
+  /// The first group, from the sample that came with the request.
+  groupSample1 String? @map("group_sample_1") @db.VarChar(6)
+  sample1At    DateTime? @map("sample_1_at") @db.Timestamptz(6)
+  sample1By    String?   @map("sample_1_by") @db.Uuid
+
+  /// The second, independently drawn, by a different person. The single
+  /// commonest cause of a fatal ABO mismatch is one mislabelled sample, and one
+  /// sample cannot detect itself being wrong.
+  groupSample2 String? @map("group_sample_2") @db.VarChar(6)
+  sample2At    DateTime? @map("sample_2_at") @db.Timestamptz(6)
+  sample2By    String?   @map("sample_2_by") @db.Uuid
+
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  requestedBy String   @map("requested_by") @db.Uuid
+
+  /// `pending` | `crossmatched` | `issued` | `completed` | `cancelled`.
+  state String @default("pending") @db.VarChar(20)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  issues BloodIssue[]
+
+  @@unique([hospitalId, requestNo], map: "uq_blood_request_no")
+  @@index([hospitalId, branchId, state, requestedAt(sort: Desc)])
+  @@index([hospitalId, patientId])
+  @@map("bb_requests")
+  @@schema("clinical")
+}
+
+/// A unit leaving the bank, and the two checks it passes on the way.
+model BloodIssue {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  requestId String @map("request_id") @db.Uuid
+  unitId    String @map("unit_id") @db.Uuid
+  patientId String @map("patient_id") @db.Uuid
+
+  // ── Two-person issue, at the bank ────────────────────────────────────────
+  issuedAt DateTime  @default(now()) @map("issued_at") @db.Timestamptz(6)
+  issuedBy String    @map("issued_by") @db.Uuid
+  issueCheckedBy String @map("issue_checked_by") @db.Uuid
+
+  /// The cooler it went out in, for the massive transfusion protocol.
+  coolerRef String? @map("cooler_ref") @db.VarChar(40)
+
+  // ── Two-person bedside check, before the first drop ──────────────────────
+  //
+  // Four things, and the transfusion cannot start without all four: two nurses
+  // who are not the same person, the wristband as scanned, and the bag as
+  // scanned. `phase-07`: this check "cannot be skipped, deferred or configured
+  // away", and there is no column here that could express doing so.
+  bedsideCheckedBy1 String? @map("bedside_checked_by_1") @db.Uuid
+  bedsideCheckedBy2 String? @map("bedside_checked_by_2") @db.Uuid
+  bedsideWristbandScan String? @map("bedside_wristband_scan") @db.VarChar(200)
+  bedsideUnitScan      String? @map("bedside_unit_scan") @db.VarChar(200)
+  bedsideCheckedAt DateTime? @map("bedside_checked_at") @db.Timestamptz(6)
+
+  transfusionStartedAt DateTime? @map("transfusion_started_at") @db.Timestamptz(6)
+  transfusionEndedAt   DateTime? @map("transfusion_ended_at") @db.Timestamptz(6)
+  volumeTransfusedMl   Int?      @map("volume_transfused_ml")
+
+  /// Set when the unit came back unused, inside the cold-chain window.
+  returnedAt DateTime? @map("returned_at") @db.Timestamptz(6)
+  returnReason String? @map("return_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  request BloodRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  unit    BloodUnit    @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  reactions TransfusionReaction[]
+
+  @@index([hospitalId, branchId, issuedAt(sort: Desc)])
+  @@index([hospitalId, patientId])
+  @@map("bb_issues")
+  @@schema("clinical")
+}
+
+/// A transfusion reaction, reported to haemovigilance.
+model TransfusionReaction {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  issueId   String @map("issue_id") @db.Uuid
+  patientId String @map("patient_id") @db.Uuid
+
+  /// `febrile` | `allergic` | `anaphylaxis` | `haemolytic_acute` | `haemolytic_delayed`
+  /// | `taco` | `trali` | `bacterial` | `other`.
+  kind String @db.VarChar(30)
+  /// `mild` | `moderate` | `severe` | `life_threatening` | `death`.
+  severity String @db.VarChar(20)
+
+  onsetAt DateTime @map("onset_at") @db.Timestamptz(6)
+  /// Millilitres in when it started. The single most useful number for judging
+  /// an acute haemolytic reaction.
+  volumeInMl Int? @map("volume_in_ml")
+
+  symptoms   String[]
+  management String  @db.Text
+
+  /// The bag and the giving set go back to the bank. A reaction investigated
+  /// without them is an investigation that cannot conclude.
+  bagReturnedAt DateTime? @map("bag_returned_at") @db.Timestamptz(6)
+
+  reportedAt DateTime @default(now()) @map("reported_at") @db.Timestamptz(6)
+  reportedBy String   @map("reported_by") @db.Uuid
+
+  /// Haemovigilance reporting (NACO/SBTC).
+  haemovigilanceRef String?   @map("haemovigilance_ref") @db.VarChar(60)
+  reportedToHvAt    DateTime? @map("reported_to_hv_at") @db.Timestamptz(6)
+
+  investigation String? @db.Text
+  conclusion    String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  issue BloodIssue @relation(fields: [issueId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, reportedAt(sort: Desc)])
+  @@index([hospitalId, patientId])
+  @@map("bb_reactions")
+  @@schema("clinical")
+}

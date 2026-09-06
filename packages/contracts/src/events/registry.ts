@@ -10168,6 +10168,108 @@ const theatreEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * Phase 7E + 7F — critical care and blood.
+ *
+ * `code.blue.closed` carries the two numbers a code is judged on, derived from
+ * the flowsheet rather than entered. A duration somebody typed is a duration
+ * somebody remembered, and survival after an arrest turns on those two.
+ */
+const criticalCareEvents: readonly EventDefinition[] = [
+  ev(
+    'code.blue.called',
+    'code_blue',
+    'IP-013',
+    'A code blue was called. This is the broadcast — the team hears it from here, not from a screen somebody had open.',
+    z.object({
+      codeId: uuid,
+      codeNo: z.string(),
+      location: z.string(),
+      patientId: uuid.nullable(),
+      wardId: uuid.nullable(),
+      calledBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'code.blue.closed',
+    'code_blue',
+    'IP-013',
+    'A code finished. Time to first shock and time to first drug are derived from the flowsheet, never entered.',
+    z.object({
+      codeId: uuid,
+      codeNo: z.string(),
+      outcome: z.string(),
+      secondsToCpr: z.number().int().nullable(),
+      secondsToFirstShock: z.number().int().nullable(),
+      secondsToFirstDrug: z.number().int().nullable(),
+      secondsToRosc: z.number().int().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'blood.issued',
+    'blood_issue',
+    'IP-007',
+    'A unit left the bank after a two-person check, against a request with two agreeing group samples.',
+    z.object({
+      issueId: uuid,
+      requestId: uuid,
+      unitNo: z.string(),
+      component: z.string(),
+      bloodGroup: z.string(),
+      patientId: uuid,
+      issuedBy: uuid,
+      checkedBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'blood.transfusion.started',
+    'blood_issue',
+    'IP-007',
+    'The first drop went in, after two people checked the wristband against the bag. The scan payloads are on the row; this says it happened.',
+    z.object({
+      issueId: uuid,
+      unitNo: z.string(),
+      patientId: uuid,
+      checkedBy1: uuid,
+      checkedBy2: uuid,
+      minutesFromIssue: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'blood.reaction.reported',
+    'transfusion_reaction',
+    'IP-007',
+    'A transfusion reaction. Reaches haemovigilance from here, because a reaction reported only into a chart is a reaction nobody outside the ward learns from.',
+    z.object({
+      reactionId: uuid,
+      issueId: uuid,
+      patientId: uuid,
+      kind: z.string(),
+      severity: z.string(),
+      volumeInMl: z.number().int().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'icu.bundle.incomplete',
+    'icu_bundle',
+    'IP-009',
+    'A care bundle was not completed for a shift. Carries the exceptions, because a missed element with a stated reason and a missed element with none are different problems.',
+    z.object({
+      bundleId: uuid,
+      admissionId: uuid,
+      bundle: z.string(),
+      shift: z.string(),
+      exceptions: z.array(z.string()),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -10240,6 +10342,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...nursingEvents,
   ...ipBillingEvents,
   ...theatreEvents,
+  ...criticalCareEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

@@ -4,8 +4,11 @@ import type {
   AdmissionView,
   BedBoardRow,
   CensusRow,
+  BloodUnitRow,
   ChargeRunView,
   CleaningTaskView,
+  CodeDetail,
+  CodeRow,
   CssdLoadRow,
   ClearanceView,
   EscalationRow,
@@ -428,4 +431,78 @@ export async function releaseLoad(id: string): Promise<CssdLoadRow> {
 /** Produces a list of patients, so it takes a reason. */
 export async function recallLoad(id: string, reason: string): Promise<RecallResult> {
   return request(`${V1}/cssd/loads/${id}/recall`, { method: 'PATCH', body: {}, reason });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7E + 7F
+//
+// `transfuse` takes a second nurse and two scans, and nothing that could stand
+// in for any of them. There is no `override` in this client because there is
+// none on the server and no column in the schema that could express one.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getCodes(
+  filters: { readonly openOnly?: boolean } = {},
+  options: Signal = {},
+): Promise<PageOf<CodeRow>> {
+  return request(`${V1}/code/calls${queryString({ openOnly: filters.openOnly })}`, withSignal(options));
+}
+
+export async function getCode(id: string, options: Signal = {}): Promise<CodeDetail> {
+  return request(`${V1}/code/calls/${id}`, withSignal(options));
+}
+
+export async function callCode(body: {
+  readonly location: string;
+  readonly patientId?: string;
+  readonly cartId?: string;
+}): Promise<CodeDetail> {
+  return request(`${V1}/code/calls`, { method: 'POST', body, idempotencyKey: newIdempotencyKey() });
+}
+
+export async function recordCodeEvent(
+  id: string,
+  body: {
+    readonly kind: string;
+    readonly rhythm?: string;
+    readonly joules?: number;
+    readonly drug?: string;
+    readonly dose?: string;
+    readonly route?: string;
+    readonly note?: string;
+  },
+): Promise<CodeDetail> {
+  return request(`${V1}/code/calls/${id}/events`, { method: 'POST', body });
+}
+
+export async function closeCode(
+  id: string,
+  body: { readonly outcome: string; readonly ceaseReason?: string; readonly debriefNote?: string },
+): Promise<CodeDetail> {
+  return request(`${V1}/code/calls/${id}/close`, { method: 'PATCH', body });
+}
+
+export async function restockCart(id: string, resealedNo: string): Promise<CodeDetail> {
+  return request(`${V1}/code/calls/${id}/restock`, {
+    method: 'PATCH',
+    body: { kind: 'full', findings: { restocked: true }, resealedNo },
+  });
+}
+
+export async function getBloodInventory(
+  filters: {
+    readonly component?: string;
+    readonly bloodGroup?: string;
+    readonly availableOnly?: boolean;
+  } = {},
+  options: Signal = {},
+): Promise<PageOf<BloodUnitRow>> {
+  return request(
+    `${V1}/blood/inventory${queryString({
+      component: filters.component,
+      bloodGroup: filters.bloodGroup,
+      availableOnly: filters.availableOnly,
+    })}`,
+    withSignal(options),
+  );
 }
