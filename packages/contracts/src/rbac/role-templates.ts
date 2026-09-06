@@ -316,6 +316,24 @@ const MOBILE_CLINICIAN = ['mobile.sync', 'auth.device.manage'] as const;
  *
  * ABAC scopes the read to their own statements; the permission alone does not.
  */
+/**
+ * OP-006 — the emergency floor.
+ *
+ * Held widely on purpose. `er.quickreg` is the key that gets an unconscious
+ * patient a tag, a wristband and a bay in under thirty seconds; a permission
+ * model that made it hard to reach would be one that killed somebody. The
+ * consequential keys — merging an identity, ending an episode — are the ones
+ * that carry a reason.
+ */
+const ER_FLOOR = [
+  'er.board.read',
+  'er.visit.read',
+  'er.quickreg',
+  'er.visit.update',
+  'er.bay.assign',
+  'er.prealert.receive',
+] as const;
+
 const PAYOUT_EARNER = ['payout.statement.read', 'payout.statement.list', 'payout.dispute.raise'] as const;
 
 const DOCTOR_CLINICAL = [
@@ -1878,6 +1896,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...ER_FLOOR,
+      'er.disposition.decide',
+      'er.identity.merge',
       ...DIAGNOSTIC_ORDERING,
       'rad.mlc.read',
 
@@ -2190,6 +2211,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'triage-board',
     permissions: [
+      ...ER_FLOOR,
+      'er.disposition.decide',
       ...WARD_DIAGNOSTICS,
 
       'receipt.collect.night',
@@ -2341,6 +2364,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'registration',
     permissions: [
+      ...ER_FLOOR,
+      'er.identity.merge',
       ...DIAGNOSTIC_FRONT_DESK,
 
       ...PATIENT_DESK,

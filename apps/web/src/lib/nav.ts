@@ -3,6 +3,7 @@ import { ADMIN_SCREENS } from '@/features/admin/screens';
 import { DIAGNOSTICS_SCREENS } from '@/features/diagnostics/screens';
 import { INVENTORY_SCREENS } from '@/features/inventory/screens';
 import { PHARMACY_SCREENS } from '@/features/pharmacy/screens';
+import { ER_SCREENS } from '@/features/emergency/screens';
 import { RCM_SCREENS } from '@/features/rcm/screens';
 
 /**
@@ -99,6 +100,21 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
    * Phase 5. Pricing sits above administration and below the operational
    * consoles: a biller reaches it several times a day, an administrator rarely.
    */
+  /**
+   * Phase 6. Above the revenue cycle and below the clinical consoles: the ER
+   * board is a screen somebody looks at every few minutes for a whole shift.
+   */
+  {
+    key: 'emergency',
+    label: 'Emergency',
+    href: '/er/board',
+    children: ER_SCREENS.map((screen) => ({
+      key: screen.key,
+      label: screen.label,
+      href: screen.href,
+      permission: screen.permission,
+    })),
+  },
   {
     key: 'rcm',
     label: 'Revenue cycle',

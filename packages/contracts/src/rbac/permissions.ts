@@ -7581,6 +7581,71 @@ const NC034 = group('NC-034', 5, [
   ),
 ]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-006 — ER intake, the ER board and dispositions
+//
+// `er.quickreg` is deliberately `low` risk and held widely. It is the key that
+// gets an unconscious patient a tag, a wristband and a bay in under thirty
+// seconds, and a permission model that made it hard to reach would be a
+// permission model that killed somebody.
+// ─────────────────────────────────────────────────────────────────────────────
+const OP006 = group('OP-006', 6, [
+  p('er.board.read', 'er_visit', 'list', 'phi', 'low', 'See the ER board: who is here, how sick, how long.'),
+  p(
+    'er.visit.read',
+    'er_visit',
+    'read',
+    'phi',
+    'low',
+    'View one ER visit: how they arrived, where they are, and what has happened since.',
+    { phiRead: true },
+  ),
+  p(
+    'er.quickreg',
+    'er_visit',
+    'create',
+    'phi',
+    'low',
+    'Register an arrival in seconds — a name or a tag, and nothing else required.',
+  ),
+  p('er.visit.update', 'er_visit', 'update', 'phi', 'low', 'Amend the arrival details as they become known.'),
+  p(
+    'er.identity.merge',
+    'er_visit',
+    'update',
+    'phi',
+    'high',
+    'Reconcile a temporary tag into a real UHID, carrying every ER record with it.',
+    { requiresReason: true },
+  ),
+  p('er.bay.assign', 'er_bay', 'update', 'operational', 'low', 'Put a patient in a bay, or move them.'),
+  p(
+    'er.bay.manage',
+    'er_bay',
+    'manage',
+    'operational',
+    'medium',
+    'Maintain ER zones, bays and their equipment.',
+  ),
+  p(
+    'er.disposition.decide',
+    'er_disposition',
+    'update',
+    'phi',
+    'high',
+    'End the episode: admit, discharge, refer, LAMA, observation or death.',
+    { requiresReason: true },
+  ),
+  p(
+    'er.prealert.receive',
+    'er_visit',
+    'create',
+    'phi',
+    'low',
+    'Take an ambulance pre-alert and put the inbound patient on the board with an ETA.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -7641,6 +7706,9 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...RC008,
   ...RC006,
   ...NC034,
+
+  // Phase 6
+  ...OP006,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

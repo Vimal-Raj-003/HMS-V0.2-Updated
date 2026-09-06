@@ -61,6 +61,15 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   // that appears on a TDS return. Gapless per branch per FY, because a missing
   // statement number in a 26Q filing is a question somebody has to answer.
   ['PAYOUT', '{BR}/PAY/{FY}/{SEQ:6}', true, 'fy'],
+  // OP-006 §6.1: the ER number is the identity of an episode that may start
+  // before anybody knows the patient's name. Gapless per branch per FY, because
+  // a missing ER number is an episode somebody has to account for.
+  ['ER_NO', '{BR}/ER/{FY}/{SEQ:6}', true, 'fy'],
+  // The temporary tag. Never reset, and deliberately so: a tag recycled daily
+  // means two patients called ER-TAG-0007 a week apart, and if either is still
+  // unidentified that is exactly the confusion the tag exists to prevent. Not
+  // gapless — an abandoned tag must not burn a number an auditor asks about.
+  ['ER_TAG', 'ER-TAG-{SEQ:5}', false, 'never'],
   // OP-002 §5: "Numbering: `RX`, `ORD` per hospital/branch/FY (non-gapless)."
   // Not gapless — an abandoned prescription draft must not burn a number an
   // auditor will later ask about, and nothing legal depends on the sequence

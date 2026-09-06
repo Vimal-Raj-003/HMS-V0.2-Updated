@@ -8746,6 +8746,99 @@ const payoutEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * OP-006 — the ER front door.
+ *
+ * `er.patient.arrived` fires before anybody knows who the patient is. That is
+ * the point: downstream boards, timers and pre-alerts all key off the arrival,
+ * not off an identity that may not exist for hours.
+ */
+const emergencyEvents: readonly EventDefinition[] = [
+  ev(
+    'er.prealert.received',
+    'er_visit',
+    'OP-006',
+    'An ambulance is on its way. The board shows the inbound patient with an ETA so a bay can be held before they arrive.',
+    z.object({
+      visitId: uuid,
+      erNo: z.string(),
+      expectedAt: z.string(),
+      arrivalMode: z.string(),
+      ambulanceRef: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'er.patient.arrived',
+    'er_visit',
+    'OP-006',
+    'Somebody came through the door. Fires whether or not they can be identified — care does not wait for a UHID.',
+    z.object({
+      visitId: uuid,
+      erNo: z.string(),
+      patientId: uuid.nullable(),
+      tempIdentity: z.string().nullable(),
+      arrivalMode: z.string(),
+      mlcSuspected: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'er.bay.assigned',
+    'er_bay',
+    'OP-006',
+    'A patient was put in a bay. Drives the board and the bay-occupancy count.',
+    z.object({
+      visitId: uuid,
+      bayId: uuid,
+      bayCode: z.string(),
+      zoneCode: z.string(),
+      method: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'er.bay.vacated',
+    'er_bay',
+    'OP-006',
+    'A bay is free of its patient and needs cleaning. NC-018 consumes this in Phase 7; until then the bay sits visibly dirty rather than silently free.',
+    z.object({
+      bayId: uuid,
+      bayCode: z.string(),
+      zoneCode: z.string(),
+      needsCleaning: z.boolean(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'er.identity.merged',
+    'er_visit',
+    'OP-006',
+    'A temporary tag became a real patient. Exit gate 2: every ER, MLC and imaging record follows, and the ER number does not change.',
+    z.object({
+      visitId: uuid,
+      erNo: z.string(),
+      tempIdentity: z.string(),
+      patientId: uuid,
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+  ev(
+    'er.disposition.decided',
+    'er_disposition',
+    'OP-006',
+    'The episode ended. An `admit` carries the pre-filled request IP-001 consumes in Phase 7.',
+    z.object({
+      visitId: uuid,
+      erNo: z.string(),
+      kind: z.string(),
+      admissionRequestId: uuid.nullable(),
+      erLosMinutes: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 2920 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -8805,6 +8898,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...estimateEvents,
   ...leakageEvents,
   ...payoutEvents,
+  ...emergencyEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

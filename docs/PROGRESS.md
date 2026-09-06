@@ -356,6 +356,51 @@ cannot query the figure is one they argue about by email.
 
 ---
 
+### 2026-09-06 · Phase 6 begins · The front door at 3 a.m.
+
+**Built — OP-006 (ER intake, board and dispositions), complete.** 5 tables, 9
+keys, 6 events, and **exit gates 1 and 2 pass**.
+
+Gate 1: an ambulance pre-alerted with an 8-minute ETA, the board showed the
+inbound patient, resus bay R1 was held before arrival, and the handover carried
+the complaint and the MLC suspicion into the ER record with nothing re-keyed —
+because it is the same record.
+
+Gate 2: an unknown patient brought in by police was registered in **54 ms**
+sending nothing but `arrivalMode`. They got `ER-TAG-00002`, a bay, and treatment.
+Two hours later the tag was reconciled to a real UHID and the ER number, the bay,
+the movement history and the door-to-doctor timestamp all survived — the visit
+gains a patient rather than being recreated, which is the whole of the gate.
+
+**The Katara rule is a shape, not a check.** `er_visits.patient_id` is nullable
+and a CHECK requires _either_ a patient or a tag — never a registered patient.
+And no column in any of the five tables references a bill, a payer or a balance,
+so there is nowhere for a "pay first" gate to be added later by somebody who did
+not read the header. That is stronger than skipping the check.
+
+Fourteen constraints proven live, including a bay holding two patients, a patient
+in two bays, a LAMA with no witness, a referral with no destination, a death with
+no time, and a bay reassigned after the patient was discharged.
+
+Two smaller things worth recording:
+
+- A vacated bay goes to `cleaning`, never straight to `free`. NC-018 arrives in
+  Phase 7; until then the bay sits visibly dirty on the board. A bay that
+  silently became free is how the next patient is put on an unwiped trolley.
+- `ER_TAG` was first written as a daily-reset series. The platform refused it —
+  daily series are issued from `queue.queue_token_series` — and the refusal was
+  right for a second reason: a tag recycled daily means two patients called
+  `ER-TAG-0007` a week apart, and if either is still unidentified that is exactly
+  the confusion the tag exists to prevent. It is now never-reset.
+
+Also fixed here: the e2e suite had never been in any TypeScript project, so it
+was neither typechecked nor lintable and the pre-commit hook could not handle a
+commit that touched it. It is in the project now, with two real defects it had
+been hiding.
+
+**Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
+across 54 controllers; catalogue 922 keys; event registry 677.
+
 ## Phase 5 complete — 2026-09-06
 
 Nine modules: RC-003 tariff, OP-005 OP billing, EN-010 payments, OP-023 packages,

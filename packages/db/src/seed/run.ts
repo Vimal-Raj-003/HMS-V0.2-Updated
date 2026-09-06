@@ -37,6 +37,7 @@ import { seedClinical } from './clinical.js';
 import { seedDiagnostics } from './diagnostics.js';
 import { seedSupplyChain } from './inventory.js';
 import { seedPharmacy } from './pharmacy.js';
+import { seedEmergency } from './emergency.js';
 import { seedLeakage } from './leakage.js';
 import { seedSchemes } from './schemes.js';
 import { seedTariff } from './tariff.js';
@@ -121,6 +122,7 @@ export async function runSeed(db: Pool, tier: Tier): Promise<ReturnType<typeof t
     await seedTariff(ctx, tenancy);
     await seedSchemes(ctx, tenancy);
     await seedLeakage(ctx, tenancy);
+    await seedEmergency(ctx, tenancy);
   }
   await seedActivity(ctx, tenancy);
   await seedPatientPopulation(ctx, tenancy);
