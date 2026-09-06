@@ -9459,6 +9459,160 @@ const IP007BB = group('IP-007', 7, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 7G — IP-002, IP-017
+//
+// `ip.discharge.summary.sign` is `medium` and not `high`, deliberately. The
+// control on a summary is not scarcity of the key — every consultant signs
+// summaries all day — it is that signing is refused while a medicine is
+// unreconciled, and that a signed summary cannot be edited afterwards. Both are
+// database triggers. Making the key scarce would only push signing onto one
+// exhausted registrar's login at 9 p.m.
+//
+// `mortuary.release.manage` is `high` for the opposite reason. Releasing a body
+// is done a handful of times a week by a named custodian, and the four gates the
+// database enforces — certificate issued, next of kin verified, MLC closed,
+// post-mortem done — are the ones a distressed family will plead to skip. The
+// person who has to say no to them should be the person the hospital chose.
+// ═════════════════════════════════════════════════════════════════════════════
+const IP002 = group('IP-002', 7, [
+  p(
+    'ip.discharge.read',
+    'ip_discharge',
+    'read',
+    'phi',
+    'low',
+    'Read the discharge worklist, one discharge, and the summary versions behind it.',
+    { phiRead: true },
+  ),
+  p(
+    'ip.discharge.initiate',
+    'ip_discharge',
+    'create',
+    'phi',
+    'medium',
+    'Start a discharge, and revoke one when the patient deteriorates before they leave.',
+  ),
+  p(
+    'ip.discharge.reconcile',
+    'ip_med_reconciliation',
+    'decide',
+    'phi',
+    'low',
+    'Decide each medicine across the home, inpatient and discharge lists, with the reason for the change.',
+  ),
+  p(
+    'ip.discharge.summary.write',
+    'ip_discharge_summary',
+    'record',
+    'phi',
+    'low',
+    'Draft the discharge summary. A draft is editable; signing it is a separate key.',
+  ),
+  p(
+    'ip.discharge.summary.sign',
+    'ip_discharge_summary',
+    'sign',
+    'phi',
+    'medium',
+    'Sign the summary, which makes it immutable. Refused while any medicine is unreconciled.',
+  ),
+  p(
+    'ip.discharge.summary.cosign',
+    'ip_discharge_summary',
+    'cosign',
+    'phi',
+    'medium',
+    'Countersign a resident-signed summary. The one change a signed summary accepts, and never by the signer.',
+  ),
+  p(
+    'ip.discharge.summary.amend',
+    'ip_discharge_summary',
+    'amend',
+    'phi',
+    'medium',
+    'Issue a new version of a signed summary. The reason is stored on the version and printed on it.',
+    { requiresReason: true },
+  ),
+  p(
+    'ip.discharge.dama',
+    'ip_discharge',
+    'record',
+    'phi',
+    'medium',
+    'Record a discharge against medical advice: what was explained, who witnessed it, when it was signed.',
+    { requiresReason: true },
+  ),
+  p(
+    'ip.discharge.complete',
+    'ip_discharge',
+    'complete',
+    'phi',
+    'low',
+    'Mark the patient physically left, which releases the bed and locks the bill.',
+  ),
+]);
+
+const IP017 = group('IP-017', 7, [
+  p(
+    'mortuary.case.read',
+    'mortuary_record',
+    'read',
+    'phi',
+    'low',
+    'Read the mortuary register and one death file.',
+    { phiRead: true },
+  ),
+  p(
+    'mortuary.case.create',
+    'mortuary_record',
+    'create',
+    'phi',
+    'medium',
+    'Open a death file: the declaration, the cause, and the tag the body is identified by from then on.',
+  ),
+  p(
+    'mortuary.body.operate',
+    'mortuary_record',
+    'record',
+    'phi',
+    'low',
+    'Last offices, receiving the body into cold storage, and moving it between chambers.',
+  ),
+  p(
+    'mortuary.mccd.write',
+    'mortuary_mccd',
+    'record',
+    'phi',
+    'high',
+    'Issue the medical certificate of cause of death. Only a registered medical practitioner may hold this.',
+  ),
+  p(
+    'mortuary.pm.write',
+    'mortuary_post_mortem',
+    'record',
+    'phi',
+    'medium',
+    'Record that a required post-mortem has been performed, and its reference.',
+  ),
+  p(
+    'mortuary.release.manage',
+    'mortuary_release',
+    'release',
+    'phi',
+    'high',
+    'Verify the next of kin and release the body. Refused without a certificate, a verified claimant, a closed MLC and any required post-mortem.',
+  ),
+  p(
+    'mortuary.report.read',
+    'mortuary_record',
+    'list',
+    'phi',
+    'low',
+    'The mortuary census, the register for a date range, and the indicators drawn from them.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -9546,6 +9700,8 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...IP009,
   ...IP013,
   ...IP007BB,
+  ...IP002,
+  ...IP017,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

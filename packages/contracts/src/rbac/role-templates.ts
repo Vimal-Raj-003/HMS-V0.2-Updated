@@ -675,6 +675,55 @@ const BLOOD_BANK = [
   'blood.reaction.report',
 ] as const;
 
+/** Phase 7G — the doctor's half of a discharge, up to and including signing. */
+const DISCHARGE_CLINICAL = [
+  'ip.discharge.read',
+  'ip.discharge.initiate',
+  'ip.discharge.reconcile',
+  'ip.discharge.summary.write',
+  'ip.discharge.summary.sign',
+  'ip.discharge.dama',
+] as const;
+
+/**
+ * The consultant's two extra keys: countersigning a resident's summary, and
+ * issuing a new version of one already signed.
+ *
+ * A resident holds `DISCHARGE_CLINICAL` and can sign — waiting for a consultant
+ * to be free before a patient may go home is how discharges slip to the evening
+ * and the bed is lost for a day. What the resident cannot do is close the loop
+ * alone: they have no `cosign` key, and the database refuses a countersignature
+ * from the person who signed.
+ */
+const DISCHARGE_CONSULTANT = [
+  ...DISCHARGE_CLINICAL,
+  'ip.discharge.summary.cosign',
+  'ip.discharge.summary.amend',
+] as const;
+
+/** The ward's half: watch the worklist, and record that the patient actually left. */
+const DISCHARGE_WARD = ['ip.discharge.read', 'ip.discharge.complete'] as const;
+
+/**
+ * IP-017 — declaring a death and certifying it.
+ *
+ * `mortuary.mccd.write` is not in the resident bundle. Every other clinical
+ * output a resident produces here is countersigned by a consultant, and a
+ * certificate of cause of death is a document with no countersignature slot: it
+ * goes to the Registrar under one name. So it is signed by somebody whose
+ * signature stands on its own.
+ */
+const MORTUARY_CLINICAL = ['mortuary.case.read', 'mortuary.case.create', 'mortuary.mccd.write'] as const;
+
+/** The custodian of the register, and the only holder of the release itself. */
+const MORTUARY_CUSTODIAN = [
+  'mortuary.case.read',
+  'mortuary.body.operate',
+  'mortuary.pm.write',
+  'mortuary.release.manage',
+  'mortuary.report.read',
+] as const;
+
 const FLEET_DISPATCH = [
   'fleet.vehicle.read',
   'fleet.request.create',
@@ -2214,6 +2263,12 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      ...DISCHARGE_CONSULTANT,
+      ...MORTUARY_CLINICAL,
+      'mortuary.release.manage',
+      'mortuary.report.read',
+      'mortuary.body.operate',
+      'mortuary.pm.write',
       'icu.flowsheet.read',
       'code.close',
       'blood.inventory.read',
@@ -2332,6 +2387,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'department-dashboard',
     permissions: [
+      ...DISCHARGE_CONSULTANT,
+      ...MORTUARY_CLINICAL,
       ...DIAGNOSTIC_ORDERING,
 
       'appointment.overbook',
@@ -2432,6 +2489,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...DISCHARGE_CONSULTANT,
+      ...MORTUARY_CLINICAL,
       'icu.flowsheet.read',
       'icu.bundle.record',
       'code.call',
@@ -2483,6 +2542,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...DISCHARGE_CONSULTANT,
+      ...MORTUARY_CLINICAL,
       ...ICU_BEDSIDE,
       'icu.score.compute',
       'code.close',
@@ -2552,6 +2613,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...DISCHARGE_CONSULTANT,
+      ...MORTUARY_CLINICAL,
       'icu.flowsheet.read',
       'code.call',
       'blood.request.create',
@@ -2644,6 +2707,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'icu-board',
     permissions: [
+      ...DISCHARGE_CONSULTANT,
+      ...MORTUARY_CLINICAL,
       ...ICU_BEDSIDE,
       'icu.score.compute',
       'code.close',
@@ -2721,6 +2786,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'lab-validation',
     permissions: [
+      'mortuary.case.read',
+      'mortuary.pm.write',
+      'mortuary.report.read',
       ...LAB_VALIDATION,
 
       ...DIAGNOSTIC_CLINICIAN,
@@ -2746,6 +2814,9 @@ const templates: readonly RoleTemplate[] = [
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
     permissions: [
+      ...DISCHARGE_CLINICAL,
+      'mortuary.case.read',
+      'mortuary.case.create',
       ...ICU_BEDSIDE,
       'blood.request.create',
       'blood.inventory.read',
@@ -2854,6 +2925,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...DISCHARGE_WARD,
+      'mortuary.case.read',
+      'mortuary.body.operate',
       ...BLOOD_BEDSIDE,
       'code.call',
       'code.record',
@@ -2898,6 +2972,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'icu-flowsheet',
     permissions: [
+      ...DISCHARGE_WARD,
+      'mortuary.case.read',
+      'mortuary.body.operate',
       ...ICU_BEDSIDE,
       ...BLOOD_BEDSIDE,
       'icu.score.compute',
@@ -3046,6 +3123,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-command-centre',
     permissions: [
+      ...DISCHARGE_WARD,
+      'mortuary.case.read',
+      'mortuary.report.read',
       ...ICU_BEDSIDE,
       'cart.reseal',
       'code.close',
@@ -3120,6 +3200,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'facilities',
     homeWorkspace: 'task-list',
     permissions: [
+      'mortuary.body.operate',
       'nursing.ward.read',
       ...HOUSEKEEPING_FLOOR,
       'transfer.accept',
@@ -3232,6 +3313,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'finance',
     homeWorkspace: 'billing-desk',
     permissions: [
+      'ip.discharge.read',
       'ot.board.read',
       ...IP_BILL_DESK,
       ...BED_BOARD_READER,
@@ -3355,6 +3437,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-ward-indents',
     permissions: [
+      'ip.discharge.read',
+      'ip.discharge.reconcile',
       'mar.read',
       'mar.order.verify',
       'nursing.ward.read',
@@ -3660,6 +3744,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'records',
     homeWorkspace: 'mrd-queue',
     permissions: [
+      ...MORTUARY_CUSTODIAN,
+      'ip.discharge.read',
       'ipbill.clearance.read',
       'admission.read',
       'admission.list',

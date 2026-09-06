@@ -10270,6 +10270,138 @@ const criticalCareEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * Phase 7G — the discharge and the death file.
+ *
+ * `ip.discharge.summary.signed` is what everything downstream waits on: the
+ * FHIR push, the patient's copy in the portal, the coder's queue. It carries the
+ * version, because an amendment publishes the same event again with a higher
+ * one, and a consumer that ignored the version would show a GP the superseded
+ * document forever.
+ */
+const dischargeEvents: readonly EventDefinition[] = [
+  ev(
+    'ip.discharge.initiated',
+    'ip_discharge',
+    'IP-002',
+    'A discharge was started. Billing stops future auto-postings, pharmacy prepares the take-home pack, and the bed is flagged for turnover.',
+    z.object({
+      dischargeId: uuid,
+      admissionId: uuid,
+      patientId: uuid,
+      kind: z.string(),
+      destination: z.string().nullable(),
+      initiatedBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'ip.discharge.medications_reconciled',
+    'ip_med_reconciliation',
+    'IP-002',
+    'Every medicine on the three lists now has a decision behind it. Until this, the summary cannot be signed.',
+    z.object({
+      dischargeId: uuid,
+      admissionId: uuid,
+      medicineCount: z.number().int(),
+      stopped: z.number().int(),
+      changed: z.number().int(),
+      started: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'ip.discharge.summary.signed',
+    'ip_discharge_summary',
+    'IP-002',
+    'The summary was signed. Consumers must key on the version — an amendment republishes this with a higher one, and the old version is superseded, not corrected.',
+    z.object({
+      summaryId: uuid,
+      dischargeId: uuid,
+      admissionId: uuid,
+      patientId: uuid,
+      version: z.number().int(),
+      signedBy: uuid,
+      amendReason: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'ip.discharge.completed',
+    'ip_discharge',
+    'IP-002',
+    'The patient physically left. The bed is released to housekeeping and the bill is locked to further postings.',
+    z.object({
+      dischargeId: uuid,
+      admissionId: uuid,
+      patientId: uuid,
+      kind: z.string(),
+      destination: z.string().nullable(),
+      completedAt: iso,
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'ip.discharge.dama_recorded',
+    'ip_discharge',
+    'IP-002',
+    'A patient left against medical advice. Goes to quality as a matter of course: a ward with a rising DAMA rate has a problem that is not clinical.',
+    z.object({
+      dischargeId: uuid,
+      admissionId: uuid,
+      patientId: uuid,
+      witnessName: z.string(),
+      signedAt: iso,
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'mortuary.case.created',
+    'mortuary_record',
+    'IP-017',
+    'A death was declared and a file opened. Stops every reminder, appointment and campaign the patient was on, within the minute.',
+    z.object({
+      recordId: uuid,
+      recordNo: z.string(),
+      patientId: uuid,
+      admissionId: uuid.nullable(),
+      bodyTagNo: z.string(),
+      mlc: z.boolean(),
+      declaredAt: iso,
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'mortuary.certificate.issued',
+    'mortuary_record',
+    'IP-017',
+    'The certificate of cause of death was issued. One of the four things the database checks before a body may be released.',
+    z.object({
+      recordId: uuid,
+      recordNo: z.string(),
+      mccdForm: z.string(),
+      mccdNo: z.string(),
+      issuedBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'mortuary.body.released',
+    'mortuary_record',
+    'IP-017',
+    'The body was released to a verified next of kin. Frees the chamber, opens the cleaning task, and closes the file.',
+    z.object({
+      recordId: uuid,
+      recordNo: z.string(),
+      bodyTagNo: z.string(),
+      releasedTo: z.string(),
+      relationship: z.string(),
+      releasedAt: iso,
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -10343,6 +10475,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...ipBillingEvents,
   ...theatreEvents,
   ...criticalCareEvents,
+  ...dischargeEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

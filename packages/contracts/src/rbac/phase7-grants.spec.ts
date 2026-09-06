@@ -28,6 +28,8 @@ const PHASE_7_PREFIXES = [
   'cart',
   'code',
   'blood',
+  'ip',
+  'mortuary',
 ] as const;
 
 /**
@@ -249,6 +251,38 @@ describe('Phase 7A permission catalogue', () => {
 
   it('gives every Phase 7 key only to roles that were meant to have it', () => {
     const ALLOWED: Readonly<Record<string, readonly string[]>> = {
+      ip: [
+        'hospital_admin',
+        'branch_admin',
+        'medical_superintendent',
+        'hod',
+        'doctor_ip',
+        'doctor_emergency',
+        'surgeon',
+        'intensivist',
+        'resident_doctor',
+        'nurse_ward',
+        'nurse_icu',
+        'nurse_supervisor',
+        'pharmacist_ip',
+        'billing_executive',
+        'mrd_officer',
+      ],
+      mortuary: [
+        'medical_superintendent',
+        'hod',
+        'doctor_ip',
+        'doctor_emergency',
+        'surgeon',
+        'intensivist',
+        'resident_doctor',
+        'pathologist',
+        'nurse_ward',
+        'nurse_icu',
+        'nurse_supervisor',
+        'ward_attendant',
+        'mrd_officer',
+      ],
       bed: [
         'hospital_admin',
         'branch_admin',
@@ -547,5 +581,58 @@ describe('Phase 7A permission catalogue', () => {
     for (const key of ['nurse_supervisor', 'housekeeping', 'ward_attendant', 'receptionist']) {
       expect(getRoleTemplate(key), key).toBeDefined();
     }
+  });
+});
+
+/**
+ * Phase 7G — the two rules a discharge summary and a body release turn on.
+ *
+ * Both are enforced in the database; these assert that the *keys* do not offer
+ * a way around them. A role holding both `sign` and `cosign` still cannot
+ * countersign its own summary — `cosigner_is_a_second_person` refuses that — but
+ * a role holding `cosign` and not `sign` would be a consultant who can approve
+ * work they are not allowed to produce, which is not a role that exists here.
+ */
+describe('Phase 7G — discharge and the mortuary', () => {
+  it('gives nobody a cosign key without the sign key it countersigns', () => {
+    const offenders = ROLE_TEMPLATES.filter(
+      (role) =>
+        role.permissions.includes('ip.discharge.summary.cosign') &&
+        !role.permissions.includes('ip.discharge.summary.sign'),
+    ).map((role) => role.key);
+    expect(offenders).toEqual([]);
+  });
+
+  it('lets a resident sign a summary but never close the loop on it', () => {
+    const resident = getRoleTemplate('resident_doctor');
+    expect(resident?.permissions).toContain('ip.discharge.summary.sign');
+    expect(resident?.permissions).not.toContain('ip.discharge.summary.cosign');
+    expect(resident?.permissions).not.toContain('ip.discharge.summary.amend');
+  });
+
+  it('keeps the certificate of cause of death out of the resident bundle', () => {
+    // Every other clinical output a resident produces is countersigned. An MCCD
+    // goes to the Registrar under one name and has no countersignature slot.
+    expect(getRoleTemplate('resident_doctor')?.permissions).not.toContain('mortuary.mccd.write');
+    expect(holdersOf('mortuary.mccd.write').length).toBeGreaterThan(0);
+  });
+
+  it('keeps the body release with the custodian, not with the ward', () => {
+    expect([...holdersOf('mortuary.release.manage')].sort()).toEqual([
+      'medical_superintendent',
+      'mrd_officer',
+    ]);
+  });
+
+  it('marks the amendment reason mandatory and the release high-risk', () => {
+    expect(permission('ip.discharge.summary.amend').requiresReason).toBe(true);
+    expect(permission('ip.discharge.dama').requiresReason).toBe(true);
+    expect(permission('mortuary.release.manage').risk).toBe('high');
+    expect(permission('mortuary.mccd.write').risk).toBe('high');
+  });
+
+  it('audits every read of a death file and a discharge as a PHI read', () => {
+    expect(permission('mortuary.case.read').phiRead).toBe(true);
+    expect(permission('ip.discharge.read').phiRead).toBe(true);
   });
 });

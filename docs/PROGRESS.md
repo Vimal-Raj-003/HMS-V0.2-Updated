@@ -5,15 +5,15 @@
 
 ## Current state
 
-| Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current phase          | **Phase 3 (Diagnostics) complete through API, screens, analyzer interface and report documents; Phase 4 (Pharmacy & Stores) has its schema.** Phase 3's lab and radiology modules are wired into `AppModule` and covered by the wiring guard; the analyzer interface proves exit gate 7 against a real database; gates 5 and 9 remain blocked on **O-12** and gate 8 has a k6 script that has never been run. Phase 4 has 112 tables and no contracts, no seeds and no API.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |     |
-| Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Repo status            | **533 application tables** across thirteen tenant schemas (`core` 141, `inventory` 85, `clinical` 67, `mdm` 55, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `pharmacy` 17, `engage` 13, `queue` 10, `finance` 2), **0 without RLS** — read out of a live container, not copied from a commit. **15 migrations. 213 API route handlers across 37 controllers; 33 Next.js pages.** 38 partitioned tables registered for maintenance, matching the database exactly.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Last green CI          | **Green on this machine, 2026-09-02.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **2,809 unit tests, 20/20 packages**; `pnpm test:integration` **648 tests, 12/12 packages** (was red — see D-48); `pnpm test:safety` 9/9 and `@vims/flags` 40/40; `pnpm build` 13/13; `prettier --check` clean; `pnpm test:e2e` **238 passed / 14 skipped / 0 failed** across all three Playwright projects — up from 182 as the design gallery added a render, an axe scan and a keyboard pass per component (was 174/8 at the start of the day, and not repeatable at all until D-50); **five** gate scripts pass, `charts:check` among them. D-46…D-51 record the defects that were keeping these red. **Never run: both k6 scripts** — k6 is not installed here.                                                                                                                                                                                                     |
-| Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path. Against `docs/12` by _coverage_ rather than by DoD: **43 of 177 modules sit in phases 0–4 and have code; 134 sit in phases 5–13 and have none** (no controller, no screen — verified by search on 2026-09-02). **22 of the 50 P0 modules have no code at all**, including OP-005 billing, EN-002 insurance/TPA, RC-003 tariff, EN-010 payments, IP-001 admission & beds, IP-005 IP billing, IP-006 OT, IP-007 blood bank, IP-009 ICU, OP-006/TR-001…TR-008 emergency & trauma and NC-011 reporting. Functionally wired end to end and exercised over real HTTP this session: **OP-001, EN-006, NC-001, OP-007, OP-002, OP-004, OP-003** and the Phase-4 inventory reads. **The system can register, queue, consult, prescribe, order diagnostics, dispense and hold stock; it cannot admit a patient, raise a bill, or process an insurance claim.** |
-| Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Current phase          | **Phases 0–7 complete.** Phase 7 (Inpatient) finished on 2026-09-08 with step 7G — discharge, the versioned summary and the mortuary — and all ten of its provable exit gates pass. Gate 11 (the load test) has not been run: k6 is not installed here. Phase 8 (specialty consoles) is next and has no code.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                 |
+| Repo status            | **714 non-partition tables** outside the system schemas across fourteen tenant schemas (`clinical` 174, `core` 124, `billing` 96, `inventory` 82, `mdm` 66, `lab` 38, `rad` 34, `integration` 26, `patient` 18, `pharmacy` 17, `ops` 12, `engage` 11, `queue` 8, `finance` 2) — **0 business tables without RLS**; the only four without it are pg_partman's own `ext.part_config`, `ext.part_config_sub`, `ext.db_capabilities` and `public._prisma_migrations`. Read out of a live container, not copied from a commit. **46 migrations. 742 API routes. 88 Next.js screens.** Permission catalogue **1,144 keys**; event registry **773**.                                                                                                           |
+| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **3,062 unit tests, 20/20 packages**; `pnpm test:integration` **489 tests, 18/18 files** — including the Phase-1 scheduling flake fixed this session, which failed only at certain times of day. **Never run: both k6 scripts** (k6 is not installed here) and no Playwright golden path exists for any Phase 5–7 module.                                                                                                                                                                                                                                                                                                                                    |
+| Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path, and that is now the largest outstanding debt in the build. Against `docs/12` by _coverage_ rather than by DoD: every module in phases 0–7 has schema, contracts, API, screens and its rules proved live in both directions; phases 8–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, and release a body lawfully. It cannot yet run a specialty console, the ERP back office, a patient portal or the analytics layer.** |
+| Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                |
+| Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 The table counts, RLS coverage and migration state above were read out of a live container at this session's HEAD, not copied from a commit message: `core.v_rls_coverage` reports **423 monitored tables, 0 without RLS, 0 without a policy, 0 without a write check**, and the only deliberately-open policies remain the two catalogues (`core.permissions`, `core.setting_definitions` — D-17).
 
@@ -400,6 +400,97 @@ been hiding.
 
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
+
+### 2026-09-08 (later) · Phase 7G · The discharge summary, and the four facts before a body leaves — **Phase 7 complete**
+
+**Built — IP-002 + IP-017 (step 7G of seven), complete.** 4 tables, 16
+permission keys, 8 events, 2 screens, 1 integration suite. **Exit gate 10
+passes, and Phase 7 is finished.**
+
+**Gate 10a: the summary is signed on reconciled medicines**
+
+| Attempt                                                          | What happened                                                       |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Sign with two ward medicines undecided                           | Refused, naming the first one                                       |
+| Sign with `force`, `skipReconciliation`, `override`, `emergency` | Refused — identically, five times; the trigger cannot be addressed  |
+| Sign as a second, more senior login                              | Refused                                                             |
+| Stop a medicine with no reason                                   | Refused                                                             |
+| Stop it with a reason, continue the other                        | Both recorded, owned and timestamped                                |
+| Sign                                                             | Signed, hashed, `ip.discharge.summary.signed` emitted               |
+| Edit the signed summary through the draft route                  | Refused — the back door is the same trigger                         |
+| Countersign as the person who signed                             | Refused — "a second check by the same person is not a second check" |
+| Countersign as the second consultant                             | Accepted — the one change a signed summary takes                    |
+| Amend with a reason                                              | Version 2, `supersedes_id` set, version 1 untouched                 |
+| Leave against advice with four characters of explanation         | Refused                                                             |
+| Leave against advice, risks and witness recorded                 | Accepted                                                            |
+| The doctor marking the patient left                              | 403 — that is the ward's key                                        |
+| The ward nurse marking the patient left                          | Accepted; bed released, bill locked                                 |
+
+**Gate 10b: the mortuary**
+
+Four facts, removed one at a time, same refusal each time:
+
+```
+  release with no certificate      → "The death certificate has not been issued for TAG-31357"
+  release with the NOK unverified  → "...not to whoever came to the door"
+  release with the MLC open        → "...destroys evidence that cannot be recovered"
+  release with the PM outstanding  → "A post-mortem is required and has not been performed"
+  certificate · NOK · MLC closed · PM done → released
+```
+
+The tag is compared at the door in both directions — receiving and releasing —
+and a mismatch stops the handover naming both numbers. A resident asking for
+the certificate gets 403; the ward asking for the release gets 403. Releasing
+twice is refused.
+
+**The checklist agrees with the trigger, item for item**
+
+`GET /mortuary/cases/:id/release-checklist` reads the same four facts the
+trigger reads and reports all of them at once, so the custodian can tell a
+family what is outstanding. It authorises nothing. A checklist that could
+disagree is worse than none: the custodian would promise a release the database
+then refuses, in front of the family.
+
+**The half of the rule that makes the other half real**
+
+The signing gate counts unresolved rows — so if nothing ever created one, the
+count would always be zero and the gate would be decoration. `POST
+/ip/discharge/:id/reconciliation/prefill` assembles the three lists from the
+active MAR orders and the patient's last signed prescription, every row
+`unresolved`. Re-running it never reopens a medicine somebody has already
+decided (D-114). A follow-up migration adds the unique index the upsert needs:
+one decision per medicine per discharge, on `lower(btrim(drug_name))`, because
+"metformin" from the round and "Metformin" from the chart are one drug.
+
+**A defect this work surfaced, in Phase 1**
+
+`scheduling.integration.spec.ts` creates slots by marching a shared counter
+twenty minutes at a time, so by mid-suite two consecutive slots can be hours
+apart — and when the gap straddles 18:30 UTC they land on different Asia/Kolkata
+dates. The one-appointment-per-patient-per-doctor-per-day test then failed for a
+reason unrelated to the rule, at certain times of day only. Both slots are now
+anchored to tomorrow morning, and the clock is out of the test.
+
+**Tested** — 23 integration tests against a real PostgreSQL 17
+(`discharge.integration.spec.ts`), covering every row of both tables above plus
+the bypass hunt, cross-role checks, one audit row and the registered outbox
+event per mutation. Every rule was additionally proved live over HTTP and in
+raw SQL, in both directions.
+
+**Gates** — 20/20 packages typecheck, lint and test (**3,062 unit tests**);
+**489 API integration tests, all passing**, up from 466 and with the Phase-1
+flake fixed; **742 routes**; catalogue **1,144 keys**; event registry **773**;
+714 non-partition tables outside the system schemas, the only four without RLS
+being pg_partman's own `ext.part_config`, `ext.part_config_sub`,
+`ext.db_capabilities` and `public._prisma_migrations`; 46 migrations; 88 screens.
+
+**Still open, and carried forward honestly** — no Playwright golden path and no
+k6 script for any Phase 6 or Phase 7 module, so none of them meets
+`CLAUDE.md` §7's Definition of Done in full. Phase 7 exit gate 11 (the load
+test) has not been run. This is now the largest outstanding debt in the build
+and it is not shrinking on its own.
+
+**Next:** Phase 8 — the specialty consoles.
 
 ### 2026-09-08 · Phase 7E + 7F · Intensive care, a code with a real clock, and the two-person check before the first drop
 

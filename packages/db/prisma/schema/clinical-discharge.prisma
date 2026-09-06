@@ -1,0 +1,253 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7G · IP-002 + IP-017 + IP-018
+//
+// Discharge, the summary, and the exits that are not going home.
+//
+// ── Two gates ───────────────────────────────────────────────────────────────
+//
+// 1. An unresolved medication discrepancy blocks the summary from being signed.
+//    A patient goes home with a list; if the list and the ward chart disagree
+//    and nobody said which is right, the patient takes both or neither.
+//
+// 2. A body is released to a next of kin who was verified, and never while an
+//    MLC is open. Releasing a body in an unresolved medico-legal case destroys
+//    evidence that cannot be recovered, and the family cannot consent to that
+//    on the state's behalf.
+//
+// ── The summary is immutable once signed ────────────────────────────────────
+//
+// An amendment is a new version with a reason. A discharge summary is the
+// document a GP, an insurer and a court all read, and one that can be edited
+// after signing is one none of them can rely on.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum DischargeKind {
+  routine
+  /// Discharge against medical advice, with witnessed consent.
+  dama
+  absconded
+  referred_out
+  transferred_out
+  died
+
+  @@schema("clinical")
+}
+
+enum MedReconAction {
+  continue_same
+  stop
+  change
+  new_medicine
+  /// Nobody has decided yet. This is the state that blocks the summary.
+  unresolved
+
+  @@schema("clinical")
+}
+
+/// The discharge itself.
+model Discharge {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+  patientId   String @map("patient_id") @db.Uuid
+
+  kind DischargeKind @default(routine)
+
+  initiatedAt DateTime  @default(now()) @map("initiated_at") @db.Timestamptz(6)
+  initiatedBy String    @map("initiated_by") @db.Uuid
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  completedBy String?   @map("completed_by") @db.Uuid
+
+  /// `home` | `another_hospital` | `hospice` | `rehab` | `mortuary` | `absconded`.
+  destination String? @db.VarChar(40)
+
+  /// For a discharge against advice: what was explained, who witnessed it.
+  damaRisksExplained String?   @map("dama_risks_explained") @db.Text
+  damaWitnessName    String?   @map("dama_witness_name") @db.VarChar(160)
+  damaSignedAt       DateTime? @map("dama_signed_at") @db.Timestamptz(6)
+
+  followUpAt   DateTime? @map("follow_up_at") @db.Timestamptz(6)
+  followUpWith String?   @map("follow_up_with") @db.VarChar(160)
+
+  gatePassNo String?   @map("gate_pass_no") @db.VarChar(60)
+  gatePassAt DateTime? @map("gate_pass_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  reconciliations MedReconciliation[]
+  summaries       DischargeSummary[]
+
+  @@unique([hospitalId, admissionId], map: "uq_discharge_per_admission")
+  @@index([hospitalId, branchId, kind, initiatedAt(sort: Desc)])
+  @@map("ip_discharges")
+  @@schema("clinical")
+}
+
+/// One medicine, compared across the three lists.
+///
+/// Home, inpatient, discharge — line by line, with a decision and a reason for
+/// each. An `unresolved` row is what blocks the summary.
+model MedReconciliation {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  dischargeId String @map("discharge_id") @db.Uuid
+  admissionId String @map("admission_id") @db.Uuid
+
+  drugName String @map("drug_name") @db.VarChar(200)
+
+  /// What they were on before, what they were on here, what they go home with.
+  homeDose      String? @map("home_dose") @db.VarChar(120)
+  inpatientDose String? @map("inpatient_dose") @db.VarChar(120)
+  dischargeDose String? @map("discharge_dose") @db.VarChar(120)
+
+  action MedReconAction @default(unresolved)
+  /// Required for everything except `continue_same`. Stopping somebody's statin
+  /// without a reason is how it never gets restarted.
+  reason String? @db.Text
+
+  decidedAt DateTime? @map("decided_at") @db.Timestamptz(6)
+  decidedBy String?   @map("decided_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  discharge Discharge @relation(fields: [dischargeId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, dischargeId, action])
+  @@map("ip_med_reconciliations")
+  @@schema("clinical")
+}
+
+/// The discharge summary: versioned, signed, immutable.
+model DischargeSummary {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  dischargeId String @map("discharge_id") @db.Uuid
+  admissionId String @map("admission_id") @db.Uuid
+  patientId   String @map("patient_id") @db.Uuid
+
+  version Int @default(1)
+  /// Points at the version this one replaces, so the chain is walkable.
+  supersedesId String? @map("supersedes_id") @db.Uuid
+  amendReason  String? @map("amend_reason") @db.Text
+
+  admissionDiagnosis String? @map("admission_diagnosis") @db.Text
+  finalDiagnosis     String  @map("final_diagnosis") @db.Text
+  icd10Codes         String[] @map("icd10_codes")
+  proceduresPerformed String[] @map("procedures_performed")
+  courseInHospital   String  @map("course_in_hospital") @db.Text
+  significantFindings String? @map("significant_findings") @db.Text
+  conditionOnDischarge String @map("condition_on_discharge") @db.Text
+  dischargeMedications Json?  @map("discharge_medications")
+  followUpPlan       String  @map("follow_up_plan") @db.Text
+  /// What to come back for. The single most useful paragraph in the document,
+  /// and the one most often left out.
+  redFlagAdvice      String  @map("red_flag_advice") @db.Text
+  dietAdvice         String? @map("diet_advice") @db.Text
+
+  /// The patient's copy, in their language.
+  patientCopyLocale String? @map("patient_copy_locale") @db.VarChar(12)
+
+  draftedBy String   @map("drafted_by") @db.Uuid
+  draftedAt DateTime @default(now()) @map("drafted_at") @db.Timestamptz(6)
+
+  /// A resident drafts; a consultant co-signs. Signing is what makes it a
+  /// document rather than a draft, and it is what makes it immutable.
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+  cosignedBy String?   @map("cosigned_by") @db.Uuid
+  cosignedAt DateTime? @map("cosigned_at") @db.Timestamptz(6)
+
+  /// Hash over the signed content, for the tamper chain.
+  contentHash String? @map("content_hash") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  discharge Discharge @relation(fields: [dischargeId], references: [id], onDelete: Restrict)
+
+  @@unique([dischargeId, version], map: "uq_summary_version")
+  @@index([hospitalId, branchId, signedAt(sort: Desc)])
+  @@index([hospitalId, patientId])
+  @@map("ip_discharge_summaries")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IP-017 — the mortuary
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A death, from the declaration to the release.
+model MortuaryRecord {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String? @map("admission_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  mlcId       String? @map("mlc_id") @db.Uuid
+
+  recordNo String @map("record_no") @db.VarChar(60)
+
+  declaredAt DateTime @map("declared_at") @db.Timestamptz(6)
+  declaredBy String   @map("declared_by") @db.Uuid
+  causeOfDeath String @map("cause_of_death") @db.Text
+
+  /// The numbered tag on the body. What every subsequent identification is
+  /// checked against.
+  bodyTagNo String @map("body_tag_no") @db.VarChar(40)
+
+  lastOfficeAt DateTime? @map("last_office_at") @db.Timestamptz(6)
+  lastOfficeBy String?   @map("last_office_by") @db.Uuid
+
+  receivedAt DateTime? @map("received_at") @db.Timestamptz(6)
+  receivedBy String?   @map("received_by") @db.Uuid
+  coldStorageUnit String? @map("cold_storage_unit") @db.VarChar(40)
+
+  /// MCCD Form 4 (hospital death) or 4A (non-institutional). Required before a
+  /// body is released in every state.
+  mccdForm   String?   @map("mccd_form") @db.VarChar(10)
+  mccdNo     String?   @map("mccd_no") @db.VarChar(60)
+  mccdIssuedAt DateTime? @map("mccd_issued_at") @db.Timestamptz(6)
+  mccdIssuedBy String?   @map("mccd_issued_by") @db.Uuid
+  registrarReportedAt DateTime? @map("registrar_reported_at") @db.Timestamptz(6)
+
+  postMortemRequired Boolean   @default(false) @map("post_mortem_required")
+  postMortemAt       DateTime? @map("post_mortem_at") @db.Timestamptz(6)
+  postMortemRef      String?   @map("post_mortem_ref") @db.VarChar(60)
+
+  embalmedAt DateTime? @map("embalmed_at") @db.Timestamptz(6)
+
+  // ── The release ──────────────────────────────────────────────────────────
+  //
+  // A body goes to a verified next of kin, never while an MLC is open, and
+  // never without a certificate. All three are checked by a trigger.
+  nokName         String?   @map("nok_name") @db.VarChar(200)
+  nokRelationship String?   @map("nok_relationship") @db.VarChar(60)
+  nokIdType       String?   @map("nok_id_type") @db.VarChar(40)
+  nokIdRef        String?   @map("nok_id_ref") @db.VarChar(80)
+  nokVerifiedAt   DateTime? @map("nok_verified_at") @db.Timestamptz(6)
+  nokVerifiedBy   String?   @map("nok_verified_by") @db.Uuid
+
+  releasedAt DateTime? @map("released_at") @db.Timestamptz(6)
+  releasedBy String?   @map("released_by") @db.Uuid
+  releaseNote String?  @map("release_note") @db.Text
+
+  /// Nobody has claimed the body. A different, longer process.
+  unclaimed Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, recordNo], map: "uq_mortuary_record_no")
+  @@unique([hospitalId, bodyTagNo], map: "uq_body_tag_no")
+  @@index([hospitalId, branchId, releasedAt])
+  @@map("ip_mortuary_records")
+  @@schema("clinical")
+}

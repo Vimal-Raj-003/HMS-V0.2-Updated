@@ -148,6 +148,11 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   // is drawn must not burn a number.
   ['CODE_BLUE', '{BR}/CODE/{FY}/{SEQ:4}', false, 'fy'],
   ['BLOOD_REQ', '{BR}/BBR/{FY}/{SEQ:5}', false, 'fy'],
+  // IP-017: the mortuary register. Gapless, and on the financial year with the
+  // other statutory registers. A death register with a hole in it is a register
+  // a coroner reads as a missing body, and the argument that the number was
+  // simply never used is one nobody wants to be making.
+  ['MORTUARY', '{BR}/MOR/{FY}/{SEQ:4}', true, 'fy'],
   ['LIC_INVOICE', 'VIMS/{FY}/{SEQ:5}', true, 'fy'],
 ];
 

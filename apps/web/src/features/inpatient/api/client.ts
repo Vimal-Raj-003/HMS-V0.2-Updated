@@ -6,6 +6,8 @@ import type {
   CensusRow,
   BloodUnitRow,
   ChargeRunView,
+  DischargeDetail,
+  DischargeRow,
   CleaningTaskView,
   CodeDetail,
   CodeRow,
@@ -13,10 +15,14 @@ import type {
   ClearanceView,
   EscalationRow,
   MarDoseRow,
+  MortuaryRow,
   OtCaseDetail,
   OtCaseRow,
+  ReconciliationRow,
   RecallResult,
+  ReleaseChecklist,
   RunningBillView,
+  SummaryRow,
   WardPatientRow,
 } from './types';
 
@@ -505,4 +511,162 @@ export async function getBloodInventory(
     })}`,
     withSignal(options),
   );
+}
+
+// ── Phase 7G — IP-002 and IP-017 ────────────────────────────────────────────
+
+export async function getDischarges(
+  filters: { readonly openOnly?: boolean; readonly kind?: string } = {},
+  options: Signal = {},
+): Promise<PageOf<DischargeRow>> {
+  return request(
+    `${V1}/ip/discharge${queryString({ openOnly: filters.openOnly, kind: filters.kind })}`,
+    withSignal(options),
+  );
+}
+
+export async function getDischarge(id: string, options: Signal = {}): Promise<DischargeDetail> {
+  return request(`${V1}/ip/discharge/${id}`, withSignal(options));
+}
+
+export async function initiateDischarge(body: {
+  readonly admissionId: string;
+  readonly patientId: string;
+  readonly kind?: string;
+  readonly destination?: string;
+}): Promise<DischargeRow> {
+  return request(`${V1}/ip/discharge`, { method: 'POST', body, idempotencyKey: newIdempotencyKey() });
+}
+
+/** Assembles the three lists from the ward chart and the last prescription. */
+export async function prefillReconciliation(id: string): Promise<readonly ReconciliationRow[]> {
+  return request(`${V1}/ip/discharge/${id}/reconciliation/prefill`, { method: 'POST', body: {} });
+}
+
+export async function reconcileMedicines(
+  id: string,
+  medicines: readonly {
+    readonly drugName: string;
+    readonly action: string;
+    readonly dischargeDose?: string;
+    readonly reason?: string;
+  }[],
+): Promise<readonly ReconciliationRow[]> {
+  return request(`${V1}/ip/discharge/${id}/reconciliation`, {
+    method: 'POST',
+    body: { medicines },
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export async function saveSummaryDraft(
+  id: string,
+  body: Readonly<Record<string, unknown>>,
+): Promise<SummaryRow> {
+  return request(`${V1}/ip/discharge/${id}/summary`, { method: 'POST', body });
+}
+
+export async function signSummary(summaryId: string): Promise<SummaryRow> {
+  return request(`${V1}/ip/discharge/summaries/${summaryId}/sign`, {
+    method: 'POST',
+    body: {},
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export async function cosignSummary(summaryId: string): Promise<SummaryRow> {
+  return request(`${V1}/ip/discharge/summaries/${summaryId}/cosign`, {
+    method: 'POST',
+    body: {},
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export async function recordDama(
+  id: string,
+  body: { readonly risksExplained: string; readonly witnessName: string },
+): Promise<DischargeRow> {
+  return request(`${V1}/ip/discharge/${id}/dama`, {
+    method: 'POST',
+    body,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export async function markPatientLeft(
+  id: string,
+  body: { readonly destination?: string; readonly gatePassNo?: string } = {},
+): Promise<DischargeRow> {
+  return request(`${V1}/ip/discharge/${id}/left`, {
+    method: 'POST',
+    body,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export async function getMortuaryCases(
+  filters: { readonly inHouseOnly?: boolean } = {},
+  options: Signal = {},
+): Promise<PageOf<MortuaryRow>> {
+  return request(
+    `${V1}/mortuary/cases${queryString({ inHouseOnly: filters.inHouseOnly })}`,
+    withSignal(options),
+  );
+}
+
+export async function getReleaseChecklist(id: string, options: Signal = {}): Promise<ReleaseChecklist> {
+  return request(`${V1}/mortuary/cases/${id}/release-checklist`, withSignal(options));
+}
+
+export async function receiveBody(
+  id: string,
+  body: {
+    readonly bodyTagScan: string;
+    readonly coldStorageUnit: string;
+    readonly lastOfficeDone?: boolean;
+  },
+): Promise<MortuaryRow> {
+  return request(`${V1}/mortuary/cases/${id}/receive`, {
+    method: 'POST',
+    body,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export async function issueMccd(
+  id: string,
+  body: { readonly mccdForm: string; readonly mccdNo: string },
+): Promise<MortuaryRow> {
+  return request(`${V1}/mortuary/cases/${id}/mccd`, {
+    method: 'POST',
+    body,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export async function verifyNextOfKin(
+  id: string,
+  body: {
+    readonly nokName: string;
+    readonly nokRelationship: string;
+    readonly nokIdType: string;
+    readonly nokIdRef: string;
+  },
+): Promise<MortuaryRow> {
+  return request(`${V1}/mortuary/cases/${id}/nok-verify`, {
+    method: 'POST',
+    body,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export async function releaseBody(
+  id: string,
+  body: { readonly bodyTagScan: string; readonly releaseNote?: string },
+): Promise<MortuaryRow> {
+  return request(`${V1}/mortuary/cases/${id}/release`, {
+    method: 'POST',
+    body,
+    idempotencyKey: newIdempotencyKey(),
+  });
 }

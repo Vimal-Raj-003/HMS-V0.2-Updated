@@ -291,6 +291,35 @@ async function createSlot(
   return id;
 }
 
+/**
+ * Two slots that are certainly on the same Asia/Kolkata date.
+ *
+ * `createSlot` marches a shared counter forward twenty minutes at a time, so by
+ * the middle of a suite run two consecutive slots can be hours apart — and when
+ * that gap straddles 18:30 UTC they land on different Kolkata dates. The
+ * one-appointment-per-patient-per-doctor-per-day rule then correctly does not
+ * fire, and the test that asserts it fails for a reason that has nothing to do
+ * with the rule. Anchoring both to tomorrow morning removes the clock from the
+ * test entirely.
+ */
+async function createSameDaySlots(site: Site): Promise<readonly [string, string]> {
+  const ids: [string, string] = [newId(), newId()];
+  for (const [index, id] of ids.entries()) {
+    await pg.pool('migrator').query(
+      `INSERT INTO clinical.schedule_slots
+         (id, hospital_id, branch_id, practitioner_key, slot_date, slot_start, slot_end,
+          capacity, overbook_allowance, status, updated_at)
+       SELECT $1, $2, $3, $4, x.d,
+              (x.d + make_interval(hours => 10, mins => $5::int)) AT TIME ZONE 'Asia/Kolkata',
+              (x.d + make_interval(hours => 10, mins => $5::int + 10)) AT TIME ZONE 'Asia/Kolkata',
+              1, 0, 'open', now()
+         FROM (SELECT ((now() AT TIME ZONE 'Asia/Kolkata')::date + 1) AS d) x`,
+      [id, site.hospitalId, site.branchId, site.doctorKey, index * 20],
+    );
+  }
+  return ids;
+}
+
 async function login(hospitalId: string, identifier: string): Promise<string> {
   const res = await app.inject({
     method: 'POST',
@@ -630,8 +659,7 @@ describe('booking', () => {
   });
 
   it('blocks a second live appointment for the same patient, doctor and day (OP-001 §5)', async () => {
-    const first = await createSlot(siteA);
-    const second = await createSlot(siteA);
+    const [first, second] = await createSameDaySlots(siteA);
     const patientId = nextPatient(siteA);
 
     const a = await call({

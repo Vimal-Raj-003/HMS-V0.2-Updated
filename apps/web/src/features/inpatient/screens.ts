@@ -263,6 +263,55 @@ export const IP_SCREENS: readonly IpScreen[] = [
     ],
     entitlement: 'module.inpatient.enabled',
   },
+  {
+    key: 'discharges',
+    label: 'Discharges',
+    href: '/ip/discharge',
+    area: 'inpatient',
+    permission: 'ip.discharge.read',
+    summary:
+      'Who is going home today and what each one is still waiting on \u2014 with the count of undecided medicines on the row, before anybody tries to sign.',
+    deniedExplanation:
+      'The discharge worklist is held by the wards, pharmacy, billing and MRD, because all four are waiting on the same patient. Starting a discharge, deciding medicines, signing the summary and recording that the patient left are four separate keys.',
+    keywords: [
+      'discharge',
+      'summary',
+      'reconciliation',
+      'medicines',
+      'going home',
+      'dama',
+      'against medical advice',
+      'follow-up',
+      'gate pass',
+      'red flag',
+    ],
+    entitlement: 'module.inpatient.enabled',
+  },
+  {
+    key: 'mortuary',
+    label: 'Mortuary',
+    href: '/ip/mortuary',
+    area: 'inpatient',
+    permission: 'mortuary.case.read',
+    summary:
+      'The register, the certificates, and the four things standing between each body and the door \u2014 the same four the database checks.',
+    deniedExplanation:
+      'The death register is held by the custodian, MRD, the superintendent and the wards that look after the patient. Issuing the certificate and releasing the body are separate keys, and the release is held by the person the hospital chose to say no to a distressed family.',
+    keywords: [
+      'mortuary',
+      'death',
+      'body',
+      'mccd',
+      'certificate',
+      'cause of death',
+      'next of kin',
+      'release',
+      'post-mortem',
+      'cold storage',
+      'unclaimed',
+    ],
+    entitlement: 'module.inpatient.enabled',
+  },
 ];
 
 export function ipScreen(key: string): IpScreen {
