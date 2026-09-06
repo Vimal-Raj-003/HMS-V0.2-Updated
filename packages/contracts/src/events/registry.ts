@@ -9834,6 +9834,172 @@ const inpatientEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * Phase 7B — the nursing station.
+ *
+ * `mar.dose.given` carries the scan payloads, not a flag. A subscriber counting
+ * "scanned administrations" from a boolean is counting a field somebody set; a
+ * payload is evidence, and the pharmacovigilance and error-reporting feeds both
+ * need the second kind.
+ */
+const nursingEvents: readonly EventDefinition[] = [
+  ev(
+    'mar.dose.given',
+    'mar_dose',
+    'IP-003',
+    'A dose was administered against a scanned wristband and a scanned drug.',
+    z.object({
+      doseId: uuid,
+      orderId: uuid,
+      admissionId: uuid,
+      patientId: uuid,
+      drugName: z.string(),
+      givenDose: z.string().nullable(),
+      administeredBy: uuid,
+      witnessedBy: uuid.nullable(),
+      highAlert: z.boolean(),
+      minutesFromDue: z.number().int().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'mar.dose.omitted',
+    'mar_dose',
+    'IP-003',
+    'A dose was missed, refused or held. The reason is coded because "patient asleep" and "drug not on the ward" are different problems with different owners.',
+    z.object({
+      doseId: uuid,
+      orderId: uuid,
+      admissionId: uuid,
+      drugName: z.string(),
+      state: z.string(),
+      reasonCode: z.string(),
+      highAlert: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'mar.scan.mismatch',
+    'mar_dose',
+    'IP-003',
+    'A scan did not match the order — the wrong patient, or the wrong drug. Refused, and recorded: a near miss nobody counts is a near miss that becomes an error.',
+    z.object({
+      orderId: uuid,
+      admissionId: uuid,
+      expected: z.string(),
+      scanned: z.string(),
+      kind: z.string(),
+      attemptedBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'mar.order.verified',
+    'mar_order',
+    'IP-014',
+    'A pharmacist verified an order and released it to the chart.',
+    z.object({
+      orderId: uuid,
+      admissionId: uuid,
+      drugName: z.string(),
+      verifiedBy: uuid,
+      minutesToVerify: z.number().int(),
+    }),
+    { retentionDays: 5475 },
+  ),
+  ev(
+    'news2.escalated',
+    'escalation',
+    'EN-029',
+    'A deteriorating patient escalated a rung. Fired by the worker from a column, so it happens whether or not anybody has a browser open.',
+    z.object({
+      escalationId: uuid,
+      admissionId: uuid,
+      patientId: uuid,
+      score: z.number().int(),
+      band: z.string(),
+      fromRung: z.string(),
+      toRung: z.string(),
+      minutesUnanswered: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'news2.escalation.resolved',
+    'escalation',
+    'EN-029',
+    'Somebody saw the patient and said what they did.',
+    z.object({
+      escalationId: uuid,
+      admissionId: uuid,
+      rung: z.string(),
+      minutesToResolve: z.number().int(),
+      outcome: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'nursing.risk.high',
+    'risk_assessment',
+    'EN-039',
+    'A risk scale came out high. Carries the interventions, because a high score with nothing done about it is the thing this event exists to make visible.',
+    z.object({
+      assessmentId: uuid,
+      admissionId: uuid,
+      scale: z.string(),
+      score: z.number().int(),
+      band: z.string(),
+      interventions: z.array(z.string()),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'nursing.handover.signed',
+    'shift_handover',
+    'IP-003',
+    'A shift handed over, signed by both nurses.',
+    z.object({
+      handoverId: uuid,
+      wardId: uuid,
+      fromShift: z.string(),
+      toShift: z.string(),
+      patients: z.number().int(),
+      handedOverBy: uuid,
+      receivedBy: uuid,
+    }),
+    { retentionDays: 3650 },
+  ),
+  ev(
+    'infection.hai.candidate',
+    'hai_case',
+    'IP-012',
+    'A rule flagged a possible hospital-acquired infection. A candidate, not a rate — the adjudication is a human decision and the two counts mean different things.',
+    z.object({
+      caseId: uuid,
+      admissionId: uuid,
+      patientId: uuid,
+      kind: z.string(),
+      organism: z.string().nullable(),
+      deviceDays: z.number().int().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'infection.isolation.started',
+    'isolation_order',
+    'IP-012',
+    'A patient went into isolation. The bed board and housekeeping both read this — an isolation room needs a different clean.',
+    z.object({
+      orderId: uuid,
+      admissionId: uuid,
+      patientId: uuid,
+      precaution: z.string(),
+      organism: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -9903,6 +10069,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
 
   // Phase 7
   ...inpatientEvents,
+  ...nursingEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

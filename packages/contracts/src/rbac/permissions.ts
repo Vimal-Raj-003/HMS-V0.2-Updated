@@ -8910,6 +8910,186 @@ const IP025 = group('IP-025', 7, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 7B — IP-003, IP-004, IP-014, IP-012, EN-029, EN-039
+//
+// `mar.administer` is `low` and held by every bedside nurse, because the
+// control on a dose is the scan and the witness, not the permission. Making it
+// scarce would move drug rounds onto one nurse's login, which is the failure
+// this module's hard gates exist to make impossible.
+// ═════════════════════════════════════════════════════════════════════════════
+const IP003 = group('IP-003', 7, [
+  p(
+    'nursing.ward.read',
+    'ward',
+    'view',
+    'phi',
+    'low',
+    'The ward screen: every patient, their due tasks, their scores and their alerts.',
+    { phiRead: true },
+  ),
+  p(
+    'nursing.assignment.manage',
+    'nurse_assignment',
+    'assign',
+    'phi',
+    'low',
+    'Assign nurses to patients for a shift, with the ratio shown as it changes.',
+  ),
+  p(
+    'nursing.assessment.record',
+    'risk_assessment',
+    'record',
+    'phi',
+    'low',
+    'Record a nursing assessment or a risk scale. The band is computed from the score, never chosen.',
+  ),
+  p(
+    'nursing.note.write',
+    'nursing_note',
+    'create',
+    'phi',
+    'low',
+    'Write a nursing note, a wound chart or a drain chart.',
+  ),
+  p(
+    'nursing.io.record',
+    'fluid_entry',
+    'record',
+    'phi',
+    'low',
+    'Record intake and output, and read the running balance.',
+  ),
+  p(
+    'nursing.handover.compose',
+    'shift_handover',
+    'create',
+    'phi',
+    'low',
+    'Compose the shift handover from what actually happened during the shift.',
+  ),
+  p(
+    'nursing.handover.sign',
+    'shift_handover',
+    'sign',
+    'phi',
+    'medium',
+    'Sign a handover, giving or receiving. Two signatures, and the database refuses them being one person.',
+  ),
+  p('mar.read', 'mar_dose', 'read', 'phi', 'low', 'See the drug chart and what is due.', { phiRead: true }),
+  p(
+    'mar.administer',
+    'mar_dose',
+    'record',
+    'phi',
+    'low',
+    'Give a dose. The wristband and the drug are scanned and the payloads are kept — the control is the scan, not this key.',
+  ),
+  p(
+    'mar.witness',
+    'mar_dose',
+    'cosign',
+    'phi',
+    'low',
+    'Witness a high-alert dose as the second nurse. Cannot be the nurse giving it.',
+  ),
+  p(
+    'mar.omit',
+    'mar_dose',
+    'record',
+    'phi',
+    'low',
+    'Record a dose as missed, refused or held, with a coded reason.',
+  ),
+  p(
+    'mar.order.write',
+    'mar_order',
+    'create',
+    'phi',
+    'medium',
+    'Put a drug on the chart. It cannot be given until a pharmacist has verified it.',
+  ),
+  p(
+    'mar.order.verify',
+    'mar_order',
+    'validate',
+    'phi',
+    'medium',
+    'The pharmacist’s check. Nothing on the chart can be administered before it.',
+  ),
+  p(
+    'mar.order.discontinue',
+    'mar_order',
+    'cancel',
+    'phi',
+    'medium',
+    'Stop a drug, with the reason kept on the order.',
+    { requiresReason: true },
+  ),
+]);
+
+const EN029IP = group('EN-029', 7, [
+  p(
+    'escalation.read',
+    'escalation',
+    'list',
+    'phi',
+    'low',
+    'The deterioration board: who is escalating, on which rung, and for how long.',
+  ),
+  p(
+    'escalation.acknowledge',
+    'escalation',
+    'record',
+    'phi',
+    'low',
+    'Acknowledge an escalation, which stops the ladder climbing.',
+  ),
+  p(
+    'escalation.resolve',
+    'escalation',
+    'complete',
+    'phi',
+    'low',
+    'Close an escalation with what was actually done about the patient.',
+  ),
+]);
+
+const IP012 = group('IP-012', 7, [
+  p(
+    'infection.device.record',
+    'device_day',
+    'record',
+    'phi',
+    'low',
+    'Record a line, catheter or ventilator going in and coming out. These are the denominators of every HAI rate.',
+  ),
+  p(
+    'infection.isolation.manage',
+    'isolation_order',
+    'create',
+    'phi',
+    'medium',
+    'Start and stop isolation precautions, with the organism and the indication.',
+  ),
+  p(
+    'infection.hai.read',
+    'hai_case',
+    'list',
+    'phi',
+    'medium',
+    'The HAI candidate list and the confirmed rate, with their device-day denominators.',
+  ),
+  p(
+    'infection.hai.adjudicate',
+    'hai_case',
+    'decide',
+    'phi',
+    'medium',
+    'Confirm or reject an HAI candidate, with the reasoning that supports the decision.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -8988,6 +9168,9 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...IP018,
   ...NC018,
   ...IP025,
+  ...IP003,
+  ...EN029IP,
+  ...IP012,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

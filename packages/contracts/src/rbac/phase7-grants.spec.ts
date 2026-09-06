@@ -11,7 +11,17 @@ import { ROLE_TEMPLATES, getRoleTemplate } from './role-templates.js';
  * and nothing else catches the resulting mis-anchored grant: types, lint and
  * the seed all pass while an orthopaedic key sits on a dialysis technician.
  */
-const PHASE_7_PREFIXES = ['bed', 'admission', 'transfer', 'housekeeping', 'census'] as const;
+const PHASE_7_PREFIXES = [
+  'bed',
+  'admission',
+  'transfer',
+  'housekeeping',
+  'census',
+  'nursing',
+  'mar',
+  'escalation',
+  'infection',
+] as const;
 
 /**
  * Throws rather than returning `undefined`.
@@ -93,6 +103,48 @@ describe('Phase 7A permission catalogue', () => {
    * with no entry here is a new module whose grants nobody has reviewed, and
    * failing loudly is the correct outcome.
    */
+  /**
+   * Giving a dose is held by every bedside nurse, deliberately.
+   *
+   * The control on a dose is the scan and the witness, both enforced by the
+   * database and neither bypassable by any flag. Making the *permission* scarce
+   * would push drug rounds onto one nurse's login — which defeats the witness
+   * rule by making one person do everything, and is the failure the hard gates
+   * exist to make impossible.
+   */
+  it('keeps giving a dose a low-risk permission held by every bedside nurse', () => {
+    const administer = permission('mar.administer');
+    expect(administer.risk).toBe('low');
+    expect(administer.requiresReason ?? false).toBe(false);
+
+    for (const nurse of ['nurse_ward', 'nurse_icu', 'nurse_er_triage', 'nurse_ot_scrub']) {
+      expect(holdersOf('mar.administer'), nurse).toContain(nurse);
+    }
+  });
+
+  /**
+   * The pharmacist verifies and does not administer; the nurse administers and
+   * does not verify. Two people, two keys — that separation is the whole point
+   * of the verification standing between the order and the chart.
+   */
+  it('keeps verifying an order away from the nurses who give it', () => {
+    const verifiers = [...holdersOf('mar.order.verify')].sort();
+    expect(verifiers).toEqual(['pharmacist_ip', 'pharmacy_incharge']);
+    for (const verifier of verifiers) {
+      expect(holdersOf('mar.administer'), `${verifier} must not also administer`).not.toContain(verifier);
+    }
+  });
+
+  /**
+   * And prescribing is not administering either. A doctor who can write the
+   * order and give it is a doctor with no second pair of eyes on either.
+   */
+  it('keeps prescribing away from administering', () => {
+    for (const prescriber of holdersOf('mar.order.write')) {
+      expect(holdersOf('mar.administer'), `${prescriber} must not also administer`).not.toContain(prescriber);
+    }
+  });
+
   it('gives every Phase 7 key only to roles that were meant to have it', () => {
     const ALLOWED: Readonly<Record<string, readonly string[]>> = {
       bed: [
@@ -173,6 +225,76 @@ describe('Phase 7A permission catalogue', () => {
         'ward_attendant',
         'housekeeping',
         'facility_maintenance',
+      ],
+      nursing: [
+        'nurse_ward',
+        'nurse_icu',
+        'nurse_ot_scrub',
+        'nurse_er_triage',
+        'nurse_supervisor',
+        'nurse_opd',
+        'doctor_ip',
+        'intensivist',
+        'doctor_emergency',
+        'surgeon',
+        'doctor_consultant_opd',
+        'resident_doctor',
+        'anaesthetist',
+        'medical_superintendent',
+        'infection_control_nurse',
+        'pharmacist_ip',
+        'pharmacy_incharge',
+        'quality_manager',
+        'ward_attendant',
+        'dietician',
+        'therapist',
+      ],
+      mar: [
+        'nurse_ward',
+        'nurse_icu',
+        'nurse_ot_scrub',
+        'nurse_er_triage',
+        'nurse_supervisor',
+        'nurse_opd',
+        'doctor_ip',
+        'intensivist',
+        'doctor_emergency',
+        'surgeon',
+        'doctor_consultant_opd',
+        'resident_doctor',
+        'anaesthetist',
+        'medical_superintendent',
+        'pharmacist_ip',
+        'pharmacy_incharge',
+      ],
+      escalation: [
+        'nurse_ward',
+        'nurse_icu',
+        'nurse_ot_scrub',
+        'nurse_er_triage',
+        'nurse_supervisor',
+        'nurse_opd',
+        'doctor_ip',
+        'intensivist',
+        'doctor_emergency',
+        'surgeon',
+        'doctor_consultant_opd',
+        'resident_doctor',
+        'anaesthetist',
+        'medical_superintendent',
+      ],
+      infection: [
+        'nurse_ward',
+        'nurse_icu',
+        'nurse_ot_scrub',
+        'nurse_er_triage',
+        'nurse_supervisor',
+        'infection_control_nurse',
+        'doctor_ip',
+        'intensivist',
+        'surgeon',
+        'medical_superintendent',
+        'quality_manager',
       ],
       census: [
         'hospital_admin',

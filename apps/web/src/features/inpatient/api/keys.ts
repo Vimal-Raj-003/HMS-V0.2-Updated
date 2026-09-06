@@ -14,6 +14,14 @@ export function ipKeys(hospitalId: string) {
     admission: (id: string) => [...root, 'admission', id] as const,
     cleaning: (scope: string) => [...root, 'cleaning', scope] as const,
     cleaningRoot: () => [...root, 'cleaning'] as const,
+
+    // Phase 7B
+    ward: (scope: string) => [...root, 'ward', scope] as const,
+    wardRoot: () => [...root, 'ward'] as const,
+    mar: (scope: string) => [...root, 'mar', scope] as const,
+    marRoot: () => [...root, 'mar'] as const,
+    escalations: (scope: string) => [...root, 'escalations', scope] as const,
+    escalationsRoot: () => [...root, 'escalations'] as const,
   };
 }
 

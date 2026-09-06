@@ -1,5 +1,14 @@
 import { newIdempotencyKey, queryString, request } from './http';
-import type { AdmissionDetailView, AdmissionView, BedBoardRow, CensusRow, CleaningTaskView } from './types';
+import type {
+  AdmissionDetailView,
+  AdmissionView,
+  BedBoardRow,
+  CensusRow,
+  CleaningTaskView,
+  EscalationRow,
+  MarDoseRow,
+  WardPatientRow,
+} from './types';
 
 /**
  * Every call Phase 7A makes.
@@ -166,4 +175,91 @@ export async function cleaningAction(
 /** The audited exception. The reason lands on the bed row, where the trigger reads it. */
 export async function skipCleaning(bedId: string, reason: string): Promise<{ readonly status: string }> {
   return request(`${V1}/ip/beds/${bedId}/skip-cleaning`, { method: 'PATCH', body: {}, reason });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7B
+//
+// `administer` takes the two scan payloads and nothing that could stand in for
+// them. There is no `force`, no `override` and no `skipScan` in this client,
+// because there is no such thing on the server and no flag anywhere that turns
+// the requirement off.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getWard(
+  filters: { readonly wardId?: string } = {},
+  options: Signal = {},
+): Promise<PageOf<WardPatientRow>> {
+  return request(`${V1}/nursing/ward${queryString({ wardId: filters.wardId })}`, withSignal(options));
+}
+
+export async function getMarRound(
+  filters: {
+    readonly admissionId?: string;
+    readonly wardId?: string;
+    readonly dueOnly?: boolean;
+    readonly overdueOnly?: boolean;
+  } = {},
+  options: Signal = {},
+): Promise<PageOf<MarDoseRow>> {
+  return request(
+    `${V1}/nursing/mar${queryString({
+      admissionId: filters.admissionId,
+      wardId: filters.wardId,
+      dueOnly: filters.dueOnly,
+      overdueOnly: filters.overdueOnly,
+    })}`,
+    withSignal(options),
+  );
+}
+
+export interface AdministerBody {
+  /** What the scanner read off the wristband. */
+  readonly patientScan: string;
+  /** What the scanner read off the drug. */
+  readonly drugScan: string;
+  /** Required for a high-alert drug, and refused if it is you. */
+  readonly witnessedBy?: string;
+  readonly givenDose?: string;
+  readonly site?: string;
+  readonly prnIndication?: string;
+}
+
+export async function administer(doseId: string, body: AdministerBody): Promise<MarDoseRow> {
+  return request(`${V1}/nursing/mar/doses/${doseId}/administer`, { method: 'POST', body });
+}
+
+export async function omitDose(
+  doseId: string,
+  body: { readonly state: string; readonly reasonCode: string; readonly note?: string },
+): Promise<MarDoseRow> {
+  return request(`${V1}/nursing/mar/doses/${doseId}/omit`, { method: 'PATCH', body });
+}
+
+export async function verifyOrder(orderId: string, note?: string): Promise<{ readonly verified: boolean }> {
+  return request(`${V1}/nursing/mar/orders/${orderId}/verify`, {
+    method: 'PATCH',
+    body: note === undefined ? {} : { note },
+  });
+}
+
+export async function getEscalations(
+  filters: { readonly wardId?: string; readonly openOnly?: boolean } = {},
+  options: Signal = {},
+): Promise<PageOf<EscalationRow>> {
+  return request(
+    `${V1}/nursing/escalations${queryString({ wardId: filters.wardId, openOnly: filters.openOnly })}`,
+    withSignal(options),
+  );
+}
+
+export async function acknowledgeEscalation(id: string, note?: string): Promise<EscalationRow> {
+  return request(`${V1}/nursing/escalations/${id}/acknowledge`, {
+    method: 'PATCH',
+    body: note === undefined ? {} : { note },
+  });
+}
+
+export async function resolveEscalation(id: string, outcome: string): Promise<EscalationRow> {
+  return request(`${V1}/nursing/escalations/${id}/resolve`, { method: 'PATCH', body: { outcome } });
 }

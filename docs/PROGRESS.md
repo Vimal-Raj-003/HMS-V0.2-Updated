@@ -401,6 +401,74 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-07 (later) · Phase 7B · The nursing station, the five rights, and a near miss that survived its own refusal
+
+**Built — IP-003, IP-004, IP-014, IP-012, EN-029, EN-039 (step 7B of seven),
+complete.** 12 tables, 21 permission keys, 10 events, 2 screens. **Exit gates 4
+and 5 pass.**
+
+**Gate 4: the five rights, driven over HTTP**
+
+| Attempt                                  | What happened                                                       |
+| ---------------------------------------- | ------------------------------------------------------------------- |
+| Given before pharmacy verified the order | Refused — the verification stands between the order and the ward    |
+| Wrong patient's wristband scanned        | Refused, and recorded as a near miss                                |
+| Wrong drug barcode scanned               | Refused, naming the expected barcode and the one read               |
+| Insulin with no second nurse             | Refused — "there is no override for this"                           |
+| Insulin witnessed by the nurse giving it | Refused — "a second check by the same person is not a second check" |
+| Both scans, a genuine second nurse       | Given                                                               |
+
+Every one of those is refused twice: once by the service, with a message naming
+what was expected, and once by the database, which will not accept a `given` row
+without both scan payloads, without a witness on a high-alert drug, with a
+witness who is the administering nurse, or against an unverified order. There is
+no column in the schema that could express a bypass, no flag in the API and no
+field in the request that stands in for a scan.
+
+**The near miss that was being erased by the refusal that caused it**
+
+Recording a wrong-drug scan inside the administering transaction meant the
+refusal rolled it back. The safety record was lost precisely _because_ the
+control worked, which is the worst possible failure of a near-miss register. The
+mismatch now throws out of that transaction and is written in one of its own
+before the refusal is returned. Two mismatches, driven over HTTP, both present
+in the outbox and the audit log afterwards.
+
+**Gate 5: escalation climbs with no browser open**
+
+`ip_news2_escalations` holds its own `due_at` and its own rung. One statement
+walks overdue, unanswered rows and climbs: nurse → senior nurse → RMO →
+consultant → rapid response, each rung recorded in the row's own ladder with the
+time it went unanswered. Proved by raising an escalation an hour in the past and
+running the worker's statement four times with nothing open anywhere.
+
+One live escalation per admission, enforced by a partial unique index: a second
+ladder on one patient means both climb slowly and the second resets the clock
+the first had earned.
+
+**The band is a function of the score**
+
+`risk_band_follows_the_score` computes what the band should be and refuses
+anything else. Braden runs backwards — lower is worse — and that inversion is
+what gets miscoded: a Braden of 12 filed as "low risk" is a pressure sore in
+five days. A high band with no interventions is refused too, because an
+assessment nobody acted on is a form.
+
+**Tested** — every constraint proved live in both directions; the drug round
+driven end to end over HTTP through all six attempts above; the ladder climbed
+four rungs; near misses confirmed present after the refusals that produced them.
+
+**Gates** — 20/20 packages typecheck, lint and test (2,945 → **2,948 tests**);
+**679 routes across 62 controllers**; catalogue **1,087 keys**; event registry
+**749**; 723 base tables, 0 without RLS; 42 migrations; 79 screens.
+
+**Still missing:** no e2e golden path and no k6 script; the nursing PWA's offline
+queue (IP-004) is specified but not built; exit gates 3 and 6–12 belong to steps
+7C–7G.
+
+**Next:** 7C — IP billing, the midnight room-charge job, and the discharge
+clearance gate.
+
 ### 2026-09-07 · Phase 7A · Beds, admissions, turnover — and the board that is a query
 
 **Built — IP-001, IP-018, NC-018, IP-025 (step 7A of seven), complete.** 10

@@ -561,6 +561,58 @@ const BED_COMMAND = [...BED_MANAGEMENT, 'bed.block', 'bed.config.manage', 'censu
 /** Housekeeping's own worklist. */
 const HOUSEKEEPING_FLOOR = ['bed.board.read', 'housekeeping.task.read', 'housekeeping.task.accept'] as const;
 
+/**
+ * Phase 7B — the bedside.
+ *
+ * `mar.administer` sits in the widest bundle here, deliberately. The control on
+ * a dose is the scan and the witness, both enforced by the database; making the
+ * permission scarce would push drug rounds onto one nurse's login, which
+ * defeats the witness rule by making one person do everything.
+ */
+const NURSING_BEDSIDE = [
+  'nursing.ward.read',
+  'nursing.assessment.record',
+  'nursing.note.write',
+  'nursing.io.record',
+  'mar.read',
+  'mar.administer',
+  'mar.witness',
+  'mar.omit',
+  'escalation.read',
+  'escalation.acknowledge',
+  'infection.device.record',
+] as const;
+
+/** The nurse in charge: assignments, the handover, and closing an escalation. */
+const NURSING_IN_CHARGE = [
+  ...NURSING_BEDSIDE,
+  'nursing.assignment.manage',
+  'nursing.handover.compose',
+  'nursing.handover.sign',
+  'escalation.resolve',
+  'infection.isolation.manage',
+] as const;
+
+/** The prescriber's half of the chart. Not administration — that is the bedside. */
+const MAR_PRESCRIBER = [
+  'mar.read',
+  'mar.order.write',
+  'mar.order.discontinue',
+  'nursing.ward.read',
+  'escalation.read',
+  'escalation.acknowledge',
+  'escalation.resolve',
+] as const;
+
+/** Infection control's own view. */
+const INFECTION_CONTROL = [
+  'nursing.ward.read',
+  'infection.device.record',
+  'infection.isolation.manage',
+  'infection.hai.read',
+  'infection.hai.adjudicate',
+] as const;
+
 const FLEET_DISPATCH = [
   'fleet.vehicle.read',
   'fleet.request.create',
@@ -2091,6 +2143,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      'nursing.ward.read',
+      'escalation.read',
+      'escalation.resolve',
+      'infection.hai.read',
       ...BED_COMMAND,
       'transfer.out',
       ...POLYTRAUMA_FLOOR,
@@ -2255,6 +2311,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'doctor-opd',
     permissions: [
+      ...MAR_PRESCRIBER,
       ...WARD_FLOOR,
       'transfer.execute',
       ...POLYTRAUMA_FLOOR,
@@ -2296,6 +2353,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...MAR_PRESCRIBER,
+      'nursing.assessment.record',
+      'nursing.note.write',
+      'infection.isolation.manage',
+      'infection.device.record',
       ...WARD_FLOOR,
       'admission.admit',
       'transfer.execute',
@@ -2333,6 +2395,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...MAR_PRESCRIBER,
       ...WARD_FLOOR,
       'bed.hold.create',
       'admission.admit',
@@ -2394,6 +2457,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...MAR_PRESCRIBER,
+      'infection.hai.read',
       ...WARD_FLOOR,
       'admission.admit',
       'transfer.execute',
@@ -2438,6 +2503,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'anaesthesia-worklist',
     permissions: [
+      'mar.read',
+      'mar.order.write',
+      'nursing.ward.read',
+      'escalation.read',
       ...POLYTRAUMA_FLOOR,
       'polytrauma.procedure.state',
       'polytrauma.blood.plan',
@@ -2466,6 +2535,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'icu-board',
     permissions: [
+      ...MAR_PRESCRIBER,
+      'infection.isolation.manage',
+      'infection.device.record',
+      'infection.hai.read',
       ...WARD_FLOOR,
       'admission.admit',
       'transfer.execute',
@@ -2556,6 +2629,7 @@ const templates: readonly RoleTemplate[] = [
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
     permissions: [
+      ...MAR_PRESCRIBER,
       ...WARD_FLOOR,
       ...POLYTRAUMA_FLOOR,
       'polytrauma.consent.record',
@@ -2613,6 +2687,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      'nursing.ward.read',
+      'mar.read',
+      'nursing.assessment.record',
       ...BED_BOARD_READER,
       'admission.request',
       ...PLASTER_ROOM,
@@ -2656,6 +2733,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...NURSING_BEDSIDE,
       ...WARD_FLOOR,
       'housekeeping.task.read',
       ...POLYTRAUMA_FLOOR,
@@ -2694,6 +2772,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'icu-flowsheet',
     permissions: [
+      ...NURSING_BEDSIDE,
+      'infection.isolation.manage',
       ...WARD_FLOOR,
       'housekeeping.task.read',
       ...POLYTRAUMA_NURSING,
@@ -2731,6 +2811,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'triage-board',
     permissions: [
+      ...NURSING_BEDSIDE,
       ...BED_BOARD_READER,
       'admission.request',
       'bed.hold.create',
@@ -2778,6 +2859,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'ot-checklist',
     permissions: [
+      ...NURSING_BEDSIDE,
       ...POLYTRAUMA_NURSING,
       ...IMPLANT_AT_THE_TROLLEY,
       ...BASE_CLINICAL,
@@ -2802,6 +2884,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'infection-control',
     permissions: [
+      ...INFECTION_CONTROL,
       ...BED_BOARD_READER,
       'transfer.read',
       'bed.block',
@@ -2823,6 +2906,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-command-centre',
     permissions: [
+      ...NURSING_IN_CHARGE,
       ...BED_MANAGEMENT,
       'bed.block',
       'housekeeping.task.inspect',
@@ -2890,6 +2974,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'facilities',
     homeWorkspace: 'task-list',
     permissions: [
+      'nursing.ward.read',
       ...HOUSEKEEPING_FLOOR,
       'transfer.accept',
       'org.read',
@@ -3120,6 +3205,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-ward-indents',
     permissions: [
+      'mar.read',
+      'mar.order.verify',
+      'nursing.ward.read',
       ...CDSS_SAFETY_FLOOR,
       'rx.drug.search',
       'cdss.kb.read',
@@ -3155,6 +3243,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-admin',
     permissions: [
+      'mar.read',
+      'mar.order.verify',
+      'nursing.ward.read',
       'receipt.petty.manage',
 
       'rx.drug.search',
@@ -3327,7 +3418,14 @@ const templates: readonly RoleTemplate[] = [
     description: 'Nutritional assessment and diet orders.',
     category: 'therapy',
     homeWorkspace: 'diet-worklist',
-    permissions: [...BED_BOARD_READER, ...BASE_CLINICAL, ...SIGNS_DOCUMENTS],
+    permissions: [
+      'nursing.ward.read',
+      'nursing.assessment.record',
+      'nursing.note.write',
+      ...BED_BOARD_READER,
+      ...BASE_CLINICAL,
+      ...SIGNS_DOCUMENTS,
+    ],
     abacDefaults: { careTeamOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -3341,6 +3439,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'therapy',
     homeWorkspace: 'therapy-schedule',
     permissions: [
+      'nursing.ward.read',
+      'nursing.note.write',
+      'nursing.assessment.record',
       ...BED_BOARD_READER,
       ...CAST_WATCH,
       ...BASE_CLINICAL,
@@ -3895,6 +3996,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'quality',
     permissions: [
+      'infection.hai.read',
+      'nursing.ward.read',
       ...IMPLANT_RECALL_OFFICER,
       'fracture.record.list',
       'fleet.report.read',

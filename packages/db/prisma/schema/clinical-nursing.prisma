@@ -1,0 +1,528 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7B · IP-003, IP-004, IP-014, IP-012, EN-029, EN-039
+//
+// The nursing station: assignments, assessments, the MAR, escalation.
+//
+// ── The two hard gates in this file ─────────────────────────────────────────
+//
+// 1. A dose is administered against a scanned wristband and a scanned drug.
+//    Not a checkbox saying somebody scanned — the scanned payloads, stored,
+//    and a CHECK that refuses a row claiming a scan without one.
+// 2. A high-alert drug needs a second nurse who is not the first. Insulin,
+//    heparin, concentrated electrolytes, chemotherapy and opioids kill people
+//    at the wrong dose, and the witness is the control that catches it.
+//
+// `phase-07`: "No feature flag, no configuration value and no emergency mode
+// may bypass the 5 Rights scan or the second-nurse witness." There is no column
+// in this file that could express such a bypass, which is the strongest form of
+// that promise available in a schema.
+//
+// ── Escalation survives the browser ─────────────────────────────────────────
+//
+// `news2_escalations` holds its own `due_at` and its own rung. The worker walks
+// overdue rows and climbs the ladder. Nothing about it depends on a tab being
+// open, which is the entire point: the nurse who recorded the deteriorating
+// observation is the one most likely to be busy with the patient.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum MarDoseState {
+  /// Released by the pharmacist and waiting for its time.
+  due
+  given
+  /// The time passed without an administration.
+  missed
+  refused
+  /// Deliberately withheld — held for a procedure, held pending a level.
+  held
+  cancelled
+  /// A PRN dose that was never needed.
+  not_required
+
+  @@schema("clinical")
+}
+
+enum EscalationRung {
+  nurse
+  senior_nurse
+  rmo
+  consultant
+  rapid_response
+  code_blue
+
+  @@schema("clinical")
+}
+
+enum RiskScale {
+  morse_falls
+  braden_pressure
+  pain
+  restraint
+  nutrition
+  dvt
+
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7B.1 — who is looking after whom
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A nurse, a shift, a ward.
+model NurseAssignment {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  wardId String @map("ward_id") @db.Uuid
+  nurseId String @map("nurse_id") @db.Uuid
+
+  /// `morning` | `evening` | `night`. The roster's own vocabulary (NC-030).
+  shift String @db.VarChar(20)
+  shiftDate DateTime @map("shift_date") @db.Date
+  startsAt DateTime @map("starts_at") @db.Timestamptz(6)
+  endsAt   DateTime @map("ends_at") @db.Timestamptz(6)
+
+  /// `bedside` | `in_charge` | `float` | `medication`.
+  role String @default("bedside") @db.VarChar(20)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  patients NursePatientAssignment[]
+
+  @@unique([hospitalId, wardId, nurseId, shiftDate, shift], map: "uq_nurse_shift")
+  @@index([hospitalId, branchId, wardId, shiftDate])
+  @@map("ip_nurse_assignments")
+  @@schema("clinical")
+}
+
+/// Which patients that nurse has this shift.
+///
+/// A row per patient rather than an array, so the ratio is a count and a
+/// handover can say precisely which beds moved between nurses.
+model NursePatientAssignment {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  assignmentId String @map("assignment_id") @db.Uuid
+  admissionId  String @map("admission_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  assignment NurseAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, admissionId], map: "uq_nurse_patient")
+  @@index([hospitalId, admissionId])
+  @@map("ip_nurse_patient_assignments")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7B.2 — assessments and the risk scales
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One completed risk assessment.
+///
+/// The score is computed by the service from the items, never accepted from the
+/// caller — a Morse score somebody typed is a number with no items behind it,
+/// and the items are what a reviewer needs when the patient falls.
+model RiskAssessment {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+  scale       RiskScale
+
+  /// The individual answers, keyed by the scale's own item names.
+  items Json
+
+  score Int
+  /// `low` | `moderate` | `high` | `very_high`, from the scale's published bands.
+  band  String @db.VarChar(20)
+
+  assessedAt DateTime @default(now()) @map("assessed_at") @db.Timestamptz(6)
+  assessedBy String   @map("assessed_by") @db.Uuid
+
+  /// When the scale says to do it again. Braden is daily in ICU, Morse on
+  /// admission, transfer, fall and change of condition — held as a timestamp
+  /// rather than a rule so the ward list can sort on it.
+  reassessDueAt DateTime? @map("reassess_due_at") @db.Timestamptz(6)
+
+  /// What was actually done about a high score. A Braden of 12 with no
+  /// interventions is a pressure sore in five days.
+  interventions String[]
+  notes         String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, admissionId, scale, assessedAt(sort: Desc)])
+  @@index([hospitalId, reassessDueAt])
+  @@map("ip_risk_assessments")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7B.3 — deterioration, and who was told
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// An escalation raised by a NEWS2 score, walking a ladder on its own clock.
+model News2Escalation {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String  @map("admission_id") @db.Uuid
+  vitalsId    String? @map("vitals_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  wardId      String? @map("ward_id") @db.Uuid
+
+  score Int
+  /// `low` | `low_medium` | `medium` | `high`, from the RCP bands.
+  band  String @db.VarChar(20)
+
+  rung EscalationRung @default(nurse)
+
+  raisedAt DateTime @default(now()) @map("raised_at") @db.Timestamptz(6)
+
+  /// When this rung must be answered by. The worker reads this column, not a
+  /// timer in anybody's browser.
+  dueAt DateTime @map("due_at") @db.Timestamptz(6)
+
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  acknowledgedBy String?   @map("acknowledged_by") @db.Uuid
+
+  /// Closed when somebody has seen the patient and said what they did.
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy String?   @map("resolved_by") @db.Uuid
+  outcome    String?   @db.Text
+
+  /// Each rung climbed, with when and why. Append-only within the row.
+  ladder Json @default("[]")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, resolvedAt, dueAt])
+  @@index([hospitalId, admissionId, raisedAt(sort: Desc)])
+  @@map("ip_news2_escalations")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7B.4 — the MAR
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A medication order as the ward sees it, after the pharmacist has verified it.
+///
+/// Separate from `prescription_items` because a prescription is what the doctor
+/// wrote and this is what the ward is allowed to give: the pharmacist's
+/// verification stands between them, and a MAR line that exists before that
+/// verification is a dose that can be given on an unchecked order.
+model MarOrder {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String  @map("admission_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  prescriptionItemId String? @map("prescription_item_id") @db.Uuid
+
+  drugId   String? @map("drug_id") @db.Uuid
+  drugName String  @map("drug_name") @db.VarChar(200)
+  /// The barcode the ward will scan. Compared against what the scanner reads.
+  drugBarcode String? @map("drug_barcode") @db.VarChar(120)
+
+  dose      String @db.VarChar(80)
+  doseUnit  String @map("dose_unit") @db.VarChar(20)
+  route     String @db.VarChar(40)
+  frequency String @db.VarChar(40)
+
+  /// Insulin, heparin, concentrated electrolytes, chemotherapy, opioids. Set
+  /// from the drug master, never by the prescriber — a drug's danger is a
+  /// property of the drug.
+  isHighAlert Boolean @default(false) @map("is_high_alert")
+  isNarcotic  Boolean @default(false) @map("is_narcotic")
+  isPrn       Boolean @default(false) @map("is_prn")
+  prnIndication String? @map("prn_indication") @db.Text
+
+  startsAt DateTime  @map("starts_at") @db.Timestamptz(6)
+  endsAt   DateTime? @map("ends_at") @db.Timestamptz(6)
+
+  /// The pharmacist's verification. Without it the MAR shows nothing.
+  verifiedAt DateTime? @map("verified_at") @db.Timestamptz(6)
+  verifiedBy String?   @map("verified_by") @db.Uuid
+  verificationNote String? @map("verification_note") @db.Text
+
+  discontinuedAt DateTime? @map("discontinued_at") @db.Timestamptz(6)
+  discontinuedBy String?   @map("discontinued_by") @db.Uuid
+  discontinueReason String? @map("discontinue_reason") @db.Text
+
+  orderedBy String   @map("ordered_by") @db.Uuid
+  orderedAt DateTime @default(now()) @map("ordered_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  doses MarDose[]
+
+  @@index([hospitalId, branchId, admissionId, startsAt])
+  @@index([hospitalId, verifiedAt])
+  @@map("ip_mar_orders")
+  @@schema("clinical")
+}
+
+/// One scheduled dose, and what happened to it.
+model MarDose {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  orderId     String @map("order_id") @db.Uuid
+  admissionId String @map("admission_id") @db.Uuid
+  patientId   String @map("patient_id") @db.Uuid
+
+  /// When it is due. A PRN dose has none until it is given.
+  dueAt DateTime? @map("due_at") @db.Timestamptz(6)
+
+  state MarDoseState @default(due)
+
+  // ── The five rights, as recorded evidence ────────────────────────────────
+  //
+  // `patient_scan` and `drug_scan` hold what the scanner actually read. A
+  // boolean saying "scanned" is a boolean somebody can set; a payload is a
+  // payload, and it can be compared against the wristband and the drug.
+  patientScan String? @map("patient_scan") @db.VarChar(200)
+  drugScan    String? @map("drug_scan") @db.VarChar(200)
+
+  administeredAt DateTime? @map("administered_at") @db.Timestamptz(6)
+  administeredBy String?   @map("administered_by") @db.Uuid
+
+  /// The second nurse on a high-alert drug. Authenticated separately, and the
+  /// database refuses them being the same person as the first.
+  witnessedBy String?   @map("witnessed_by") @db.Uuid
+  witnessedAt DateTime? @map("witnessed_at") @db.Timestamptz(6)
+
+  /// The dose that was actually given, when it differs from the order.
+  givenDose String? @map("given_dose") @db.VarChar(80)
+  site      String? @db.VarChar(80)
+
+  /// A coded reason, not free text. "Patient asleep" and "drug unavailable"
+  /// are different problems with different owners, and a free-text box makes
+  /// them uncountable.
+  reasonCode String? @map("reason_code") @db.VarChar(40)
+  reasonNote String? @map("reason_note") @db.Text
+
+  /// For a PRN dose: why it was given and whether it worked.
+  prnIndication String? @map("prn_indication") @db.Text
+  prnEffect     String? @map("prn_effect") @db.Text
+  prnEffectAt   DateTime? @map("prn_effect_at") @db.Timestamptz(6)
+
+  /// The running narcotic balance after this dose, from IP-014.
+  narcoticBalanceAfter Decimal? @map("narcotic_balance_after") @db.Decimal(12, 3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order MarOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, branchId, admissionId, dueAt])
+  @@index([hospitalId, state, dueAt])
+  @@index([hospitalId, orderId, dueAt])
+  @@map("ip_mar_doses")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7B.5 — fluids, notes, handover
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FluidBalanceEntry {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+
+  /// `intake` | `output`.
+  direction String @db.VarChar(10)
+  /// `oral` | `iv` | `ng` | `urine` | `drain` | `vomit` | `stool` | `blood` | `other`.
+  kind      String @db.VarChar(20)
+  volumeMl  Int    @map("volume_ml")
+
+  at       DateTime @default(now()) @db.Timestamptz(6)
+  recordedBy String @map("recorded_by") @db.Uuid
+  notes    String?  @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, admissionId, at(sort: Desc)])
+  @@map("ip_fluid_entries")
+  @@schema("clinical")
+}
+
+/// A nursing note, in SBAR.
+model NursingNote {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+
+  /// `sbar` | `progress` | `wound` | `drain` | `incident`.
+  kind String @default("progress") @db.VarChar(20)
+
+  situation      String? @db.Text
+  background     String? @db.Text
+  assessment     String? @db.Text
+  recommendation String? @db.Text
+  body           String? @db.Text
+
+  photoRef String? @map("photo_ref") @db.VarChar(200)
+
+  at       DateTime @default(now()) @db.Timestamptz(6)
+  byId     String   @map("by_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, admissionId, at(sort: Desc)])
+  @@map("ip_nursing_notes")
+  @@schema("clinical")
+}
+
+/// The shift handover, composed from the shift's own events and signed by both.
+model ShiftHandover {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  wardId String @map("ward_id") @db.Uuid
+
+  fromShift String @map("from_shift") @db.VarChar(20)
+  toShift   String @map("to_shift") @db.VarChar(20)
+  shiftDate DateTime @map("shift_date") @db.Date
+
+  /// Composed automatically: every patient, their NEWS2 trend, doses missed,
+  /// escalations open, results pending. Held as JSON because it is a snapshot
+  /// of a moment rather than a set of live joins — the point of a handover is
+  /// what was said at 20:00, not what is true now.
+  composed Json
+
+  /// What the outgoing nurse added by hand.
+  additions String? @db.Text
+
+  handedOverBy String?   @map("handed_over_by") @db.Uuid
+  handedOverAt DateTime? @map("handed_over_at") @db.Timestamptz(6)
+  receivedBy   String?   @map("received_by") @db.Uuid
+  receivedAt   DateTime? @map("received_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, wardId, shiftDate(sort: Desc)])
+  @@map("ip_shift_handovers")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7B.6 — infection control
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A device in a patient, and for how long.
+///
+/// Device-days are the denominator of every HAI rate. Derived from these rows
+/// rather than counted by hand, because a CLABSI rate computed from a
+/// hand-kept tally is a rate nobody can defend to an accreditor.
+model DeviceDay {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+  patientId   String @map("patient_id") @db.Uuid
+  wardId      String? @map("ward_id") @db.Uuid
+
+  /// `central_line` | `urinary_catheter` | `ventilator` | `peripheral_line` | `drain`.
+  deviceType String @map("device_type") @db.VarChar(40)
+  site       String? @db.VarChar(80)
+
+  insertedAt DateTime  @map("inserted_at") @db.Timestamptz(6)
+  insertedBy String?   @map("inserted_by") @db.Uuid
+  removedAt  DateTime? @map("removed_at") @db.Timestamptz(6)
+  removedBy  String?   @map("removed_by") @db.Uuid
+  removalReason String? @map("removal_reason") @db.VarChar(60)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, deviceType, insertedAt])
+  @@index([hospitalId, admissionId, removedAt])
+  @@map("ip_device_days")
+  @@schema("clinical")
+}
+
+/// A suspected hospital-acquired infection, and its adjudication.
+model HaiCase {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+  patientId   String @map("patient_id") @db.Uuid
+
+  /// `clabsi` | `cauti` | `vap` | `ssi` | `cdiff` | `other`.
+  kind String @db.VarChar(20)
+
+  /// Raised by the rule, then judged by a human. Both states matter: the count
+  /// of candidates says whether the detection is working, and the count of
+  /// confirmed says what the rate is.
+  detectedAt DateTime @default(now()) @map("detected_at") @db.Timestamptz(6)
+  detectedBy String?  @map("detected_by") @db.Uuid
+  /// What fired: the organism, the device-day count, the temperature.
+  trigger    Json?
+
+  /// `candidate` | `confirmed` | `rejected` | `withdrawn`.
+  adjudication String  @default("candidate") @db.VarChar(20)
+  adjudicatedAt DateTime? @map("adjudicated_at") @db.Timestamptz(6)
+  adjudicatedBy String?   @map("adjudicated_by") @db.Uuid
+  rationale     String?   @db.Text
+
+  organism String? @db.VarChar(120)
+  deviceDayId String? @map("device_day_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, kind, detectedAt(sort: Desc)])
+  @@index([hospitalId, adjudication])
+  @@map("ip_hai_cases")
+  @@schema("clinical")
+}
+
+/// Isolation, and why.
+model IsolationOrder {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+  patientId   String @map("patient_id") @db.Uuid
+
+  /// `contact` | `droplet` | `airborne` | `protective` | `enteric`.
+  precaution String @db.VarChar(20)
+  organism   String? @db.VarChar(120)
+  indication String  @db.Text
+
+  startedAt DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  startedBy String    @map("started_by") @db.Uuid
+  endedAt   DateTime? @map("ended_at") @db.Timestamptz(6)
+  endedBy   String?   @map("ended_by") @db.Uuid
+  endReason String?   @map("end_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, endedAt])
+  @@index([hospitalId, admissionId])
+  @@map("ip_isolation_orders")
+  @@schema("clinical")
+}

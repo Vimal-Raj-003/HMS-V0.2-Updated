@@ -90,6 +90,57 @@ export const IP_SCREENS: readonly IpScreen[] = [
     ],
     entitlement: 'module.inpatient.enabled',
   },
+  {
+    key: 'nursing-station',
+    label: 'Nursing station',
+    href: '/ip/ward',
+    area: 'inpatient',
+    permission: 'nursing.ward.read',
+    summary:
+      'Every patient on the ward ordered by who needs looking at — an escalation first, then the highest NEWS2, then the late doses.',
+    deniedExplanation:
+      'The ward screen is held by the nurses and doctors looking after inpatients, plus dietetics, therapy and pharmacy. Giving a dose and closing an escalation are separate keys.',
+    keywords: [
+      'nursing station',
+      'ward',
+      'news2',
+      'deterioration',
+      'escalation',
+      'falls',
+      'braden',
+      'morse',
+      'isolation',
+      'devices',
+      'handover',
+    ],
+    entitlement: 'module.inpatient.enabled',
+  },
+  {
+    key: 'mar-round',
+    label: 'Drug round',
+    href: '/ip/mar',
+    area: 'inpatient',
+    permission: 'mar.read',
+    summary:
+      'Every dose due, latest first. Two scans to give one, a second nurse for anything high alert, and a coded reason for anything not given.',
+    deniedExplanation:
+      'The drug chart is held by the nurses who give doses, the doctors who write them and the pharmacists who verify them — three different keys, held by three different people on purpose.',
+    keywords: [
+      'mar',
+      'drug round',
+      'medication',
+      'five rights',
+      '5 rights',
+      'barcode',
+      'wristband',
+      'high alert',
+      'insulin',
+      'witness',
+      'missed dose',
+      'prn',
+    ],
+    entitlement: 'module.inpatient.enabled',
+  },
 ];
 
 export function ipScreen(key: string): IpScreen {

@@ -136,3 +136,82 @@ export interface CleaningTaskView {
   readonly minutesRemaining: number;
   readonly breached: boolean;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7B
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface WardPatientRow {
+  readonly admissionId: string;
+  readonly patientId: string;
+  readonly ipNo: string;
+  readonly bedCode: string | null;
+  readonly wardId: string | null;
+  readonly wardName: string | null;
+  readonly attendingDoctorId: string | null;
+  readonly expectedDischargeAt: string | null;
+  readonly news2Score: number | null;
+  readonly news2Band: string | null;
+  readonly lastVitalsAt: string | null;
+  readonly vitalsOverdueMinutes: number | null;
+  readonly escalationId: string | null;
+  readonly escalationRung: string | null;
+  readonly escalationOverdue: boolean;
+  readonly dosesDue: number;
+  readonly dosesOverdue: number;
+  readonly assessmentsOverdue: number;
+  readonly isolation: readonly string[];
+  readonly fallsBand: string | null;
+  readonly pressureBand: string | null;
+  readonly devices: readonly string[];
+  readonly nurseId: string | null;
+}
+
+export interface MarDoseRow {
+  readonly id: string;
+  readonly orderId: string;
+  readonly admissionId: string;
+  readonly patientId: string;
+  readonly ipNo: string;
+  readonly bedCode: string | null;
+  readonly drugName: string;
+  readonly dose: string;
+  readonly doseUnit: string;
+  readonly route: string;
+  readonly frequency: string;
+  readonly isHighAlert: boolean;
+  readonly isNarcotic: boolean;
+  readonly isPrn: boolean;
+  readonly verified: boolean;
+  readonly dueAt: string | null;
+  readonly state: string;
+  readonly administeredAt: string | null;
+  readonly administeredBy: string | null;
+  readonly witnessedBy: string | null;
+  readonly reasonCode: string | null;
+  readonly reasonNote: string | null;
+  readonly givenDose: string | null;
+  readonly minutesUntilDue: number | null;
+  readonly overdue: boolean;
+}
+
+export interface EscalationRow {
+  readonly id: string;
+  readonly admissionId: string;
+  readonly patientId: string;
+  readonly ipNo: string;
+  readonly bedCode: string | null;
+  readonly wardName: string | null;
+  readonly score: number;
+  readonly band: string;
+  readonly rung: string;
+  readonly raisedAt: string;
+  readonly dueAt: string;
+  readonly acknowledgedAt: string | null;
+  readonly acknowledgedBy: string | null;
+  readonly resolvedAt: string | null;
+  readonly outcome: string | null;
+  readonly ladder: unknown;
+  readonly minutesUnanswered: number;
+  readonly overdue: boolean;
+}

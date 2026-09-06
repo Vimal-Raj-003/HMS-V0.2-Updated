@@ -33,6 +33,7 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'TR005', // cast and traction: laterality, the red flag and its action
   'TR007', // polytrauma board: the sequence, consent, blood, escalation, closure
   'IP001', // beds and admissions: one patient per bed, the cleaning gate, discharge
+  'IP003', // the MAR's five rights, the witness, the escalation ladder, risk bands
 ]);
 
 /**
