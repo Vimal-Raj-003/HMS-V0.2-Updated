@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { queryFlag } from '@vims/contracts';
 
 /** RC-008 request contracts. */
 const uuid = z.string().uuid();
@@ -21,7 +22,7 @@ export const ESTIMATE_STATUSES = [
 ] as const;
 
 export const templateQuerySchema = z.object({
-  activeOnly: z.coerce.boolean().default(true),
+  activeOnly: queryFlag().default(true),
   limit: pageLimit,
 });
 export type TemplateQuery = z.infer<typeof templateQuerySchema>;

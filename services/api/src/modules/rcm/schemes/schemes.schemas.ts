@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { queryFlag } from '@vims/contracts';
 
 /** RC-007 request contracts. */
 const uuid = z.string().uuid();
@@ -57,7 +58,7 @@ export const SHORTFALL_CATEGORIES = [
 
 export const schemeQuerySchema = z.object({
   type: z.enum(SCHEME_TYPES).optional(),
-  activeOnly: z.coerce.boolean().default(true),
+  activeOnly: queryFlag().default(true),
   limit: pageLimit,
 });
 export type SchemeQuery = z.infer<typeof schemeQuerySchema>;

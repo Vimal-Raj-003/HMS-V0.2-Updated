@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { queryFlag } from '@vims/contracts';
 
 /**
  * Request contracts for NC-005, NC-006, NC-007, NC-008 and NC-021.
@@ -271,7 +272,7 @@ export const itemQuerySchema = z.object({
   categoryId: uuid.optional(),
   schedule: z.enum(DRUG_SCHEDULES).optional(),
   status: z.enum(['draft', 'pending_approval', 'active', 'inactive', 'blocked']).optional(),
-  narcoticOnly: z.coerce.boolean().optional(),
+  narcoticOnly: queryFlag().optional(),
   cursor,
   limit: pageLimit,
 });
@@ -380,8 +381,8 @@ export const stockQuerySchema = z.object({
   itemId: uuid.optional(),
   batchId: uuid.optional(),
   expiringInDays: z.coerce.number().int().min(0).max(3650).optional(),
-  includeConsignment: z.coerce.boolean().default(true),
-  onlyPositive: z.coerce.boolean().default(true),
+  includeConsignment: queryFlag().default(true),
+  onlyPositive: queryFlag().default(true),
   cursor,
   limit: pageLimit,
 });
@@ -1035,7 +1036,7 @@ export type CaptureInvoiceRequest = z.infer<typeof captureInvoiceSchema>;
 export const invoiceQuerySchema = z.object({
   vendorId: uuid.optional(),
   matchStatus: z.string().trim().max(32).optional(),
-  exceptionsOnly: z.coerce.boolean().default(false),
+  exceptionsOnly: queryFlag().default(false),
   cursor,
   limit: pageLimit,
 });

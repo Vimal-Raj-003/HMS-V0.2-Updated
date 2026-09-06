@@ -2,6 +2,7 @@
  * Admin console DTOs (EN-007 §6, EN-041 §6).
  */
 import { z } from 'zod';
+import { queryFlag } from '../primitives/query-flag.js';
 import { abacConditionsSchema } from '../rbac/abac.js';
 import { emailSchema, indianMobileSchema } from './auth.js';
 
@@ -255,9 +256,9 @@ export const auditSearchQuerySchema = z.object({
   businessKey: z.string().max(128).optional(),
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
-  breakGlassOnly: z.coerce.boolean().optional(),
-  impersonatedOnly: z.coerce.boolean().optional(),
-  deniedOnly: z.coerce.boolean().optional(),
+  breakGlassOnly: queryFlag().optional(),
+  impersonatedOnly: queryFlag().optional(),
+  deniedOnly: queryFlag().optional(),
   q: z.string().max(200).optional(),
   cursor: z.string().max(2048).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),

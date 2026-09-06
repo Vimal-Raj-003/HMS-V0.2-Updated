@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { queryFlag } from '@vims/contracts';
 
 /** NC-034 request contracts. */
 const uuid = z.string().uuid();
@@ -32,7 +33,7 @@ export const DISPUTE_CATEGORIES = [
 
 export const contractQuerySchema = z.object({
   doctorId: uuid.optional(),
-  activeOnly: z.coerce.boolean().default(true),
+  activeOnly: queryFlag().default(true),
   limit: pageLimit,
 });
 export type ContractQuery = z.infer<typeof contractQuerySchema>;

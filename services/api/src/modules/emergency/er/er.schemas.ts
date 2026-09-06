@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { queryFlag } from '@vims/contracts';
 
 /** OP-006 request contracts. */
 const uuid = z.string().uuid();
@@ -58,7 +59,7 @@ export const boardQuerySchema = z.object({
   status: z.enum(VISIT_STATUSES).optional(),
   zoneId: uuid.optional(),
   /** Default false: the board is about who is here now, not the day's history. */
-  includeDeparted: z.coerce.boolean().default(false),
+  includeDeparted: queryFlag().default(false),
   limit: pageLimit,
 });
 export type BoardQuery = z.infer<typeof boardQuerySchema>;

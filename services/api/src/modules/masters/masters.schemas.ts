@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { queryFlag } from '@vims/contracts';
 
 /**
  * Request contracts for the EN-027 read half.
@@ -40,12 +41,12 @@ export const listDepartmentsQuerySchema = masterListQuerySchema.extend({
 export const listSpecialitiesQuerySchema = masterListQuerySchema.extend({
   branchId: uuidSchema.optional(),
   departmentId: uuidSchema.optional(),
-  telemedicineOnly: z.coerce.boolean().optional(),
+  telemedicineOnly: queryFlag().optional(),
   q: searchSchema,
 });
 
 export const listConsultTypesQuerySchema = masterListQuerySchema.extend({
-  onlineBookableOnly: z.coerce.boolean().optional(),
+  onlineBookableOnly: queryFlag().optional(),
   q: searchSchema,
 });
 
@@ -54,7 +55,7 @@ export const listServicesQuerySchema = masterListQuerySchema.extend({
   departmentId: uuidSchema.optional(),
   specialityId: uuidSchema.optional(),
   group: z.string().max(64).optional(),
-  appointableOnly: z.coerce.boolean().optional(),
+  appointableOnly: queryFlag().optional(),
   q: searchSchema,
 });
 
@@ -80,8 +81,8 @@ export const listDoctorsQuerySchema = masterListQuerySchema.extend({
   branchId: uuidSchema.optional(),
   specialityId: uuidSchema.optional(),
   departmentId: uuidSchema.optional(),
-  onlineBookableOnly: z.coerce.boolean().optional(),
-  teleOnly: z.coerce.boolean().optional(),
+  onlineBookableOnly: queryFlag().optional(),
+  teleOnly: queryFlag().optional(),
   q: searchSchema,
 });
 
@@ -135,14 +136,14 @@ export const listQueuesQuerySchema = z.object({
   kind: queueKindSchema.optional(),
   departmentId: uuidSchema.optional(),
   practitionerId: uuidSchema.optional(),
-  includeInactive: z.coerce.boolean().optional(),
+  includeInactive: queryFlag().optional(),
   cursor: z.string().max(2048).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 
 export const listCashCountersQuerySchema = z.object({
   branchId: uuidSchema.optional(),
-  includeInactive: z.coerce.boolean().optional(),
+  includeInactive: queryFlag().optional(),
   cursor: z.string().max(2048).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });

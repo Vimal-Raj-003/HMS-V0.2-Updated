@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { queryFlag } from '@vims/contracts';
 
 /**
  * The request contracts for OP-001 §6's patient routes.
@@ -312,7 +313,7 @@ export const searchPatientsQuerySchema = z.object({
    */
   identifier: z.string().trim().min(3).max(128).optional(),
   /** Include merged and inactive records. Off by default on every path. */
-  includeInactive: z.coerce.boolean().default(false),
+  includeInactive: queryFlag().default(false),
   cursor,
   limit,
 });
