@@ -111,7 +111,11 @@ export type PermissionAction =
   | 'reverse'
   | 'sell'
   | 'trace'
-  | 'use';
+  | 'use'
+  // Phase 6. Escalating a consult is not notifying somebody and not requesting
+  // again — it is handing a named person responsibility for a wait that has
+  // gone on too long, and it is audited as its own act.
+  | 'escalate';
 
 /** docs/05 §Model: "Data classes: PHI, financial, HR, operational." */
 export type DataClass = 'phi' | 'financial' | 'hr' | 'operational' | 'security' | 'commercial';
@@ -8551,6 +8555,151 @@ const TR005 = group('TR-005', 6, [
   ),
 ]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-007 — the polytrauma coordination board
+//
+// The risk grading here follows who is harmed by the mistake. Reordering the
+// surgical queue is `high`: putting a femoral nail ahead of a laparotomy is a
+// decision that kills, and it is the decision this whole module exists to make
+// visible. Recording a family conversation is `low`, because the failure mode
+// there is that nobody records one at all.
+// ─────────────────────────────────────────────────────────────────────────────
+const TR007 = group('TR-007', 6, [
+  p(
+    'polytrauma.case.open',
+    'polytrauma_case',
+    'create',
+    'phi',
+    'medium',
+    'Open a coordination board for a patient with injuries in more than one system.',
+  ),
+  p('polytrauma.case.read', 'polytrauma_case', 'read', 'phi', 'low', 'Open the board and its queue.', {
+    phiRead: true,
+  }),
+  p(
+    'polytrauma.case.list',
+    'polytrauma_case',
+    'list',
+    'phi',
+    'low',
+    'See every live board, ordered by how urgent the top of each queue is.',
+  ),
+  p(
+    'polytrauma.case.close',
+    'polytrauma_case',
+    'complete',
+    'phi',
+    'medium',
+    'Close a board. It refuses while a procedure is unfinished, a consult unanswered or a blocking task open.',
+  ),
+  p(
+    'polytrauma.procedure.plan',
+    'polytrauma_procedure',
+    'create',
+    'phi',
+    'medium',
+    'Add a planned procedure to the queue with its urgency class and the reason for it.',
+  ),
+  p(
+    'polytrauma.procedure.sequence',
+    'polytrauma_procedure',
+    'update',
+    'phi',
+    'high',
+    'Reorder the queue. Life-saving before limb-saving before definitive is enforced by the database, and a reordering that breaks it is refused at commit.',
+    { requiresReason: true },
+  ),
+  p(
+    'polytrauma.procedure.state',
+    'polytrauma_procedure',
+    'update',
+    'phi',
+    'medium',
+    'Move a procedure to ready, into theatre, or to done. Entering theatre checks the consent and the blood.',
+  ),
+  p(
+    'polytrauma.consent.record',
+    'polytrauma_consent',
+    'record',
+    'phi',
+    'medium',
+    'Record consent for one planned procedure: who signed, in what language, and what risks were discussed.',
+  ),
+  p(
+    'polytrauma.consent.waive',
+    'polytrauma_consent',
+    'override',
+    'phi',
+    'high',
+    'Record an emergency waiver. Lawful only for a life-saving procedure on a patient who cannot consent, and the grounds are kept with the record.',
+    { requiresReason: true },
+  ),
+  p(
+    'polytrauma.blood.plan',
+    'polytrauma_blood',
+    'create',
+    'phi',
+    'medium',
+    'State what blood this case needs, and reconcile it against what the bank has actually reserved.',
+  ),
+  p(
+    'polytrauma.consult.request',
+    'polytrauma_consult',
+    'create',
+    'phi',
+    'low',
+    'Ask another specialty to see the patient, with the question and a target time.',
+  ),
+  p(
+    'polytrauma.consult.respond',
+    'polytrauma_consult',
+    'record',
+    'phi',
+    'low',
+    'Acknowledge, see the patient, advise, or decline with a reason.',
+  ),
+  p(
+    'polytrauma.consult.escalate',
+    'polytrauma_consult',
+    'escalate',
+    'phi',
+    'medium',
+    'Escalate a consult by name. Escalating one that is not yet breached is allowed and asks why.',
+  ),
+  p(
+    'polytrauma.team.assign',
+    'polytrauma_case',
+    'assign',
+    'phi',
+    'low',
+    'Put people on the case, and name the one lead.',
+  ),
+  p(
+    'polytrauma.task.manage',
+    'polytrauma_task',
+    'update',
+    'phi',
+    'low',
+    'Add and close tasks. A blocking task holds the board open.',
+  ),
+  p(
+    'polytrauma.huddle.record',
+    'polytrauma_huddle',
+    'record',
+    'phi',
+    'low',
+    'Write what the multi-disciplinary team decided and who was in the room. Append-only.',
+  ),
+  p(
+    'polytrauma.family.update',
+    'polytrauma_case',
+    'record',
+    'phi',
+    'low',
+    'Record what the family were told, by whom, in which language, and whether the prognosis was covered. Append-only.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -8622,6 +8771,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP009,
   ...TR003,
   ...TR005,
+  ...TR007,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

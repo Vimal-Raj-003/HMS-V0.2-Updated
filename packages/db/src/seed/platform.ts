@@ -136,6 +136,10 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   ['AMB_REQ', '{BR}/AMB/{FY}/{SEQ:5}', false, 'fy'],
   ['AMB_TRIP', '{BR}/TRIP/{FY}/{SEQ:5}', false, 'fy'],
   ['BLOOD_BAG', '{BR}/BB/{FY}/{SEQ:5}', true, 'fy'],
+  // TR-007: the polytrauma coordination board. Not gapless — a board opened and
+  // immediately closed because the second injury turned out to be a graze must
+  // not burn a number, and nothing statutory rests on the sequence.
+  ['POLYTRAUMA', '{BR}/PT/{FY}/{SEQ:5}', false, 'fy'],
   ['LIC_INVOICE', 'VIMS/{FY}/{SEQ:5}', true, 'fy'],
 ];
 

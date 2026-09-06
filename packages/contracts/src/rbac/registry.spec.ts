@@ -276,9 +276,26 @@ describe('system role templates', () => {
     expect(billing.abacDefaults.amountLimit?.combine).toBe('whichever_is_lower');
   });
 
-  it('requires a second person for the blood bank and pharmacy narcotics roles', () => {
-    expect(getRoleTemplate('blood_bank_officer')!.abacDefaults.requiresSecondPerson).toBe(true);
-    expect(getRoleTemplate('pharmacy_incharge')!.abacDefaults.requiresSecondPerson).toBe(true);
+  /**
+   * Two-person verification for blood and narcotics lives on the permission,
+   * not on the person.
+   *
+   * This used to assert a role-level `requiresSecondPerson`, which sounds like
+   * "these people are co-signers" and means "these people may do nothing
+   * alone" — including reading. What the requirement actually needs is that
+   * these roles hold keys that demand a second signature, and that they carry
+   * mandatory MFA under docs/04 §2.
+   */
+  it('holds the blood bank and pharmacy narcotics roles to two-person keys and MFA', () => {
+    for (const key of ['blood_bank_officer', 'pharmacy_incharge']) {
+      const template = getRoleTemplate(key)!;
+      expect(template.abacDefaults.requiresSecondPerson).toBe(undefined);
+      expect(template.mfaMandatory, `${key} must require MFA`).toBe(true);
+      expect(
+        template.permissions.some((permission) => SECOND_PERSON_PERMISSIONS.includes(permission)),
+        `${key} must hold a key that demands a second signature`,
+      ).toBe(true);
+    }
   });
 
   it('flags the roles whose grant needs two approvers', () => {
@@ -316,5 +333,31 @@ describe('system role templates', () => {
     // (Phase 3), so the assertion is that nothing validation-shaped is granted.
     const tech = getRoleTemplate('lab_technician')!;
     expect(tech.permissions.some((k) => k.includes('validate'))).toBe(false);
+  });
+
+  /**
+   * No role template may carry `requiresSecondPerson` as an ABAC default.
+   *
+   * It reads like "this person is a valid co-signer" and means the opposite:
+   * `evaluateConditions` treats it as "this actor must supply a co-signer for
+   * every request", and `PolicyGuard` never supplies one. A role carrying it
+   * therefore gets 403 on everything — reads included. It sat on the two
+   * pharmacists, the pharmacy in-charge and the blood bank officer, which made
+   * the entire Phase 4 pharmacy module uncallable by pharmacists while every
+   * test stayed green, because no test drove a route as one of them.
+   *
+   * Two-person verification is a property of an action. `requiresSecondPerson`
+   * on the *permission* expresses it, and `Permission()` already refuses to let
+   * such a key become a route decorator for the same underlying reason.
+   */
+  it('never puts requiresSecondPerson on a role, only on a permission', () => {
+    const offenders = ROLE_TEMPLATES.filter((role) => role.abacDefaults?.requiresSecondPerson === true).map(
+      (role) => role.key,
+    );
+
+    expect(
+      offenders,
+      'a role-level requiresSecondPerson denies every request that role makes, reads included',
+    ).toEqual([]);
   });
 });

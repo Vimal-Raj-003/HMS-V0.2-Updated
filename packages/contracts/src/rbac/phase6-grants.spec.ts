@@ -241,6 +241,44 @@ describe('Phase 6 — trauma and medico-legal grants', () => {
    * allowed to hold it. A grant that lands anywhere else fails the build, and
    * adding a legitimate one means editing this list — which is the point.
    */
+  /**
+   * An emergency waiver says nobody could be asked and the bleeding could not
+   * wait. That is a consultant's call. Held wider — by a registrar, a nurse, a
+   * coordinator — it stops being an exception and becomes the default path.
+   */
+  it('keeps the emergency consent waiver with the people answerable for it', () => {
+    const holders = ROLE_TEMPLATES.filter((role) =>
+      role.permissions.includes('polytrauma.consent.waive'),
+    ).map((role) => role.key);
+
+    expect(holders.sort()).toEqual(['doctor_emergency', 'intensivist', 'surgeon']);
+  });
+
+  /**
+   * Reordering the queue is the decision this board exists to make visible.
+   * Both properties matter: `high` drives the UI treatment and the step-up, and
+   * `requiresReason` puts the surgical judgement in the audit row beside the
+   * arrangement it produced.
+   */
+  it('makes resequencing the surgical queue high-risk and reasoned', () => {
+    const sequence = PERMISSION_CATALOGUE.find((p) => p.key === 'polytrauma.procedure.sequence');
+    expect(sequence?.risk).toBe('high');
+    expect(sequence?.requiresReason).toBe(true);
+  });
+
+  /**
+   * And reading the board is not, because a board only the trauma lead can read
+   * is a whiteboard with extra steps. The neurosurgeon has to be able to see
+   * what orthopaedics is planning without asking anybody.
+   */
+  it('keeps reading the board a low-risk permission held widely', () => {
+    const read = PERMISSION_CATALOGUE.find((p) => p.key === 'polytrauma.case.read');
+    expect(read?.risk).toBe('low');
+
+    const holders = ROLE_TEMPLATES.filter((role) => role.permissions.includes('polytrauma.case.read'));
+    expect(holders.length).toBeGreaterThanOrEqual(12);
+  });
+
   it('gives every Phase 6 key only to roles that were meant to have it', () => {
     const ALLOWED: Readonly<Record<string, readonly string[]>> = {
       // OP-006. Held widely on purpose — `er.quickreg` is the key that gets an
@@ -320,6 +358,26 @@ describe('Phase 6 — trauma and medico-legal grants', () => {
         'purchase_officer',
         'quality_manager',
         'biomedical_engineer',
+      ],
+      polytrauma: [
+        'surgeon',
+        'doctor_emergency',
+        'intensivist',
+        'anaesthetist',
+        'doctor_consultant_opd',
+        'doctor_ip',
+        'resident_doctor',
+        'medical_superintendent',
+        'radiologist',
+        'nurse_er_triage',
+        'nurse_icu',
+        'nurse_ot_scrub',
+        'nurse_ward',
+        'nurse_supervisor',
+        // Blood bank holds the requirement, because "cross-matched 6" and
+        // "6 reserved" are different facts and the bank owns the second one.
+        'blood_bank_officer',
+        'counsellor',
       ],
       cast: [
         'surgeon',

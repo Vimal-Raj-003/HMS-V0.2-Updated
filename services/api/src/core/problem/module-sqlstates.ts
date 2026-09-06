@@ -31,6 +31,7 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'TR002', // fracture registry: laterality, classification, union
   'TR003', // implant traceability: permanence, reuse, recall closure
   'TR005', // cast and traction: laterality, the red flag and its action
+  'TR007', // polytrauma board: the sequence, consent, blood, escalation, closure
 ]);
 
 /**

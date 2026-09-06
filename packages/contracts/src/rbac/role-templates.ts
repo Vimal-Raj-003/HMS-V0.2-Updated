@@ -470,6 +470,61 @@ const PLASTER_ROOM = [
 /** The neurovascular check, for anyone at the bedside who is not applying plaster. */
 const CAST_WATCH = ['cast.request.read', 'cast.check.record'] as const;
 
+/**
+ * TR-007 — everybody who touches the board.
+ *
+ * Reading it is held widely: the whole point of a coordination board is that
+ * the neurosurgeon can see what orthopaedics is planning without asking, and a
+ * board only the trauma lead can read is a whiteboard with extra steps.
+ */
+const POLYTRAUMA_FLOOR = [
+  'polytrauma.case.read',
+  'polytrauma.case.list',
+  'polytrauma.consult.request',
+  'polytrauma.consult.respond',
+  'polytrauma.task.manage',
+  'polytrauma.huddle.record',
+  'polytrauma.family.update',
+] as const;
+
+/**
+ * The surgeons and the trauma lead: the queue itself.
+ *
+ * `polytrauma.procedure.sequence` is the one key in this module graded `high`.
+ * Reordering the queue is the decision the board exists to make visible, and a
+ * definitive case moved ahead of a life-saving one is a patient who dies with a
+ * beautifully fixed femur — so it takes a reason, and the database refuses the
+ * arrangement anyway.
+ */
+const POLYTRAUMA_SURGICAL = [
+  ...POLYTRAUMA_FLOOR,
+  'polytrauma.case.open',
+  'polytrauma.case.close',
+  'polytrauma.procedure.plan',
+  'polytrauma.procedure.sequence',
+  'polytrauma.procedure.state',
+  'polytrauma.consent.record',
+  'polytrauma.blood.plan',
+  'polytrauma.consult.escalate',
+  'polytrauma.team.assign',
+] as const;
+
+/**
+ * The waiver is separate from recording an ordinary consent.
+ *
+ * An unconscious patient with no next of kin can lawfully have their bleeding
+ * stopped. Deciding that is a consultant's call, not a registrar's, and it is
+ * held by the people who can be answerable for it afterwards.
+ */
+const POLYTRAUMA_WAIVER = ['polytrauma.consent.waive'] as const;
+
+/** Nursing on the board: the tasks, the consults, and what the family were told. */
+const POLYTRAUMA_NURSING = [
+  ...POLYTRAUMA_FLOOR,
+  'polytrauma.consent.record',
+  'polytrauma.procedure.state',
+] as const;
+
 const FLEET_DISPATCH = [
   'fleet.vehicle.read',
   'fleet.request.create',
@@ -1998,6 +2053,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      ...POLYTRAUMA_FLOOR,
+      'polytrauma.consult.escalate',
+      'polytrauma.case.close',
       'fleet.trip.read',
       'fleet.report.read',
       ...MLC_OVERSIGHT,
@@ -2157,6 +2215,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'doctor-opd',
     permissions: [
+      ...POLYTRAUMA_FLOOR,
+      'polytrauma.consult.escalate',
       ...IMPLANT_LOOKUP,
       ...PLASTER_ROOM,
       'cast.remove',
@@ -2194,6 +2254,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...POLYTRAUMA_FLOOR,
+      'polytrauma.consent.record',
       ...IMPLANT_LOOKUP,
       ...CAST_WATCH,
       ...FRACTURE_FLOOR,
@@ -2224,6 +2286,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...POLYTRAUMA_SURGICAL,
+      ...POLYTRAUMA_WAIVER,
       ...IMPLANT_LOOKUP,
       ...PLASTER_ROOM,
       ...FRACTURE_FLOOR,
@@ -2279,6 +2343,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...POLYTRAUMA_SURGICAL,
+      ...POLYTRAUMA_WAIVER,
       ...IMPLANT_SURGEON,
       ...PLASTER_ROOM,
       'cast.remove',
@@ -2318,6 +2384,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'anaesthesia-worklist',
     permissions: [
+      ...POLYTRAUMA_FLOOR,
+      'polytrauma.procedure.state',
+      'polytrauma.blood.plan',
+      'polytrauma.consent.record',
       ...IMPLANT_LOOKUP,
       ...TRAUMA_TEAM,
       ...DIAGNOSTIC_ORDERING,
@@ -2342,6 +2412,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'icu-board',
     permissions: [
+      ...POLYTRAUMA_SURGICAL,
+      ...POLYTRAUMA_WAIVER,
       ...IMPLANT_LOOKUP,
       ...CAST_WATCH,
       'mlc.case.read',
@@ -2370,6 +2442,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'radiology-reading',
     permissions: [
+      'polytrauma.case.read',
+      'polytrauma.case.list',
+      'polytrauma.consult.respond',
       ...IMPLANT_LOOKUP,
       'fracture.record.read',
       'fracture.record.list',
@@ -2422,6 +2497,9 @@ const templates: readonly RoleTemplate[] = [
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
     permissions: [
+      ...POLYTRAUMA_FLOOR,
+      'polytrauma.consent.record',
+      'polytrauma.procedure.plan',
       ...IMPLANT_LOOKUP,
       ...PLASTER_ROOM,
       ...FRACTURE_FLOOR,
@@ -2516,6 +2594,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...POLYTRAUMA_FLOOR,
       ...CAST_WATCH,
       'fleet.request.create',
       'fleet.request.read',
@@ -2551,6 +2630,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'icu-flowsheet',
     permissions: [
+      ...POLYTRAUMA_NURSING,
       'fleet.request.create',
       'fleet.request.read',
       ...WARD_DIAGNOSTICS,
@@ -2585,6 +2665,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'triage-board',
     permissions: [
+      ...POLYTRAUMA_NURSING,
       ...PLASTER_ROOM,
       ...PREHOSPITAL_RECEIVER,
       ...MLC_FLOOR,
@@ -2628,6 +2709,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'ot-checklist',
     permissions: [
+      ...POLYTRAUMA_NURSING,
       ...IMPLANT_AT_THE_TROLLEY,
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
@@ -2664,6 +2746,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-command-centre',
     permissions: [
+      ...POLYTRAUMA_FLOOR,
+      'polytrauma.team.assign',
+      'polytrauma.consult.escalate',
       ...WARD_DIAGNOSTICS,
 
       'queue.token.manage',
@@ -2918,11 +3003,19 @@ const templates: readonly RoleTemplate[] = [
       'mdm.pharmacy.propose',
       ...PHARMACY_COUNTER,
     ],
-    // `requiresSecondPerson` on the role is what makes this pharmacist a valid
-    // *co-signer* on somebody else's controlled-drug transaction as well as the
-    // first signature on their own. docs/04 §2 mandates 2FA for anybody who can
-    // touch the narcotic register, which is why MFA moves to true here.
-    abacDefaults: { requiresSecondPerson: true },
+    // No `requiresSecondPerson` here, deliberately.
+    //
+    // It used to sit on this role, meaning to say "this pharmacist is a valid
+    // co-signer on a controlled-drug transaction". That is not what the flag
+    // does. In `evaluateConditions` it means "this actor must supply a
+    // co-signer *for every request they make*", and `PolicyGuard` never
+    // supplies one — so the pharmacist could not read the item list, let alone
+    // dispense. Being a valid co-signer is a property of holding the key, not
+    // of a role-level condition; two-person verification is a property of an
+    // action, and `requiresSecondPerson` on the permission already expresses
+    // it. docs/04 §2 still mandates 2FA for anybody who can touch the narcotic
+    // register, which is why MFA stays true.
+    abacDefaults: {},
     mfaMandatory: true,
     sensitiveGrant: false,
     requiresCoSign: false,
@@ -2957,7 +3050,7 @@ const templates: readonly RoleTemplate[] = [
       'inventory.consumption.list',
       'inventory.consumption.reverse',
     ],
-    abacDefaults: { assignedWardOnly: true, requiresSecondPerson: true },
+    abacDefaults: { assignedWardOnly: true },
     mfaMandatory: true,
     sensitiveGrant: false,
     requiresCoSign: false,
@@ -3013,7 +3106,7 @@ const templates: readonly RoleTemplate[] = [
       'inventory.consumption.list',
       'inventory.consumption.supervise',
     ],
-    abacDefaults: { requiresSecondPerson: true },
+    abacDefaults: {},
     mfaMandatory: true,
     sensitiveGrant: true,
     requiresCoSign: false,
@@ -3102,8 +3195,15 @@ const templates: readonly RoleTemplate[] = [
     description: 'Donors, components, cross-match and issue under two-person verification.',
     category: 'diagnostics',
     homeWorkspace: 'blood-bank',
-    permissions: [...BASE_CLINICAL, ...LABEL_PRINTER, 'barcode.verify.blood'],
-    abacDefaults: { requiresSecondPerson: true },
+    permissions: [
+      'polytrauma.case.read',
+      'polytrauma.case.list',
+      'polytrauma.blood.plan',
+      ...BASE_CLINICAL,
+      ...LABEL_PRINTER,
+      'barcode.verify.blood',
+    ],
+    abacDefaults: {},
     mfaMandatory: true,
     sensitiveGrant: true,
     requiresCoSign: false,
@@ -3192,7 +3292,13 @@ const templates: readonly RoleTemplate[] = [
       'Session notes with restricted visibility. Mental-health records are excluded from cross-branch sharing by default (EN-041 §3.4.3).',
     category: 'therapy',
     homeWorkspace: 'counselling-sessions',
-    permissions: [...BASE_CLINICAL, ...SIGNS_DOCUMENTS],
+    permissions: [
+      'polytrauma.case.list',
+      'polytrauma.case.read',
+      'polytrauma.family.update',
+      ...BASE_CLINICAL,
+      ...SIGNS_DOCUMENTS,
+    ],
     abacDefaults: { ownPatientsOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,

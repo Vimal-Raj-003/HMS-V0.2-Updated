@@ -1,0 +1,428 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-007 — the polytrauma coordination board
+//
+// A polytrauma patient is not one problem with one owner. They are six problems
+// with six owners, and the thing that kills them is not usually any single
+// injury: it is that neurosurgery, orthopaedics and general surgery each have a
+// plan, each plan is correct, and nobody sequenced them. This board exists to
+// make the sequence a shared, written object rather than a corridor
+// conversation somebody half-remembers.
+//
+// ── The ordering rule ───────────────────────────────────────────────────────
+//
+// Life-saving before limb-saving before definitive. Not a convention here — a
+// trigger. A femoral nail scheduled ahead of a laparotomy for a bleeding spleen
+// is a patient who dies with a beautifully fixed femur, and the failure mode is
+// not that anybody chose it: it is that the two lists were made separately and
+// merged by whoever got to the whiteboard first.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Why an operation is being done, which is what decides when it is done.
+///
+/// The three classes are the damage-control ordering. `life_saving` is
+/// haemorrhage and airway: it happens now. `limb_saving` is vascular injury,
+/// compartment syndrome, an open fracture's debridement — hours, not days.
+/// `definitive` is everything that can wait for the patient to be warm,
+/// clotting and not acidotic.
+enum ProcedurePriority {
+  life_saving
+  limb_saving
+  definitive
+  /// Not an operation — a bedside or radiological procedure that still needs a
+  /// slot and a consent. Sequenced last because it never displaces theatre.
+  adjunct
+
+  @@schema("clinical")
+}
+
+enum ProcedureState {
+  planned
+  ready
+  in_theatre
+  done
+  abandoned
+  deferred
+
+  @@schema("clinical")
+}
+
+enum ConsentState {
+  /// Nobody has been asked yet.
+  not_sought
+  sought
+  given
+  refused
+  /// The patient cannot consent and no next of kin is present. Lawful for a
+  /// life-saving procedure, and only for one.
+  emergency_waiver
+  withdrawn
+
+  @@schema("clinical")
+}
+
+enum ConsultState {
+  requested
+  acknowledged
+  seen
+  advised
+  declined
+  cancelled
+
+  @@schema("clinical")
+}
+
+enum PolytraumaState {
+  active
+  /// Off the board but not finished — the patient went to ICU or a ward and the
+  /// coordination continues under a different team.
+  handed_over
+  closed
+
+  @@schema("clinical")
+}
+
+/// One patient, one board card.
+model PolytraumaCase {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId    String  @map("patient_id") @db.Uuid
+  erVisitId    String? @map("er_visit_id") @db.Uuid
+  activationId String? @map("activation_id") @db.Uuid
+  admissionId  String? @map("admission_id") @db.Uuid
+
+  /// Human reference from the numbering series, e.g. `BLR-Main/PT/2026-27/00014`.
+  caseNo String @map("case_no") @db.VarChar(60)
+
+  /// The lead. One name, because "the trauma team" cannot be paged and cannot
+  /// be held to a decision.
+  leadClinicianId String? @map("lead_clinician_id") @db.Uuid
+
+  state PolytraumaState @default(active)
+
+  openedAt DateTime  @default(now()) @map("opened_at") @db.Timestamptz(6)
+  openedBy String?   @map("opened_by") @db.Uuid
+  closedAt DateTime? @map("closed_at") @db.Timestamptz(6)
+  closedBy String?   @map("closed_by") @db.Uuid
+  /// Where the patient went. A board does not simply stop.
+  outcome  String?   @db.VarChar(60)
+  closureNotes String? @map("closure_notes") @db.Text
+
+  /// Copied from TR-001 at the moment the board opened, not joined live.
+  ///
+  /// The board says how badly injured this patient was *on arrival*. Joining to
+  /// the current score would make the card change under the reader whenever
+  /// somebody amended a score, and "ISS 34" on a huddle note has to mean the
+  /// same thing tomorrow as it did when it was written.
+  issAtOpen  Int? @map("iss_at_open")
+  nissAtOpen Int? @map("niss_at_open")
+  /// Stored as text to preserve the exact rendered percentage.
+  trissAtOpen String? @map("triss_at_open") @db.VarChar(12)
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  procedures PolytraumaProcedure[]
+  consults   PolytraumaConsult[]
+  bloodNeeds PolytraumaBloodRequirement[]
+  members    PolytraumaTeamMember[]
+  tasks      PolytraumaTask[]
+  huddles    PolytraumaHuddle[]
+  updates    PolytraumaFamilyUpdate[]
+
+  @@unique([hospitalId, caseNo], map: "uq_polytrauma_case_no")
+  @@index([hospitalId, branchId, state, openedAt(sort: Desc)])
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, erVisitId])
+  @@map("pt_cases")
+  @@schema("clinical")
+}
+
+/// A planned procedure, and where it sits in the queue.
+model PolytraumaProcedure {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  name        String  @db.VarChar(200)
+  specialty   String  @db.VarChar(60)
+  /// The fracture or injury it addresses, when there is one.
+  fractureId  String? @map("fracture_id") @db.Uuid
+  injuryId    String? @map("injury_id") @db.Uuid
+  side        String? @db.VarChar(16)
+
+  priority ProcedurePriority
+  /// 1, 2, 3 … within the case. Unique, and the trigger holds the class order.
+  sequence Int
+
+  state ProcedureState @default(planned)
+
+  surgeonId  String?   @map("surgeon_id") @db.Uuid
+  plannedFor DateTime? @map("planned_for") @db.Timestamptz(6)
+  startedAt  DateTime? @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  /// Estimated theatre time, minutes. Drives whether three procedures fit in a
+  /// day or whether one of them is tomorrow's problem.
+  estimatedMinutes Int? @map("estimated_minutes")
+
+  /// Why this is where it is in the queue. Free text on purpose: the reason a
+  /// laparotomy goes before a nail is a sentence, and a code would lose it.
+  rationale String? @db.Text
+
+  /// Set when somebody deliberately deferred it, with grounds.
+  deferReason String? @map("defer_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  case    PolytraumaCase       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  consent PolytraumaConsent?
+  blood   PolytraumaBloodRequirement[]
+
+  @@unique([caseId, sequence], map: "uq_pt_procedure_sequence")
+  @@index([hospitalId, caseId, sequence])
+  @@index([hospitalId, state])
+  @@map("pt_procedures")
+  @@schema("clinical")
+}
+
+/// Consent for one planned procedure.
+///
+/// One row per procedure, not one per case. "The patient consented" is not a
+/// fact about a patient; it is a fact about an operation, and a polytrauma
+/// patient signs for several of them at different moments and sometimes in
+/// different states of capacity.
+model PolytraumaConsent {
+  id          String @id @db.Uuid
+  hospitalId  String @map("hospital_id") @db.Uuid
+  procedureId String @unique @map("procedure_id") @db.Uuid
+
+  state ConsentState @default(not_sought)
+
+  /// Who signed. The patient, or the relationship of whoever signed for them.
+  signedBy       String? @map("signed_by") @db.VarChar(120)
+  relationship   String? @db.VarChar(60)
+  /// The language it was explained in. A consent taken in a language the
+  /// patient does not read is not a consent.
+  explainedLocale String? @map("explained_locale") @db.VarChar(12)
+  explainedBy    String? @map("explained_by") @db.Uuid
+
+  /// The specific risks discussed. Not a template id — what was actually said.
+  risksDiscussed String[] @map("risks_discussed")
+
+  soughtAt DateTime? @map("sought_at") @db.Timestamptz(6)
+  decidedAt DateTime? @map("decided_at") @db.Timestamptz(6)
+
+  /// Required for `emergency_waiver`, and for `refused` where the refusal is
+  /// against advice.
+  reason String? @db.Text
+
+  witnessName String? @map("witness_name") @db.VarChar(120)
+  documentRef String? @map("document_ref") @db.VarChar(200)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  procedure PolytraumaProcedure @relation(fields: [procedureId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, state])
+  @@map("pt_consents")
+  @@schema("clinical")
+}
+
+/// What blood this case needs, and whether it is actually there.
+///
+/// Modelled here in Phase 6 and reconciled against IP-007 in Phase 7. The point
+/// of holding it now is that "cross-match 6 units" written on a whiteboard and
+/// "6 units reserved in the fridge" are different facts, and a laparotomy that
+/// starts on the first one is a laparotomy that stops halfway.
+model PolytraumaBloodRequirement {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  caseId      String  @map("case_id") @db.Uuid
+  procedureId String? @map("procedure_id") @db.Uuid
+
+  component String @db.VarChar(40)
+  /// What was asked for.
+  unitsRequired Int  @map("units_required")
+  /// What the blood bank has actually put aside for this patient.
+  unitsReserved Int  @default(0) @map("units_reserved")
+  unitsIssued   Int  @default(0) @map("units_issued")
+
+  /// Massive transfusion protocol activated for this case.
+  mtpActivated   Boolean   @default(false) @map("mtp_activated")
+  mtpActivatedAt DateTime? @map("mtp_activated_at") @db.Timestamptz(6)
+
+  crossmatchRef String?   @map("crossmatch_ref") @db.VarChar(60)
+  neededBy      DateTime? @map("needed_by") @db.Timestamptz(6)
+  notes         String?   @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  case      PolytraumaCase       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  procedure PolytraumaProcedure? @relation(fields: [procedureId], references: [id], onDelete: SetNull)
+
+  @@index([hospitalId, caseId])
+  @@map("pt_blood_requirements")
+  @@schema("clinical")
+}
+
+/// A request for another specialty to come and see the patient.
+model PolytraumaConsult {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  specialty String  @db.VarChar(60)
+  question  String  @db.Text
+  urgency   String  @default("routine") @db.VarChar(16)
+
+  /// Minutes allowed, from the request. Comes from configuration per urgency —
+  /// stored on the row so a later change to the policy does not silently
+  /// re-judge a consult that was answered under the old one.
+  slaMinutes Int      @map("sla_minutes")
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  requestedBy String?  @map("requested_by") @db.Uuid
+  /// `requested_at + sla_minutes`, written by a trigger so the board can sort
+  /// and filter on it without recomputing an interval per row.
+  dueAt      DateTime @map("due_at") @db.Timestamptz(6)
+
+  state ConsultState @default(requested)
+
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  acknowledgedBy String?   @map("acknowledged_by") @db.Uuid
+  seenAt         DateTime? @map("seen_at") @db.Timestamptz(6)
+  seenBy         String?   @map("seen_by") @db.Uuid
+  advice         String?   @db.Text
+
+  /// Escalation is a recorded act, not a colour on a screen. It names who was
+  /// escalated to, so "we escalated it" can be checked.
+  escalatedAt DateTime? @map("escalated_at") @db.Timestamptz(6)
+  escalatedTo String?   @map("escalated_to") @db.Uuid
+  escalationNote String? @map("escalation_note") @db.Text
+
+  declineReason String? @map("decline_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  case PolytraumaCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId])
+  @@index([hospitalId, state, dueAt])
+  @@map("pt_consults")
+  @@schema("clinical")
+}
+
+/// Who is on this case.
+model PolytraumaTeamMember {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  userId String  @map("user_id") @db.Uuid
+  role   String  @db.VarChar(60)
+  specialty String? @db.VarChar(60)
+  isLead Boolean @default(false) @map("is_lead")
+
+  joinedAt DateTime  @default(now()) @map("joined_at") @db.Timestamptz(6)
+  leftAt   DateTime? @map("left_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  case PolytraumaCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId])
+  @@map("pt_team_members")
+  @@schema("clinical")
+}
+
+/// A thing somebody has to do, with a name against it.
+model PolytraumaTask {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  title       String  @db.VarChar(200)
+  detail      String? @db.Text
+  ownerId     String? @map("owner_id") @db.Uuid
+  procedureId String? @map("procedure_id") @db.Uuid
+
+  dueAt       DateTime? @map("due_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  completedBy String?   @map("completed_by") @db.Uuid
+
+  /// A task that blocks the sequence. The board shows these first, because an
+  /// unavailable CT slot is not a note, it is the reason theatre is waiting.
+  blocking Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  case PolytraumaCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId, completedAt])
+  @@map("pt_tasks")
+  @@schema("clinical")
+}
+
+/// What the multi-disciplinary team decided, and who was in the room.
+model PolytraumaHuddle {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  heldAt   DateTime @default(now()) @map("held_at") @db.Timestamptz(6)
+  chairId  String?  @map("chair_id") @db.Uuid
+  /// The specialties represented. A huddle that decided a neurosurgical
+  /// sequence with no neurosurgeon present is a decision somebody will revisit.
+  specialties String[]
+  attendees   String[] @db.Uuid
+
+  decisions String  @db.Text
+  concerns  String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  case PolytraumaCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId, heldAt(sort: Desc)])
+  @@map("pt_huddles")
+  @@schema("clinical")
+}
+
+/// What the family has actually been told, and by whom.
+///
+/// Kept as its own log rather than as clinical notes, because the question a
+/// relative asks at 3 a.m. is "has anybody spoken to us?" and the answer has to
+/// be findable by somebody who was not there.
+model PolytraumaFamilyUpdate {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  at       DateTime @default(now()) @db.Timestamptz(6)
+  byId     String?  @map("by_id") @db.Uuid
+  spokeTo  String   @map("spoke_to") @db.VarChar(120)
+  relationship String? @db.VarChar(60)
+  locale   String?  @db.VarChar(12)
+
+  summary  String  @db.Text
+  /// Whether the conversation covered the prognosis. Separate because it is the
+  /// one thing families report never having been told.
+  prognosisDiscussed Boolean @default(false) @map("prognosis_discussed")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  case PolytraumaCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId, at(sort: Desc)])
+  @@map("pt_family_updates")
+  @@schema("clinical")
+}

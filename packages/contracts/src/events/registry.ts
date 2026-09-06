@@ -9545,6 +9545,142 @@ const implantAndCastEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * TR-007 — the polytrauma board.
+ *
+ * `polytrauma.sequence.changed` carries the whole queue rather than the one row
+ * that moved. A reorder is only meaningful as an arrangement: "the nail moved to
+ * position 2" tells a reader nothing without what is now at 1 and 3, and the
+ * whole point of this board is that the arrangement is the decision.
+ */
+const polytraumaEvents: readonly EventDefinition[] = [
+  ev(
+    'polytrauma.case.opened',
+    'polytrauma_case',
+    'TR-007',
+    'A coordination board was opened for a patient injured in more than one system.',
+    z.object({
+      caseId: uuid,
+      caseNo: z.string(),
+      patientId: uuid,
+      erVisitId: uuid.nullable(),
+      leadClinicianId: uuid.nullable(),
+      iss: z.number().int().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'polytrauma.sequence.changed',
+    'polytrauma_case',
+    'TR-007',
+    'The surgical queue was reordered. Carries the whole arrangement, because a position is meaningless without the positions around it.',
+    z.object({
+      caseId: uuid,
+      changedBy: uuid,
+      reason: z.string(),
+      queue: z.array(
+        z.object({
+          procedureId: uuid,
+          name: z.string(),
+          priority: z.string(),
+          sequence: z.number().int(),
+          state: z.string(),
+        }),
+      ),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'polytrauma.procedure.entered_theatre',
+    'polytrauma_procedure',
+    'TR-007',
+    'A procedure started. By this point the database has checked that consent is settled and the blood is reserved rather than merely cross-matched.',
+    z.object({
+      caseId: uuid,
+      procedureId: uuid,
+      name: z.string(),
+      priority: z.string(),
+      surgeonId: uuid.nullable(),
+      consentState: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'polytrauma.consent.waived',
+    'polytrauma_consent',
+    'TR-007',
+    'An emergency waiver was recorded. Lawful for a life-saving procedure on a patient who cannot consent, and separated from an ordinary consent so the waivers are countable.',
+    z.object({
+      caseId: uuid,
+      procedureId: uuid,
+      recordedBy: uuid,
+      reason: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'polytrauma.consult.requested',
+    'polytrauma_consult',
+    'TR-007',
+    'Another specialty was asked to see the patient, with the clock its answer is measured against.',
+    z.object({
+      caseId: uuid,
+      consultId: uuid,
+      specialty: z.string(),
+      urgency: z.string(),
+      slaMinutes: z.number().int(),
+      dueAt: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'polytrauma.consult.escalated',
+    'polytrauma_consult',
+    'TR-007',
+    'A consult was escalated to a named person. `breached` says whether the clock had actually run out, so an escalation register can be read without recomputing every interval.',
+    z.object({
+      caseId: uuid,
+      consultId: uuid,
+      specialty: z.string(),
+      escalatedTo: uuid,
+      breached: z.boolean(),
+      minutesWaiting: z.number().int(),
+      note: z.string().nullable(),
+    }),
+    { retentionDays: 3650 },
+  ),
+  ev(
+    'polytrauma.blood.short',
+    'polytrauma_blood',
+    'TR-007',
+    'A case needs more units than the bank has reserved. Emitted when the requirement is written, not when theatre discovers it.',
+    z.object({
+      caseId: uuid,
+      procedureId: uuid.nullable(),
+      component: z.string(),
+      unitsRequired: z.number().int(),
+      unitsReserved: z.number().int(),
+      neededBy: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'polytrauma.case.closed',
+    'polytrauma_case',
+    'TR-007',
+    'A board was closed. It cannot be, while a procedure is unfinished or a consult unanswered.',
+    z.object({
+      caseId: uuid,
+      caseNo: z.string(),
+      outcome: z.string().nullable(),
+      procedures: z.number().int(),
+      deferred: z.number().int(),
+      hoursOpen: z.number().int(),
+    }),
+    { retentionDays: 5475 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -9610,6 +9746,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...prehospitalEvents,
   ...fractureEvents,
   ...implantAndCastEvents,
+  ...polytraumaEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

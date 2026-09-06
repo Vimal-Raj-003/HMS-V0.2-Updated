@@ -336,12 +336,22 @@ describe('Phase 4 role grants', () => {
     // docs/04 §2: TOTP mandatory for "Pharmacy-narcotics". A pharmacist who can
     // be the second signature on a controlled-drug transaction is in that set,
     // and both dispensing templates can be.
+    //
+    // Being a valid co-signer is holding the key, not carrying a role-level
+    // condition. This test used to assert `abacDefaults.requiresSecondPerson`,
+    // which reads that way and does the opposite: the engine treats it as "this
+    // actor must supply a co-signer for every request", and `PolicyGuard` never
+    // supplies one — so it made these three roles get 403 on everything,
+    // including reading the item list. The condition is gone; what remains is
+    // what was actually meant.
     for (const key of ['pharmacist_op', 'pharmacist_ip', 'pharmacy_incharge']) {
       const t = getRoleTemplate(key);
-      expect(t?.abacDefaults.requiresSecondPerson, `${key} must carry the second-person condition`).toBe(
-        true,
-      );
+      expect(t?.abacDefaults.requiresSecondPerson, `${key} must not be denied every request`).toBe(undefined);
       expect(t?.mfaMandatory, `${key} touches the narcotic register and must require MFA`).toBe(true);
+      expect(
+        t?.permissions.some((permission) => SECOND_PERSON_PERMISSIONS.includes(permission)),
+        `${key} must hold at least one key that demands a second person`,
+      ).toBe(true);
     }
   });
 

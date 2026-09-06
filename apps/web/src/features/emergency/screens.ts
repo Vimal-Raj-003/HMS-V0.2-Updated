@@ -240,6 +240,56 @@ export const ER_SCREENS: readonly ErScreen[] = [
     ],
     entitlement: 'module.emergency.enabled',
   },
+  {
+    key: 'polytrauma-boards',
+    label: 'Polytrauma boards',
+    href: '/er/polytrauma',
+    area: 'emergency',
+    permission: 'polytrauma.case.list',
+    summary:
+      'One card per patient injured in more than one system, ordered by what is waiting — a breached consult first, then blood not yet reserved, then the work itself.',
+    deniedExplanation:
+      'The polytrauma boards are held by everybody who touches these patients: surgery, emergency, intensive care, anaesthetics, nursing, radiology, the blood bank and the counsellors. A board only the trauma lead can read is a whiteboard with extra steps.',
+    keywords: [
+      'polytrauma',
+      'coordination',
+      'multi-specialty',
+      'sequencing',
+      'damage control',
+      'consult',
+      'sla',
+      'escalation',
+      'blood',
+      'consent',
+      'huddle',
+      'mdt',
+    ],
+    entitlement: 'module.emergency.enabled',
+  },
+  {
+    key: 'polytrauma-case',
+    label: 'Polytrauma board',
+    href: '/er/polytrauma/board',
+    area: 'emergency',
+    permission: 'polytrauma.case.read',
+    summary:
+      'One board: the surgical queue with what is blocking each procedure, consent per procedure, blood reserved against blood required, and the consults with their clocks.',
+    deniedExplanation:
+      'Reading a board is held widely so the neurosurgeon can see what orthopaedics is planning without asking. Reordering the queue is a separate, higher-risk key that takes a reason, and the emergency consent waiver is a further one still.',
+    keywords: [
+      'polytrauma board',
+      'surgical queue',
+      'life saving',
+      'limb saving',
+      'definitive',
+      'damage control',
+      'consent',
+      'emergency waiver',
+      'massive transfusion',
+      'consult escalation',
+    ],
+    entitlement: 'module.emergency.enabled',
+  },
 ];
 
 export function erScreen(key: string): ErScreen {

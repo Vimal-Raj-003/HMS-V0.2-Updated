@@ -401,6 +401,107 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+## Phase 6 complete — 2026-09-06
+
+Nine modules: OP-006 ER intake, TR-001 triage and trauma activation, TR-008 MLC
+and forensic, TR-009 + NC-013 pre-hospital and ambulance fleet, TR-002 + OP-009
+fracture registry and orthopaedic OPD, TR-003 implant traceability, TR-005 cast
+and traction, TR-007 the polytrauma coordination board.
+
+**Gates** — 20/20 packages typecheck, lint and test (**2,929 tests**); **637
+routes across 60 controllers**; catalogue **1,040 keys**; event registry **730**;
+**701 base tables, 0 without RLS**; 40 migrations; 74 screens. Hex-literal,
+chart-palette, gate-script, alert-runbook, permission-key and prettier clean.
+
+**Still missing across the whole phase:** no e2e golden path and no k6 script
+for any of the nine modules, so none meets `CLAUDE.md` §7's full Definition of
+Done — the same gap every module in this repo currently has. Exit gates 1–10
+were driven by hand against the live database and over real HTTP; gate 11
+(500 visits/day and a 100-casualty surge under the stated budgets, k6 committed)
+has not been run.
+
+### 2026-09-06 (night, later) · Phase 6 · TR-007 the polytrauma board — and four roles that could not call anything
+
+**Built — TR-007, complete.** 9 tables, 17 permission keys, 8 events, 2 screens.
+**Exit gate 10 passes**: three competing procedures sequenced, consent tracked
+per procedure, blood reconciled against what the bank has actually reserved, and
+an SLA-breached consult escalating.
+
+**One rule, and everything else defends it**
+
+A polytrauma patient has six problems and six owners. What kills them is usually
+not any single injury: it is that neurosurgery, orthopaedics and general surgery
+each have a correct plan and nobody sequenced the three. So life-saving before
+limb-saving before definitive is a deferred constraint trigger, not a sort
+order. A femoral nail scheduled ahead of a laparotomy for a bleeding spleen is a
+patient who dies with a beautifully fixed femur.
+
+| Rule                                             | What it prevents                                           |
+| ------------------------------------------------ | ---------------------------------------------------------- |
+| Life-saving before limb-saving before definitive | Two correct lists merged by whoever reached the whiteboard |
+| Theatre needs a _settled_ consent                | Wheeling in on "consent sought", which is nobody's answer  |
+| A waiver covers only a life-saving procedure     | "Nobody could be asked" stretched over an elective plate   |
+| Reserved units, not cross-matched ones           | A laparotomy that stops halfway                            |
+| `due_at` is the database's arithmetic            | An SLA the client can be wrong about                       |
+| An escalation names who it went to               | "We escalated it", which cannot be checked                 |
+| A board cannot close over unfinished work        | A closed board with three procedures nobody picked up      |
+
+All seven proved live in both directions, and again over HTTP.
+
+**The deferred trigger had to read the table, not the row**
+
+First attempt judged each `NEW` image as the statement produced it. Reordering a
+list means updating every row, and the intermediate states are legitimately out
+of order — a shift-by-ten before placing each row is a normal way to move under
+a unique index. An `AFTER` trigger's `NEW` is frozen at its statement, so the
+final, correct arrangement was refused while the stale image was judged. It now
+checks the whole case at COMMIT by reading the table.
+
+**And adding a procedure had to place it, not append it**
+
+Appending made the obvious thing impossible: a board with a definitive nail on
+it, then somebody adds the laparotomy — the append lands behind the nail and the
+ordering trigger refuses it. Where a _class_ sits is not a surgical judgement, so
+the queue arranges that itself; which of two laparotomies goes first is, and
+that is what `resequence` is for.
+
+**A permission that could be reached by sending a different field**
+
+`polytrauma.consent.waive` is `high` risk and held by three consultant roles. A
+resident holding only `polytrauma.consent.record` recorded a waiver by sending
+`state: "emergency_waiver"` to the ordinary consent route — the narrow key was
+reachable through the wide one. The waiver now has its own route, its own
+schema and no `state` field at all: reaching the route _is_ the state.
+
+**Four roles could not call a single endpoint, and had not been able to for two phases**
+
+Driving TR-007 as a blood bank officer returned 403 on `GET /polytrauma` — a
+plain read. `pharmacist_op`, `pharmacist_ip`, `pharmacy_incharge` and
+`blood_bank_officer` all carried `abacDefaults: { requiresSecondPerson: true }`,
+added in Phase 4 meaning "this pharmacist is a valid co-signer". That is not
+what the flag does. `evaluateConditions` reads it as "this actor must supply a
+co-signer for **every** request", and `PolicyGuard` never supplies one — so
+`GET /inventory/items` returned 403 for a pharmacist and 200 for a nurse. The
+entire Phase 4 pharmacy module was uncallable by pharmacists, and every test
+stayed green because no test drove a route as one of them.
+
+Two-person verification is a property of an action, not of a person. The flag is
+gone from all four templates; `requiresSecondPerson` on the _permission_ already
+expresses it, and `Permission()` has refused to let such a key become a route
+decorator since Phase 4 for the same underlying reason. Two existing tests
+asserted the mistaken belief and now assert what actually holds; a third
+(`registry.spec.ts`) fails if anybody puts it back on a role.
+
+**Tested** — every constraint above live in both directions; the board driven
+end to end over HTTP (opened → three procedures self-ordering by class → the
+nail moved to the front and refused → reorder without a reason refused → waiver
+bypass refused → consent without a name refused → consent with no risks refused
+→ theatre refused on 2 of 6 units → the bank reserves 6 → theatre → consult
+escalated early with grounds, and a breached one escalated without) and both
+screens driven in a real browser, the only console error being the expected 409.
+
+**Next:** Phase 7 — inpatient.
+
 ### 2026-09-06 (night) · Phase 6 · TR-003 + TR-005 — the recall list, and the limb inside the plaster
 
 **Built — TR-003 and TR-005, complete.** 9 tables, 19 permission keys, 9 events,

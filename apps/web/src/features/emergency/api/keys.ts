@@ -33,6 +33,11 @@ export function erKeys(hospitalId: string) {
     dispatchBoard: (scope: string) => [...root, 'fleet', 'board', scope] as const,
     dispatchBoardRoot: () => [...root, 'fleet', 'board'] as const,
     fleetTrip: (id: string) => [...root, 'fleet', 'trip', id] as const,
+
+    // TR-007
+    polytraumaBoards: (scope: string) => [...root, 'polytrauma', 'boards', scope] as const,
+    polytraumaBoardsRoot: () => [...root, 'polytrauma', 'boards'] as const,
+    polytraumaBoard: (id: string) => [...root, 'polytrauma', 'board', id] as const,
     inbound: () => [...root, 'prehospital', 'inbound'] as const,
   };
 }
