@@ -1,0 +1,498 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-003 + TR-005 — implant traceability, and everything strapped to a limb
+//
+// `phase-06` §6.8–6.9, exit gate 8.
+//
+//   implant_catalogue    UDI/GTIN, manufacturer, size, side, MRI conditionality
+//   implant_stock        one physical item: serial or lot, expiry, where it is
+//   implant_usages       this item, in this patient, in this operation
+//   implant_recalls      a field safety notice, and the patients it names
+//   implant_recall_cases one patient on one recall, and whether they answered
+//   cast_requests        somebody asked for a cast, a splint, a brace, traction
+//   cast_applications    it was applied: material, position, limb, by whom
+//   cast_checks          the complication watch, and the red flags
+//   pin_site_schedules   external fixator and traction pin care
+//
+// ── The recall is the point of TR-003 ───────────────────────────────────────
+//
+// Everything else in the module exists so that, given a UDI or a lot number, a
+// query returns the exact list of patients carrying that device — by name, with
+// the surgeon who implanted it and the date. `phase-06` calls this "the single
+// most important test in this deliverable" and it is right: a hip stem recall
+// with an incomplete patient list is a recall that leaves people walking around
+// on a device the manufacturer has withdrawn.
+//
+// So §B.1 refuses an implant recorded against a patient without a scan, or an
+// audited manual entry that says why the scan failed. A device with no serial
+// and no lot is a device no recall can ever find, and it is refused outright.
+//
+// ── Compartment syndrome is why TR-005 has red flags ────────────────────────
+//
+// A cast complication is not a comfort issue. Pain out of proportion,
+// paraesthesia, pain on passive stretch: those three in a limb in plaster are a
+// surgical emergency with a window measured in hours, and the classic way it is
+// missed is that each was mentioned to a different person. `cast_checks`
+// records them as structured fields on one row, and §B.5 refuses closing a
+// check that found one without saying what was done.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ImplantKind {
+  plate
+  screw
+  intramedullary_nail
+  external_fixator
+  k_wire
+  prosthesis
+  spinal_construct
+  cement
+  graft
+  suture_anchor
+  other
+
+  @@schema("clinical")
+}
+
+/// How the device came to be in this hospital.
+enum ImplantOwnership {
+  /// The hospital bought it and it sits in stores.
+  owned
+  /// The vendor's, until it goes into a patient. NC-007's handshake.
+  consignment
+  /// Brought in by the vendor for this case only.
+  loan_set
+
+  @@schema("clinical")
+}
+
+enum ImplantStockStatus {
+  available
+  reserved
+  implanted
+  /// Opened and not used: still consumed, and still billed to somebody.
+  wasted
+  returned
+  expired
+  quarantined
+
+  @@schema("clinical")
+}
+
+/// Magnetic resonance conditionality, per ASTM F2503. Recorded because the
+/// answer to "can this patient have an MRI?" must not be a phone call to the
+/// manufacturer three years later.
+enum MriConditionality {
+  safe
+  conditional
+  unsafe
+  unknown
+
+  @@schema("clinical")
+}
+
+enum ImmobilisationKind {
+  cast
+  backslab
+  splint
+  brace
+  traction
+  external_fixator
+  sling
+  other
+
+  @@schema("clinical")
+}
+
+enum ImmobilisationStatus {
+  requested
+  applied
+  changed
+  removed
+  cancelled
+
+  @@schema("clinical")
+}
+
+/// The catalogue: a model of device, not a physical item.
+model ImplantCatalogueItem {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  /// The Unique Device Identifier's device half. This is what a field safety
+  /// notice names, so it is what a recall search keys on.
+  udiDi     String? @map("udi_di") @db.VarChar(60)
+  gtin      String? @db.VarChar(20)
+  /// The hospital's own reference for the device.
+  ///
+  /// Optional, because an imported device may arrive carrying only a UDI and
+  /// no local number, and forcing one to be invented produces a reference
+  /// nobody outside the store recognises. A CHECK requires *one* of the two —
+  /// a catalogue row with neither cannot be looked up by anybody.
+  catalogueNo String? @map("catalogue_no") @db.VarChar(60)
+
+  manufacturer String      @db.VarChar(160)
+  brand        String?     @db.VarChar(120)
+  kind         ImplantKind
+  description  String      @db.VarChar(300)
+
+  /// Sizes are not interchangeable and a left plate does not fit a right femur.
+  sizeLabel String? @map("size_label") @db.VarChar(60)
+  /// `left` | `right` | `universal`. Universal is common and must be explicit.
+  laterality String @default("universal") @db.VarChar(16)
+  material   String? @db.VarChar(80)
+
+  mriConditionality MriConditionality @default(unknown) @map("mri_conditionality")
+  /// `{ teslaMax, gradientMax, notes }` — what "conditional" is conditional on.
+  mriConditions Json? @map("mri_conditions")
+
+  shelfLifeMonths Int?    @map("shelf_life_months")
+  ownership       ImplantOwnership @default(owned)
+  vendorId        String? @map("vendor_id") @db.Uuid
+  /// The consignment price this device bills at, held on the catalogue so a
+  /// usage cannot be priced from a rate card that changed since.
+  consignmentPrice Decimal? @map("consignment_price") @db.Decimal(14, 2)
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  stock   ImplantStockItem[]
+  recalls ImplantRecall[]
+
+  @@unique([hospitalId, catalogueNo], map: "uq_implant_catalogue_no")
+  @@index([hospitalId, udiDi])
+  @@index([hospitalId, gtin])
+  @@index([hospitalId, kind, isActive])
+  @@map("implant_catalogue")
+  @@schema("clinical")
+}
+
+/// One physical device, on a shelf or in a person.
+model ImplantStockItem {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  catalogueId String @map("catalogue_id") @db.Uuid
+
+  /// A device carries a serial, or a lot, or both. Neither is refused: an item
+  /// a recall cannot identify is an item a recall cannot withdraw.
+  serialNo String? @map("serial_no") @db.VarChar(80)
+  lotNo    String? @map("lot_no") @db.VarChar(80)
+  /// The production-identifier half of the UDI, as scanned.
+  udiPi String? @map("udi_pi") @db.VarChar(120)
+
+  expiryOn DateTime? @map("expiry_on") @db.Date
+  status   ImplantStockStatus @default(available)
+  location String?  @db.VarChar(120)
+
+  receivedAt DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+  grnRef     String?   @map("grn_ref") @db.VarChar(60)
+  reservedForCaseId String? @map("reserved_for_case_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  catalogue ImplantCatalogueItem @relation(fields: [catalogueId], references: [id], onDelete: Restrict)
+  usage     ImplantUsage?
+
+  @@unique([hospitalId, serialNo], map: "uq_implant_serial")
+  @@index([hospitalId, branchId, status])
+  @@index([hospitalId, catalogueId, status])
+  @@index([hospitalId, lotNo])
+  @@index([hospitalId, expiryOn])
+  @@map("implant_stock")
+  @@schema("clinical")
+}
+
+/// This device, in this patient, in this operation. The recall reads this.
+model ImplantUsage {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  stockItemId String @unique @map("stock_item_id") @db.Uuid
+  patientId   String @map("patient_id") @db.Uuid
+  fractureId  String? @map("fracture_id") @db.Uuid
+  otCaseId    String? @map("ot_case_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+
+  procedureCode String? @map("procedure_code") @db.VarChar(40)
+  procedureName String  @map("procedure_name") @db.VarChar(200)
+  /// The limb it went into. Compared against the fracture's — §B.2.
+  side String @db.VarChar(16)
+
+  surgeonId  String   @map("surgeon_id") @db.Uuid
+  implantedAt DateTime @map("implanted_at") @db.Timestamptz(6)
+
+  /// True when the UDI came off a barcode. False only with a stated reason —
+  /// §B.1. A device typed from memory is one a recall may never match.
+  scanned      Boolean @default(false)
+  scanPayload  String? @map("scan_payload") @db.VarChar(300)
+  manualReason String? @map("manual_reason") @db.Text
+  manualBy     String? @map("manual_by") @db.Uuid
+
+  /// What it bills at, captured at implantation from the catalogue. A price
+  /// looked up later is a price that changed.
+  chargedPrice Decimal? @map("charged_price") @db.Decimal(14, 2)
+  chargeIntentRef String? @map("charge_intent_ref") @db.VarChar(64)
+
+  /// Explanted later — a revision, an infection, a failure.
+  explantedAt     DateTime? @map("explanted_at") @db.Timestamptz(6)
+  explantReason   String?   @map("explant_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  stockItem ImplantStockItem @relation(fields: [stockItemId], references: [id], onDelete: Restrict)
+  recallCases ImplantRecallCase[]
+
+  @@index([hospitalId, patientId, implantedAt(sort: Desc)])
+  @@index([hospitalId, surgeonId, implantedAt(sort: Desc)])
+  @@index([hospitalId, fractureId])
+  @@map("implant_usages")
+  @@schema("clinical")
+}
+
+/// A field safety notice. The query that matters runs off this.
+model ImplantRecall {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  reference   String  @db.VarChar(80)
+  catalogueId String? @map("catalogue_id") @db.Uuid
+  /// Either a device identifier or a set of lots. One of the two is required —
+  /// a recall that names neither cannot find anybody.
+  udiDi String? @map("udi_di") @db.VarChar(60)
+  lotNos String[] @default([]) @map("lot_nos")
+
+  manufacturer String  @db.VarChar(160)
+  /// `recall` | `field_safety_notice` | `advisory`. Only the first withdraws.
+  kind     String @default("field_safety_notice") @db.VarChar(32)
+  severity String @default("medium") @db.VarChar(16)
+  summary  String @db.Text
+  actionRequired String @map("action_required") @db.Text
+
+  issuedOn   DateTime  @map("issued_on") @db.Date
+  receivedAt DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+  /// When the patient list was produced. The interval from `receivedAt` is the
+  /// number a regulator asks for.
+  patientsIdentifiedAt DateTime? @map("patients_identified_at") @db.Timestamptz(6)
+  closedAt             DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  catalogue ImplantCatalogueItem? @relation(fields: [catalogueId], references: [id], onDelete: SetNull)
+  cases     ImplantRecallCase[]
+
+  @@unique([hospitalId, reference], map: "uq_implant_recall_reference")
+  @@index([hospitalId, closedAt])
+  @@map("implant_recalls")
+  @@schema("clinical")
+}
+
+/// One patient on one recall. Notified, and did they answer.
+model ImplantRecallCase {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  recallId   String @map("recall_id") @db.Uuid
+  usageId    String @map("usage_id") @db.Uuid
+
+  patientId String @map("patient_id") @db.Uuid
+  surgeonId String @map("surgeon_id") @db.Uuid
+
+  notifiedPatientAt DateTime? @map("notified_patient_at") @db.Timestamptz(6)
+  notifiedSurgeonAt DateTime? @map("notified_surgeon_at") @db.Timestamptz(6)
+  /// `pending` | `acknowledged` | `reviewed` | `revised` | `declined` |
+  /// `unreachable` | `deceased`. Unreachable is a real outcome and must be
+  /// distinguishable from nobody having tried.
+  response       String  @default("pending") @db.VarChar(24)
+  responseAt     DateTime? @map("response_at") @db.Timestamptz(6)
+  contactAttempts Int     @default(0) @map("contact_attempts")
+  notes          String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  recall ImplantRecall @relation(fields: [recallId], references: [id], onDelete: Cascade)
+  usage  ImplantUsage  @relation(fields: [usageId], references: [id], onDelete: Restrict)
+
+  @@unique([recallId, usageId], map: "uq_recall_case_per_usage")
+  @@index([hospitalId, recallId, response])
+  @@index([hospitalId, patientId])
+  @@map("implant_recall_cases")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-005
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Somebody asked for a cast, a splint, a brace or traction.
+model CastRequest {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId  String  @map("patient_id") @db.Uuid
+  fractureId String? @map("fracture_id") @db.Uuid
+  erVisitId  String? @map("er_visit_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+
+  kind ImmobilisationKind
+  /// The limb. Compared against the fracture's, the same rule as TR-002 §B.1.
+  side String @db.VarChar(16)
+  bodyRegion String @map("body_region") @db.VarChar(80)
+
+  /// The position to immobilise in — "20° flexion", "neutral", "scaphoid".
+  position String? @db.VarChar(120)
+  material String? @db.VarChar(60)
+  /// Whether the limb may bear weight in it.
+  ///
+  /// The fracture plan's own enum, not a string beside it. A cast that records
+  /// "PWB" while the plan says `nwb` is two instructions for one leg, and the
+  /// patient follows whichever they were handed. Same vocabulary, one answer.
+  weightBearing WeightBearing? @map("weight_bearing")
+
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  requestedBy String?  @map("requested_by") @db.Uuid
+  urgency     String   @default("routine") @db.VarChar(16)
+  instructions String? @db.Text
+
+  status ImmobilisationStatus @default(requested)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  applications CastApplication[]
+
+  @@index([hospitalId, branchId, status, requestedAt(sort: Desc)])
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, fractureId])
+  @@map("cast_requests")
+  @@schema("clinical")
+}
+
+/// It was applied. Now somebody has to watch it.
+model CastApplication {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  requestId  String @map("request_id") @db.Uuid
+
+  kind ImmobilisationKind
+  /// Carried again so a change can move the limb only by writing a new row —
+  /// and so a cast on the wrong side is comparable against the request.
+  side String @db.VarChar(16)
+
+  material  String  @db.VarChar(60)
+  position  String? @db.VarChar(120)
+  padding   String? @db.VarChar(80)
+  /// Where it was done: plaster room, ER, ward, theatre.
+  appliedIn String  @map("applied_in") @db.VarChar(40)
+
+  appliedAt DateTime @default(now()) @map("applied_at") @db.Timestamptz(6)
+  appliedBy String?  @map("applied_by") @db.Uuid
+
+  /// The warning instructions the patient was given, in the language they were
+  /// given in. `phase-06` §6.9: a warning nobody could read is not a warning.
+  instructionsGivenLocale String? @map("instructions_given_locale") @db.VarChar(12)
+  instructionsGivenAt     DateTime? @map("instructions_given_at") @db.Timestamptz(6)
+
+  /// When the next check is due. A cast with no check date is a cast nobody
+  /// looks at until the patient comes back with a problem.
+  nextCheckDueAt DateTime? @map("next_check_due_at") @db.Timestamptz(6)
+  plannedRemovalAt DateTime? @map("planned_removal_at") @db.Timestamptz(6)
+
+  removedAt DateTime? @map("removed_at") @db.Timestamptz(6)
+  removedBy String?   @map("removed_by") @db.Uuid
+  removalNotes String? @map("removal_notes") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  request CastRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  checks  CastCheck[]
+  pinSites PinSiteSchedule[]
+
+  @@index([hospitalId, requestId])
+  @@index([hospitalId, nextCheckDueAt])
+  @@map("cast_applications")
+  @@schema("clinical")
+}
+
+/// The complication watch. Three of these fields together are an emergency.
+model CastCheck {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  applicationId String @map("application_id") @db.Uuid
+
+  at   DateTime @default(now()) @db.Timestamptz(6)
+  byId String?  @map("by_id") @db.Uuid
+  /// `scheduled` | `unscheduled` | `telephone` | `patient_photo`.
+  kind String @default("scheduled") @db.VarChar(24)
+
+  // ── The compartment-syndrome triad ────────────────────────────────────────
+  // Pain out of proportion, pain on passive stretch, and paraesthesia. Each is
+  // a structured field because the classic miss is that each was mentioned to a
+  // different person and nobody put the three together.
+  painOutOfProportion Boolean @default(false) @map("pain_out_of_proportion")
+  painOnPassiveStretch Boolean @default(false) @map("pain_on_passive_stretch")
+  paraesthesia        Boolean @default(false)
+  pallor              Boolean @default(false)
+  pulselessness       Boolean @default(false)
+  /// Swelling, tightness, a pressure area, a smell, a stain.
+  otherFindings String[] @default([]) @map("other_findings")
+
+  capillaryRefillSec Int?    @map("capillary_refill_sec")
+  skinIntact         Boolean @default(true) @map("skin_intact")
+  castIntact         Boolean @default(true) @map("cast_intact")
+  neurovascularIntact Boolean @default(true) @map("neurovascular_intact")
+
+  /// True when any red flag fired. Set by the database — §B.4 — so it cannot
+  /// be recorded as a normal check with a red flag ticked underneath it.
+  redFlag Boolean @default(false) @map("red_flag")
+  /// What was done about it. §B.5 refuses a red-flag check without one.
+  actionTaken String? @map("action_taken") @db.Text
+  escalatedTo String? @map("escalated_to") @db.Uuid
+
+  photoRef String? @map("photo_ref") @db.VarChar(300)
+  notes    String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  application CastApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, applicationId, at(sort: Desc)])
+  @@index([hospitalId, redFlag, at(sort: Desc)])
+  @@map("cast_checks")
+  @@schema("clinical")
+}
+
+/// External fixator and traction pins. Infection here loses the frame.
+model PinSiteSchedule {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  applicationId String @map("application_id") @db.Uuid
+
+  pinLabel String @map("pin_label") @db.VarChar(40)
+  /// Days between dressings. Weekly is usual once the sites have settled.
+  intervalDays Int @default(7) @map("interval_days")
+
+  lastCareAt DateTime? @map("last_care_at") @db.Timestamptz(6)
+  nextDueAt  DateTime  @map("next_due_at") @db.Timestamptz(6)
+
+  /// Checketts-Otterburn grade 1-6. Grade 3 and above needs antibiotics; 5 and
+  /// above usually means the pin comes out.
+  infectionGrade Int?    @map("infection_grade")
+  notes          String? @db.Text
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  application CastApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, pinLabel], map: "uq_pin_site_label")
+  @@index([hospitalId, isActive, nextDueAt])
+  @@map("pin_site_schedules")
+  @@schema("clinical")
+}

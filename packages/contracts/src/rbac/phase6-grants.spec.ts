@@ -303,6 +303,36 @@ describe('Phase 6 — trauma and medico-legal grants', () => {
         'quality_manager',
       ],
       ortho: ['surgeon', 'doctor_consultant_opd', 'nurse_opd', 'therapist'],
+      implant: [
+        'surgeon',
+        'nurse_ot_scrub',
+        'doctor_consultant_opd',
+        'doctor_ip',
+        'doctor_emergency',
+        'anaesthetist',
+        'intensivist',
+        'resident_doctor',
+        // Radiology holds these because a conditional implant in a 3T scanner
+        // is a burn, and the conditionality lives on the catalogue entry.
+        'radiologist',
+        'radiology_technician',
+        'stores_keeper',
+        'purchase_officer',
+        'quality_manager',
+        'biomedical_engineer',
+      ],
+      cast: [
+        'surgeon',
+        'doctor_consultant_opd',
+        'doctor_emergency',
+        'doctor_ip',
+        'intensivist',
+        'resident_doctor',
+        'nurse_opd',
+        'nurse_er_triage',
+        'nurse_ward',
+        'therapist',
+      ],
     };
 
     const phase6 = new Set(PERMISSION_CATALOGUE.filter((p) => p.phase === 6).map((p) => p.key));

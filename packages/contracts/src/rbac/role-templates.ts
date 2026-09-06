@@ -398,6 +398,78 @@ const ORTHO_CLINIC = [
   'ortho.prom.collect',
 ] as const;
 
+/**
+ * TR-003 — whoever is holding the box.
+ *
+ * Recording the device is deliberately at the trolley, not at the desk. The
+ * failure mode this avoids is the surgeon typing a serial from memory in the
+ * evening, which is exactly the record a field safety notice cannot match.
+ */
+const IMPLANT_AT_THE_TROLLEY = [
+  'implant.catalogue.read',
+  'implant.stock.read',
+  'implant.usage.record',
+  'implant.usage.manual',
+  'implant.usage.read',
+] as const;
+
+/** The surgeon: the same, plus taking one out and saying why. */
+const IMPLANT_SURGEON = [...IMPLANT_AT_THE_TROLLEY, 'implant.usage.explant'] as const;
+
+/**
+ * Anyone who has to know what is inside a patient before they act.
+ *
+ * Radiology is the reason this bundle exists separately: a conditional implant
+ * in a 3T scanner is a burn, and the conditionality is a property of the
+ * catalogue entry, not of anything on the request form.
+ */
+const IMPLANT_LOOKUP = ['implant.catalogue.read', 'implant.usage.read'] as const;
+
+/**
+ * Running a recall.
+ *
+ * Held by quality rather than by the store, because the store is who bought the
+ * device. The person reconciling a field safety notice should not be the person
+ * whose purchasing it reflects on.
+ */
+const IMPLANT_RECALL_OFFICER = [
+  'implant.catalogue.read',
+  'implant.stock.read',
+  'implant.usage.read',
+  'implant.recall.manage',
+  'implant.recall.read',
+  'implant.recall.contact',
+  'implant.trace.query',
+] as const;
+
+/** The implant store: the catalogue, the shelf, and what a recall means for it. */
+const IMPLANT_STORE = [
+  'implant.catalogue.read',
+  'implant.catalogue.manage',
+  'implant.stock.read',
+  'implant.stock.receive',
+  'implant.stock.adjust',
+  'implant.recall.read',
+] as const;
+
+/**
+ * TR-005 — the plaster room.
+ *
+ * Applying and checking is routine work and reads that way. `cast.remove` is
+ * not in here: a cast off three weeks early is a fracture that displaces in the
+ * car park, so it sits with the people who set the plan.
+ */
+const PLASTER_ROOM = [
+  'cast.request.create',
+  'cast.request.read',
+  'cast.apply',
+  'cast.check.record',
+  'cast.pinsite.manage',
+] as const;
+
+/** The neurovascular check, for anyone at the bedside who is not applying plaster. */
+const CAST_WATCH = ['cast.request.read', 'cast.check.record'] as const;
+
 const FLEET_DISPATCH = [
   'fleet.vehicle.read',
   'fleet.request.create',
@@ -2085,6 +2157,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'doctor-opd',
     permissions: [
+      ...IMPLANT_LOOKUP,
+      ...PLASTER_ROOM,
+      'cast.remove',
       ...FRACTURE_SURGEON,
       'mlc.case.read',
       ...DIAGNOSTIC_ORDERING,
@@ -2119,6 +2194,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...IMPLANT_LOOKUP,
+      ...CAST_WATCH,
       ...FRACTURE_FLOOR,
       'fleet.request.create',
       'fleet.request.read',
@@ -2147,6 +2224,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...IMPLANT_LOOKUP,
+      ...PLASTER_ROOM,
       ...FRACTURE_FLOOR,
       ...PREHOSPITAL_RECEIVER,
       'prehospital.prealert.divert',
@@ -2200,6 +2279,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...IMPLANT_SURGEON,
+      ...PLASTER_ROOM,
+      'cast.remove',
       ...FRACTURE_SURGEON,
       'mlc.case.read',
       'mlc.injury.write',
@@ -2236,6 +2318,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'anaesthesia-worklist',
     permissions: [
+      ...IMPLANT_LOOKUP,
       ...TRAUMA_TEAM,
       ...DIAGNOSTIC_ORDERING,
 
@@ -2259,6 +2342,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'icu-board',
     permissions: [
+      ...IMPLANT_LOOKUP,
+      ...CAST_WATCH,
       'mlc.case.read',
       'mlc.injury.write',
       ...TRAUMA_TEAM,
@@ -2285,6 +2370,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'radiology-reading',
     permissions: [
+      ...IMPLANT_LOOKUP,
       'fracture.record.read',
       'fracture.record.list',
       'fracture.imaging.assess',
@@ -2336,6 +2422,8 @@ const templates: readonly RoleTemplate[] = [
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
     permissions: [
+      ...IMPLANT_LOOKUP,
+      ...PLASTER_ROOM,
       ...FRACTURE_FLOOR,
       ...TRAUMA_TEAM,
       ...DIAGNOSTIC_RESULTS_READER,
@@ -2387,6 +2475,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      ...PLASTER_ROOM,
       ...ORTHO_CLINIC,
       ...WARD_DIAGNOSTICS,
 
@@ -2427,6 +2516,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...CAST_WATCH,
       'fleet.request.create',
       'fleet.request.read',
       ...WARD_DIAGNOSTICS,
@@ -2495,6 +2585,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'triage-board',
     permissions: [
+      ...PLASTER_ROOM,
       ...PREHOSPITAL_RECEIVER,
       ...MLC_FLOOR,
       ...ER_FLOOR,
@@ -2537,6 +2628,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'ot-checklist',
     permissions: [
+      ...IMPLANT_AT_THE_TROLLEY,
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
       'barcode.verify.implant',
@@ -2989,6 +3081,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'radiology-modality',
     permissions: [
+      ...IMPLANT_LOOKUP,
       ...RADIOLOGY_MODALITY,
       ...INVESTIGATION_TECH,
       ...BASE_CLINICAL,
@@ -3057,6 +3150,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'therapy',
     homeWorkspace: 'therapy-schedule',
     permissions: [
+      ...CAST_WATCH,
       ...BASE_CLINICAL,
       ...SIGNS_DOCUMENTS,
       'fracture.record.read',
@@ -3172,6 +3266,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'supply',
     homeWorkspace: 'stores',
     permissions: [
+      ...IMPLANT_STORE,
       ...BASE_STAFF,
       'barcode.scan',
       ...LABEL_PRINTER,
@@ -3198,6 +3293,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'supply',
     homeWorkspace: 'procurement',
     permissions: [
+      ...IMPLANT_STORE,
       ...BASE_STAFF,
       ...APPROVER,
       'wf.decide.bulk',
@@ -3423,6 +3519,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'facilities',
     homeWorkspace: 'biomedical',
     permissions: [
+      'implant.catalogue.read',
+      'implant.stock.read',
+      'implant.recall.read',
       'fleet.vehicle.read',
       'fleet.maintenance.manage',
       'labq.equipment.manage',
@@ -3592,6 +3691,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'quality',
     permissions: [
+      ...IMPLANT_RECALL_OFFICER,
       'fracture.record.list',
       'fleet.report.read',
       'mlc.register.read',

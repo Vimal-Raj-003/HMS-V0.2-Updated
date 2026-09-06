@@ -401,6 +401,101 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-06 (night) · Phase 6 · TR-003 + TR-005 — the recall list, and the limb inside the plaster
+
+**Built — TR-003 and TR-005, complete.** 9 tables, 19 permission keys, 9 events,
+3 screens. **Exit gate 8 passes**: given a lot number, the register returns the
+exact patients carrying that device — by device, side, surgeon and date — and
+says how many of those records were typed rather than scanned.
+
+**The whole module is one query, and everything else defends it**
+
+`phase-06` calls the trace "the single most important test in this deliverable".
+A hip-stem recall with an incomplete list is people still walking on a withdrawn
+device. So each rule below exists because it is a way the list comes back short:
+
+| Rule                                                          | The short list it prevents                                            |
+| ------------------------------------------------------------- | --------------------------------------------------------------------- |
+| A device is booked in with a serial **or** a lot              | A device with neither can never be found by a notice                  |
+| A catalogue entry carries a UDI **or** a catalogue number     | An entry nobody can look up                                           |
+| One catalogue row per UDI-DI per hospital                     | Two rows for one device → the notice matches one and misses the other |
+| Scanned means a payload; unscanned means stated grounds       | A serial typed from memory, unexplained and unmatchable               |
+| An implanted device cannot return to `available`              | One device given to two patients                                      |
+| An implant record is never deleted, its patient never changed | The only evidence of what is inside somebody                          |
+| A recall names a device or a list of lots                     | A notice that cannot produce a patient list at all                    |
+| `unreachable` needs two recorded attempts                     | A phone call nobody made twice                                        |
+| A recall cannot close while anybody is `pending`              | A notice closed with people uninformed                                |
+
+All nine are triggers, CHECKs or partial unique indexes, proved in both
+directions against the live database and again over HTTP.
+
+**The number that is never hidden.** The trace reports `2 patients, 2 still
+carrying it, 1 entered by hand — those serials were typed, not scanned`. "11
+patients" reads as a finished answer; the unscanned count is the confidence
+interval on it, and a recall desk that cannot see it will treat a short list as
+a complete one.
+
+**TR-005 — the database decides what a red flag is.** `cast_checks.red_flag` is
+computed by a `BEFORE INSERT` trigger from the findings, and a check that raises
+one and records no action is refused. Submitting `red_flag: false` alongside
+pain on passive stretch and paraesthesia still stores `true` — the form does not
+get a vote. The screen predicts the same rule so the question "what did you do
+about it?" appears the moment a finding is ticked, before the submit rather than
+after the refusal; that is the explanation, not the enforcement.
+
+A clear check buys twenty-four hours. **A red flag brings the next look forward
+to one hour** — bivalving a cast is a measure whose effect has to be looked at
+again while there is still time to act, and leaving the limb on tomorrow's list
+is how the second look does not happen.
+
+**Six defects found by driving it, five of them in this module's own schema**
+
+1. `cast_requests.weight_bearing` was `VarChar(16)`, too narrow for
+   `non_weight_bearing` — and wrong in kind. TR-002 already has a `WeightBearing`
+   enum. A cast recording "PWB" while the plan says `nwb` is two instructions for
+   one leg, so it is now the same enum, not a string beside it.
+2. The laterality trigger printed `<NULL> <NULL>` when the request row did not
+   exist. It now returns early and lets the foreign key speak, which states the
+   actual problem.
+3. `implant_catalogue.catalogue_no` was `NOT NULL`, forcing a local number to be
+   invented for an imported device that carries only a UDI. Now nullable, with a
+   CHECK that one of the two is present.
+4. No unique index on `(hospital_id, udi_di)` — the exact way a recall list
+   splits in half. Added, partial, because most local consumables have no UDI.
+5. `implant_usages.side` was optional in the request schema and `NOT NULL` in the
+   table. Required now: `not_applicable` is a statement, a blank is an omission,
+   and laterality is the one field this module will not let go unstated.
+6. Three Postgres parameter-type failures (`$3` compared against a literal and
+   cast to an enum; `$12` in a bare `CASE WHEN … IS NULL`) that surfaced only as
+   500s under real traffic.
+
+**A seventh defect, outside this module.** `inSituOnly` was declared
+`z.boolean()` on a query schema, so `?inSituOnly=false` arrived as the string
+`"false"` and was rejected. Swept the repo: three more query schemas had it —
+`leakage.isActive`, `vitals.patientInformed`, and `inventory.carriesBatchExpiry`
+/`isPrimary`, the last two of which were `z.coerce.boolean()`, which is worse
+because it coerces `"false"` to `true`. All four now use the `queryFlag()`
+helper.
+
+**Tested** — every constraint above proved live in both directions; the recall
+driven end to end over HTTP (opened → 2 patients identified → close refused with
+both pending → one unreachable refused on the first attempt, accepted on the
+second → one reviewed → closed); the cast flow driven likewise (wrong-side
+request refused, wrong-side application refused, red flag with no action
+refused, red flag submitted as `false` stored as `true`, early removal by the
+surgeon with grounds, ward nurse refused the removal key); and all three screens
+driven in a real browser with zero console errors.
+
+**Gates** — 20/20 packages typecheck, lint and test (2,919 → **2,925 tests**);
+**618 routes across 59 controllers**; catalogue 1,004 → **1,023 keys**; event
+registry → **722**; hex-literal, chart-palette, gate-script, alert-runbook and
+permission-key all clean.
+
+**Still missing, same as every module here:** no e2e golden path and no k6 script
+for TR-003 or TR-005, so neither meets `CLAUDE.md` §7's Definition of Done.
+
+**Next:** TR-007 (polytrauma coordination board), which completes Phase 6.
+
 ### 2026-09-06 (late) · Phase 6 · TR-002 + OP-009 — the fracture registry, and the wrong-site rule
 
 **Built — TR-002 and OP-009, complete.** 12 tables, 16 permission keys, 6

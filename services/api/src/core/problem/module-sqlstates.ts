@@ -29,6 +29,8 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'TR009', // pre-hospital record, pre-alert, handover
   'NC013', // ambulance fleet: dispatch, documents, billing
   'TR002', // fracture registry: laterality, classification, union
+  'TR003', // implant traceability: permanence, reuse, recall closure
+  'TR005', // cast and traction: laterality, the red flag and its action
 ]);
 
 /**

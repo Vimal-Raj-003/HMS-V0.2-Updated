@@ -9402,6 +9402,149 @@ const fractureEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * TR-003 + TR-005 — implants and plaster.
+ *
+ * `implant.recall.opened` is the one with teeth. It carries the identified
+ * patient count at the moment the notice was opened, so the number cannot be
+ * quietly revised downward later — a recall that "found" three patients on
+ * Monday and two on Friday is a recall somebody edited.
+ */
+const implantAndCastEvents: readonly EventDefinition[] = [
+  ev(
+    'implant.recorded',
+    'implant_usage',
+    'TR-003',
+    'A device went into a patient. Billing takes the charge from this; the recall query reads the same row years later.',
+    z.object({
+      usageId: uuid,
+      patientId: uuid,
+      stockItemId: uuid,
+      udiDi: z.string().nullable(),
+      serialNo: z.string().nullable(),
+      lotNo: z.string().nullable(),
+      side: z.string().nullable(),
+      scanned: z.boolean(),
+      mriConditionality: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'implant.recorded.unscanned',
+    'implant_usage',
+    'TR-003',
+    'A device was entered by hand rather than scanned. Separate from `implant.recorded` on purpose — this is the population a recall will struggle to match, and it should be countable without parsing a flag.',
+    z.object({
+      usageId: uuid,
+      patientId: uuid,
+      reason: z.string(),
+      enteredBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'implant.explanted',
+    'implant_usage',
+    'TR-003',
+    'A device came out. The record stays; a recall list must still know it was once there.',
+    z.object({
+      usageId: uuid,
+      patientId: uuid,
+      reason: z.string(),
+      dwellDays: z.number().int().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'implant.recall.opened',
+    'implant_recall',
+    'TR-003',
+    'A field safety notice was opened. The count of patients identified is fixed here, at the moment of opening.',
+    z.object({
+      recallId: uuid,
+      reference: z.string(),
+      manufacturer: z.string(),
+      severity: z.string(),
+      lotNos: z.array(z.string()),
+      udiDi: z.string().nullable(),
+      patientsIdentified: z.number().int(),
+    }),
+    { retentionDays: 5475 },
+  ),
+  ev(
+    'implant.recall.patient_contacted',
+    'implant_recall',
+    'TR-003',
+    'Somebody on a recall was reached, or an attempt was made and failed.',
+    z.object({
+      recallId: uuid,
+      caseId: uuid,
+      patientId: uuid,
+      response: z.string(),
+      attempt: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'implant.recall.closed',
+    'implant_recall',
+    'TR-003',
+    'Every patient on a recall was accounted for and the notice was closed. The database refuses to emit this while anybody is still pending.',
+    z.object({
+      recallId: uuid,
+      reference: z.string(),
+      patients: z.number().int(),
+      unreachable: z.number().int(),
+      daysOpen: z.number().int(),
+    }),
+    { retentionDays: 5475 },
+  ),
+  ev(
+    'cast.applied',
+    'cast_application',
+    'TR-005',
+    'Plaster went on. Carries the next check due time, which is what the ward list is built from.',
+    z.object({
+      applicationId: uuid,
+      requestId: uuid,
+      patientId: uuid,
+      kind: z.string(),
+      side: z.string(),
+      nextCheckDueAt: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'cast.check.red_flag',
+    'cast_check',
+    'TR-005',
+    'A neurovascular check found a red flag. Pain out of proportion in a limb in plaster is compartment syndrome until proven otherwise, and the window is hours — so this is an alert, not a log line.',
+    z.object({
+      checkId: uuid,
+      applicationId: uuid,
+      patientId: uuid,
+      findings: z.array(z.string()),
+      actionTaken: z.string(),
+      escalatedTo: uuid.nullable(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'cast.removed',
+    'cast_application',
+    'TR-005',
+    'A cast came off. An early removal carries the grounds it was taken off on.',
+    z.object({
+      applicationId: uuid,
+      patientId: uuid,
+      daysInPlace: z.number().int(),
+      early: z.boolean(),
+      reason: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -9466,6 +9609,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...mlcEvents,
   ...prehospitalEvents,
   ...fractureEvents,
+  ...implantAndCastEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

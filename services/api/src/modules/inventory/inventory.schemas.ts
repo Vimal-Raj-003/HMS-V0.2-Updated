@@ -285,8 +285,8 @@ export const mapBarcodeSchema = z.object({
   value: z.string().trim().min(1).max(64),
   symbology: z.string().trim().max(32).default('gs1_datamatrix'),
   itemUomId: uuid.optional(),
-  carriesBatchExpiry: z.boolean().default(false),
-  isPrimary: z.boolean().default(false),
+  carriesBatchExpiry: queryFlag().default(false),
+  isPrimary: queryFlag().default(false),
 });
 export type MapBarcodeRequest = z.infer<typeof mapBarcodeSchema>;
 

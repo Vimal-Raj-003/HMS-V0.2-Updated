@@ -1,3 +1,4 @@
+import { queryFlag } from '@vims/contracts';
 import { z } from 'zod';
 
 /** RC-006 request contracts. */
@@ -32,7 +33,7 @@ export const upsertRuleSchema = z.object({
   minGapAmount: money.default(0),
   severity: z.enum(SEVERITIES).default('medium'),
   lookbackDays: z.coerce.number().int().min(1).max(3650).default(30),
-  isActive: z.boolean().default(true),
+  isActive: queryFlag().default(true),
   notes: z.string().trim().max(2000).optional(),
 });
 export type UpsertRuleRequest = z.infer<typeof upsertRuleSchema>;

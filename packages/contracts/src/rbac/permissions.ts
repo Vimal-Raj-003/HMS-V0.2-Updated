@@ -8376,6 +8376,181 @@ const OP009 = group('OP-009', 6, [
   ),
 ]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-003 — implant traceability
+//
+// The severity here is set by what a mistake costs at recall time, not by how
+// consequential the click feels. Recording a device is `low` and held by the
+// scrub nurse who is holding the box, because the alternative — the surgeon
+// entering it from memory in the evening — is how a lot number becomes wrong.
+// Overriding the scan is where the reason is demanded, because a manual entry
+// is the one that will not match anything when the field safety notice arrives.
+// ─────────────────────────────────────────────────────────────────────────────
+const TR003 = group('TR-003', 6, [
+  p(
+    'implant.catalogue.read',
+    'implant_catalogue',
+    'read',
+    'operational',
+    'low',
+    'Look up a device: its UDI, its MRI conditionality, what it costs.',
+  ),
+  p(
+    'implant.catalogue.manage',
+    'implant_catalogue',
+    'update',
+    'operational',
+    'medium',
+    'Add or amend a catalogue entry. The UDI-DI is unique per hospital — two entries for one device is two half-populated recall lists.',
+  ),
+  p(
+    'implant.stock.read',
+    'implant_stock',
+    'read',
+    'operational',
+    'low',
+    'See what is on the shelf, its lot, and when it expires.',
+  ),
+  p(
+    'implant.stock.receive',
+    'implant_stock',
+    'create',
+    'operational',
+    'low',
+    'Book a device in against its serial or its lot. A device with neither is refused — it cannot be recalled.',
+  ),
+  p(
+    'implant.stock.adjust',
+    'implant_stock',
+    'update',
+    'operational',
+    'medium',
+    'Quarantine, waste or return a device. An implanted one cannot go back to available.',
+  ),
+  p(
+    'implant.usage.record',
+    'implant_usage',
+    'create',
+    'phi',
+    'low',
+    'Record a device into a patient. Held by whoever is at the trolley — the box is in their hand and the barcode is on it.',
+  ),
+  p(
+    'implant.usage.manual',
+    'implant_usage',
+    'override',
+    'phi',
+    'medium',
+    'Record a device without scanning it. The reason is kept with the record, because a hand-typed serial is the one that will not match a recall.',
+    { requiresReason: true },
+  ),
+  p(
+    'implant.usage.read',
+    'implant_usage',
+    'read',
+    'phi',
+    'low',
+    'See what is inside a patient — and its MRI conditionality before they go in the scanner.',
+    { phiRead: true },
+  ),
+  p(
+    'implant.usage.explant',
+    'implant_usage',
+    'update',
+    'phi',
+    'medium',
+    'Record that a device came out, and why. The record is never deleted; an explant is an ending, not an erasure.',
+  ),
+  p(
+    'implant.recall.manage',
+    'implant_recall',
+    'create',
+    'operational',
+    'high',
+    'Open a field safety notice against a device or a list of lots, and work it to closure.',
+  ),
+  p(
+    'implant.recall.read',
+    'implant_recall',
+    'read',
+    'phi',
+    'medium',
+    'See who is carrying a recalled device, and where each of them has got to.',
+    { phiRead: true },
+  ),
+  p(
+    'implant.recall.contact',
+    'implant_recall',
+    'record',
+    'phi',
+    'low',
+    'Record an attempt to reach a patient on a recall, and what came of it.',
+  ),
+  p(
+    'implant.trace.query',
+    'implant_usage',
+    'export',
+    'phi',
+    'high',
+    'The recall query: given a UDI or a lot, the exact list of patients carrying it. Audited every time, because it is a list of names.',
+    { requiresReason: true },
+  ),
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-005 — cast, splint, brace and traction
+//
+// Applying plaster is a technician's job and reads that way. The one key that
+// is not routine is removing a cast against the plan, because a cast that comes
+// off three weeks early is a fracture that displaces in the car park.
+// ─────────────────────────────────────────────────────────────────────────────
+const TR005 = group('TR-005', 6, [
+  p(
+    'cast.request.create',
+    'cast_request',
+    'create',
+    'phi',
+    'low',
+    'Ask for a cast, splint, brace or traction. The side is checked against the fracture.',
+  ),
+  p('cast.request.read', 'cast_request', 'read', 'phi', 'low', 'See the plaster-room list.', {
+    phiRead: true,
+  }),
+  p(
+    'cast.apply',
+    'cast_application',
+    'create',
+    'phi',
+    'low',
+    'Record what was applied, in what position, and when it is next to be checked.',
+  ),
+  p(
+    'cast.check.record',
+    'cast_check',
+    'record',
+    'phi',
+    'low',
+    'Record a neurovascular check. The red flag is computed from the findings, and a red flag with no action is refused.',
+  ),
+  p(
+    'cast.remove',
+    'cast_application',
+    'complete',
+    'phi',
+    'medium',
+    'Take a cast off. Before the planned date it needs stated grounds — an early removal is a fracture that can still displace.',
+    { requiresReason: true },
+  ),
+  p(
+    'cast.pinsite.manage',
+    'pin_site_schedule',
+    'update',
+    'phi',
+    'low',
+    'Run the pin-site care schedule and grade the sites, Checketts-Otterburn 1 to 6.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -8445,6 +8620,8 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...TR009,
   ...TR002,
   ...OP009,
+  ...TR003,
+  ...TR005,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

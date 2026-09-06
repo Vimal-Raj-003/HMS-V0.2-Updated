@@ -1,3 +1,4 @@
+import { queryFlag } from '@vims/contracts';
 import { z } from 'zod';
 
 /**
@@ -209,7 +210,7 @@ export const acknowledgeAlertSchema = z.object({
   actionTaken: z.enum(VITALS_ALERT_ACTIONS).default('none'),
   note: z.string().trim().max(2000).optional(),
   /** Whether the patient/relative was told, for the closed-loop record. */
-  patientInformed: z.boolean().default(false),
+  patientInformed: queryFlag().default(false),
 });
 
 export type AcknowledgeAlertRequest = z.infer<typeof acknowledgeAlertSchema>;
