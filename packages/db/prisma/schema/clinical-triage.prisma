@@ -108,6 +108,16 @@ model TriageRecord {
   /// 1 for each re-triage. The first record is 1.
   sequenceNo Int @map("sequence_no")
 
+  /// `triage` | `prehospital_handover`.
+  ///
+  /// A handover record carries the crew's last road observations and **no
+  /// category**, because assigning one is the receiving nurse's clinical act
+  /// and the crew did not record the ESI decision points. It is a genuine third
+  /// state: the patient was looked at, and nothing has been decided yet. The
+  /// nurse's own triage arrives as sequence 2, and both survive — which is the
+  /// same rule as every other re-triage here.
+  source String @default("triage") @db.VarChar(24)
+
   // ── ESI ───────────────────────────────────────────────────────────────────
   /// 1–5. Null for a START triage, which uses `tag` instead.
   esiLevel Int? @map("esi_level")

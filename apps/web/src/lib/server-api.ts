@@ -1,7 +1,6 @@
 import { cookies } from 'next/headers';
 import { ACCESS_COOKIE } from './session';
-
-const API_ORIGIN = process.env['API_ORIGIN'] ?? 'http://127.0.0.1:3001';
+import { API_ORIGIN } from './api-origin';
 
 /**
  * Server-side call to `services/api` on behalf of the signed-in user.

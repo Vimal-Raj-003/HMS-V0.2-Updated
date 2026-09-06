@@ -1,0 +1,350 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-009 — the pre-hospital patient care record (schema `clinical`)
+//
+// `phase-06` §6.11, exit gate 1. The journey lives in `ops.fleet_trips`; what
+// happened to the patient during it lives here. See `ops-fleet.prisma` for why
+// there is one trip table rather than two.
+//
+// ── Exit gate 1 is a data-shape claim ───────────────────────────────────────
+//
+// "The handover carries the vitals into triage with zero re-keying." The way
+// that is true is that `ph_vitals` and `clinical.triage_records` hold the same
+// observations in the same units, and the handover copies the last road set
+// into the first triage rather than presenting it for a nurse to retype. A
+// nurse retyping a blood pressure at 3 a.m. is a transposed digit, and a
+// transposed digit here is a triage level.
+//
+// ── Written with no signal, on a moving vehicle ─────────────────────────────
+//
+// Every table here carries `device_id`, `device_sequence` and
+// `recorded_offline`. The crew is in a van with no coverage; the tablet queues
+// and syncs on arrival. A monotonic per-device sequence is what lets two
+// tablets on the same multi-casualty trip merge without either overwriting the
+// other, which a server timestamp alone cannot do.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PrehospitalPathway {
+  trauma
+  stemi
+  stroke
+  sepsis
+  paediatric
+  obstetric
+  burns
+  mci
+  medical
+  other
+
+  @@schema("clinical")
+}
+
+enum PrealertStatus {
+  raised
+  acknowledged
+  /// The ER could not take it. Needs a reason and a named decider.
+  diverted
+  stood_down
+  arrived
+
+  @@schema("clinical")
+}
+
+enum InterventionType {
+  airway_adjunct
+  supraglottic
+  ett
+  oxygen
+  bvm
+  cpr_start
+  cpr_stop
+  defib_shock
+  iv_access
+  io_access
+  fluids
+  tourniquet_on
+  tourniquet_off
+  pelvic_binder
+  splint
+  c_collar
+  dressing
+  needle_decompression
+  nebulisation
+  glucose
+  other
+
+  @@schema("clinical")
+}
+
+/// One patient, one journey. The crew's record of it.
+model PrehospitalRecord {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  /// The `ops.fleet_trips` row. A fleet trip with no patient has no PCR.
+  tripId String @unique @map("trip_id") @db.Uuid
+
+  /// `{ name, unknown, sex, ageBand, identificationMarks }`. A PCR opens for
+  /// somebody with no name — the same rule as the ER front door.
+  patientTemp Json? @map("patient_temp")
+  patientId   String? @map("patient_id") @db.Uuid
+
+  /// The structured mechanism TR-001 reads to suggest an activation.
+  mechanism Json?
+  complaint String? @db.Text
+  /// `{ safety, bystanders, police, mlcSuspected, sceneType }`.
+  scene Json?
+
+  /// START category when this is a mass-casualty trip.
+  startCategory String? @map("start_category") @db.VarChar(16)
+  mciTagNo      String? @map("mci_tag_no") @db.VarChar(40)
+
+  primarySurvey Json?   @map("primary_survey")
+  allergies     String? @db.Text
+  medications   String? @db.Text
+  history       String? @db.Text
+
+  /// A patient who refused transport. Recorded with capacity and a witness,
+  /// because "they wouldn't come" is the note a coroner reads hardest.
+  refusal Json?
+
+  destinationReason String? @map("destination_reason") @db.VarChar(300)
+  consent           Json?
+
+  /// Written with no signal and synced later. The device sequence is what lets
+  /// two tablets on one multi-casualty trip merge without overwriting.
+  offlineCaptured Boolean   @default(false) @map("offline_captured")
+  deviceId        String?   @map("device_id") @db.VarChar(64)
+  deviceSequence  Int?      @map("device_sequence")
+  syncedAt        DateTime? @map("synced_at") @db.Timestamptz(6)
+
+  /// The EMT signs the record before handover. An unsigned PCR is a draft.
+  signedByEmtAt DateTime? @map("signed_by_emt_at") @db.Timestamptz(6)
+  signedByEmtId String?   @map("signed_by_emt_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vitals        PrehospitalVital[]
+  interventions PrehospitalIntervention[]
+  drugs         PrehospitalDrug[]
+  media         PrehospitalMedia[]
+  prealerts     PrehospitalPrealert[]
+  handover      PrehospitalHandover?
+
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, createdAt(sort: Desc)])
+  @@map("ph_pcr")
+  @@schema("clinical")
+}
+
+/// Every set taken on the road, in the units TR-001 triages in.
+model PrehospitalVital {
+  id     String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  pcrId  String @map("pcr_id") @db.Uuid
+
+  at  DateTime @db.Timestamptz(6)
+  /// Monotonic per device. Two tablets, one patient, no lost set.
+  seq Int      @default(1)
+
+  heartRate       Int?     @map("heart_rate")
+  systolicBp      Int?     @map("systolic_bp")
+  diastolicBp     Int?     @map("diastolic_bp")
+  respiratoryRate Int?     @map("respiratory_rate")
+  spo2            Int?
+  temperatureC    Decimal? @map("temperature_c") @db.Decimal(4, 1)
+  glucose         Int?
+  gcsEye          Int?     @map("gcs_eye")
+  gcsVerbal       Int?     @map("gcs_verbal")
+  gcsMotor        Int?     @map("gcs_motor")
+  gcsIntubated    Boolean  @default(false) @map("gcs_intubated")
+  pupils          Json?
+  painScore       Int?     @map("pain_score")
+
+  /// `manual` | `monitor`. A monitor figure and a hand-written one are not the
+  /// same evidence, and a review will want to know which this was.
+  source   String  @default("manual") @db.VarChar(16)
+  deviceId String? @map("device_id") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  pcr PrehospitalRecord @relation(fields: [pcrId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, pcrId, at])
+  @@map("ph_vitals")
+  @@schema("clinical")
+}
+
+/// What the crew did, and when. Append-only — the ER reads it as a timeline.
+model PrehospitalIntervention {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  pcrId      String @map("pcr_id") @db.Uuid
+
+  at   DateTime         @db.Timestamptz(6)
+  type InterventionType
+  /// `{ size, site, volumeMl, joules, attempts }`.
+  details     Json?
+  performedBy String? @map("performed_by") @db.VarChar(160)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  pcr PrehospitalRecord @relation(fields: [pcrId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, pcrId, at])
+  @@map("ph_interventions")
+  @@schema("clinical")
+}
+
+/// Drugs given on the road. These reach the MAR as "pre-hospital" so the ward
+/// does not re-dose — EN-029 reads them as administered, not as prescribed.
+model PrehospitalDrug {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  pcrId      String @map("pcr_id") @db.Uuid
+
+  at       DateTime @db.Timestamptz(6)
+  drugId   String?  @map("drug_id") @db.Uuid
+  drugName String   @map("drug_name") @db.VarChar(200)
+  dose     Decimal  @db.Decimal(10, 3)
+  unit     String   @db.VarChar(16)
+  route    String   @db.VarChar(24)
+  givenBy  String?  @map("given_by") @db.VarChar(160)
+
+  /// Morphine, ketamine, midazolam. Reconciled against the vehicle register at
+  /// handover, and the handover cannot complete until it is.
+  isControlled Boolean @default(false) @map("is_controlled")
+  registerRef  String? @map("register_ref") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  pcr PrehospitalRecord @relation(fields: [pcrId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, pcrId, at])
+  @@map("ph_drugs")
+  @@schema("clinical")
+}
+
+/// ECGs and scene photographs, hashed where they were taken.
+model PrehospitalMedia {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  pcrId      String @map("pcr_id") @db.Uuid
+
+  /// `photo` | `ecg` | `video` | `document`.
+  kind    String @db.VarChar(16)
+  fileRef String @map("file_ref") @db.VarChar(400)
+  sha256  String @db.Char(64)
+
+  capturedAt DateTime @map("captured_at") @db.Timestamptz(6)
+  deviceId   String?  @map("device_id") @db.VarChar(64)
+
+  /// A scene photograph becomes TR-008 evidence only when an ER doctor confirms
+  /// the MLC. The hash taken at capture travels with it, so the chain starts on
+  /// the roadside rather than at the hospital door.
+  mlcRelevant Boolean @default(false) @map("mlc_relevant")
+  evidenceId  String? @map("evidence_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  pcr PrehospitalRecord @relation(fields: [pcrId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, pcrId])
+  @@map("ph_media")
+  @@schema("clinical")
+}
+
+/// ATMIST to the ER, before arrival. Exit gate 1 starts here.
+model PrehospitalPrealert {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  pcrId      String @map("pcr_id") @db.Uuid
+  tripId     String @map("trip_id") @db.Uuid
+
+  raisedAt DateTime @default(now()) @map("raised_at") @db.Timestamptz(6)
+  raisedBy String?  @map("raised_by") @db.Uuid
+
+  /// Age, Time, Mechanism, Injuries, Signs, Treatment. The handover format the
+  /// receiving team is trained to hear, kept structured so the board can sort
+  /// on it rather than parsing a sentence.
+  atmist  Json
+  pathway PrehospitalPathway @default(other)
+
+  /// What the field values suggest: `none` | `level_2` | `level_1`. A
+  /// suggestion. The team is called by a person, in the ER, on TR-001.
+  suggestedActivation String  @default("none") @map("suggested_activation") @db.VarChar(16)
+  confirmedActivationId String? @map("confirmed_activation_id") @db.Uuid
+
+  etaAt DateTime? @map("eta_at") @db.Timestamptz(6)
+  /// The bay held for them. §6.11: a pre-alert is only useful if it reserves.
+  bayId String? @map("bay_id") @db.Uuid
+  /// The OP-006 visit created by the pre-alert, before anybody arrives.
+  erVisitId String? @map("er_visit_id") @db.Uuid
+
+  status         PrealertStatus @default(raised)
+  acknowledgedBy String?        @map("acknowledged_by") @db.Uuid
+  acknowledgedAt DateTime?      @map("acknowledged_at") @db.Timestamptz(6)
+  divertedTo     String?        @map("diverted_to") @db.VarChar(200)
+  divertReason   String?        @map("divert_reason") @db.Text
+
+  /// Appended, never rewritten: "SBP now 78", "intubated at 03:12". After
+  /// handover the pre-alert is frozen and updates are the only way to add.
+  updates Json @default("[]")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pcr PrehospitalRecord @relation(fields: [pcrId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, status, raisedAt(sort: Desc)])
+  @@index([hospitalId, tripId])
+  @@map("ph_prealerts")
+  @@schema("clinical")
+}
+
+/// The moment the patient stops being the crew's and starts being the ER's.
+model PrehospitalHandover {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  pcrId      String @unique @map("pcr_id") @db.Uuid
+  tripId     String @map("trip_id") @db.Uuid
+
+  /// The identity the patient now has. Either an ER visit or an MCI tag —
+  /// handing a patient to nobody is what the constraint refuses.
+  erVisitId String? @map("er_visit_id") @db.Uuid
+  mciTagNo  String? @map("mci_tag_no") @db.VarChar(40)
+
+  startedAt   DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  checklist Json?
+  emtSignId      String? @map("emt_sign_id") @db.Uuid
+  receiverSignId String? @map("receiver_sign_id") @db.Uuid
+
+  /// Arrival to handover complete. Over fifteen minutes is the ambulance
+  /// standing in the corridor, which is a bed-state problem wearing an
+  /// ambulance costume.
+  offloadMinutes Int? @map("offload_minutes")
+
+  discrepancies       String? @db.Text
+  equipmentExchanged  Json?   @map("equipment_exchanged")
+  /// Morphine given on the road is reconciled against the vehicle register
+  /// before the crew leaves. The handover cannot complete otherwise.
+  controlledDrugReconciled Boolean @default(false) @map("controlled_drug_reconciled")
+
+  /// The vitals carried into TR-001's first triage record, without re-keying.
+  /// Recorded so exit gate 1 is answerable from the data rather than by
+  /// somebody remembering the demo.
+  vitalsCarriedTriageId String? @map("vitals_carried_triage_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pcr PrehospitalRecord @relation(fields: [pcrId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, tripId])
+  @@index([hospitalId, completedAt(sort: Desc)])
+  @@map("ph_handovers")
+  @@schema("clinical")
+}

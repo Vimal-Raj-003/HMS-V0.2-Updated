@@ -8024,6 +8024,211 @@ const TR008 = group('TR-008', 6, [
   ),
 ]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-009 + NC-013 — the pre-hospital record and the ambulance fleet
+//
+// Two data classes in one build, and the keys reflect it. `fleet.*` is
+// operational: a dispatcher, a workshop clerk and a fuel-card reconciler all
+// hold parts of it and none of them reads a patient record. `prehospital.*` is
+// PHI: the crew writing the record, and the ER reading it before the ambulance
+// arrives.
+//
+// The one key that crosses is `prehospital.prealert.read`, held by the whole
+// emergency floor — the point of a pre-alert is that the receiving team sees it
+// without asking anybody.
+// ─────────────────────────────────────────────────────────────────────────────
+const NC013 = group('NC-013', 6, [
+  p(
+    'fleet.vehicle.read',
+    'fleet_vehicle',
+    'read',
+    'operational',
+    'low',
+    'See the fleet, its status and where each vehicle is.',
+  ),
+  p(
+    'fleet.vehicle.manage',
+    'fleet_vehicle',
+    'manage',
+    'operational',
+    'medium',
+    'Maintain the vehicle register, its statutory documents and its equipment list.',
+  ),
+  p(
+    'fleet.document.manage',
+    'fleet_vehicle',
+    'update',
+    'operational',
+    'medium',
+    'Record insurance, fitness, permit and licence renewals. An expired mandatory document stops dispatch.',
+  ),
+  p(
+    'fleet.crew.manage',
+    'fleet_crew',
+    'manage',
+    'hr',
+    'medium',
+    'Maintain the crew roster, licences and shifts.',
+  ),
+  p(
+    'fleet.request.create',
+    'fleet_request',
+    'create',
+    'operational',
+    'low',
+    'Ask for an ambulance. Held widely — a ward that cannot call one is a ward that phones somebody instead.',
+  ),
+  p('fleet.request.read', 'fleet_request', 'list', 'operational', 'low', 'See the ambulance queue.'),
+  p(
+    'fleet.trip.dispatch',
+    'fleet_trip',
+    'dispatch',
+    'operational',
+    'medium',
+    'Assign a vehicle and a crew to a request. Refused for a vehicle whose mandatory papers have lapsed.',
+  ),
+  p('fleet.trip.read', 'fleet_trip', 'read', 'operational', 'low', 'Follow a trip and its milestones.'),
+  p(
+    'fleet.trip.update',
+    'fleet_trip',
+    'update',
+    'operational',
+    'low',
+    'Record the milestones: en route, at scene, patient on board, arrived.',
+  ),
+  p(
+    'fleet.trip.divert',
+    'fleet_trip',
+    'override',
+    'operational',
+    'high',
+    'Send an ambulance somewhere other than where it was going. Names the reason and the decider.',
+    { requiresReason: true },
+  ),
+  p(
+    'fleet.trip.close',
+    'fleet_trip',
+    'close',
+    'operational',
+    'medium',
+    'Close a trip: odometer, distance reconciliation and the SLA result.',
+  ),
+  p(
+    'fleet.checklist.record',
+    'fleet_vehicle',
+    'inspect',
+    'operational',
+    'low',
+    'Run the shift-start or post-trip check. A failed mandatory item stops the vehicle.',
+  ),
+  p(
+    'fleet.checklist.override',
+    'fleet_vehicle',
+    'override',
+    'operational',
+    'high',
+    'Send a vehicle out with a failed mandatory check. Names who authorised it and why.',
+    { requiresReason: true },
+  ),
+  p(
+    'fleet.fuel.record',
+    'fleet_vehicle',
+    'record',
+    'financial',
+    'low',
+    'Log a refuelling with the odometer reading.',
+  ),
+  p(
+    'fleet.maintenance.manage',
+    'fleet_vehicle',
+    'manage',
+    'operational',
+    'medium',
+    'Maintain service intervals, record breakdowns and take a vehicle off the road.',
+  ),
+  p(
+    'fleet.incident.record',
+    'fleet_vehicle',
+    'record',
+    'operational',
+    'medium',
+    'Report an accident, a speeding event, a complaint or an equipment failure.',
+  ),
+  p(
+    'fleet.report.read',
+    'fleet_trip',
+    'export',
+    'operational',
+    'medium',
+    'Read the response-time, utilisation and fuel reports.',
+    { requiresReason: true },
+  ),
+]);
+
+const TR009 = group('TR-009', 6, [
+  p(
+    'prehospital.pcr.write',
+    'ph_pcr',
+    'record',
+    'phi',
+    'low',
+    'Write the patient care record on the road: observations, interventions, drugs. Append-only once written.',
+  ),
+  p('prehospital.pcr.read', 'ph_pcr', 'read', 'phi', 'low', 'Read the pre-hospital record for a patient.', {
+    phiRead: true,
+  }),
+  p(
+    'prehospital.pcr.sign',
+    'ph_pcr',
+    'sign',
+    'phi',
+    'low',
+    'Sign the record as the attending crew member. An unsigned record is a draft, and a trip cannot close on one.',
+  ),
+  p(
+    'prehospital.prealert.raise',
+    'ph_prealert',
+    'create',
+    'phi',
+    'low',
+    'Send the ATMIST ahead to the ER. Held by every crew member — a pre-alert nobody could raise is a resus bay nobody prepared.',
+  ),
+  p(
+    'prehospital.prealert.read',
+    'ph_prealert',
+    'list',
+    'phi',
+    'low',
+    'See what is inbound, with its ETA and what the crew found.',
+    { phiRead: true },
+  ),
+  p(
+    'prehospital.prealert.acknowledge',
+    'ph_prealert',
+    'receive',
+    'phi',
+    'low',
+    'Acknowledge a pre-alert and hold a bay. The two-minute target is measured from the raise.',
+  ),
+  p(
+    'prehospital.prealert.divert',
+    'ph_prealert',
+    'override',
+    'phi',
+    'high',
+    'Turn an inbound ambulance away. Names where it is going instead and why.',
+    { requiresReason: true },
+  ),
+  p(
+    'prehospital.handover.complete',
+    'ph_handover',
+    'complete',
+    'phi',
+    'low',
+    'Complete the handover: identity, both signatures, and the controlled-drug reconciliation.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -8089,6 +8294,8 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP006,
   ...TR001,
   ...TR008,
+  ...NC013,
+  ...TR009,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

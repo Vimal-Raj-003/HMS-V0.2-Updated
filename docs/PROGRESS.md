@@ -401,6 +401,94 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-06 (evening) · Phase 6 · TR-009 + NC-013 — the ambulance, and exit gate 1
+
+**Built — TR-009 and NC-013, complete.** 20 tables (13 in a new `ops` schema,
+7 in `clinical`), 25 permission keys, 8 events, 2 screens. **Exit gate 1
+passes**, and it passes as a database fact rather than a demo: the crew's last
+road observations — HR 126, SBP 86, RR 32, SpO₂ 91, GCS 9 — arrived in the ER's
+first triage record _identically_, with nothing retyped, and the handover row
+records which triage record it made.
+
+**Three design decisions worth the words.**
+
+_One trip table, not two._ TR-009 §4 specifies `ph_trips` beside NC-013's
+`fleet_trips`, sharing about twenty fields. Both modules report on the same
+milestone timestamps — NC-013 for the response-time SLA, TR-009 for the offload
+interval — and two rows holding those times is two answers to "when did it
+arrive", decided by whichever screen the user happened to open. There is one
+`ops.fleet_trips`; the clinical record hangs off it. A trip carrying nobody (a
+mortuary standby, an event cover) simply has no PCR, which the spec's shape
+cannot express.
+
+_A new `ops` schema._ The first non-clinical operations schema, and Phase 9's
+housekeeping, laundry, canteen, gate and biomedical belong in it too. The split
+is where the data class changes: a vehicle's insurance expiry is not PHI, a
+patient's road blood pressure is.
+
+_No PostGIS._ It is not on `CLAUDE.md` §2's locked list and not in the on-prem
+image. Coordinates are `numeric(9,6)` and distance is `ops.haversine_km()` —
+Bengaluru to Mysuru comes out at 128.017 km against a 128 km straight line, and
+that is orders of magnitude better than the GPS fix it is fed.
+
+**The carry needed a third triage state, and finding that out was the
+interesting part.** Writing the road observations as a triage record hit
+TR-001's `triage_has_a_category`, whose own comment reads "a record with neither
+[a level nor a tag] is not a triage". Both rules were right. The crew cannot
+assign an ESI level — its decision points are a resource count and a "would I
+give them my last bed?" judgement, neither of which is a roadside observation —
+and having the server guess them is precisely the failure
+`packages/contracts/scores` exists to prevent. Discarding the observations and
+asking the nurse to retype them is the transposed digit exit gate 1 exists to
+eliminate. So `source = 'prehospital_handover'` names the honest third state:
+observations in, category pending. The nurse's triage arrives as sequence 2 and
+**both survive**, which is what TR-001 already does with every re-triage.
+`er_visits.esi_level` and `triaged_at` stay null — the patient is not triaged
+until somebody triages them, and the board still shows them waiting.
+
+**Eight constraint groups proven live**, including: dispatching an ambulance
+whose fitness certificate lapsed three weeks ago (refused, naming the document
+and its date); a trip that arrived before it left; an odometer that ran
+backwards; billing a 108 trip to the patient (refused) and the same trip left
+`pending` (silently made `not_billable`); posting a bill on a flagged distance;
+a diversion with no reason; a handover to nobody, signed by one side only, and
+with morphine unreconciled; correcting or deleting a road observation; a verbal
+GCS on an intubated patient; rewriting an ATMIST after the patient arrived
+(refused) versus appending an update (allowed); and completing a trip on an
+unsigned record — while a trip carrying nobody completes freely.
+
+**Two gaps found by driving it.** The receiving team held
+`prehospital.prealert.read` and had no endpoint to list what was inbound — only
+the fleet board carried it, behind a fleet key, so seeing who was coming would
+have meant giving a triage nurse the dispatch console. `GET
+/prehospital/inbound` now serves the ER on its own key. And a raised pre-alert
+could only be closed by arrival or diversion, so a cancelled crew left an
+inbound patient on the ER board holding a bay for ever; there is a stand-down
+now, and it releases the bay.
+
+**A defect that would have stopped a fresh clone.** `apps/web`'s server routes
+default `API_ORIGIN` to `http://127.0.0.1:3001` — written out three times —
+while `infra/env.example` sets `API_PORT=4000` and never mentions `API_ORIGIN`.
+Following the documented setup produced a login page returning 500 with
+`ECONNREFUSED 127.0.0.1:3001`, a message that says nothing about the actual
+mistake and appears only when the environment is _correct_. One module now
+derives the default from `API_PORT`, and `infra/env.example` documents the
+override.
+
+**Gates** — 20/20 packages typecheck, lint and test (**2,909 tests**); 579
+routes across 71 controllers; catalogue **988 keys**; event registry **707**;
+676 tables, **0 without RLS and 0 without a tenant policy**; 35 migrations.
+
+**Still missing:** no e2e golden path and no k6 script. GPS positions are
+recorded and partitioned monthly but no telematics provider is wired, so the
+breadcrumb trail is whatever the tablet reports — which is why the demo trip
+closed with `distance_flagged`, correctly, on a 2.56 km GPS track against a
+27 km odometer. Trip billing emits the event NC-013 prices from; the RC-003
+tariff join is Phase 9's.
+
+**Next:** TR-002 + OP-009 (fracture registry and orthopaedic OPD), then TR-003,
+TR-005, TR-007.
+
 ### 2026-09-06 (later still) · Phase 6 · TR-008 the MLC register, and three defects it found
 
 **Built — TR-008, complete.** 12 tables, 22 permission keys, 12 events, 2 screens.

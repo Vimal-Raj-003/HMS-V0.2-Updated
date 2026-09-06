@@ -188,6 +188,47 @@ describe('Phase 6 — trauma and medico-legal grants', () => {
   });
 
   /**
+   * The pre-alert asymmetry, which is TR-001's argument applied to the road.
+   *
+   * A crew member who cannot warn the ER is a resus bay nobody prepared, so
+   * raising one is `low` and unreasoned. Turning an inbound ambulance away is
+   * the considered act.
+   */
+  it('keeps raising a pre-alert cheap and diverting one considered', () => {
+    expect(permission('prehospital.prealert.raise').risk).toBe('low');
+    expect(permission('prehospital.prealert.raise').requiresReason ?? false).toBe(false);
+    expect(permission('prehospital.prealert.divert').requiresReason).toBe(true);
+    expect(permission('fleet.trip.divert').requiresReason).toBe(true);
+  });
+
+  /**
+   * Overriding a failed vehicle check sends an ambulance out with a known gap —
+   * a missing defibrillator, an empty oxygen cylinder. Somebody owns that.
+   */
+  it('makes a checklist override name a person and a reason', () => {
+    expect(permission('fleet.checklist.override').requiresReason).toBe(true);
+    expect(permission('fleet.checklist.record').requiresReason ?? false).toBe(false);
+  });
+
+  /**
+   * The crew writes the clinical record; the dispatcher does not. Keeping
+   * `prehospital.*` off the dispatch bundle is what stops a fleet console
+   * drifting into a chart.
+   */
+  it('separates the dispatch desk from the patient record', () => {
+    const dispatcher = new Set(role('call_centre_agent').permissions);
+    expect(dispatcher.has('fleet.trip.dispatch')).toBe(true);
+    for (const key of ['prehospital.pcr.read', 'prehospital.pcr.write']) {
+      expect(dispatcher.has(key), `call_centre_agent must not hold ${key}`).toBe(false);
+    }
+
+    const crew = new Set(role('ambulance_crew').permissions);
+    expect(crew.has('prehospital.pcr.write')).toBe(true);
+    expect(crew.has('prehospital.prealert.raise')).toBe(true);
+    expect(crew.has('fleet.trip.dispatch')).toBe(false);
+  });
+
+  /**
    * A coder is not a witness. MRD reads the register, issues certified copies
    * and answers requisitions; it does not open cases or document injuries.
    */

@@ -130,6 +130,11 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   // burn a number, and nothing legal rests on the sequence being unbroken —
   // only on each issued copy being individually numbered.
   ['MLC_COPY', '{BR}/MLC-COPY/{FY}/{SEQ:4}', false, 'fy'],
+  // NC-013: the ambulance request and the trip it becomes. Not gapless — a
+  // request cancelled before dispatch must not burn a number, and nothing
+  // legal rests on the sequence being unbroken.
+  ['AMB_REQ', '{BR}/AMB/{FY}/{SEQ:5}', false, 'fy'],
+  ['AMB_TRIP', '{BR}/TRIP/{FY}/{SEQ:5}', false, 'fy'],
   ['BLOOD_BAG', '{BR}/BB/{FY}/{SEQ:5}', true, 'fy'],
   ['LIC_INVOICE', 'VIMS/{FY}/{SEQ:5}', true, 'fy'],
 ];

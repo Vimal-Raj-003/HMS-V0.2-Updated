@@ -1,0 +1,654 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-013 + TR-009 — the ambulance fleet and the pre-hospital record
+//
+// `phase-06` §6.11. Schema `ops` for the fleet, `clinical` for the patient care
+// record — the split is where the data class changes, not where the module
+// boundary is.
+//
+//   ops.fleet_vehicles          the register, with its statutory papers
+//   ops.fleet_vehicle_documents RC, insurance, fitness, permit, PUC, licence
+//   ops.fleet_stations          bases, with a geofence radius
+//   ops.fleet_crew              drivers, EMTs, nurses, doctors
+//   ops.fleet_crew_shifts       who is on duty, on which vehicle
+//   ops.fleet_requests          somebody asked for an ambulance
+//   ops.fleet_trips             the journey. One per journey — see below.
+//   ops.fleet_positions         GPS breadcrumbs, partitioned monthly
+//   ops.fleet_checklists        shift-start and post-trip
+//   ops.fleet_fuel_logs         litres, odometer, and the anomalies
+//   ops.fleet_maintenance_plans due by kilometres or by days
+//   ops.fleet_breakdowns        it stopped, and what took over
+//   ops.fleet_incidents         accident, speeding, complaint, delay
+//
+//   clinical.ph_pcr             the patient care record for a trip
+//   clinical.ph_vitals          every set, timestamped, from the road
+//   clinical.ph_interventions   airway, CPR, tourniquet, fluids
+//   clinical.ph_drugs           what was given, including controlled
+//   clinical.ph_prealerts       ATMIST to the ER, before arrival
+//   clinical.ph_handovers       the moment the patient becomes the ER's
+//   clinical.ph_media           ECGs and scene photographs, hashed at capture
+//
+// ── One trip, not two ───────────────────────────────────────────────────────
+//
+// TR-009 §4 specifies `ph_trips` alongside NC-013's `fleet_trips`, linked by
+// `fleet_trip_id`. They share about twenty fields — every milestone timestamp,
+// the vehicle, the crew, the destination — and both modules report on those
+// timestamps: NC-013 for the response-time SLA, TR-009 for the offload
+// interval. Two rows holding the same times is two answers to "when did it
+// arrive", and the module that is asked will be whichever screen the user
+// happened to open.
+//
+// So there is one `fleet_trips`, and TR-009's clinical record hangs off it.
+// A fleet trip with no patient — a mortuary standby, an event cover, a
+// discharge drop — simply has no PCR, which is the honest representation and
+// is not expressible when the clinical module owns its own trip table.
+//
+// ── No PostGIS ──────────────────────────────────────────────────────────────
+//
+// `CLAUDE.md` §2 locks the extension list and PostGIS is not on it; it is also
+// absent from the on-prem image, and adding it would need an ADR and a change
+// to every deployment. Coordinates are `numeric(9,6)` pairs and distance is
+// `ops.haversine_km()`. That is accurate to a few metres over ambulance
+// distances, which is well inside what an ETA needs, and a later PostGIS
+// migration is a generated column away rather than a rewrite.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum VehicleType {
+  /// Basic life support.
+  bls
+  /// Advanced life support: monitor, defibrillator, drugs, a qualified crew.
+  als
+  neonatal
+  ventilator
+  patient_transport
+  mortuary_van
+  private
+  other
+
+  @@schema("ops")
+}
+
+enum VehicleStatus {
+  available
+  on_trip
+  /// Cleaning, restocking, or waiting for a crew.
+  not_ready
+  maintenance
+  breakdown
+  out_of_service
+  retired
+
+  @@schema("ops")
+}
+
+enum VehicleDocumentType {
+  rc
+  insurance
+  fitness
+  permit
+  puc
+  road_tax
+  speed_governor
+  ambulance_licence
+  other
+
+  @@schema("ops")
+}
+
+enum CrewRole {
+  driver
+  emt
+  nurse
+  doctor
+  attendant
+
+  @@schema("ops")
+}
+
+enum TripRequestSource {
+  er
+  ward
+  ip_transfer
+  discharge
+  /// The national emergency number. These trips are never billed to a patient.
+  ems_108
+  ems_112
+  state_ems
+  patient_app
+  call_centre
+  corporate
+  event
+  internal
+  referral_in
+  transfer_out
+
+  @@schema("ops")
+}
+
+enum TripPriority {
+  emergency
+  urgent
+  scheduled
+
+  @@schema("ops")
+}
+
+enum ClinicalNeed {
+  als
+  bls
+  patient_transport
+  neonatal
+  ventilator
+  isolation
+
+  @@schema("ops")
+}
+
+enum TripRequestStatus {
+  new
+  queued
+  assigned
+  cancelled
+  converted
+
+  @@schema("ops")
+}
+
+enum TripStatus {
+  assigned
+  en_route
+  at_scene
+  patient_onboard
+  arrived_hospital
+  handover_complete
+  returning
+  completed
+  cancelled
+  aborted
+  /// Sent elsewhere en route. Needs a reason and a named decider.
+  diverted
+
+  @@schema("ops")
+}
+
+enum TripBillingStatus {
+  not_billable
+  pending
+  posted
+  credit
+  waived
+  failed
+
+  @@schema("ops")
+}
+
+enum ChecklistKind {
+  shift_start
+  post_trip
+  weekly
+
+  @@schema("ops")
+}
+
+enum FleetIncidentKind {
+  accident
+  speeding
+  complaint
+  equipment_failure
+  delay
+  other
+
+  @@schema("ops")
+}
+
+/// The fleet register.
+model FleetVehicle {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  fleetCode      String      @map("fleet_code") @db.VarChar(24)
+  registrationNo String      @map("registration_no") @db.VarChar(24)
+  type           VehicleType
+  make           String?     @db.VarChar(60)
+  model          String?     @db.VarChar(60)
+  year           Int?
+
+  /// `[{ assetId, name, mandatory }]` — the O2 cylinder, the monitor, the
+  /// defibrillator. `mandatory` drives the shift-start checklist.
+  equipment Json @default("[]")
+
+  gpsDeviceId String? @map("gps_device_id") @db.VarChar(64)
+  gpsProvider String? @map("gps_provider") @db.VarChar(60)
+  fastagId    String? @map("fastag_id") @db.VarChar(40)
+  fuelType    String? @map("fuel_type") @db.VarChar(20)
+  tankCapacityL Int?  @map("tank_capacity_l")
+  /// `owned` | `leased` | `outsourced`.
+  ownership String @default("owned") @db.VarChar(16)
+  vendorId  String? @map("vendor_id") @db.Uuid
+  /// The NC-002 asset, when the hospital tracks vehicles as assets.
+  assetId String? @map("asset_id") @db.Uuid
+
+  baseStationId String? @map("base_station_id") @db.Uuid
+
+  status       VehicleStatus @default(not_ready)
+  statusReason String?       @map("status_reason") @db.VarChar(200)
+
+  currentOdometer Int      @default(0) @map("current_odometer")
+  /// Last known position. `numeric` rather than a geometry — see the header.
+  lastLat        Decimal?  @map("last_lat") @db.Decimal(9, 6)
+  lastLng        Decimal?  @map("last_lng") @db.Decimal(9, 6)
+  lastPositionAt DateTime? @map("last_position_at") @db.Timestamptz(6)
+
+  currentTripId String? @map("current_trip_id") @db.Uuid
+  isActive      Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  documents        FleetVehicleDocument[]
+  shifts           FleetCrewShift[]
+  trips            FleetTrip[]
+  checklists       FleetChecklist[]
+  fuelLogs         FleetFuelLog[]
+  maintenancePlans FleetMaintenancePlan[]
+  breakdowns       FleetBreakdown[]
+  incidents        FleetIncident[]
+
+  @@unique([hospitalId, registrationNo], map: "uq_fleet_registration")
+  @@unique([hospitalId, fleetCode], map: "uq_fleet_code")
+  @@index([hospitalId, branchId, status, type])
+  @@map("fleet_vehicles")
+  @@schema("ops")
+}
+
+/// The papers that make it legal to drive.
+model FleetVehicleDocument {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  vehicleId  String @map("vehicle_id") @db.Uuid
+
+  type     VehicleDocumentType
+  number   String?             @db.VarChar(60)
+  issuedOn DateTime?           @map("issued_on") @db.Date
+  /// Null means it does not expire. Everything statutory does.
+  expiryOn DateTime? @map("expiry_on") @db.Date
+  fileRef  String?   @map("file_ref") @db.VarChar(300)
+  /// Fitness, insurance and the ambulance licence are mandatory: an expired one
+  /// takes the vehicle out of service rather than raising a warning.
+  mandatory Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vehicle FleetVehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@unique([vehicleId, type], map: "uq_fleet_document_per_type")
+  @@index([hospitalId, expiryOn])
+  @@map("fleet_vehicle_documents")
+  @@schema("ops")
+}
+
+/// Where the ambulances live between trips.
+model FleetStation {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  name String  @db.VarChar(120)
+  lat  Decimal @db.Decimal(9, 6)
+  lng  Decimal @db.Decimal(9, 6)
+  /// The radius inside which a vehicle counts as "at base".
+  geofenceRadiusM Int @default(150) @map("geofence_radius_m")
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, branchId, name], map: "uq_fleet_station_name")
+  @@map("fleet_stations")
+  @@schema("ops")
+}
+
+model FleetCrew {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  userId     String? @map("user_id") @db.Uuid
+  employeeRef String? @map("employee_ref") @db.VarChar(40)
+  name       String  @db.VarChar(160)
+  role       CrewRole
+  /// The driving licence or the paramedic registration. An expired one is the
+  /// same problem as an expired fitness certificate.
+  licenceRef    String?   @map("licence_ref") @db.VarChar(80)
+  licenceExpiry DateTime? @map("licence_expiry") @db.Date
+  badgeNo       String?   @map("badge_no") @db.VarChar(40)
+  phone         String?   @db.VarChar(20)
+
+  /// Whether this person is qualified to crew an ALS vehicle.
+  alsQualified Boolean @default(false) @map("als_qualified")
+  isActive     Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  shifts FleetCrewShift[]
+
+  @@index([hospitalId, branchId, role, isActive])
+  @@map("fleet_crew")
+  @@schema("ops")
+}
+
+model FleetCrewShift {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  crewId     String @map("crew_id") @db.Uuid
+  vehicleId  String? @map("vehicle_id") @db.Uuid
+
+  shiftStart DateTime  @map("shift_start") @db.Timestamptz(6)
+  shiftEnd   DateTime? @map("shift_end") @db.Timestamptz(6)
+  rosterRef  String?   @map("roster_ref") @db.VarChar(64)
+  /// The shift-start check. A vehicle is not dispatchable until this is true.
+  checklistPassed Boolean @default(false) @map("checklist_passed")
+  /// `on_duty` | `on_trip` | `break` | `off`.
+  status String @default("on_duty") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  crew    FleetCrew     @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  vehicle FleetVehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+
+  @@index([hospitalId, vehicleId, status])
+  @@index([hospitalId, crewId, shiftStart(sort: Desc)])
+  @@map("fleet_crew_shifts")
+  @@schema("ops")
+}
+
+/// Somebody asked for an ambulance.
+model FleetRequest {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  requestNo String            @map("request_no") @db.VarChar(40)
+  source    TripRequestSource
+  priority  TripPriority      @default(urgent)
+
+  patientId String? @map("patient_id") @db.Uuid
+  erVisitId String? @map("er_visit_id") @db.Uuid
+
+  /// `{ address, lat, lng, contact, landmark }`.
+  pickup Json
+  drop   Json?
+
+  requestedAt DateTime  @default(now()) @map("requested_at") @db.Timestamptz(6)
+  requiredAt  DateTime? @map("required_at") @db.Timestamptz(6)
+
+  clinicalNeed ClinicalNeed @default(bls) @map("clinical_need")
+  escorts      Json?
+  payer        Json?
+
+  requesterUserId String? @map("requester_user_id") @db.Uuid
+  requesterContact String? @map("requester_contact") @db.VarChar(160)
+  /// The 108/112 case number, when the state service raised it.
+  externalCaseId String? @map("external_case_id") @db.VarChar(60)
+
+  status       TripRequestStatus @default(new)
+  cancelReason String?           @map("cancel_reason") @db.Text
+  estimateAmount Decimal?        @map("estimate_amount") @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  trips FleetTrip[]
+
+  @@unique([hospitalId, requestNo], map: "uq_fleet_request_no")
+  @@index([hospitalId, branchId, status, requestedAt(sort: Desc)])
+  @@map("fleet_requests")
+  @@schema("ops")
+}
+
+/// The journey. One row per journey, clinical record or not — see the header.
+model FleetTrip {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  tripNo    String @map("trip_no") @db.VarChar(40)
+  requestId String? @map("request_id") @db.Uuid
+  vehicleId String @map("vehicle_id") @db.Uuid
+
+  /// `[{ crewId, role, name }]`, captured at dispatch. A later roster change
+  /// must not rewrite who actually went.
+  crew Json @default("[]")
+
+  status TripStatus @default(assigned)
+
+  // ── The milestones both modules report on ─────────────────────────────────
+  // Response time is dispatch → at scene; offload is arrival → handover
+  // complete. One set of timestamps, so the SLA report and the ER board cannot
+  // give different answers.
+  dispatchedAt       DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  enRouteAt          DateTime? @map("en_route_at") @db.Timestamptz(6)
+  atSceneAt          DateTime? @map("at_scene_at") @db.Timestamptz(6)
+  patientContactAt   DateTime? @map("patient_contact_at") @db.Timestamptz(6)
+  departedSceneAt    DateTime? @map("departed_scene_at") @db.Timestamptz(6)
+  arrivedHospitalAt  DateTime? @map("arrived_hospital_at") @db.Timestamptz(6)
+  handoverCompleteAt DateTime? @map("handover_complete_at") @db.Timestamptz(6)
+  availableAt        DateTime? @map("available_at") @db.Timestamptz(6)
+
+  startOdometer Int?     @map("start_odometer")
+  endOdometer   Int?     @map("end_odometer")
+  gpsDistanceKm Decimal? @map("gps_distance_km") @db.Decimal(8, 2)
+  /// Set when GPS and the odometer disagree by more than a tenth. Blocks
+  /// billing until somebody looks.
+  distanceFlagged Boolean @default(false) @map("distance_flagged")
+  waitingMinutes  Int     @default(0) @map("waiting_minutes")
+  tolls           Json?
+
+  patientId String? @map("patient_id") @db.Uuid
+  erVisitId String? @map("er_visit_id") @db.Uuid
+  /// A declared mass-casualty incident, when this trip is part of one.
+  mciIncidentId String? @map("mci_incident_id") @db.Uuid
+
+  destinationBranchId String? @map("destination_branch_id") @db.Uuid
+  destinationExternal String? @map("destination_external") @db.VarChar(200)
+  diversionReason     String? @map("diversion_reason") @db.Text
+  diversionBy         String? @map("diversion_by") @db.Uuid
+
+  billingStatus TripBillingStatus @default(pending) @map("billing_status")
+  billItemIds   String[]          @default([]) @map("bill_item_ids") @db.Uuid
+
+  /// `{ targets: {...}, actuals: {...}, met: bool }`, computed at close.
+  sla        Json?
+  remarks    String? @db.Text
+  cancelReason String? @map("cancel_reason") @db.Text
+  closedBy   String? @map("closed_by") @db.Uuid
+  closedAt   DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  request FleetRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  vehicle FleetVehicle  @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+
+  checklists  FleetChecklist[]
+  breakdowns  FleetBreakdown[]
+  incidents   FleetIncident[]
+
+  @@unique([hospitalId, tripNo], map: "uq_fleet_trip_no")
+  @@index([hospitalId, branchId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, vehicleId, status])
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, erVisitId])
+  @@map("fleet_trips")
+  @@schema("ops")
+}
+
+/// GPS breadcrumbs. Partitioned monthly; one year hot, then aggregated.
+model FleetPosition {
+  id        String   @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  vehicleId String   @map("vehicle_id") @db.Uuid
+  tripId    String?  @map("trip_id") @db.Uuid
+
+  at       DateTime @db.Timestamptz(6)
+  lat      Decimal  @db.Decimal(9, 6)
+  lng      Decimal  @db.Decimal(9, 6)
+  speedKmh Decimal? @map("speed_kmh") @db.Decimal(6, 2)
+  heading  Int?
+  ignition Boolean?
+  /// `device` | `phone`. A phone fix is worse and the ETA should say so.
+  source     String @default("device") @db.VarChar(16)
+  accuracyM  Int?   @map("accuracy_m")
+
+  @@id([id, at])
+  @@index([hospitalId, vehicleId, at(sort: Desc)])
+  @@index([hospitalId, tripId, at])
+  @@map("fleet_positions")
+  @@schema("ops")
+}
+
+model FleetChecklist {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  vehicleId  String @map("vehicle_id") @db.Uuid
+  tripId     String? @map("trip_id") @db.Uuid
+  crewShiftId String? @map("crew_shift_id") @db.Uuid
+
+  kind       ChecklistKind
+  templateRef String?      @map("template_ref") @db.VarChar(80)
+  /// `[{ item, mandatory, ok, qty, expiry }]`.
+  responses  Json
+  failedItems Json @default("[]") @map("failed_items")
+  passed     Boolean @default(false)
+
+  /// A failed mandatory item can be overridden, but only with a reason and a
+  /// name — the vehicle goes out with a known gap, on somebody's authority.
+  overrideBy     String? @map("override_by") @db.Uuid
+  overrideReason String? @map("override_reason") @db.Text
+
+  at   DateTime @default(now()) @db.Timestamptz(6)
+  byId String?  @map("by_id") @db.Uuid
+
+  vehicle FleetVehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  trip    FleetTrip?   @relation(fields: [tripId], references: [id], onDelete: SetNull)
+
+  @@index([hospitalId, vehicleId, at(sort: Desc)])
+  @@map("fleet_checklists")
+  @@schema("ops")
+}
+
+model FleetFuelLog {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  vehicleId  String @map("vehicle_id") @db.Uuid
+
+  at       DateTime @default(now()) @db.Timestamptz(6)
+  driverId String?  @map("driver_id") @db.Uuid
+  litres   Decimal  @db.Decimal(8, 2)
+  amount   Decimal  @db.Decimal(14, 2)
+  odometer Int
+  station  String?  @db.VarChar(120)
+  /// `manual` | `card_import`.
+  source     String  @default("manual") @db.VarChar(16)
+  receiptRef String? @map("receipt_ref") @db.VarChar(300)
+
+  /// Computed on insert from the previous entry. A litre figure with no
+  /// consumption beside it is a number nobody checks.
+  kmPerLitre   Decimal? @map("km_per_litre") @db.Decimal(6, 2)
+  anomalyFlags String[] @default([]) @map("anomaly_flags")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  vehicle FleetVehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, vehicleId, at(sort: Desc)])
+  @@map("fleet_fuel_logs")
+  @@schema("ops")
+}
+
+model FleetMaintenancePlan {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  vehicleId  String @map("vehicle_id") @db.Uuid
+
+  name        String @db.VarChar(120)
+  intervalKm  Int?   @map("interval_km")
+  intervalDays Int?  @map("interval_days")
+
+  lastServiceKm   Int?      @map("last_service_km")
+  lastServiceDate DateTime? @map("last_service_date") @db.Date
+  nextDueKm       Int?      @map("next_due_km")
+  nextDueDate     DateTime? @map("next_due_date") @db.Date
+
+  /// Kilometres past due at which the vehicle goes out of service rather than
+  /// carrying a warning. Configurable, because a rural single-ambulance
+  /// hospital and a city fleet cannot use the same number.
+  hardStopOverdueKm Int @default(2000) @map("hard_stop_overdue_km")
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vehicle FleetVehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, vehicleId, isActive])
+  @@map("fleet_maintenance_plans")
+  @@schema("ops")
+}
+
+model FleetBreakdown {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  vehicleId  String @map("vehicle_id") @db.Uuid
+  tripId     String? @map("trip_id") @db.Uuid
+
+  at          DateTime @default(now()) @db.Timestamptz(6)
+  lat         Decimal? @db.Decimal(9, 6)
+  lng         Decimal? @db.Decimal(9, 6)
+  description String   @db.Text
+  /// The ambulance that took over. A breakdown with a patient on board and no
+  /// replacement recorded is the one an inquiry asks about.
+  replacementVehicleId String?   @map("replacement_vehicle_id") @db.Uuid
+  resolvedAt           DateTime? @map("resolved_at") @db.Timestamptz(6)
+  cost                 Decimal?  @db.Decimal(14, 2)
+  rootCause            String?   @map("root_cause") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  vehicle FleetVehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  trip    FleetTrip?   @relation(fields: [tripId], references: [id], onDelete: SetNull)
+
+  @@index([hospitalId, vehicleId, at(sort: Desc)])
+  @@map("fleet_breakdowns")
+  @@schema("ops")
+}
+
+model FleetIncident {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  vehicleId  String @map("vehicle_id") @db.Uuid
+  tripId     String? @map("trip_id") @db.Uuid
+
+  kind        FleetIncidentKind
+  severity    String            @default("minor") @db.VarChar(16)
+  description String            @db.Text
+  reportedBy  String?           @map("reported_by") @db.Uuid
+  actions     String?           @db.Text
+  status      String            @default("open") @db.VarChar(16)
+  /// The NC-015 incident, once Phase 9 exists to receive it.
+  incidentRef String? @map("incident_ref") @db.VarChar(64)
+
+  at        DateTime @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vehicle FleetVehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  trip    FleetTrip?   @relation(fields: [tripId], references: [id], onDelete: SetNull)
+
+  @@index([hospitalId, vehicleId, at(sort: Desc)])
+  @@map("fleet_incidents")
+  @@schema("ops")
+}

@@ -186,6 +186,60 @@ export const ER_SCREENS: readonly ErScreen[] = [
     ],
     entitlement: 'module.emergency.enabled',
   },
+  {
+    key: 'ambulance-dispatch',
+    label: 'Ambulance dispatch',
+    href: '/er/ambulance',
+    area: 'emergency',
+    permission: 'fleet.trip.read',
+    summary:
+      'What is waiting, what is out, and which vehicles can legally leave the yard — with the papers that would stop them showing on the row.',
+    deniedExplanation:
+      'The dispatch console is held by the call centre, the fleet manager and the administrators. It is deliberately separate from the patient record: a dispatcher can send an ambulance and cannot read the clinical notes it comes back with.',
+    keywords: [
+      'ambulance',
+      'dispatch',
+      'fleet',
+      '108',
+      '112',
+      'vehicle',
+      'crew',
+      'trip',
+      'response time',
+      'gps',
+      'odometer',
+      'fitness certificate',
+      'insurance',
+      'checklist',
+    ],
+    entitlement: 'module.emergency.enabled',
+  },
+  {
+    key: 'prehospital-trip',
+    label: 'Pre-hospital record',
+    href: '/er/ambulance/trip',
+    area: 'emergency',
+    permission: 'prehospital.pcr.read',
+    summary:
+      'The crew’s record: observations, interventions, drugs, the ATMIST pre-alert, and the handover that carries the road numbers into triage without anybody retyping them.',
+    deniedExplanation:
+      'The pre-hospital record is held by the ambulance crew and the receiving emergency team. It is PHI and separate from the dispatch console, which handles the same trip without seeing the patient.',
+    keywords: [
+      'pcr',
+      'pre-hospital',
+      'prehospital',
+      'atmist',
+      'pre-alert',
+      'prealert',
+      'handover',
+      'offload',
+      'road vitals',
+      'ambulance record',
+      'emt',
+      'paramedic',
+    ],
+    entitlement: 'module.emergency.enabled',
+  },
 ];
 
 export function erScreen(key: string): ErScreen {

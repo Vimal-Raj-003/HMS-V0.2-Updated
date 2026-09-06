@@ -118,6 +118,21 @@ describe('the emergency screen catalogue', () => {
     expect(open?.requiresReason ?? false).toBe(false);
   });
 
+  /**
+   * The dispatch console and the patient record are separate screens on
+   * separate keys, and that separation is the module's shape: a call-centre
+   * agent sends an ambulance and never sees what comes back in it.
+   */
+  it('keeps the ambulance console off the clinical key', () => {
+    expect(erScreen('ambulance-dispatch').permission).toBe('fleet.trip.read');
+    expect(erScreen('prehospital-trip').permission).toBe('prehospital.pcr.read');
+
+    const dispatch = PERMISSION_CATALOGUE.find((p) => p.key === 'fleet.trip.read');
+    const record = PERMISSION_CATALOGUE.find((p) => p.key === 'prehospital.pcr.read');
+    expect(dispatch?.dataClass).toBe('operational');
+    expect(record?.dataClass).toBe('phi');
+  });
+
   it('explains every denial in plain words', () => {
     for (const screen of ER_SCREENS) {
       expect(screen.summary.length).toBeGreaterThan(20);

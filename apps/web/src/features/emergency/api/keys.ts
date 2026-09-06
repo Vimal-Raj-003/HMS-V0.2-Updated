@@ -28,6 +28,12 @@ export function erKeys(hospitalId: string) {
     mlcCase: (id: string) => [...root, 'mlc', 'case', id] as const,
     mlcWorklist: (kind: string) => [...root, 'mlc', 'worklist', kind] as const,
     mlcGate: (erVisitId: string) => [...root, 'mlc', 'gate', erVisitId] as const,
+
+    // ── NC-013 + TR-009 ──────────────────────────────────────────────────────
+    dispatchBoard: (scope: string) => [...root, 'fleet', 'board', scope] as const,
+    dispatchBoardRoot: () => [...root, 'fleet', 'board'] as const,
+    fleetTrip: (id: string) => [...root, 'fleet', 'trip', id] as const,
+    inbound: () => [...root, 'prehospital', 'inbound'] as const,
   };
 }
 

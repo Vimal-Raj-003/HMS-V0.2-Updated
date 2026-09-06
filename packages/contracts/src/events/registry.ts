@@ -9181,6 +9181,133 @@ const mlcEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * TR-009 + NC-013 — the ambulance, and the patient in it.
+ *
+ * `prehospital.prealert.raised` is the event exit gate 1 turns on: it is what
+ * puts an inbound patient on the ER board before anybody has arrived, and what
+ * lets a bay be held. It carries the ATMIST — the structured handover the
+ * receiving team is trained to hear — rather than a free-text note, because the
+ * board sorts on it.
+ */
+const prehospitalEvents: readonly EventDefinition[] = [
+  ev(
+    'fleet.trip.dispatched',
+    'fleet_trip',
+    'NC-013',
+    'A vehicle and crew were assigned. The response-time clock starts here.',
+    z.object({
+      tripId: uuid,
+      tripNo: z.string(),
+      vehicleId: uuid,
+      fleetCode: z.string(),
+      priority: z.string(),
+      source: z.string(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'fleet.trip.milestone',
+    'fleet_trip',
+    'NC-013',
+    'En route, at scene, patient on board, arrived. One event type for all of them so a subscriber tracks a trip without knowing the vocabulary in advance.',
+    z.object({
+      tripId: uuid,
+      tripNo: z.string(),
+      status: z.string(),
+      at: z.string(),
+      minutesFromDispatch: z.number().int().nullable(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'fleet.trip.diverted',
+    'fleet_trip',
+    'NC-013',
+    'An ambulance was sent somewhere other than where it was going. Carries the reason, because a death in transit after a diversion has to be explicable.',
+    z.object({
+      tripId: uuid,
+      tripNo: z.string(),
+      reason: z.string(),
+      divertedBy: uuid,
+      destination: z.string().nullable(),
+    }),
+    { retentionDays: 3650 },
+  ),
+  ev(
+    'fleet.trip.completed',
+    'fleet_trip',
+    'NC-013',
+    'The trip closed. Carries the SLA result and whether the distance needs a human before it is billed.',
+    z.object({
+      tripId: uuid,
+      tripNo: z.string(),
+      billingStatus: z.string(),
+      distanceFlagged: z.boolean(),
+      responseMinutes: z.number().int().nullable(),
+      offloadMinutes: z.number().int().nullable(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'fleet.vehicle.grounded',
+    'fleet_vehicle',
+    'NC-013',
+    'A vehicle came off the road: expired papers, a failed check, a breakdown or a service overdue. The minimum-availability rule reads this.',
+    z.object({
+      vehicleId: uuid,
+      fleetCode: z.string(),
+      reason: z.string(),
+      status: z.string(),
+    }),
+    { retentionDays: 2920 },
+  ),
+  ev(
+    'prehospital.prealert.raised',
+    'ph_prealert',
+    'TR-009',
+    'ATMIST from the road. Puts the inbound patient on the ER board with an ETA so a bay can be held — exit gate 1 begins here.',
+    z.object({
+      prealertId: uuid,
+      tripId: uuid,
+      pathway: z.string(),
+      suggestedActivation: z.string(),
+      etaAt: z.string().nullable(),
+      atmist: z.record(z.string(), z.unknown()),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'prehospital.prealert.acknowledged',
+    'ph_prealert',
+    'TR-009',
+    'The ER answered. The gap from the raise is the two-minute target; past it, the ER in-charge is called.',
+    z.object({
+      prealertId: uuid,
+      tripId: uuid,
+      acknowledgedBy: uuid,
+      secondsToAcknowledge: z.number().int(),
+      bayId: uuid.nullable(),
+    }),
+    { retentionDays: 3650 },
+  ),
+  ev(
+    'prehospital.handover.completed',
+    'ph_handover',
+    'TR-009',
+    'The patient is the ER’s. Carries the offload interval and the id of the triage record the road vitals were carried into — exit gate 1 ends here.',
+    z.object({
+      handoverId: uuid,
+      tripId: uuid,
+      erVisitId: uuid.nullable(),
+      mciTagNo: z.string().nullable(),
+      offloadMinutes: z.number().int().nullable(),
+      vitalsCarriedTriageId: uuid.nullable(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -9243,6 +9370,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...emergencyEvents,
   ...traumaEvents,
   ...mlcEvents,
+  ...prehospitalEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

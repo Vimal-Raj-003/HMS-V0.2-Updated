@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { ACCESS_COOKIE, REFRESH_COOKIE, WORKSPACE_COOKIE, cookiesMaySkipSecure } from '@/lib/session';
+import { API_ORIGIN } from '@/lib/api-origin';
 
 /**
  * Login proxy.
@@ -28,8 +29,6 @@ interface LoginResponse {
   homeWorkspace: string | null;
   branches: string[];
 }
-
-const API_ORIGIN = process.env['API_ORIGIN'] ?? 'http://127.0.0.1:3001';
 
 export async function POST(request: Request): Promise<NextResponse> {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));

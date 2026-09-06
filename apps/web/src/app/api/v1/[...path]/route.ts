@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ACCESS_COOKIE } from '@/lib/session';
 import { cookies } from 'next/headers';
+import { API_ORIGIN } from '@/lib/api-origin';
 
 /**
  * The browser's only door to `services/api`.
@@ -18,8 +19,6 @@ import { cookies } from 'next/headers';
  * here would discard exactly the fields `docs/06` §1.1 requires a user-visible
  * failure to carry.
  */
-
-const API_ORIGIN = process.env['API_ORIGIN'] ?? 'http://127.0.0.1:3001';
 
 /**
  * Headers forwarded upstream.

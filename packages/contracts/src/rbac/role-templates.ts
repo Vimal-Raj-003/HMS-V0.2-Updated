@@ -350,6 +350,70 @@ const ER_FLOOR = [
  * opened is a case the hospital cannot later prove it saw. Nothing in this
  * bundle discloses, releases or closes anything.
  */
+/**
+ * NC-013 — the dispatch desk.
+ *
+ * Assigning a vehicle, following it, closing the trip. Not diverting one, and
+ * not overriding a failed check: those two are the decisions somebody has to
+ * own by name.
+ */
+const FLEET_DISPATCH = [
+  'fleet.vehicle.read',
+  'fleet.request.create',
+  'fleet.request.read',
+  'fleet.trip.dispatch',
+  'fleet.trip.read',
+  'fleet.trip.update',
+  'fleet.trip.close',
+] as const;
+
+/** The crew: the checks, the milestones, and the fuel log. */
+const FLEET_CREW = [
+  'fleet.vehicle.read',
+  'fleet.trip.read',
+  'fleet.trip.update',
+  'fleet.checklist.record',
+  'fleet.fuel.record',
+  'fleet.incident.record',
+] as const;
+
+/** Whoever runs the fleet: the register, the papers, the workshop, the reports. */
+const FLEET_MANAGER = [
+  ...FLEET_DISPATCH,
+  'fleet.vehicle.manage',
+  'fleet.document.manage',
+  'fleet.crew.manage',
+  'fleet.maintenance.manage',
+  'fleet.checklist.override',
+  'fleet.trip.divert',
+  'fleet.incident.record',
+  'fleet.report.read',
+] as const;
+
+/**
+ * TR-009 — the crew's clinical record.
+ *
+ * Writing it and raising the pre-alert are both `low`: a crew member who cannot
+ * warn the ER is a resus bay nobody prepared, and that is the failure this
+ * module exists to prevent.
+ */
+const PREHOSPITAL_CREW = [
+  'prehospital.pcr.write',
+  'prehospital.pcr.read',
+  'prehospital.pcr.sign',
+  'prehospital.prealert.raise',
+  'prehospital.prealert.read',
+  'prehospital.handover.complete',
+] as const;
+
+/** The receiving end: read what is inbound, answer it, hold a bay. */
+const PREHOSPITAL_RECEIVER = [
+  'prehospital.pcr.read',
+  'prehospital.prealert.read',
+  'prehospital.prealert.acknowledge',
+  'prehospital.handover.complete',
+] as const;
+
 const MLC_FLOOR = [
   'mlc.case.create',
   'mlc.case.read',
@@ -1545,6 +1609,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'admin-console',
     permissions: [
+      ...FLEET_MANAGER,
       'mlc.configure',
       ...MCI_COMMAND,
       // Phase 5 — RC-003. Holds the *publish* half only. The finance manager
@@ -1820,6 +1885,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      'fleet.trip.read',
+      'fleet.report.read',
       ...MLC_OVERSIGHT,
       'mlc.case.read',
       'mlc.report.read',
@@ -2010,6 +2077,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      'fleet.request.create',
+      'fleet.request.read',
       'mlc.case.read',
       'mlc.injury.write',
       ...DIAGNOSTIC_ORDERING,
@@ -2035,6 +2104,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...PREHOSPITAL_RECEIVER,
+      'prehospital.prealert.divert',
       ...MLC_OFFICER,
       // Both halves, not just the write. A clinician who may record the MoHFW
       // protocol but not read it back is a clinician examining a survivor
@@ -2306,6 +2377,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      'fleet.request.create',
+      'fleet.request.read',
       ...WARD_DIAGNOSTICS,
 
       ...VITALS_RECORDER,
@@ -2338,6 +2411,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'icu-flowsheet',
     permissions: [
+      'fleet.request.create',
+      'fleet.request.read',
       ...WARD_DIAGNOSTICS,
 
       ...VITALS_RECORDER,
@@ -2370,6 +2445,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'triage-board',
     permissions: [
+      ...PREHOSPITAL_RECEIVER,
       ...MLC_FLOOR,
       ...ER_FLOOR,
       ...TRIAGE_FLOOR,
@@ -2526,6 +2602,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'registration',
     permissions: [
+      'fleet.request.create',
+      'fleet.request.read',
       ...ER_FLOOR,
       'er.identity.merge',
       ...DIAGNOSTIC_FRONT_DESK,
@@ -2563,6 +2641,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'call-console',
     permissions: [
+      ...FLEET_DISPATCH,
       ...PATIENT_READ,
       ...APPOINTMENT_DESK,
       'messaging.message.send',
@@ -3284,6 +3363,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'facilities',
     homeWorkspace: 'biomedical',
     permissions: [
+      'fleet.vehicle.read',
+      'fleet.maintenance.manage',
       'labq.equipment.manage',
       'lab.instrument.downtime.record',
       'rad.configure',
@@ -3398,7 +3479,7 @@ const templates: readonly RoleTemplate[] = [
     description: 'Dispatch board and trip app with GPS and pre-hospital vitals.',
     category: 'facilities',
     homeWorkspace: 'ambulance-dispatch',
-    permissions: [...BASE_CLINICAL, 'notify.escalation.read'],
+    permissions: [...BASE_CLINICAL, 'notify.escalation.read', ...FLEET_CREW, ...PREHOSPITAL_CREW],
     abacDefaults: { dataClassMasks: ['aadhaar'] },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -3451,6 +3532,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'quality',
     permissions: [
+      'fleet.report.read',
       'mlc.register.read',
       'trauma.activation.read',
       'trauma.activation.list',

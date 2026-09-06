@@ -26,6 +26,8 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'OP006', // ER intake and dispositions
   'TR001', // triage, trauma activation, scores
   'TR008', // MLC register, evidence chain, discharge gate
+  'TR009', // pre-hospital record, pre-alert, handover
+  'NC013', // ambulance fleet: dispatch, documents, billing
 ]);
 
 /**
