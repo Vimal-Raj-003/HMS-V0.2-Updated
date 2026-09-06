@@ -9681,6 +9681,159 @@ const polytraumaEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * Phase 7A — beds and admissions.
+ *
+ * `bed.vacated` is the one with downstream teeth: housekeeping dispatches from
+ * it, the bed board recomputes from it, and IP-005 stops the room clock on it.
+ * Three subscribers, one fact, published once — which is why it is an event
+ * rather than three service calls the admission handler has to remember.
+ */
+const inpatientEvents: readonly EventDefinition[] = [
+  ev(
+    'admission.admitted',
+    'admission',
+    'IP-001',
+    'A patient was admitted to a bed. IP-005 starts the room clock here, and the ER visit closes against it.',
+    z.object({
+      admissionId: uuid,
+      ipNo: z.string(),
+      patientId: uuid,
+      bedId: uuid,
+      wardId: uuid,
+      classId: uuid,
+      kind: z.string(),
+      erVisitId: uuid.nullable(),
+      registrationComplete: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'admission.deposit.short',
+    'admission',
+    'IP-001',
+    'A patient was admitted on less than the suggested deposit, or on none. There is no pay-first gate in an emergency, so this is a fact to follow up rather than a barrier — and it is the one the cash desk needs before the bill grows.',
+    z.object({
+      admissionId: uuid,
+      ipNo: z.string(),
+      suggested: z.string(),
+      taken: z.string(),
+      approvalId: uuid.nullable(),
+      reason: z.string(),
+    }),
+    { retentionDays: 3650 },
+  ),
+  ev(
+    'bed.occupied',
+    'bed',
+    'IP-001',
+    'A bed now has a patient in it.',
+    z.object({
+      bedId: uuid,
+      bedCode: z.string(),
+      wardId: uuid,
+      admissionId: uuid,
+      patientId: uuid,
+      classId: uuid,
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'bed.vacated',
+    'bed',
+    'IP-001',
+    'A bed emptied. Housekeeping dispatches from this, the board recomputes from it, and the room clock stops on it — three subscribers, one fact, published once.',
+    z.object({
+      bedId: uuid,
+      bedCode: z.string(),
+      wardId: uuid,
+      wardType: z.string(),
+      admissionId: uuid,
+      reason: z.string(),
+      occupiedMinutes: z.number().int(),
+    }),
+    { retentionDays: 3650 },
+  ),
+  ev(
+    'bed.hold.expired',
+    'bed',
+    'IP-001',
+    'A hold ran out and the bed went back to the pool. The person it was held for is still coming, which is why this notifies rather than simply releasing.',
+    z.object({
+      holdId: uuid,
+      bedId: uuid,
+      bedCode: z.string(),
+      reason: z.string(),
+      heldMinutes: z.number().int(),
+      patientId: uuid.nullable(),
+    }),
+    { containsPhi: true, retentionDays: 1825 },
+  ),
+  ev(
+    'patient.transferred',
+    'bed_transfer',
+    'IP-018',
+    'A patient moved. Carries the class on both sides, because that is what IP-005 prorates on.',
+    z.object({
+      transferId: uuid,
+      admissionId: uuid,
+      patientId: uuid,
+      kind: z.string(),
+      fromBedId: uuid.nullable(),
+      toBedId: uuid.nullable(),
+      fromClassId: uuid.nullable(),
+      toClassId: uuid.nullable(),
+      at: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'housekeeping.cleaning.requested',
+    'cleaning_task',
+    'NC-018',
+    'A bed needs cleaning before anybody else can have it.',
+    z.object({
+      taskId: uuid,
+      bedId: uuid,
+      bedCode: z.string(),
+      wardId: uuid,
+      kind: z.string(),
+      slaMinutes: z.number().int(),
+      dueAt: z.string(),
+    }),
+    { retentionDays: 1825 },
+  ),
+  ev(
+    'housekeeping.cleaning.breached',
+    'cleaning_task',
+    'NC-018',
+    'A clean went past its window. The bed is still out of service and somebody is waiting for it, which is the only reason this is worth an alert.',
+    z.object({
+      taskId: uuid,
+      bedId: uuid,
+      bedCode: z.string(),
+      wardId: uuid,
+      overdueMinutes: z.number().int(),
+      state: z.string(),
+    }),
+    { retentionDays: 1825 },
+  ),
+  ev(
+    'bed.available',
+    'bed',
+    'NC-018',
+    'A bed is clean and back on the board. Emitted only after a cleaning confirmation or a recorded override — the board never learns of a bed before housekeeping has.',
+    z.object({
+      bedId: uuid,
+      bedCode: z.string(),
+      wardId: uuid,
+      turnaroundMinutes: z.number().int().nullable(),
+      overridden: z.boolean(),
+    }),
+    { retentionDays: 1825 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -9747,6 +9900,9 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...fractureEvents,
   ...implantAndCastEvents,
   ...polytraumaEvents,
+
+  // Phase 7
+  ...inpatientEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

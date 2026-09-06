@@ -401,6 +401,75 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-07 · Phase 7A · Beds, admissions, turnover — and the board that is a query
+
+**Built — IP-001, IP-018, NC-018, IP-025 (step 7A of seven), complete.** 10
+tables, 26 permission keys, 9 events, 3 screens. **Exit gates 1 and 2 pass.**
+
+**Gate 1: fifty concurrent claims on one bed produce exactly one admission**
+
+Fifty psql processes fired the same allocating transaction at the same bed. One
+occupancy, one admission, bed occupied. The lock does the work —
+`SELECT … FOR UPDATE SKIP LOCKED`, and `SKIP LOCKED` is the important half:
+two admissions happening at once each get _a_ bed rather than queueing for the
+same one and having the loser fail. Behind it sits a GiST exclusion constraint
+on `(bed_id, tstzrange(from_at, to_at, '[)'))`, proved separately by inserting
+straight into the table with no lock taken and again with a back-dated
+overlapping range. Both refused.
+
+The range is half-open on purpose. A patient leaving at 14:00 and another
+arriving at 14:00 is a normal turnover; closed-closed would refuse it and send
+somebody looking for a bug that is not there. Tested, and accepted.
+
+**Gate 2: the board is a query, so rebuilding it is a tautology**
+
+There is no `beds_free` column anywhere in this phase and there will not be
+one. `clinical.v_bed_board` reads `ip_bed_occupancies` on every request, and the
+census is a `count(*) FILTER` over that view. A counter drifts the first time a
+transaction rolls back after incrementing it, and the drift is invisible until
+somebody is sent to a bed with a patient in it.
+
+Occupancy divides by _usable_ beds. A twenty-bed ward with four blocked for
+maintenance is at 16/16, not 16/20 — reporting the second makes a full ward look
+like it has room, at exactly the moment somebody is trying to find a bed.
+
+**The cleaning gate, and why it has an exception**
+
+A bed cannot go from `occupied` to `available` without a completed clean; the
+trigger refuses it. Returning to `available` from `reserved` or `blocked` is
+allowed, because nobody has been in the bed. The override — a bed vacated for
+ten minutes for a portable X-ray — costs a stated reason recorded on the bed
+row, and is held by the nurse supervisor alone. Without the exception the rule
+gets worked around by marking a fake clean, which is worse, because it looks
+like a clean.
+
+**Six rules, all proved live in both directions**
+
+| Rule                                            | The failure it prevents                                  |
+| ----------------------------------------------- | -------------------------------------------------------- |
+| One patient per bed per moment                  | Two patients sent to one bed                             |
+| A bed is not available until it is cleaned      | The next patient put into an unmade bed                  |
+| An occupancy ends after it starts, and says why | A census that cannot distinguish transfer from discharge |
+| A discharged admission holds no open occupancy  | A patient who went home still counted in the ward        |
+| A hold expires, and only one is live per bed    | Two people each told the bed is theirs                   |
+| A blocked bed states its reason                 | A bed missing from the estate with no explanation        |
+
+**Deposits and paperwork are recorded, never enforced.** There is no pay-first
+gate anywhere (Parmanand Katara). A shortfall raises
+`admission.deposit.short` for the cash desk; an ER fast-track admission carries
+`registration_complete = false` and is treated regardless. Both are shown on the
+admitted list as prompts, not barriers.
+
+**Gates** — 20/20 packages typecheck, lint and test (2,929 → **2,945 tests**);
+**656 routes across 61 controllers**; catalogue **1,066 keys**; event registry
+**739**; 711 base tables, 0 without RLS; 41 migrations; 77 screens.
+
+**Still missing:** no e2e golden path and no k6 script; exit gates 3–12 belong to
+steps 7B–7G and are not yet built.
+
+**Next:** 7B — nursing station, MAR with the 5 Rights, assessments, NEWS2
+escalation, nursing mobile, infection control.
+
 ## Phase 6 complete — 2026-09-06
 
 Nine modules: OP-006 ER intake, TR-001 triage and trauma activation, TR-008 MLC

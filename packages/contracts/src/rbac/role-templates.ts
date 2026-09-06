@@ -525,6 +525,42 @@ const POLYTRAUMA_NURSING = [
   'polytrauma.procedure.state',
 ] as const;
 
+/**
+ * Phase 7A — the bed board, held as widely as the question "where is my patient?"
+ *
+ * A board only the bed manager can read is a board everybody phones the bed
+ * manager about, which is how a hospital ends up with a whiteboard beside the
+ * screen and two answers to one question.
+ */
+const BED_BOARD_READER = ['bed.board.read', 'census.read', 'admission.read', 'admission.list'] as const;
+
+/** The ward: admit, move, and keep the expected discharge honest. */
+const WARD_FLOOR = [
+  ...BED_BOARD_READER,
+  'admission.request',
+  'admission.update',
+  'transfer.read',
+  'transfer.accept',
+  'census.discharge.plan',
+] as const;
+
+/** The admitting desk and the bed manager: the allocation itself. */
+const BED_MANAGEMENT = [
+  ...WARD_FLOOR,
+  'bed.allocate',
+  'bed.hold.create',
+  'bed.hold.release',
+  'admission.admit',
+  'transfer.execute',
+  'census.demand.manage',
+] as const;
+
+/** Taking a bed out of service, and putting the hospital into surge. */
+const BED_COMMAND = [...BED_MANAGEMENT, 'bed.block', 'bed.config.manage', 'census.surge.declare'] as const;
+
+/** Housekeeping's own worklist. */
+const HOUSEKEEPING_FLOOR = ['bed.board.read', 'housekeeping.task.read', 'housekeeping.task.accept'] as const;
+
 const FLEET_DISPATCH = [
   'fleet.vehicle.read',
   'fleet.request.create',
@@ -1777,6 +1813,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'admin-console',
     permissions: [
+      ...BED_COMMAND,
       ...FLEET_MANAGER,
       'mlc.configure',
       ...MCI_COMMAND,
@@ -1974,6 +2011,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'branch-admin',
     permissions: [
+      ...BED_COMMAND,
       'schedule.publish',
       'schedule.configure',
       'frontoffice.counter.configure',
@@ -2053,6 +2091,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      ...BED_COMMAND,
+      'transfer.out',
       ...POLYTRAUMA_FLOOR,
       'polytrauma.consult.escalate',
       'polytrauma.case.close',
@@ -2215,6 +2255,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'doctor-opd',
     permissions: [
+      ...WARD_FLOOR,
+      'transfer.execute',
       ...POLYTRAUMA_FLOOR,
       'polytrauma.consult.escalate',
       ...IMPLANT_LOOKUP,
@@ -2254,6 +2296,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...WARD_FLOOR,
+      'admission.admit',
+      'transfer.execute',
+      'transfer.out',
+      'transfer.leave',
       ...POLYTRAUMA_FLOOR,
       'polytrauma.consent.record',
       ...IMPLANT_LOOKUP,
@@ -2286,6 +2333,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...WARD_FLOOR,
+      'bed.hold.create',
+      'admission.admit',
+      'transfer.execute',
       ...POLYTRAUMA_SURGICAL,
       ...POLYTRAUMA_WAIVER,
       ...IMPLANT_LOOKUP,
@@ -2343,6 +2394,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...WARD_FLOOR,
+      'admission.admit',
+      'transfer.execute',
       ...POLYTRAUMA_SURGICAL,
       ...POLYTRAUMA_WAIVER,
       ...IMPLANT_SURGEON,
@@ -2412,6 +2466,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'icu-board',
     permissions: [
+      ...WARD_FLOOR,
+      'admission.admit',
+      'transfer.execute',
+      'transfer.out',
+      'bed.hold.create',
       ...POLYTRAUMA_SURGICAL,
       ...POLYTRAUMA_WAIVER,
       ...IMPLANT_LOOKUP,
@@ -2497,6 +2556,7 @@ const templates: readonly RoleTemplate[] = [
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
     permissions: [
+      ...WARD_FLOOR,
       ...POLYTRAUMA_FLOOR,
       'polytrauma.consent.record',
       'polytrauma.procedure.plan',
@@ -2553,6 +2613,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      ...BED_BOARD_READER,
+      'admission.request',
       ...PLASTER_ROOM,
       ...ORTHO_CLINIC,
       ...WARD_DIAGNOSTICS,
@@ -2594,6 +2656,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...WARD_FLOOR,
+      'housekeeping.task.read',
       ...POLYTRAUMA_FLOOR,
       ...CAST_WATCH,
       'fleet.request.create',
@@ -2630,6 +2694,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'icu-flowsheet',
     permissions: [
+      ...WARD_FLOOR,
+      'housekeeping.task.read',
       ...POLYTRAUMA_NURSING,
       'fleet.request.create',
       'fleet.request.read',
@@ -2665,6 +2731,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'triage-board',
     permissions: [
+      ...BED_BOARD_READER,
+      'admission.request',
+      'bed.hold.create',
       ...POLYTRAUMA_NURSING,
       ...PLASTER_ROOM,
       ...PREHOSPITAL_RECEIVER,
@@ -2732,7 +2801,15 @@ const templates: readonly RoleTemplate[] = [
     description: 'Healthcare-associated infection surveillance and isolation management.',
     category: 'nursing',
     homeWorkspace: 'infection-control',
-    permissions: [...BASE_CLINICAL, ...BREAK_GLASS, 'audit.report.read', 'notify.report.read'],
+    permissions: [
+      ...BED_BOARD_READER,
+      'transfer.read',
+      'bed.block',
+      ...BASE_CLINICAL,
+      ...BREAK_GLASS,
+      'audit.report.read',
+      'notify.report.read',
+    ],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -2746,6 +2823,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-command-centre',
     permissions: [
+      ...BED_MANAGEMENT,
+      'bed.block',
+      'housekeeping.task.inspect',
+      'housekeeping.override',
       ...POLYTRAUMA_FLOOR,
       'polytrauma.team.assign',
       'polytrauma.consult.escalate',
@@ -2809,6 +2890,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'facilities',
     homeWorkspace: 'task-list',
     permissions: [
+      ...HOUSEKEEPING_FLOOR,
+      'transfer.accept',
       'org.read',
       'mdm.read',
       'tpl.form.read',
@@ -2829,6 +2912,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'registration',
     permissions: [
+      ...BED_MANAGEMENT,
+      'admission.cancel',
       'fleet.request.create',
       'fleet.request.read',
       ...ER_FLOOR,
@@ -2892,6 +2977,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'finance',
     homeWorkspace: 'cash-counter',
     permissions: [
+      'admission.read',
+      'admission.list',
       ...PATIENT_READ,
       ...CASHIER_BASE,
       ...QUEUE_CALLER,
@@ -2913,6 +3000,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'finance',
     homeWorkspace: 'billing-desk',
     permissions: [
+      ...BED_BOARD_READER,
+      'transfer.read',
       ...PATIENT_READ,
       ...CASHIER_BASE,
       ...TARIFF_READ,
@@ -2950,6 +3039,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'finance',
     homeWorkspace: 'insurance-queue',
     permissions: [
+      ...BED_BOARD_READER,
+      'transfer.read',
       ...BASE_STAFF,
       // Phase 5 — EN-002 / RC-002. Assembles and submits; recording the payer's
       // decision is finance's key, so an approval nobody received cannot be
@@ -3236,7 +3327,7 @@ const templates: readonly RoleTemplate[] = [
     description: 'Nutritional assessment and diet orders.',
     category: 'therapy',
     homeWorkspace: 'diet-worklist',
-    permissions: [...BASE_CLINICAL, ...SIGNS_DOCUMENTS],
+    permissions: [...BED_BOARD_READER, ...BASE_CLINICAL, ...SIGNS_DOCUMENTS],
     abacDefaults: { careTeamOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -3250,6 +3341,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'therapy',
     homeWorkspace: 'therapy-schedule',
     permissions: [
+      ...BED_BOARD_READER,
       ...CAST_WATCH,
       ...BASE_CLINICAL,
       ...SIGNS_DOCUMENTS,
@@ -3312,6 +3404,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'records',
     homeWorkspace: 'mrd-queue',
     permissions: [
+      'admission.read',
+      'admission.list',
+      'transfer.read',
+      'census.read',
       'fracture.record.list',
       'fracture.registry.export',
       ...MLC_RECORDS,
@@ -3679,7 +3775,7 @@ const templates: readonly RoleTemplate[] = [
     description: 'Work orders and preventive maintenance.',
     category: 'facilities',
     homeWorkspace: 'facility',
-    permissions: [...BASE_STAFF, 'barcode.scan'],
+    permissions: ['bed.board.read', 'housekeeping.task.read', ...BASE_STAFF, 'barcode.scan'],
     abacDefaults: {},
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -3693,6 +3789,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'facilities',
     homeWorkspace: 'housekeeping',
     permissions: [
+      ...HOUSEKEEPING_FLOOR,
+      'housekeeping.task.inspect',
       'org.read',
       'mdm.read',
       'tpl.form.read',

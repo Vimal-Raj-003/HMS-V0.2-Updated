@@ -4,6 +4,7 @@ import { DIAGNOSTICS_SCREENS } from '@/features/diagnostics/screens';
 import { INVENTORY_SCREENS } from '@/features/inventory/screens';
 import { PHARMACY_SCREENS } from '@/features/pharmacy/screens';
 import { ER_SCREENS } from '@/features/emergency/screens';
+import { IP_SCREENS } from '@/features/inpatient/screens';
 import { ORTHO_SCREENS } from '@/features/ortho/screens';
 import { RCM_SCREENS } from '@/features/rcm/screens';
 
@@ -125,6 +126,21 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
     label: 'Orthopaedics',
     href: '/ortho/fractures',
     children: ORTHO_SCREENS.map((screen) => ({
+      key: screen.key,
+      label: screen.label,
+      href: screen.href,
+      permission: screen.permission,
+    })),
+  },
+  /**
+   * Phase 7. After orthopaedics, because the ward is where a fracture patient
+   * goes next and the bed board is read by the same people.
+   */
+  {
+    key: 'inpatient',
+    label: 'Inpatient',
+    href: '/ip/board',
+    children: IP_SCREENS.map((screen) => ({
       key: screen.key,
       label: screen.label,
       href: screen.href,

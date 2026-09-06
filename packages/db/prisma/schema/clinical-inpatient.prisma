@@ -1,0 +1,506 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7 · Step 7A — IP-001, IP-018, NC-018, IP-025
+//
+// Beds, admissions, transfers, cleaning and the board that shows them.
+//
+// ── The bed board is derived, never stored ──────────────────────────────────
+//
+// There is no `beds_free` column anywhere in this file, and there will not be
+// one. Occupancy is `bed_occupancies`, and every census figure is a count over
+// it. A hand-maintained counter drifts the first time a transaction rolls back
+// after incrementing it, and the drift is invisible until somebody is sent to a
+// bed that has a patient in it.
+//
+// ── One patient per bed, enforced by the database ───────────────────────────
+//
+// `bed_occupancies` carries a GiST exclusion constraint on (bed, time range).
+// Two admissions racing for the last bed cannot both win, regardless of what
+// the application does — and the allocation path takes `FOR UPDATE SKIP LOCKED`
+// on the bed row so the common case never reaches the constraint at all.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum BedStatus {
+  available
+  occupied
+  reserved
+  /// Vacated and not yet cleaned. A bed cannot leave this state without a
+  /// cleaning confirmation — the one rule NC-018 exists to enforce.
+  cleaning
+  blocked
+  retired
+
+  @@schema("clinical")
+}
+
+enum AdmissionStatus {
+  requested
+  admitted
+  /// Out on temporary leave, still holding the bed.
+  on_leave
+  discharge_initiated
+  discharged
+  cancelled
+  /// Left against medical advice, absconded, or died — recorded distinctly
+  /// because each has a different statutory consequence.
+  closed_other
+
+  @@schema("clinical")
+}
+
+enum AdmissionKind {
+  elective
+  emergency
+  day_care
+  observation
+  /// Admitted from the ER before registration is complete. Same IP series, and
+  /// `registration_complete = false` until the desk catches up.
+  er_fast_track
+  transfer_in
+  newborn
+
+  @@schema("clinical")
+}
+
+enum HoldReason {
+  er_disposition
+  elective_booking
+  ot_return
+  icu_return
+  transfer_in
+  other
+
+  @@schema("clinical")
+}
+
+enum CleaningState {
+  requested
+  accepted
+  in_progress
+  done
+  inspected
+  failed
+
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7A.1 — the physical estate
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Building {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  code String @db.VarChar(20)
+  name String @db.VarChar(120)
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  wards Ward[]
+
+  @@unique([hospitalId, branchId, code], map: "uq_building_code")
+  @@index([hospitalId, branchId])
+  @@map("ip_buildings")
+  @@schema("clinical")
+}
+
+/// A ward. The unit a nurse is assigned to and the unit a census counts.
+model Ward {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  buildingId String @map("building_id") @db.Uuid
+
+  code  String @db.VarChar(20)
+  name  String @db.VarChar(120)
+  floor String @db.VarChar(20)
+
+  /// `general` | `icu` | `hdu` | `ot` | `nicu` | `picu` | `labour` | `isolation` | `day_care`.
+  wardType String @map("ward_type") @db.VarChar(24)
+
+  /// Minutes allowed to turn a bed around in this ward, from vacate to
+  /// available. An ICU bed is cleaned faster than a general one because
+  /// somebody is waiting on it, and the SLA is per ward type for that reason.
+  cleaningSlaMinutes Int @default(60) @map("cleaning_sla_minutes")
+
+  /// `any` | `male` | `female`. A ward that admits one sex only.
+  sexPolicy String @default("any") @map("sex_policy") @db.VarChar(10)
+  /// Paediatric wards refuse adults and vice versa. Null means no age policy.
+  minAgeYears Int? @map("min_age_years")
+  maxAgeYears Int? @map("max_age_years")
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  building Building @relation(fields: [buildingId], references: [id], onDelete: Restrict)
+  rooms    Room[]
+  beds     Bed[]
+
+  @@unique([hospitalId, branchId, code], map: "uq_ward_code")
+  @@index([hospitalId, branchId, wardType])
+  @@map("ip_wards")
+  @@schema("clinical")
+}
+
+/// The bed class, which is what the tariff is priced against.
+///
+/// Separate from the room and the bed so a hospital can re-class a room without
+/// touching every bed in it, and so the tariff joins to one row rather than to
+/// a string somebody typed.
+model BedClass {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  code String @db.VarChar(20)
+  name String @db.VarChar(80)
+
+  /// The RC-003 service this class bills as. Room rent posts against it nightly.
+  tariffServiceId String? @map("tariff_service_id") @db.Uuid
+
+  /// Rank, so "eligible up to semi-private" is a comparison rather than a list.
+  /// Lower is cheaper.
+  tier Int
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  rooms Room[]
+  beds  Bed[]
+
+  @@unique([hospitalId, code], map: "uq_bed_class_code")
+  @@map("ip_bed_classes")
+  @@schema("clinical")
+}
+
+model Room {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  wardId     String @map("ward_id") @db.Uuid
+  classId    String @map("class_id") @db.Uuid
+
+  code String @db.VarChar(20)
+  name String? @db.VarChar(80)
+
+  /// A room whose beds must all hold the same sex, because they share it.
+  isShared Boolean @default(true) @map("is_shared")
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ward     Ward     @relation(fields: [wardId], references: [id], onDelete: Restrict)
+  bedClass BedClass @relation(fields: [classId], references: [id], onDelete: Restrict)
+  beds     Bed[]
+
+  @@unique([hospitalId, wardId, code], map: "uq_room_code")
+  @@index([hospitalId, wardId])
+  @@map("ip_rooms")
+  @@schema("clinical")
+}
+
+model Bed {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  wardId     String @map("ward_id") @db.Uuid
+  roomId     String @map("room_id") @db.Uuid
+  classId    String @map("class_id") @db.Uuid
+
+  code String @db.VarChar(20)
+
+  status BedStatus @default(available)
+
+  /// What this bed physically has. A ventilated patient cannot go to a bed with
+  /// no ventilator point, and the allocation query filters on these rather than
+  /// on somebody remembering which bay has what.
+  isolationCapable Boolean @default(false) @map("isolation_capable")
+  hasOxygenPoint   Boolean @default(true) @map("has_oxygen_point")
+  hasMonitor       Boolean @default(false) @map("has_monitor")
+  hasVentilatorPoint Boolean @default(false) @map("has_ventilator_point")
+  hasAttendantBed  Boolean @default(false) @map("has_attendant_bed")
+
+  /// Set while `blocked`. Beyond 24 hours it needs an approval, which is a
+  /// service rule rather than a shape — the shape only insists on a reason.
+  blockReason String? @map("block_reason") @db.Text
+  blockedAt   DateTime? @map("blocked_at") @db.Timestamptz(6)
+  blockedBy   String?   @map("blocked_by") @db.Uuid
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ward       Ward            @relation(fields: [wardId], references: [id], onDelete: Restrict)
+  room       Room            @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  bedClass   BedClass        @relation(fields: [classId], references: [id], onDelete: Restrict)
+  occupancies BedOccupancy[]
+  holds      BedHold[]
+  cleanings  CleaningTask[]
+
+  @@unique([hospitalId, branchId, code], map: "uq_bed_code")
+  @@index([hospitalId, branchId, wardId, status])
+  @@index([hospitalId, status, classId])
+  @@map("ip_beds")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7A.1 — the admission
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Admission {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId String  @map("patient_id") @db.Uuid
+  /// Where the patient came from.
+  erVisitId String? @map("er_visit_id") @db.Uuid
+  opdVisitId String? @map("opd_visit_id") @db.Uuid
+
+  /// From the `IP_NO` series. Gapless per branch per financial year.
+  ipNo String @map("ip_no") @db.VarChar(60)
+
+  kind   AdmissionKind
+  status AdmissionStatus @default(requested)
+
+  /// False for an ER fast-track admission until the front desk completes it.
+  /// The patient is admitted and treated either way; this only says whether the
+  /// paperwork has caught up.
+  registrationComplete Boolean @default(true) @map("registration_complete")
+
+  attendingDoctorId String? @map("attending_doctor_id") @db.Uuid
+  admittingDoctorId String? @map("admitting_doctor_id") @db.Uuid
+  department        String? @db.VarChar(60)
+
+  provisionalDiagnosis String? @map("provisional_diagnosis") @db.Text
+  icd10                String? @db.VarChar(20)
+
+  /// The class the patient is entitled to under their payer, and the class they
+  /// were actually given. A difference is the proportionate-deduction warning.
+  entitledClassId String? @map("entitled_class_id") @db.Uuid
+  payerId         String? @map("payer_id") @db.Uuid
+  preauthCaseId   String? @map("preauth_case_id") @db.Uuid
+  packageId       String? @map("package_id") @db.Uuid
+
+  /// What the desk asked for, and what was actually taken. A shortfall needs an
+  /// EN-038 approval, recorded here by id rather than as a boolean.
+  depositSuggested Decimal? @map("deposit_suggested") @db.Decimal(14, 2)
+  depositTaken     Decimal  @default(0) @map("deposit_taken") @db.Decimal(14, 2)
+  depositApprovalId String? @map("deposit_approval_id") @db.Uuid
+
+  consentId String? @map("consent_id") @db.Uuid
+
+  requestedAt DateTime  @default(now()) @map("requested_at") @db.Timestamptz(6)
+  requestedBy String?   @map("requested_by") @db.Uuid
+  admittedAt  DateTime? @map("admitted_at") @db.Timestamptz(6)
+  admittedBy  String?   @map("admitted_by") @db.Uuid
+
+  /// Maintained by the ward round, and what the discharge-before-noon programme
+  /// is measured against.
+  expectedDischargeAt DateTime? @map("expected_discharge_at") @db.Timestamptz(6)
+
+  dischargedAt DateTime? @map("discharged_at") @db.Timestamptz(6)
+  dischargedBy String?   @map("discharged_by") @db.Uuid
+  /// `routine` | `lama` | `absconded` | `transferred_out` | `died` | `cancelled`.
+  outcome      String?   @db.VarChar(24)
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  occupancies BedOccupancy[]
+  transfers   BedTransfer[]
+  holds       BedHold[]
+
+  @@unique([hospitalId, ipNo], map: "uq_admission_ip_no")
+  @@index([hospitalId, branchId, status, admittedAt(sort: Desc)])
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, erVisitId])
+  @@index([hospitalId, expectedDischargeAt])
+  @@map("ip_admissions")
+  @@schema("clinical")
+}
+
+/// Who is in which bed, and when.
+///
+/// The only source of occupancy in the system. `during` is a `tstzrange` with a
+/// GiST exclusion constraint, so one bed cannot hold two patients at one moment
+/// no matter what raced. Every census, every board and every room-rent line is a
+/// query over this table.
+model BedOccupancy {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+  bedId       String @map("bed_id") @db.Uuid
+  patientId   String @map("patient_id") @db.Uuid
+
+  /// The class at the time of occupancy, copied. Re-classing a room later must
+  /// not silently re-price a stay that already happened.
+  classId String @map("class_id") @db.Uuid
+
+  fromAt DateTime  @default(now()) @map("from_at") @db.Timestamptz(6)
+  toAt   DateTime? @map("to_at") @db.Timestamptz(6)
+
+  /// Why it ended: `transfer` | `discharge` | `leave` | `correction`.
+  endReason String? @map("end_reason") @db.VarChar(24)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  admission Admission @relation(fields: [admissionId], references: [id], onDelete: Restrict)
+  bed       Bed       @relation(fields: [bedId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, branchId, bedId, fromAt(sort: Desc)])
+  @@index([hospitalId, admissionId, fromAt])
+  @@map("ip_bed_occupancies")
+  @@schema("clinical")
+}
+
+/// A bed held for somebody who is on their way.
+model BedHold {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  bedId       String  @map("bed_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+  patientId   String? @map("patient_id") @db.Uuid
+
+  reason HoldReason
+
+  /// The TTL is a real timestamp, not a duration somebody has to subtract.
+  /// 2 h from the ER, 6 h elective, 24 h for an OT or ICU return.
+  heldAt    DateTime @default(now()) @map("held_at") @db.Timestamptz(6)
+  heldBy    String?  @map("held_by") @db.Uuid
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+
+  releasedAt   DateTime? @map("released_at") @db.Timestamptz(6)
+  releasedBy   String?   @map("released_by") @db.Uuid
+  /// `admitted` | `expired` | `cancelled`.
+  releaseReason String?  @map("release_reason") @db.VarChar(24)
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  bed       Bed        @relation(fields: [bedId], references: [id], onDelete: Cascade)
+  admission Admission? @relation(fields: [admissionId], references: [id], onDelete: SetNull)
+
+  @@index([hospitalId, branchId, expiresAt])
+  @@index([hospitalId, bedId, releasedAt])
+  @@map("ip_bed_holds")
+  @@schema("clinical")
+}
+
+/// A move, with the SBAR that has to travel with the patient.
+model BedTransfer {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String @map("admission_id") @db.Uuid
+
+  fromBedId String? @map("from_bed_id") @db.Uuid
+  toBedId   String? @map("to_bed_id") @db.Uuid
+  fromClassId String? @map("from_class_id") @db.Uuid
+  toClassId   String? @map("to_class_id") @db.Uuid
+
+  /// `intra_facility` | `inter_branch` | `transfer_out` | `transfer_in` | `leave` | `return`.
+  kind String @db.VarChar(24)
+
+  reason String @db.Text
+
+  /// SBAR — the handover the receiving nurse actually needs. Held as columns
+  /// rather than free text because "lines and tubes" is the one that gets
+  /// forgotten, and a missing column is visible where a missing paragraph is not.
+  situation      String? @db.Text
+  background     String? @db.Text
+  assessment     String? @db.Text
+  recommendation String? @db.Text
+  linesAndTubes  String[] @map("lines_and_tubes")
+  infusions      String[]
+  pendingResults String[] @map("pending_results")
+  allergies      String[]
+
+  /// For a transfer out: where to, and whether they were stable enough to go.
+  destinationFacility String? @map("destination_facility") @db.VarChar(200)
+  stabilityNote       String? @map("stability_note") @db.Text
+  documentsPack       String[] @map("documents_pack")
+
+  handedOverBy String?   @map("handed_over_by") @db.Uuid
+  acceptedBy   String?   @map("accepted_by") @db.Uuid
+  acceptedAt   DateTime? @map("accepted_at") @db.Timestamptz(6)
+
+  at DateTime @default(now()) @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  admission Admission @relation(fields: [admissionId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, branchId, at(sort: Desc)])
+  @@index([hospitalId, admissionId, at])
+  @@map("ip_bed_transfers")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7A.3 — housekeeping
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A bed that needs cleaning before anybody else can have it.
+model CleaningTask {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  bedId String @map("bed_id") @db.Uuid
+
+  /// `terminal` after a discharge, `daily`, `spill`, `isolation` after an
+  /// infectious case. The kind decides the checklist and the time allowed.
+  kind String @default("terminal") @db.VarChar(20)
+
+  state CleaningState @default(requested)
+
+  /// Copied from the ward at dispatch. A later change to the ward's SLA must
+  /// not re-judge a task that was already breached or already met.
+  slaMinutes Int      @map("sla_minutes")
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  dueAt      DateTime @map("due_at") @db.Timestamptz(6)
+
+  acceptedAt  DateTime? @map("accepted_at") @db.Timestamptz(6)
+  acceptedBy  String?   @map("accepted_by") @db.Uuid
+  startedAt   DateTime? @map("started_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  completedBy String?   @map("completed_by") @db.Uuid
+
+  /// The QC pass. A bed becomes available on this, or on a completion where the
+  /// ward does not require inspection.
+  inspectedAt DateTime? @map("inspected_at") @db.Timestamptz(6)
+  inspectedBy String?   @map("inspected_by") @db.Uuid
+  failReason  String?   @map("fail_reason") @db.Text
+
+  checklist Json?
+
+  escalatedAt DateTime? @map("escalated_at") @db.Timestamptz(6)
+  escalatedTo String?   @map("escalated_to") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  bed Bed @relation(fields: [bedId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, branchId, state, dueAt])
+  @@index([hospitalId, bedId, requestedAt(sort: Desc)])
+  @@map("ip_cleaning_tasks")
+  @@schema("clinical")
+}

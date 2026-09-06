@@ -8700,6 +8700,216 @@ const TR007 = group('TR-007', 6, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 7A — IP-001, IP-018, NC-018, IP-025
+//
+// Reading the bed board is the widest key in the phase, held by anybody who
+// needs to know where a patient is. Allocating a bed is not much narrower —
+// somebody has to be able to do it at 3 a.m. — but *blocking* one is, because
+// a blocked bed is a bed nobody can use and the hospital is short of them.
+// ═════════════════════════════════════════════════════════════════════════════
+const IP001 = group('IP-001', 7, [
+  p(
+    'bed.board.read',
+    'bed',
+    'read',
+    'phi',
+    'low',
+    'See the bed board: what is free, what is occupied, what is waiting on a clean.',
+    { phiRead: true },
+  ),
+  p(
+    'bed.config.manage',
+    'bed',
+    'configure',
+    'operational',
+    'medium',
+    'Add and amend buildings, wards, rooms, bed classes and beds.',
+  ),
+  p(
+    'bed.allocate',
+    'bed',
+    'assign',
+    'phi',
+    'low',
+    'Put a patient in a bed. Transactional — fifty simultaneous claims on one bed produce exactly one admission.',
+  ),
+  p(
+    'bed.hold.create',
+    'bed',
+    'create',
+    'phi',
+    'low',
+    'Hold a bed for somebody on their way, with a TTL: two hours from the ER, six elective, twenty-four for an OT or ICU return.',
+  ),
+  p('bed.hold.release', 'bed', 'update', 'phi', 'low', 'Release a hold before it expires.'),
+  p(
+    'bed.block',
+    'bed',
+    'update',
+    'operational',
+    'medium',
+    'Take a bed out of service. Beyond twenty-four hours it needs an approval — a blocked bed is one the hospital does not have.',
+    { requiresReason: true },
+  ),
+  p(
+    'admission.request',
+    'admission',
+    'create',
+    'phi',
+    'low',
+    'Raise an admission request from the ER disposition or the OPD advice.',
+  ),
+  p(
+    'admission.admit',
+    'admission',
+    'complete',
+    'phi',
+    'medium',
+    'Admit: the bed, the consent, the deposit and the IP number, in one transaction.',
+  ),
+  p('admission.read', 'admission', 'read', 'phi', 'low', 'Open one admission and its stay so far.', {
+    phiRead: true,
+  }),
+  p('admission.list', 'admission', 'list', 'phi', 'low', 'The admitted list, by ward or by consultant.'),
+  p(
+    'admission.update',
+    'admission',
+    'update',
+    'phi',
+    'low',
+    'Amend the attending doctor, the diagnosis, or the expected discharge date.',
+  ),
+  p(
+    'admission.deposit.waive',
+    'admission',
+    'override',
+    'financial',
+    'high',
+    'Admit on less than the suggested deposit, or on none. There is no pay-first gate in an emergency; this records who decided and why.',
+    { requiresReason: true },
+  ),
+  p(
+    'admission.cancel',
+    'admission',
+    'cancel',
+    'phi',
+    'medium',
+    'Cancel an admission request that never became an admission.',
+    { requiresReason: true },
+  ),
+]);
+
+const IP018 = group('IP-018', 7, [
+  p(
+    'transfer.execute',
+    'bed_transfer',
+    'create',
+    'phi',
+    'medium',
+    'Move a patient between beds, with the SBAR the receiving nurse needs and a proration preview before it is confirmed.',
+  ),
+  p('transfer.read', 'bed_transfer', 'read', 'phi', 'low', 'See a patient’s movements.', { phiRead: true }),
+  p(
+    'transfer.accept',
+    'bed_transfer',
+    'record',
+    'phi',
+    'low',
+    'Accept a handover on the receiving side, which is what closes the loop.',
+  ),
+  p(
+    'transfer.out',
+    'bed_transfer',
+    'complete',
+    'phi',
+    'high',
+    'Transfer a patient out to another facility, with a stability note and the documents pack.',
+    { requiresReason: true },
+  ),
+  p(
+    'transfer.leave',
+    'bed_transfer',
+    'update',
+    'phi',
+    'medium',
+    'Record temporary leave, which holds the bed and pauses nothing else.',
+    { requiresReason: true },
+  ),
+]);
+
+const NC018 = group('NC-018', 7, [
+  p(
+    'housekeeping.task.read',
+    'cleaning_task',
+    'list',
+    'operational',
+    'low',
+    'The cleaning worklist, ordered by what is closest to breaching.',
+  ),
+  p(
+    'housekeeping.task.accept',
+    'cleaning_task',
+    'update',
+    'operational',
+    'low',
+    'Take a cleaning task, and record starting and finishing it.',
+  ),
+  p(
+    'housekeeping.task.inspect',
+    'cleaning_task',
+    'validate',
+    'operational',
+    'low',
+    'Pass or fail a clean. A failed one goes back with a reason.',
+  ),
+  p(
+    'housekeeping.override',
+    'bed',
+    'override',
+    'operational',
+    'medium',
+    'Return a bed to the board without a completed clean — a bed vacated for ten minutes for an X-ray. The reason is kept on the bed.',
+    { requiresReason: true },
+  ),
+]);
+
+const IP025 = group('IP-025', 7, [
+  p(
+    'census.read',
+    'bed',
+    'view',
+    'phi',
+    'low',
+    'The census and occupancy by ward, class and consultant — derived from the occupancy table, never from a counter.',
+  ),
+  p(
+    'census.demand.manage',
+    'bed',
+    'plan',
+    'phi',
+    'low',
+    'Run the demand queue: who is waiting for a bed, and which one they are getting.',
+  ),
+  p(
+    'census.discharge.plan',
+    'admission',
+    'plan',
+    'phi',
+    'low',
+    'Maintain expected discharge dates, which is what the discharge-before-noon programme is measured on.',
+  ),
+  p(
+    'census.surge.declare',
+    'bed',
+    'activate',
+    'operational',
+    'high',
+    'Put the hospital into surge mode, wired to the Phase 6 MCI declaration.',
+    { requiresReason: true },
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -8772,6 +8982,12 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...TR003,
   ...TR005,
   ...TR007,
+
+  // Phase 7
+  ...IP001,
+  ...IP018,
+  ...NC018,
+  ...IP025,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));
