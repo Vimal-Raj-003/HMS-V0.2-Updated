@@ -140,6 +140,9 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   // immediately closed because the second injury turned out to be a graze must
   // not burn a number, and nothing statutory rests on the sequence.
   ['POLYTRAUMA', '{BR}/PT/{FY}/{SEQ:5}', false, 'fy'],
+  // IP-006: the theatre case. Not gapless — a case cancelled before it reaches
+  // the table must not burn a number, and nothing legal rests on the sequence.
+  ['OT_CASE', '{BR}/OT/{FY}/{SEQ:5}', false, 'fy'],
   ['LIC_INVOICE', 'VIMS/{FY}/{SEQ:5}', true, 'fy'],
 ];
 

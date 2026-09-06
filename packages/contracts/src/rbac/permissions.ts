@@ -9159,6 +9159,151 @@ const IP005 = group('IP-005', 7, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 7D — IP-006, IP-024, EN-003, TR-004
+//
+// There is no `ot.checklist.bypass` key and there will not be one. The three
+// phases are enforced by triggers, and a permission that could turn them off
+// would be a permission somebody grants at 2 a.m. to get a case moving.
+// ═════════════════════════════════════════════════════════════════════════════
+const IP006 = group('IP-006', 7, [
+  p(
+    'ot.board.read',
+    'ot_case',
+    'view',
+    'phi',
+    'low',
+    'The theatre board: what is scheduled, what is running, what is waiting on a pre-op check.',
+    { phiRead: true },
+  ),
+  p(
+    'ot.case.book',
+    'ot_case',
+    'create',
+    'phi',
+    'low',
+    'Book a case with its procedure, side, duration and the equipment it needs.',
+  ),
+  p(
+    'ot.case.schedule',
+    'ot_case',
+    'plan',
+    'phi',
+    'medium',
+    'Put a case on a list, with conflict detection against the theatre and the surgeon.',
+  ),
+  p(
+    'ot.case.bump',
+    'ot_case',
+    'override',
+    'phi',
+    'high',
+    'Displace an elective case with an emergency one. Somebody’s operation was cancelled, and the reason is recorded on both.',
+    { requiresReason: true },
+  ),
+  p(
+    'ot.preop.record',
+    'ot_case',
+    'record',
+    'phi',
+    'low',
+    'Record the pre-op checks: consent, fasting, PAC clearance, cross-match, the site mark.',
+  ),
+  p('ot.checklist.signin', 'ot_case', 'sign', 'phi', 'low', 'Run the WHO sign-in and put your name on it.'),
+  p(
+    'ot.checklist.timeout',
+    'ot_case',
+    'sign',
+    'phi',
+    'low',
+    'Run the time-out. Nothing can be cut until this is done — the team says the patient, the procedure and the side out loud, together.',
+  ),
+  p(
+    'ot.checklist.signout',
+    'ot_case',
+    'sign',
+    'phi',
+    'low',
+    'Run the sign-out with the instrument, swab and sharps counts.',
+  ),
+  p(
+    'ot.intraop.record',
+    'ot_case',
+    'record',
+    'phi',
+    'low',
+    'Record the operation: times, findings, blood loss, specimens, the C-arm dose.',
+  ),
+  p(
+    'ot.case.close',
+    'ot_case',
+    'complete',
+    'phi',
+    'medium',
+    'Close a case. Refused without a sign-out, and refused on an unreconciled count with no recorded resolution.',
+  ),
+  p(
+    'ot.note.write',
+    'ot_case',
+    'create',
+    'phi',
+    'medium',
+    'Write the operative note and the post-operative orders.',
+  ),
+]);
+
+const EN003 = group('EN-003', 7, [
+  p(
+    'cssd.set.manage',
+    'cssd_set',
+    'configure',
+    'operational',
+    'low',
+    'Define instrument sets and their contents.',
+  ),
+  p(
+    'cssd.load.run',
+    'cssd_load',
+    'create',
+    'operational',
+    'low',
+    'Start a sterilisation load and record the cycle parameters off the autoclave.',
+  ),
+  p(
+    'cssd.indicator.record',
+    'cssd_load',
+    'validate',
+    'operational',
+    'medium',
+    'Read the Bowie-Dick, chemical and biological indicators into the load record.',
+  ),
+  p(
+    'cssd.load.release',
+    'cssd_load',
+    'release',
+    'operational',
+    'medium',
+    'Release a load for issue. Refused while the biological indicator is pending or failed.',
+  ),
+  p(
+    'cssd.issue',
+    'cssd_issue',
+    'issue',
+    'operational',
+    'low',
+    'Issue a set to a theatre. Refused from any load that is not released.',
+  ),
+  p(
+    'cssd.recall.run',
+    'cssd_load',
+    'trace',
+    'phi',
+    'high',
+    'Recall a failed load: every set issued from it and every patient those sets touched.',
+    { requiresReason: true, phiRead: true },
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -9241,6 +9386,8 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...EN029IP,
   ...IP012,
   ...IP005,
+  ...IP006,
+  ...EN003,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

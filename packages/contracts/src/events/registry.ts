@@ -10068,6 +10068,106 @@ const ipBillingEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * Phase 7D — theatre and sterile supply.
+ *
+ * `ot.count.discrepancy` fires whether or not the case closes. A count that did
+ * not reconcile is a patient who may have something inside them, and the event
+ * exists so that fact reaches the safety team even when the theatre resolves it
+ * in the room and moves on.
+ */
+const theatreEvents: readonly EventDefinition[] = [
+  ev(
+    'ot.case.bumped',
+    'ot_case',
+    'IP-006',
+    'An emergency displaced an elective case. Somebody’s operation was cancelled; this is what tells the ward, the patient and the list.',
+    z.object({
+      caseId: uuid,
+      bumpedCaseId: uuid,
+      theatreId: uuid.nullable(),
+      reason: z.string(),
+      bumpedBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'ot.timeout.completed',
+    'ot_case',
+    'IP-006',
+    'The WHO time-out was run and named. The incision cannot be recorded before this.',
+    z.object({
+      caseId: uuid,
+      caseNo: z.string(),
+      patientId: uuid,
+      side: z.string().nullable(),
+      ranBy: uuid,
+      minutesFromWheelIn: z.number().int().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'ot.count.discrepancy',
+    'ot_case',
+    'IP-006',
+    'An instrument, swab or sharps count did not reconcile. Fires whether or not the case then closes — a retained item is a never event, and the safety team hears about it even when the theatre resolves it in the room.',
+    z.object({
+      caseId: uuid,
+      caseNo: z.string(),
+      patientId: uuid,
+      swabGap: z.number().int(),
+      instrumentGap: z.number().int(),
+      sharpsGap: z.number().int(),
+      resolution: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'ot.case.closed',
+    'ot_case',
+    'IP-006',
+    'An operation finished, its counts reconciled or resolved.',
+    z.object({
+      caseId: uuid,
+      caseNo: z.string(),
+      patientId: uuid,
+      performedProcedure: z.string().nullable(),
+      knifeToSkinMinutes: z.number().int().nullable(),
+      bloodLossMl: z.number().int().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'cssd.load.failed',
+    'cssd_load',
+    'EN-003',
+    'A load failed its biological indicator. Nothing from it may be issued, and everything already issued needs recalling.',
+    z.object({
+      loadId: uuid,
+      loadNo: z.string(),
+      autoclaveId: z.string(),
+      setsInLoad: z.number().int(),
+      setsAlreadyIssued: z.number().int(),
+    }),
+    { retentionDays: 3650 },
+  ),
+  ev(
+    'cssd.recall.issued',
+    'cssd_load',
+    'EN-003',
+    'A failed load was recalled. Carries the patient count, because that is the number somebody has to act on at 6 a.m.',
+    z.object({
+      loadId: uuid,
+      loadNo: z.string(),
+      setsRecalled: z.number().int(),
+      casesAffected: z.number().int(),
+      patientsAffected: z.number().int(),
+      reason: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -10139,6 +10239,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...inpatientEvents,
   ...nursingEvents,
   ...ipBillingEvents,
+  ...theatreEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

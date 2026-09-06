@@ -1,0 +1,355 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7D · IP-006 + IP-024 + EN-003 + TR-004
+//
+// The theatre, the WHO checklist, anaesthesia and the sterile-supply cycle.
+//
+// ── The checklist is a gate, not a form ─────────────────────────────────────
+//
+// `phase-07`: "Incision cannot be recorded before the time-out is complete; the
+// case cannot be closed before sign-out (including instrument, swab and sharps
+// counts reconciling). Configuration may add items but may never remove or
+// bypass the three phases."
+//
+// So the three phases are columns on the case, not rows in a configurable list.
+// A configurable list can be configured to nothing; a NOT NULL timestamp with a
+// trigger reading it cannot. Extra items live in the JSON beside them and can
+// be added freely — the floor is in the shape.
+//
+// ── A load that fails its biological indicator cannot be released ───────────
+//
+// EN-003's whole point. The BI result is a column with a CHECK, and issuing a
+// set from a load whose BI failed is refused by a trigger. The recall query —
+// every set issued from that load and every patient they touched — is the thing
+// the module exists to be able to answer at 6 a.m.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum OtCaseState {
+  requested
+  scheduled
+  /// Pre-op checks done, patient sent for.
+  ready
+  /// In the theatre, sign-in done.
+  signed_in
+  /// Time-out complete. Only now can an incision be recorded.
+  timed_out
+  in_progress
+  /// Sign-out complete, counts reconciled.
+  signed_out
+  closed
+  cancelled
+  /// Bumped by an emergency case, with a recorded reason.
+  postponed
+
+  @@schema("clinical")
+}
+
+enum SterilisationState {
+  received
+  decontaminated
+  inspected
+  /// In the autoclave.
+  sterilising
+  /// Out of the autoclave, cooling, indicators not yet read.
+  quarantined
+  released
+  /// Biological indicator failed. Nothing from this load may be issued.
+  failed
+  recalled
+
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7D.1 — theatres and cases
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Theatre {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  code String @db.VarChar(20)
+  name String @db.VarChar(120)
+  /// `general` | `ortho` | `cardiac` | `neuro` | `obstetric` | `day_care` | `emergency`.
+  kind String @default("general") @db.VarChar(24)
+
+  /// Laminar flow, C-arm compatible, microscope — what the case needs to have.
+  hasLaminarFlow Boolean @default(false) @map("has_laminar_flow")
+  hasCArm        Boolean @default(false) @map("has_c_arm")
+  hasMicroscope  Boolean @default(false) @map("has_microscope")
+
+  /// Minutes between cases for cleaning. Longer after an infected case.
+  turnoverMinutes Int @default(30) @map("turnover_minutes")
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  cases OtCase[]
+
+  @@unique([hospitalId, branchId, code], map: "uq_theatre_code")
+  @@map("ot_theatres")
+  @@schema("clinical")
+}
+
+/// One operation, from the booking to the note.
+model OtCase {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  caseNo String @map("case_no") @db.VarChar(60)
+
+  patientId   String  @map("patient_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+  theatreId   String? @map("theatre_id") @db.Uuid
+  polytraumaCaseId String? @map("polytrauma_case_id") @db.Uuid
+  fractureId  String? @map("fracture_id") @db.Uuid
+
+  plannedProcedure String  @map("planned_procedure") @db.VarChar(300)
+  procedureCode    String? @map("procedure_code") @db.VarChar(40)
+  specialty        String  @db.VarChar(60)
+  /// The side, compared against the consent and the site mark. Wrong-site
+  /// surgery is a never event and the comparison is the cheapest guard there is.
+  side             String? @db.VarChar(16)
+
+  /// `elective` | `emergency` | `urgent`. An emergency case may bump an
+  /// elective one, and the bump is recorded.
+  urgency String @default("elective") @db.VarChar(16)
+
+  /// `general` | `spinal` | `regional` | `local` | `sedation` | `combined`.
+  anaesthesiaType String? @map("anaesthesia_type") @db.VarChar(24)
+  asaGrade        Int?    @map("asa_grade")
+
+  surgeonId     String? @map("surgeon_id") @db.Uuid
+  assistantIds  String[] @map("assistant_ids") @db.Uuid
+  anaesthetistId String? @map("anaesthetist_id") @db.Uuid
+  scrubNurseId  String? @map("scrub_nurse_id") @db.Uuid
+  circulatingNurseId String? @map("circulating_nurse_id") @db.Uuid
+
+  scheduledStart DateTime? @map("scheduled_start") @db.Timestamptz(6)
+  estimatedMinutes Int?    @map("estimated_minutes")
+
+  state OtCaseState @default(requested)
+
+  // ── Pre-op readiness. Each is a fact with a time, not a tick ────────────
+  consentAt       DateTime? @map("consent_at") @db.Timestamptz(6)
+  consentId       String?   @map("consent_id") @db.Uuid
+  siteMarkedAt    DateTime? @map("site_marked_at") @db.Timestamptz(6)
+  siteMarkedBy    String?   @map("site_marked_by") @db.Uuid
+  fastingFrom     DateTime? @map("fasting_from") @db.Timestamptz(6)
+  pacClearedAt    DateTime? @map("pac_cleared_at") @db.Timestamptz(6)
+  pacClearedBy    String?   @map("pac_cleared_by") @db.Uuid
+  crossmatchRef   String?   @map("crossmatch_ref") @db.VarChar(60)
+  antibioticGivenAt DateTime? @map("antibiotic_given_at") @db.Timestamptz(6)
+
+  // ── The WHO checklist. Three columns, not three configurable rows ───────
+  //
+  // Extra items go in the JSON. The three phases are the floor and cannot be
+  // configured away, because "configuration may never remove or bypass the
+  // three phases" is only true if configuration cannot reach them.
+  signInAt   DateTime? @map("sign_in_at") @db.Timestamptz(6)
+  signInBy   String?   @map("sign_in_by") @db.Uuid
+  signInItems Json?    @map("sign_in_items")
+
+  timeOutAt   DateTime? @map("time_out_at") @db.Timestamptz(6)
+  timeOutBy   String?   @map("time_out_by") @db.Uuid
+  timeOutItems Json?    @map("time_out_items")
+
+  signOutAt   DateTime? @map("sign_out_at") @db.Timestamptz(6)
+  signOutBy   String?   @map("sign_out_by") @db.Uuid
+  signOutItems Json?    @map("sign_out_items")
+
+  // ── The counts. Reconciled means the numbers agree ──────────────────────
+  swabCountIn   Int? @map("swab_count_in")
+  swabCountOut  Int? @map("swab_count_out")
+  instrumentCountIn  Int? @map("instrument_count_in")
+  instrumentCountOut Int? @map("instrument_count_out")
+  sharpsCountIn  Int? @map("sharps_count_in")
+  sharpsCountOut Int? @map("sharps_count_out")
+  /// Set when a count did not reconcile. Triggers the imaging workflow, and the
+  /// case cannot close on it without a recorded resolution.
+  countDiscrepancy Boolean @default(false) @map("count_discrepancy")
+  countResolution  String? @map("count_resolution") @db.Text
+
+  // ── Intra-op ────────────────────────────────────────────────────────────
+  wheeledInAt  DateTime? @map("wheeled_in_at") @db.Timestamptz(6)
+  anaesthesiaStartAt DateTime? @map("anaesthesia_start_at") @db.Timestamptz(6)
+  incisionAt   DateTime? @map("incision_at") @db.Timestamptz(6)
+  closureAt    DateTime? @map("closure_at") @db.Timestamptz(6)
+  wheeledOutAt DateTime? @map("wheeled_out_at") @db.Timestamptz(6)
+
+  performedProcedure String? @map("performed_procedure") @db.Text
+  findings           String? @db.Text
+  bloodLossMl        Int?    @map("blood_loss_ml")
+  specimens          String[]
+  /// C-arm dose, for TR-004's radiation log.
+  fluoroscopyMinutes Decimal? @map("fluoroscopy_minutes") @db.Decimal(6, 2)
+  fluoroscopyDoseMgy Decimal? @map("fluoroscopy_dose_mgy") @db.Decimal(10, 2)
+
+  operativeNote String? @map("operative_note") @db.Text
+  postOpOrders  String? @map("post_op_orders") @db.Text
+
+  /// Set when this case bumped another. The reason is on this row, and the
+  /// bumped case points back.
+  bumpedCaseId String? @map("bumped_case_id") @db.Uuid
+  bumpReason   String? @map("bump_reason") @db.Text
+
+  cancelReason String? @map("cancel_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  theatre Theatre? @relation(fields: [theatreId], references: [id], onDelete: SetNull)
+  setIssues CssdIssue[]
+
+  @@unique([hospitalId, caseNo], map: "uq_ot_case_no")
+  @@index([hospitalId, branchId, state, scheduledStart])
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, theatreId, scheduledStart])
+  @@map("ot_cases")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7D.4 — sterile supply
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A tray of instruments, tracked by barcode through the cycle.
+model CssdSet {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  code    String @db.VarChar(40)
+  name    String @db.VarChar(160)
+  /// `basic` | `ortho_major` | `laparoscopy` | `cardiac` | `linen` | `implant_set`.
+  setType String @map("set_type") @db.VarChar(40)
+
+  /// What should be in it, so an inspection can count against something.
+  contents Json?
+  itemCount Int @default(0) @map("item_count")
+
+  /// How long a released pack stays sterile, by pack type.
+  shelfLifeDays Int @default(180) @map("shelf_life_days")
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  loadItems CssdLoadItem[]
+  issues    CssdIssue[]
+
+  @@unique([hospitalId, branchId, code], map: "uq_cssd_set_code")
+  @@map("cssd_sets")
+  @@schema("clinical")
+}
+
+/// One autoclave run, and what its indicators said.
+model CssdLoad {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  loadNo     String @map("load_no") @db.VarChar(60)
+  autoclaveId String @map("autoclave_id") @db.VarChar(40)
+  cycleNo    String? @map("cycle_no") @db.VarChar(40)
+
+  state SterilisationState @default(received)
+
+  /// Read off the autoclave, not typed. A cycle that did not reach temperature
+  /// is a cycle whose contents are not sterile whatever the paperwork says.
+  peakTemperatureC Decimal? @map("peak_temperature_c") @db.Decimal(6, 2)
+  holdMinutes      Decimal? @map("hold_minutes") @db.Decimal(6, 2)
+  peakPressureBar  Decimal? @map("peak_pressure_bar") @db.Decimal(6, 2)
+
+  /// `pass` | `fail` | `pending`. Bowie-Dick tests the vacuum; the chemical
+  /// indicator says the pack was exposed; the biological says the spores died.
+  /// Only the last one is proof, and it takes hours — which is why a load sits
+  /// in quarantine until it reads.
+  bowieDick  String? @map("bowie_dick") @db.VarChar(10)
+  chemicalIndicator String? @map("chemical_indicator") @db.VarChar(10)
+  biologicalIndicator String @default("pending") @map("biological_indicator") @db.VarChar(10)
+  biReadAt   DateTime? @map("bi_read_at") @db.Timestamptz(6)
+  biReadBy   String?   @map("bi_read_by") @db.Uuid
+
+  startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+  releasedAt DateTime? @map("released_at") @db.Timestamptz(6)
+  releasedBy String?   @map("released_by") @db.Uuid
+
+  /// Set when the BI failed and the recall ran.
+  recalledAt DateTime? @map("recalled_at") @db.Timestamptz(6)
+  recalledBy String?   @map("recalled_by") @db.Uuid
+  recallNote String?   @map("recall_note") @db.Text
+
+  operatorId String? @map("operator_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  items CssdLoadItem[]
+
+  @@unique([hospitalId, loadNo], map: "uq_cssd_load_no")
+  @@index([hospitalId, branchId, state, startedAt(sort: Desc)])
+  @@map("cssd_loads")
+  @@schema("clinical")
+}
+
+/// A set in a load. The join that makes the recall query answerable.
+model CssdLoadItem {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  loadId String @map("load_id") @db.Uuid
+  setId  String @map("set_id") @db.Uuid
+
+  /// When this pack stops being sterile, from the load's release.
+  expiresOn DateTime? @map("expires_on") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  load CssdLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  set  CssdSet  @relation(fields: [setId], references: [id], onDelete: Restrict)
+
+  @@unique([loadId, setId], map: "uq_cssd_load_item")
+  @@index([hospitalId, setId])
+  @@map("cssd_load_items")
+  @@schema("clinical")
+}
+
+/// A set issued to a case. The other half of the recall query.
+model CssdIssue {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  setId     String  @map("set_id") @db.Uuid
+  loadId    String? @map("load_id") @db.Uuid
+  otCaseId  String? @map("ot_case_id") @db.Uuid
+  patientId String? @map("patient_id") @db.Uuid
+
+  issuedAt DateTime  @default(now()) @map("issued_at") @db.Timestamptz(6)
+  issuedBy String?   @map("issued_by") @db.Uuid
+  issuedTo String?   @map("issued_to") @db.VarChar(120)
+
+  returnedAt DateTime? @map("returned_at") @db.Timestamptz(6)
+  returnedBy String?   @map("returned_by") @db.Uuid
+  /// `used` | `unused` | `contaminated` | `incomplete`.
+  returnState String?  @map("return_state") @db.VarChar(20)
+
+  /// Set when a load recall reached this issue.
+  recalledAt DateTime? @map("recalled_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  set    CssdSet @relation(fields: [setId], references: [id], onDelete: Restrict)
+  otCase OtCase? @relation(fields: [otCaseId], references: [id], onDelete: SetNull)
+
+  @@index([hospitalId, branchId, issuedAt(sort: Desc)])
+  @@index([hospitalId, loadId])
+  @@index([hospitalId, setId, returnedAt])
+  @@map("cssd_issues")
+  @@schema("clinical")
+}

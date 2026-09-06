@@ -619,6 +619,35 @@ const IP_BILL_READER = ['ipbill.read', 'ipbill.charge.explain', 'ipbill.clearanc
 /** Billing's own: running the job, clearing the gate. */
 const IP_BILL_DESK = [...IP_BILL_READER, 'ipbill.charge.run', 'ipbill.clearance.clear'] as const;
 
+/** Phase 7D — the theatre floor. */
+const OT_FLOOR = [
+  'ot.board.read',
+  'ot.case.book',
+  'ot.preop.record',
+  'ot.checklist.signin',
+  'ot.checklist.timeout',
+  'ot.checklist.signout',
+  'ot.intraop.record',
+] as const;
+
+/** The surgeon: the note, and closing the case. */
+const OT_SURGEON = [
+  ...OT_FLOOR,
+  'ot.case.schedule',
+  'ot.case.close',
+  'ot.note.write',
+  'ot.case.bump',
+] as const;
+
+/** Sterile supply's own cycle. */
+const CSSD_FLOOR = [
+  'cssd.set.manage',
+  'cssd.load.run',
+  'cssd.indicator.record',
+  'cssd.load.release',
+  'cssd.issue',
+] as const;
+
 const FLEET_DISPATCH = [
   'fleet.vehicle.read',
   'fleet.request.create',
@@ -1871,6 +1900,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'admin-console',
     permissions: [
+      'ot.board.read',
+      'ot.case.schedule',
+      'cssd.recall.run',
       ...IP_BILL_DESK,
       'ipbill.policy.manage',
       'ipbill.clearance.override',
@@ -2155,6 +2187,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      'ot.board.read',
+      'ot.case.bump',
+      'cssd.recall.run',
       ...IP_BILL_READER,
       'ipbill.clearance.override',
       'nursing.ward.read',
@@ -2410,6 +2445,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...OT_FLOOR,
+      'ot.case.bump',
       ...MAR_PRESCRIBER,
       ...WARD_FLOOR,
       'bed.hold.create',
@@ -2472,6 +2509,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...OT_SURGEON,
+      'cssd.issue',
       ...MAR_PRESCRIBER,
       'infection.hai.read',
       ...WARD_FLOOR,
@@ -2518,6 +2557,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'anaesthesia-worklist',
     permissions: [
+      ...OT_FLOOR,
+      'ot.case.close',
+      'ot.note.write',
       'mar.read',
       'mar.order.write',
       'nursing.ward.read',
@@ -2550,6 +2592,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'icu-board',
     permissions: [
+      'ot.board.read',
+      'ot.intraop.record',
       ...MAR_PRESCRIBER,
       'infection.isolation.manage',
       'infection.device.record',
@@ -2644,6 +2688,7 @@ const templates: readonly RoleTemplate[] = [
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
     permissions: [
+      ...OT_FLOOR,
       ...MAR_PRESCRIBER,
       ...WARD_FLOOR,
       ...POLYTRAUMA_FLOOR,
@@ -2874,6 +2919,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'ot-checklist',
     permissions: [
+      ...OT_FLOOR,
+      'cssd.issue',
       ...NURSING_BEDSIDE,
       ...POLYTRAUMA_NURSING,
       ...IMPLANT_AT_THE_TROLLEY,
@@ -2899,6 +2946,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'infection-control',
     permissions: [
+      'ot.board.read',
+      'cssd.recall.run',
       ...INFECTION_CONTROL,
       ...BED_BOARD_READER,
       'transfer.read',
@@ -2921,6 +2970,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-command-centre',
     permissions: [
+      'ot.board.read',
+      'ot.case.schedule',
       ...IP_BILL_READER,
       ...NURSING_IN_CHARGE,
       ...BED_MANAGEMENT,
@@ -3102,6 +3153,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'finance',
     homeWorkspace: 'billing-desk',
     permissions: [
+      'ot.board.read',
       ...IP_BILL_DESK,
       ...BED_BOARD_READER,
       'transfer.read',
@@ -3417,6 +3469,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'supply',
     homeWorkspace: 'cssd',
     permissions: [
+      ...CSSD_FLOOR,
+      'ot.board.read',
       ...BASE_STAFF,
       'barcode.scan',
       ...LABEL_PRINTER,
@@ -4018,6 +4072,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'quality',
     permissions: [
+      'ot.board.read',
+      'cssd.recall.run',
       'infection.hai.read',
       'nursing.ward.read',
       ...IMPLANT_RECALL_OFFICER,

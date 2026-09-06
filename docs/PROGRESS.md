@@ -401,6 +401,59 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-07 (night) · Phase 7D · The theatre, a checklist that is a gate, and a load that failed
+
+**Built — IP-006, IP-024, EN-003, TR-004 (step 7D of seven), complete.** 6
+tables, 17 permission keys, 6 events, 2 screens. **Exit gates 6 and 7 pass.**
+
+**Gate 6: the WHO checklist**
+
+| Attempt                                     | What happened                                |
+| ------------------------------------------- | -------------------------------------------- |
+| Incision with no sign-in                    | Refused — the three phases run in order      |
+| Incision after sign-in, before the time-out | Refused — "there is no override"             |
+| A time-out with nobody's name on it         | Refused                                      |
+| Incision after a named time-out             | Accepted                                     |
+| Closing with no sign-out                    | Refused                                      |
+| Closing with the counts not recorded        | Refused — "a retained swab is a never event" |
+| Closing with a swab unaccounted for         | Refused, naming the gap                      |
+| The same, with a recorded resolution        | Accepted, discrepancy flag still true        |
+| Counts reconciling                          | Accepted, discrepancy false                  |
+
+The three phases are columns, not rows in a configurable list. `phase-07`:
+"Configuration may add items but may never remove or bypass the three phases" —
+and a configurable list can be configured to nothing. Extra items live in the
+JSON beside the timestamps and can be added freely; the floor is in the shape.
+There is no `ot.checklist.bypass` permission, and a test fails if one is ever
+added.
+
+An emergency case bumps an elective one with a recorded reason on both rows. It
+does not get a shorter checklist, because the whole point of the checklist is
+that it applies at 2 a.m.
+
+**Gate 7: a load that failed its biological indicator**
+
+Bowie-Dick tests the vacuum. The chemical strip says the pack was exposed. Only
+the biological indicator says the spores died, and it takes hours — which is why
+a load sits in quarantine. Issuing from a quarantined load was refused; releasing
+with the BI pending was refused; after a pass, three sets went to a case. The BI
+was re-read at 24 hours as a fail, a fourth issue was refused, and the recall
+query returned the three sets, the case and the patient.
+
+That query is why the issue table records the case and the patient rather than
+"issued to theatre 1". It is the list somebody needs at 6 a.m. and cannot
+reconstruct from paper.
+
+**Tested** — every rule above proved live in both directions, including one tray
+in two theatres at once (refused by a partial unique index, because the recall
+list would otherwise name the wrong patient) and a recall with no note.
+
+**Gates** — 20/20 packages typecheck, lint and test (2,950 → **2,953 tests**);
+**702 routes across 64 controllers**; catalogue **1,111 keys**; event registry
+**759**; 733 base tables, 0 without RLS; 44 migrations; 82 screens.
+
+**Next:** 7E — ICU, HDU, the crash cart and code blue.
+
 ### 2026-09-07 (evening) · Phase 7C · IP billing, and the job you can run three times
 
 **Built — IP-005 (step 7C of seven), complete.** 4 tables, 7 permission keys, 4

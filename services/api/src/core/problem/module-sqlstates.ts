@@ -35,6 +35,7 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'IP001', // beds and admissions: one patient per bed, the cleaning gate, discharge
   'IP003', // the MAR's five rights, the witness, the escalation ladder, risk bands
   'IP005', // inpatient billing: charge immutability and the discharge gate
+  'IP006', // theatre: the WHO checklist gate, the counts, the sterilisation recall
 ]);
 
 /**

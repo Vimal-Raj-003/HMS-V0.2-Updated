@@ -22,6 +22,8 @@ const PHASE_7_PREFIXES = [
   'escalation',
   'infection',
   'ipbill',
+  'ot',
+  'cssd',
 ] as const;
 
 /**
@@ -165,6 +167,43 @@ describe('Phase 7A permission catalogue', () => {
     const override = permission('ipbill.clearance.override');
     expect(override.risk).toBe('high');
     expect(override.requiresReason).toBe(true);
+  });
+
+  /**
+   * There is no key that turns the WHO checklist off, and there must never be
+   * one. The three phases are enforced by triggers; a permission that could
+   * bypass them would be a permission somebody grants at 2 a.m. to get a case
+   * moving, and the whole point of the checklist is that it applies then.
+   */
+  it('offers no permission that bypasses the surgical checklist', () => {
+    const bypasses = PERMISSION_CATALOGUE.filter(
+      (permission) =>
+        permission.key.startsWith('ot.') && /bypass|skip|waive|force|emergency_mode/u.test(permission.key),
+    );
+    expect(bypasses).toEqual([]);
+  });
+
+  /**
+   * Running the time-out is `low` and held by everybody in the room. It is a
+   * thing the team does out loud together; a scarce permission would make it a
+   * thing one person clicks.
+   */
+  it('keeps running the time-out a low-risk permission held by the whole team', () => {
+    const timeout = permission('ot.checklist.timeout');
+    expect(timeout.risk).toBe('low');
+    for (const member of ['surgeon', 'anaesthetist', 'nurse_ot_scrub']) {
+      expect(holdersOf('ot.checklist.timeout'), member).toContain(member);
+    }
+  });
+
+  /**
+   * Recalling a failed sterilisation load is not. It produces a list of
+   * patients, and it is reasoned for the same purpose the implant trace is.
+   */
+  it('makes the sterilisation recall reasoned', () => {
+    const recall = permission('cssd.recall.run');
+    expect(recall.requiresReason).toBe(true);
+    expect(recall.risk).toBe('high');
   });
 
   it('gives every Phase 7 key only to roles that were meant to have it', () => {
@@ -329,6 +368,30 @@ describe('Phase 7A permission catalogue', () => {
         'nurse_supervisor',
         'doctor_ip',
         'mrd_officer',
+      ],
+      ot: [
+        'surgeon',
+        'doctor_emergency',
+        'anaesthetist',
+        'nurse_ot_scrub',
+        'nurse_supervisor',
+        'intensivist',
+        'resident_doctor',
+        'cssd_technician',
+        'quality_manager',
+        'infection_control_nurse',
+        'hospital_admin',
+        'medical_superintendent',
+        'billing_executive',
+      ],
+      cssd: [
+        'surgeon',
+        'nurse_ot_scrub',
+        'cssd_technician',
+        'quality_manager',
+        'infection_control_nurse',
+        'hospital_admin',
+        'medical_superintendent',
       ],
       census: [
         'hospital_admin',

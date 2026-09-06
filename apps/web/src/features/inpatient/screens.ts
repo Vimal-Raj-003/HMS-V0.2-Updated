@@ -165,6 +165,55 @@ export const IP_SCREENS: readonly IpScreen[] = [
     ],
     entitlement: 'module.inpatient.enabled',
   },
+  {
+    key: 'theatre-board',
+    label: 'Theatre board',
+    href: '/ip/theatre',
+    area: 'inpatient',
+    permission: 'ot.board.read',
+    summary:
+      'Today’s list with what each case is waiting on, and the WHO checklist as three steps that run in order — no button skips one.',
+    deniedExplanation:
+      'The theatre board is held by the surgical and anaesthetic teams, theatre nursing and sterile supply. Bumping an elective case and closing one are separate keys, and there is no key at all that bypasses the checklist.',
+    keywords: [
+      'theatre',
+      'operating room',
+      'ot',
+      'who checklist',
+      'time out',
+      'sign in',
+      'sign out',
+      'swab count',
+      'never event',
+      'surgery',
+      'emergency bump',
+    ],
+    entitlement: 'module.inpatient.enabled',
+  },
+  {
+    key: 'cssd',
+    label: 'Sterile supply',
+    href: '/ip/cssd',
+    area: 'inpatient',
+    permission: 'cssd.load.run',
+    summary:
+      'Loads through the cycle with their three indicators, and the recall a failed biological indicator demands — every set, every case, every patient.',
+    deniedExplanation:
+      'The sterilisation record is held by CSSD. Running the recall is a further key, because it produces a list of patients.',
+    keywords: [
+      'cssd',
+      'sterile',
+      'autoclave',
+      'biological indicator',
+      'bowie dick',
+      'load',
+      'instrument set',
+      'tray',
+      'recall',
+      'quarantine',
+    ],
+    entitlement: 'module.inpatient.enabled',
+  },
 ];
 
 export function ipScreen(key: string): IpScreen {

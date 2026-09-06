@@ -28,6 +28,13 @@ export function ipKeys(hospitalId: string) {
     billRoot: () => [...root, 'bill'] as const,
     chargeRuns: () => [...root, 'charge-runs'] as const,
     clearance: (admissionId: string) => [...root, 'clearance', admissionId] as const,
+
+    // Phase 7D
+    otBoard: (scope: string) => [...root, 'ot', 'board', scope] as const,
+    otBoardRoot: () => [...root, 'ot', 'board'] as const,
+    otCase: (id: string) => [...root, 'ot', 'case', id] as const,
+    cssdLoads: (scope: string) => [...root, 'cssd', 'loads', scope] as const,
+    cssdLoadsRoot: () => [...root, 'cssd', 'loads'] as const,
   };
 }
 

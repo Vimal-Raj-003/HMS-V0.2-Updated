@@ -6,9 +6,13 @@ import type {
   CensusRow,
   ChargeRunView,
   CleaningTaskView,
+  CssdLoadRow,
   ClearanceView,
   EscalationRow,
   MarDoseRow,
+  OtCaseDetail,
+  OtCaseRow,
+  RecallResult,
   RunningBillView,
   WardPatientRow,
 } from './types';
@@ -320,4 +324,108 @@ export async function overrideClearance(
     body: { acknowledgement },
     reason,
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7D
+//
+// There is no `force`, no `emergencyMode` and no `skipTimeout` in this client,
+// because there is none on the server. An emergency case gets a bumped elective
+// case with a recorded reason — not a shorter checklist.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getOtBoard(
+  filters: { readonly theatreId?: string; readonly date?: string; readonly openOnly?: boolean } = {},
+  options: Signal = {},
+): Promise<PageOf<OtCaseRow>> {
+  return request(
+    `${V1}/theatre/board${queryString({
+      theatreId: filters.theatreId,
+      date: filters.date,
+      openOnly: filters.openOnly,
+    })}`,
+    withSignal(options),
+  );
+}
+
+export async function getOtCase(id: string, options: Signal = {}): Promise<OtCaseDetail> {
+  return request(`${V1}/theatre/cases/${id}`, withSignal(options));
+}
+
+export async function recordPreop(
+  id: string,
+  body: {
+    readonly consentTaken?: boolean;
+    readonly siteMarked?: boolean;
+    readonly pacCleared?: boolean;
+    readonly crossmatchRef?: string;
+    readonly antibioticGiven?: boolean;
+  },
+): Promise<OtCaseDetail> {
+  return request(`${V1}/theatre/cases/${id}/preop`, { method: 'PATCH', body });
+}
+
+/** One of the three phases. The order is enforced by the server. */
+export async function runChecklist(
+  id: string,
+  phase: 'sign_in' | 'time_out' | 'sign_out',
+  items: Readonly<Record<string, boolean | string>> = {},
+): Promise<OtCaseDetail> {
+  return request(`${V1}/theatre/cases/${id}/checklist`, { method: 'POST', body: { phase, items } });
+}
+
+export async function recordIntraop(
+  id: string,
+  body: Readonly<Record<string, unknown>>,
+): Promise<OtCaseDetail> {
+  return request(`${V1}/theatre/cases/${id}/intraop`, { method: 'PATCH', body });
+}
+
+export async function recordCounts(
+  id: string,
+  body: {
+    readonly swabIn: number;
+    readonly swabOut: number;
+    readonly instrumentIn: number;
+    readonly instrumentOut: number;
+    readonly sharpsIn: number;
+    readonly sharpsOut: number;
+    readonly resolution?: string;
+  },
+): Promise<OtCaseDetail> {
+  return request(`${V1}/theatre/cases/${id}/counts`, { method: 'PATCH', body });
+}
+
+export async function closeCase(
+  id: string,
+  body: { readonly operativeNote?: string; readonly postOpOrders?: string },
+): Promise<OtCaseDetail> {
+  return request(`${V1}/theatre/cases/${id}/close`, { method: 'PATCH', body });
+}
+
+export async function getCssdLoads(
+  filters: { readonly state?: string } = {},
+  options: Signal = {},
+): Promise<PageOf<CssdLoadRow>> {
+  return request(`${V1}/cssd/loads${queryString({ state: filters.state })}`, withSignal(options));
+}
+
+export async function recordIndicators(
+  id: string,
+  body: {
+    readonly bowieDick?: string;
+    readonly chemicalIndicator?: string;
+    readonly biologicalIndicator?: string;
+  },
+): Promise<CssdLoadRow> {
+  return request(`${V1}/cssd/loads/${id}/indicators`, { method: 'PATCH', body });
+}
+
+export async function releaseLoad(id: string): Promise<CssdLoadRow> {
+  return request(`${V1}/cssd/loads/${id}/release`, { method: 'PATCH', body: {} });
+}
+
+/** Produces a list of patients, so it takes a reason. */
+export async function recallLoad(id: string, reason: string): Promise<RecallResult> {
+  return request(`${V1}/cssd/loads/${id}/recall`, { method: 'PATCH', body: {}, reason });
 }
