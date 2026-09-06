@@ -32,3 +32,8 @@ export * from './schemas/index.js';
 // Phase 6 — clinical scores. Pure functions, shared by the tablet and the server
 // so a triage level computed in a resus bay is the one the API agrees with.
 export * from './scores/index.js';
+
+// Phase 8 — the shared specialty console framework. One laterality vocabulary
+// and one catalogue of what a console tab may point at, so registering the
+// thirty-first console is configuration rather than an application.
+export * from './specialty/index.js';

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  CONSOLE_COMPONENT_CATALOGUE,
   ENFORCEMENT_POINTS,
   PERMISSION_CATALOGUE,
   ROLE_TEMPLATES,
@@ -32,6 +33,28 @@ export async function seedCatalogues(ctx: SeedContext): Promise<void> {
   await seedRoleTemplates(ctx);
   await seedMastersRegistry(ctx);
   await seedWidgetCatalogue(ctx);
+  await seedConsoleComponents(ctx);
+}
+
+/**
+ * What a specialty console tab may point at (OP-025 §0.1).
+ *
+ * The same argument as permissions, one step further: the application role can
+ * neither write this catalogue nor register a console naming something absent
+ * from it, so "register a console as data, no code deploy" stays true without
+ * letting configuration invent components that do not exist.
+ */
+async function seedConsoleComponents(ctx: SeedContext): Promise<void> {
+  const rows: SeedRow[] = CONSOLE_COMPONENT_CATALOGUE.map((c) => ({
+    key: c.key,
+    kind: c.kind,
+    label: c.label,
+    description: c.description,
+    deprecated: c.deprecated ?? false,
+    created_at: SEED_EPOCH,
+    updated_at: SEED_EPOCH,
+  }));
+  await ctx.write({ table: 'mdm.console_components', conflict: ['key'] }, rows);
 }
 
 async function seedPermissions(ctx: SeedContext): Promise<void> {

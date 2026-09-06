@@ -9613,6 +9613,105 @@ const IP017 = group('IP-017', 7, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-025 §0, the shared specialty console framework
+//
+// The keys here guard what every console shares: the registry, the worklist,
+// the stage clock and the one device-result path. A console with its own spec
+// additionally registers its own keys for its own screens — `ophtha.exam.sign`
+// guards signing an eye examination, not this.
+//
+// ── Why the device path is framework keys, not thirty sets of four ──────────
+//
+// F1 asks that a console can be registered as *data*. A key surface cannot be
+// created as data: `core.role_permissions` has a foreign key to this catalogue
+// and the API verifies it at boot, both deliberately, so an invented key would
+// deny every user rather than grant them. The shared path therefore has shared
+// keys, narrowed to a console's departments by ABAC rather than by key
+// proliferation — which also means the OCT technician is one grant, not thirty.
+//
+// `console.registry.configure` is `high` and takes a reason. Editing a console's
+// tabs changes what an entire department sees on its next patient, and the
+// person who notices is a clinician mid-consultation.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP025F = group('OP-025', 8, [
+  p(
+    'console.registry.read',
+    'specialty_console',
+    'list',
+    'operational',
+    'low',
+    'See which specialty consoles are registered and which departments they open for.',
+  ),
+  p(
+    'console.registry.configure',
+    'specialty_console',
+    'configure',
+    'operational',
+    'high',
+    'Register a console, change its tabs, or map it to a department. Takes effect on the department\u2019s next patient.',
+    { requiresReason: true, sensitiveGrant: true },
+  ),
+  p(
+    'console.device_type.configure',
+    'device_result_type',
+    'configure',
+    'operational',
+    'medium',
+    'Declare what a console can order from a device, and how the result comes back.',
+  ),
+  p(
+    'console.worklist.read',
+    'specialty_worklist',
+    'list',
+    'phi',
+    'low',
+    'The specialty worklist: who is waiting, at which stage, and what each is waiting on.',
+    { phiRead: true },
+  ),
+  p(
+    'console.stage.record',
+    'encounter_stage',
+    'record',
+    'phi',
+    'low',
+    'Move a patient between a console\u2019s service points, which is what the stage turnaround report is built from.',
+  ),
+  p(
+    'device.result.order',
+    'device_order',
+    'create',
+    'phi',
+    'low',
+    'Order an investigation from a console \u2014 the scan, the tracing, the audiogram.',
+  ),
+  p(
+    'device.result.attach',
+    'device_order',
+    'update',
+    'phi',
+    'low',
+    'Record that a result was performed and attach it. Held by technicians as well as clinicians.',
+  ),
+  p(
+    'device.result.review',
+    'device_order',
+    'review',
+    'phi',
+    'low',
+    'Mark a result as seen. Until somebody does, it is not a result \u2014 it is a file.',
+  ),
+  p(
+    'device.result.cancel',
+    'device_order',
+    'cancel',
+    'phi',
+    'low',
+    'Cancel an ordered investigation with a reason, voiding its charge if it has not been billed.',
+    { requiresReason: true },
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -9702,6 +9801,9 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...IP007BB,
   ...IP002,
   ...IP017,
+
+  // Phase 8
+  ...OP025F,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

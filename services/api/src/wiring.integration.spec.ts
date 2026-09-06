@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { PERMISSION_CATALOGUE } from '@vims/contracts';
-import { startTestPostgres, type TestPostgres } from '@vims/testing';
+import { startTestPostgres, syncConsoleComponents, type TestPostgres } from '@vims/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from './app.module.js';
 
@@ -47,6 +47,10 @@ beforeAll(async () => {
       ],
     );
   }
+
+  // The API refuses to boot on console-component drift, so a suite that boots
+  // it without the tenancy fixture has to mirror the catalogue itself.
+  await syncConsoleComponents(pg);
 
   process.env['DATABASE_URL'] = pg.connectionString('app');
   process.env['REDIS_URL'] = 'redis://127.0.0.1:6379';

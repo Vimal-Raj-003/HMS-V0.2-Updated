@@ -724,6 +724,39 @@ const MORTUARY_CUSTODIAN = [
   'mortuary.report.read',
 ] as const;
 
+/**
+ * Phase 8 — what everybody on a specialty console holds.
+ *
+ * The worklist and the stage clock are the floor: a console whose queue only
+ * the doctor can read is a queue everybody phones the doctor about, and a stage
+ * only the doctor can advance is a turnaround report that measures nothing.
+ */
+const CONSOLE_FLOOR = ['console.registry.read', 'console.worklist.read', 'console.stage.record'] as const;
+
+/** The clinician's half of the shared device path: order it, and say you saw it. */
+const CONSOLE_CLINICIAN = [
+  ...CONSOLE_FLOOR,
+  'device.result.order',
+  'device.result.review',
+  'device.result.cancel',
+] as const;
+
+/**
+ * The technician's half: perform it and attach it — never review it.
+ *
+ * The split is the point of the lifecycle. If the person who runs the scanner
+ * could also mark it reviewed, "reviewed" would mean "uploaded", and the rail
+ * of unseen results — the whole reason the state exists — would always be empty.
+ */
+const CONSOLE_TECHNICIAN = [...CONSOLE_FLOOR, 'device.result.attach'] as const;
+
+/** Composing a console: who may change what a department sees tomorrow. */
+const CONSOLE_ADMIN = [
+  'console.registry.read',
+  'console.registry.configure',
+  'console.device_type.configure',
+] as const;
+
 const FLEET_DISPATCH = [
   'fleet.vehicle.read',
   'fleet.request.create',
@@ -1976,6 +2009,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'admin-console',
     permissions: [
+      ...CONSOLE_ADMIN,
       'ot.board.read',
       'ot.case.schedule',
       'cssd.recall.run',
@@ -2180,6 +2214,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'branch-admin',
     permissions: [
+      ...CONSOLE_ADMIN,
       ...IP_BILL_DESK,
       'ipbill.policy.manage',
       'ipbill.clearance.override',
@@ -2263,6 +2298,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      ...CONSOLE_CLINICIAN,
+      ...CONSOLE_ADMIN,
       ...DISCHARGE_CONSULTANT,
       ...MORTUARY_CLINICAL,
       'mortuary.release.manage',
@@ -2387,6 +2424,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'department-dashboard',
     permissions: [
+      ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
       ...MORTUARY_CLINICAL,
       ...DIAGNOSTIC_ORDERING,
@@ -2447,6 +2485,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'doctor-opd',
     permissions: [
+      ...CONSOLE_CLINICIAN,
       ...MAR_PRESCRIBER,
       ...WARD_FLOOR,
       'transfer.execute',
@@ -2489,6 +2528,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
       ...MORTUARY_CLINICAL,
       'icu.flowsheet.read',
@@ -2542,6 +2582,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
       ...MORTUARY_CLINICAL,
       ...ICU_BEDSIDE,
@@ -2613,6 +2654,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
       ...MORTUARY_CLINICAL,
       'icu.flowsheet.read',
@@ -2667,6 +2709,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'anaesthesia-worklist',
     permissions: [
+      ...CONSOLE_CLINICIAN,
       ...ICU_BEDSIDE,
       'icu.score.compute',
       'code.close',
@@ -2707,6 +2750,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'icu-board',
     permissions: [
+      ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
       ...MORTUARY_CLINICAL,
       ...ICU_BEDSIDE,
@@ -2756,6 +2800,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'radiology-reading',
     permissions: [
+      ...CONSOLE_CLINICIAN,
       'polytrauma.case.read',
       'polytrauma.case.list',
       'polytrauma.consult.respond',
@@ -2786,6 +2831,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'lab-validation',
     permissions: [
+      ...CONSOLE_CLINICIAN,
       'mortuary.case.read',
       'mortuary.pm.write',
       'mortuary.report.read',
@@ -2814,6 +2860,7 @@ const templates: readonly RoleTemplate[] = [
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
     permissions: [
+      ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CLINICAL,
       'mortuary.case.read',
       'mortuary.case.create',
@@ -2879,6 +2926,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      ...CONSOLE_TECHNICIAN,
       'nursing.ward.read',
       'mar.read',
       'nursing.assessment.record',
@@ -2925,6 +2973,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...CONSOLE_TECHNICIAN,
       ...DISCHARGE_WARD,
       'mortuary.case.read',
       'mortuary.body.operate',
@@ -2972,6 +3021,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'icu-flowsheet',
     permissions: [
+      ...CONSOLE_TECHNICIAN,
       ...DISCHARGE_WARD,
       'mortuary.case.read',
       'mortuary.body.operate',
@@ -3018,6 +3068,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'triage-board',
     permissions: [
+      ...CONSOLE_TECHNICIAN,
       ...ICU_BEDSIDE,
       ...BLOOD_BEDSIDE,
       'cart.reseal',
@@ -3224,6 +3275,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'registration',
     permissions: [
+      ...CONSOLE_FLOOR,
       ...BED_MANAGEMENT,
       'admission.cancel',
       'fleet.request.create',
@@ -3535,6 +3587,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'lab-bench',
     permissions: [
+      ...CONSOLE_TECHNICIAN,
       'blood.inventory.read',
       'blood.unit.manage',
       ...LAB_BENCH,
@@ -3592,6 +3645,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'radiology-modality',
     permissions: [
+      ...CONSOLE_TECHNICIAN,
       ...IMPLANT_LOOKUP,
       ...RADIOLOGY_MODALITY,
       ...INVESTIGATION_TECH,
@@ -3658,6 +3712,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'therapy',
     homeWorkspace: 'diet-worklist',
     permissions: [
+      ...CONSOLE_TECHNICIAN,
       'nursing.ward.read',
       'nursing.assessment.record',
       'nursing.note.write',
@@ -3678,6 +3733,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'therapy',
     homeWorkspace: 'therapy-schedule',
     permissions: [
+      ...CONSOLE_TECHNICIAN,
       'nursing.ward.read',
       'nursing.note.write',
       'nursing.assessment.record',
@@ -3704,6 +3760,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'therapy',
     homeWorkspace: 'dialysis-board',
     permissions: [
+      ...CONSOLE_TECHNICIAN,
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,
       // Phase 4 — the ward or unit is a sub-store: indent, receive, return,
@@ -3725,6 +3782,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'therapy',
     homeWorkspace: 'counselling-sessions',
     permissions: [
+      ...CONSOLE_FLOOR,
       'polytrauma.case.list',
       'polytrauma.case.read',
       'polytrauma.family.update',
@@ -4352,6 +4410,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'it-console',
     permissions: [
+      ...CONSOLE_ADMIN,
       'lab.instrument.manage',
       'integration.lab.configure',
       'integration.lab.read',

@@ -5,6 +5,7 @@ import { INVENTORY_SCREENS } from '@/features/inventory/screens';
 import { PHARMACY_SCREENS } from '@/features/pharmacy/screens';
 import { ER_SCREENS } from '@/features/emergency/screens';
 import { IP_SCREENS } from '@/features/inpatient/screens';
+import { SPECIALTY_SCREENS } from '@/features/specialty/screens';
 import { ORTHO_SCREENS } from '@/features/ortho/screens';
 import { RCM_SCREENS } from '@/features/rcm/screens';
 
@@ -141,6 +142,21 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
     label: 'Inpatient',
     href: '/ip/board',
     children: IP_SCREENS.map((screen) => ({
+      key: screen.key,
+      label: screen.label,
+      href: screen.href,
+      permission: screen.permission,
+    })),
+  },
+  /**
+   * Phase 8. The framework's own screen only — a console's screens belong to
+   * the console, and appear under it once it is registered and switched on.
+   */
+  {
+    key: 'specialty',
+    label: 'Specialty',
+    href: '/specialty/consoles',
+    children: SPECIALTY_SCREENS.map((screen) => ({
       key: screen.key,
       label: screen.label,
       href: screen.href,

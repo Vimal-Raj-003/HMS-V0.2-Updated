@@ -10402,6 +10402,94 @@ const dischargeEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * Phase 8 — the shared specialty console framework.
+ *
+ * `device.result.attached` is the one the console tab and the timeline both
+ * listen to, and F2 gives it two seconds. It deliberately does not carry the
+ * result: a payload is a second, staler copy of a study that may be 20 MB of
+ * DICOM, and `docs/07 §3` is explicit that the refetch is the authority.
+ */
+const specialtyEvents: readonly EventDefinition[] = [
+  ev(
+    'console.registered',
+    'specialty_console',
+    'OP-025',
+    'A specialty console was registered or remapped. Departments named here see different tabs on their next patient.',
+    z.object({
+      consoleId: uuid,
+      code: z.string(),
+      moduleKey: z.string(),
+      departmentIds: z.array(uuid),
+      tabCount: z.number().int(),
+      isActive: z.boolean(),
+    }),
+    { retentionDays: 3650 },
+  ),
+  ev(
+    'device.result.ordered',
+    'device_order',
+    'OP-025',
+    'A console ordered an investigation. The modality worklist, the technician queue and the charge intent all start here.',
+    z.object({
+      orderId: uuid,
+      consoleCode: z.string(),
+      deviceResultTypeCode: z.string(),
+      patientId: uuid,
+      encounterId: uuid,
+      side: z.string(),
+      orderedBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'device.result.attached',
+    'device_order',
+    'OP-025',
+    'A result arrived. The console tab and the timeline refetch from this; the payload stays where it is, because a 20 MB study copied into a queue is a second, staler copy.',
+    z.object({
+      orderId: uuid,
+      consoleCode: z.string(),
+      deviceResultTypeCode: z.string(),
+      patientId: uuid,
+      encounterId: uuid,
+      hasParsedValues: z.boolean(),
+      viaPacs: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'device.result.reviewed',
+    'device_order',
+    'OP-025',
+    'A clinician says they saw it. Until this, the result is a file — and an unreviewed one older than its console\u2019s window goes to the doctor\u2019s rail.',
+    z.object({
+      orderId: uuid,
+      consoleCode: z.string(),
+      deviceResultTypeCode: z.string(),
+      patientId: uuid,
+      reviewedBy: uuid,
+      minutesUnreviewed: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'encounter.stage.moved',
+    'encounter_stage',
+    'OP-025',
+    'A patient moved between a console\u2019s service points. The EN-006 boards and the stage turnaround report both read this.',
+    z.object({
+      encounterId: uuid,
+      patientId: uuid,
+      consoleCode: z.string(),
+      fromStage: z.string().nullable(),
+      toStage: z.string(),
+      minutesInPreviousStage: z.number().int().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 1825 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -10476,6 +10564,9 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...theatreEvents,
   ...criticalCareEvents,
   ...dischargeEvents,
+
+  // Phase 8
+  ...specialtyEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

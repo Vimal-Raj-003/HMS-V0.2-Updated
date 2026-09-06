@@ -38,6 +38,7 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'IP006', // theatre: the WHO checklist gate, the counts, the sterilisation recall
   'IP007', // blood and the code: the bedside check, the group samples, the cart
   'IP002', // discharge: reconciliation before signature, the immutable summary, the body release
+  'SP001', // the specialty console framework: the tab registry, the result lifecycle, the charge intent
 ]);
 
 /**

@@ -1,3 +1,4 @@
+import { CONSOLE_COMPONENT_CATALOGUE } from '@vims/contracts/specialty';
 import { newId } from '@vims/contracts/primitives';
 import type { TestPostgres } from '../containers/postgres.js';
 
@@ -36,6 +37,29 @@ export interface CreateTenantFixtureOptions {
  * application code may ever do this — which is precisely why the fixture, not
  * the application, owns it.
  */
+/**
+ * Mirrors the console-component catalogue that the API verifies at boot.
+ *
+ * Not tenant data — it is what the build ships, the same shape as
+ * `core.permissions` — but it belongs here for a practical reason: the API
+ * refuses to start when a component exists in code and not in the table, on
+ * purpose (a console naming it would be refused with a message about a tab the
+ * build plainly has). Every integration suite creates this fixture and then
+ * boots the API, so this is the one place that makes a fresh test database
+ * bootable without sixteen copies of the same loop.
+ */
+export async function syncConsoleComponents(pg: TestPostgres): Promise<void> {
+  const pool = pg.pool('migrator');
+  for (const component of CONSOLE_COMPONENT_CATALOGUE) {
+    await pool.query(
+      `INSERT INTO mdm.console_components (key, kind, label, description, deprecated, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now(), now())
+       ON CONFLICT (key) DO NOTHING`,
+      [component.key, component.kind, component.label, component.description, component.deprecated ?? false],
+    );
+  }
+}
+
 export async function createTenantFixture(
   pg: TestPostgres,
   options: CreateTenantFixtureOptions = {},
@@ -50,6 +74,8 @@ export async function createTenantFixture(
   };
 
   const pool = pg.pool('migrator');
+
+  await syncConsoleComponents(pg);
 
   await pool.query(
     `INSERT INTO core.org_groups (id, name, legal_name, updated_at)

@@ -1,0 +1,276 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-025 §0 — the shared specialty console framework
+//
+// Thirty consoles, one framework. An ophthalmologist, a dentist, a chemotherapy
+// nurse and an antenatal counsellor each open the same patient chart and see a
+// workspace built for their specialty — underneath it is one encounter, one
+// billing path, one document chain and one audit trail.
+//
+// ── A console is data, but it can only name code that exists ────────────────
+//
+// `mdm.specialty_consoles` registers a console's tabs, and F1 requires that
+// registering one takes no code deploy. That is only safe if the registry
+// cannot name a component the build does not ship: a tab pointing at a missing
+// component is a workspace that breaks for a whole department, discovered by
+// the first clinician who opens it.
+//
+// So `mdm.console_components` is a catalogue synced from code at boot — exactly
+// as `core.permissions` is — and a trigger refuses a console whose tabs name
+// anything absent from it. Configuration stays free; it just cannot invent
+// components.
+//
+// ── One attachment path, for every console ──────────────────────────────────
+//
+// `specialty.device_orders` is the single lifecycle: ordered → performed →
+// attached/parsed → reviewed. `phase-08`: "A console that ships its own
+// worklist, its own upload path or its own print pipeline is a defect, not a
+// feature." A result stays unreviewed until a clinician says otherwise, because
+// an OCT that lands in a folder nobody opened is worse than one never taken —
+// it looks like it was seen.
+//
+// ── Laterality is `clinical.Laterality`, not a new enum ─────────────────────
+//
+// OD/OS/OU, right/left ear, limb side and dental quadrant are all one database
+// vocabulary — `left | right | bilateral | not_applicable` — with the console's
+// own words on screen. Two spellings of "the left eye" is how a report counts
+// one eye twice.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// What a console tab points at.
+enum ConsoleComponentKind {
+  /// A React component compiled into the web app.
+  tab_component
+  /// An EN-039 dynamic form template, resolved by its key at render time.
+  form_template
+
+  @@schema("mdm")
+}
+
+/// How a device result reaches the record.
+enum DeviceResultTransport {
+  /// DICOM, routed to Orthanc/PACS with a modality worklist order (EN-008).
+  dicom
+  /// PDF, JPEG, CSV or XML, stored through OP-022 into object storage.
+  file
+  /// A structured payload pushed by an EN-042 adapter, parsed into columns.
+  structured
+  /// A photograph or a scan of paper. Always available, whatever else fails.
+  manual
+
+  @@schema("mdm")
+}
+
+enum DeviceOrderStatus {
+  ordered
+  performed
+  attached
+  cancelled
+
+  @@schema("specialty")
+}
+
+/// The catalogue of components a console tab may name. Synced from code at boot.
+///
+/// No `hospital_id`: this is what the build ships, not what a hospital
+/// configures — the same shape as `core.permissions`, and world-readable for
+/// the same reason. A key present in the database but absent from code is
+/// marked `deprecated` rather than deleted, so an old console row still
+/// resolves to something explicable.
+model ConsoleComponent {
+  key  String               @id @db.VarChar(80)
+  kind ConsoleComponentKind
+
+  label       String @db.VarChar(120)
+  description String @db.Text
+
+  /// Present in the database, absent from this build. Registrations naming it
+  /// still resolve; new ones are refused.
+  deprecated Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([kind, deprecated])
+  @@map("console_components")
+  @@schema("mdm")
+}
+
+/// A specialty console: a tab overlay on the OP-002 consultation workspace.
+///
+/// Never a separate encounter type. The generic tabs — history, prescription,
+/// orders, timeline, notes — stay reachable at all times, because a console
+/// that hides the rest of the chart is how a specialist misses the allergy.
+model SpecialtyConsole {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  /// `OPHTHA`, `DENTAL`, `CARDIO` — the prefix on this console's permissions,
+  /// events and print templates.
+  code String @db.VarChar(24)
+  name String @db.VarChar(120)
+  /// The licence and feature flag that gates it: `module.<key>.enabled`.
+  moduleKey String @map("module_key") @db.VarChar(60)
+
+  /// Departments whose encounters open in this console.
+  departmentIds String[] @map("department_ids") @db.Uuid
+
+  /// Ordered `[{key, label, component, formTemplateKey?, roles?}]`. Every
+  /// `component` and `formTemplateKey` must exist in `mdm.console_components`.
+  tabs Json
+
+  /// Worklist columns, stage lanes and the queue definitions behind them.
+  worklistConfig Json @default("{}") @map("worklist_config")
+  /// Service codes this console's actions bill against.
+  billingLinks Json @default("{}") @map("billing_links")
+
+  isActive  Boolean @default(true) @map("is_active")
+  sortOrder Int     @default(0) @map("sort_order")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  deviceResultTypes DeviceResultType[]
+
+  @@unique([hospitalId, code], map: "uq_specialty_console_code")
+  @@index([hospitalId, isActive, sortOrder])
+  @@map("specialty_consoles")
+  @@schema("mdm")
+}
+
+/// What a console can order from a device, and how the result comes back.
+model DeviceResultType {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  /// `OCT_MACULA`, `ECG_12L`, `SPIRO`, `AUDIO_PTA`, `OPG`, `NST`.
+  code String @db.VarChar(40)
+  name String @db.VarChar(160)
+
+  consoleId String @map("console_id") @db.Uuid
+
+  transport DeviceResultTransport
+  /// Accepted content types for `file` transport. Empty for DICOM and manual.
+  mimeTypes String[] @default([]) @map("mime_types")
+
+  /// The EN-042 adapter that turns the payload into typed columns, if any.
+  parserKey String? @map("parser_key") @db.VarChar(60)
+  /// The OP-022 report console template this result renders through.
+  reportTemplateKey String? @map("report_template_key") @db.VarChar(60)
+  /// What the action bills as. Null for a result that carries no charge.
+  billingServiceCode String? @map("billing_service_code") @db.VarChar(40)
+
+  /// Hours after which an unreviewed result appears in the doctor's rail.
+  reviewDueHours Int @default(4) @map("review_due_hours")
+
+  /// Whether the order names an eye, an ear, a limb or nothing.
+  sideRequired Boolean @default(false) @map("side_required")
+
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  console SpecialtyConsole @relation(fields: [consoleId], references: [id], onDelete: Restrict)
+
+  @@unique([hospitalId, code], map: "uq_device_result_type_code")
+  @@index([hospitalId, consoleId, active])
+  @@map("device_result_types")
+  @@schema("mdm")
+}
+
+/// One leg of a multi-stage visit: optometrist → dilation → doctor → counsellor.
+///
+/// The stage is what the turnaround report is computed from, so it is a row per
+/// leg with its own clock rather than a status column that overwrites the last
+/// one. A visit that took four hours because the dilation drops were late and a
+/// visit that took four hours because the doctor was in theatre are different
+/// problems, and a single status cannot tell them apart.
+model EncounterStage {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  encounterId String @map("encounter_id") @db.Uuid
+  patientId   String @map("patient_id") @db.Uuid
+
+  consoleCode String @map("console_code") @db.VarChar(24)
+  /// `refraction`, `dilating`, `doctor`, `imaging`, `counselling`.
+  stageKey String @map("stage_key") @db.VarChar(40)
+
+  /// The EN-006 service point the patient is queued at during this stage.
+  queueDefinitionId String? @map("queue_definition_id") @db.Uuid
+
+  startedAt DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  startedBy String?   @map("started_by") @db.Uuid
+  endedAt   DateTime? @map("ended_at") @db.Timestamptz(6)
+  endedBy   String?   @map("ended_by") @db.Uuid
+
+  note String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, encounterId, startedAt])
+  @@index([hospitalId, consoleCode, stageKey, startedAt(sort: Desc)])
+  @@map("encounter_stages")
+  @@schema("clinical")
+}
+
+/// A device result, from the order to the moment a clinician says they saw it.
+///
+/// One table for every console. The alternative — a per-console orders table
+/// with its own upload path — is thirty implementations of the same five
+/// states, of which some subset will forget the review step.
+model DeviceOrder {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId   String  @map("patient_id") @db.Uuid
+  encounterId String  @map("encounter_id") @db.Uuid
+  visitId     String? @map("visit_id") @db.Uuid
+
+  consoleCode          String @map("console_code") @db.VarChar(24)
+  deviceResultTypeId   String @map("device_result_type_id") @db.Uuid
+  deviceResultTypeCode String @map("device_result_type_code") @db.VarChar(40)
+
+  /// OD is `right`, OS is `left`, OU is `bilateral`. One vocabulary in the
+  /// database; the console's own words on screen.
+  side Laterality @default(not_applicable)
+
+  status DeviceOrderStatus @default(ordered)
+
+  orderedAt DateTime @default(now()) @map("ordered_at") @db.Timestamptz(6)
+  orderedBy String   @map("ordered_by") @db.Uuid
+
+  performedAt DateTime? @map("performed_at") @db.Timestamptz(6)
+  performedBy String?   @map("performed_by") @db.Uuid
+
+  attachedAt DateTime? @map("attached_at") @db.Timestamptz(6)
+  /// The OP-022 result row, for a file; the PACS study, for DICOM.
+  resultFileId String? @map("result_file_id") @db.Uuid
+  pacsStudyUid String? @map("pacs_study_uid") @db.VarChar(80)
+  /// What the EN-042 parser pulled out — the fields a report can query.
+  parsed Json?
+
+  /// Nobody has looked at it yet. An unreviewed result is not a result.
+  reviewedAt DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewedBy String?   @map("reviewed_by") @db.Uuid
+
+  cancelledAt  DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelReason String?   @map("cancel_reason") @db.Text
+
+  /// The intent this order raised, so cancelling the order can void it.
+  chargeIntentId String? @map("charge_intent_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, encounterId, orderedAt])
+  @@index([hospitalId, consoleCode, status, orderedAt(sort: Desc)])
+  @@index([hospitalId, reviewedAt, attachedAt])
+  @@map("device_orders")
+  @@schema("specialty")
+}

@@ -401,6 +401,76 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-09 · Phase 8 · The framework thirty consoles are built on — OP-025 §0
+
+**Built — the shared specialty console framework, complete and proved.** 5
+tables, 9 permission keys, 5 events, 3 shared components, 1 admin screen, 20
+integration tests. **F1–F5 all pass, tested once here and never re-tested per
+console.**
+
+**F1 — a console is data, and it cannot outrun the build**
+
+| Attempt                                             | What happened                                                          |
+| --------------------------------------------------- | ---------------------------------------------------------------------- |
+| A tab naming a component nobody wrote               | Refused, naming it                                                     |
+| A tab naming a deprecated component                 | Refused — existing consoles still resolve it, new registrations do not |
+| A tab naming both a component and a form            | Refused — two things claiming one pane, and no way to say which wins   |
+| A tab naming neither                                | Refused — that is a blank panel                                        |
+| A console with no tabs                              | Refused                                                                |
+| A console with no licence key to switch it off with | Refused — gate 11 needs every console to be switchable                 |
+| A doctor composing one                              | 403 — it changes what a department sees on its next patient            |
+| Composed only of what the build ships               | Registered, and visible to the department immediately, with no deploy  |
+
+The mechanism is `mdm.console_components`: a catalogue synced from code at boot
+exactly as `core.permissions` is, read-only to the application, with a trigger
+checking every tab against it. Configuration stays free; it just cannot invent.
+
+**F2 — a result is unreviewed until somebody says otherwise**
+
+The technician performs and attaches; the doctor reviews. Neither can do the
+other's half, in the keys or in the database, and `review` takes no request body
+at all — a `reviewedBy` field would let the person who uploaded the scan record
+the doctor as having read it, and the rail of unlooked-at results would be
+empty forever. Reviewing before anything is attached is refused; so is
+un-reviewing; so is reviving a cancelled order.
+
+**F3 — the charge intent, and the half of the rule everybody forgets**
+
+An order raises its intent in the same transaction. Cancelling before billing
+voids it. Cancelling _after_ it has reached a bill line is refused outright —
+that is a reversal with a reason, because the pair is what a credit note is made
+of. The trigger sits on `billing.charge_intents`, not in the console, since
+every module raises intents and only one of them would have remembered.
+
+**F4 — signed documents** ride the existing `clinical.documents` chain rather
+than a per-console copy: version 1 signed and immutable, version 2 carrying its
+reason, and the digest of version 1 computed by the database and stored as
+version 2's predecessor.
+
+**F5 — one clock per leg.** Moving a patient closes the open leg and opens the
+next in one call, because that is one fact and two calls would let a dropped
+connection leave somebody in neither queue. A partial unique index refuses a
+second open leg of the same stage.
+
+**A defect this work found in its own fixture**
+
+The worklist inner-joins `patient.patients`, and a cross-branch fixture made it
+return nothing — correctly, because row-level security hides a patient the
+reader may not see. The join stays inner on purpose: an outer one would leave
+the stage on the list with a blank name, and somebody would click it.
+
+**Tested** — 20 integration tests against a real PostgreSQL 17, plus every rule
+proved live over HTTP and in raw SQL in both directions.
+
+**Gates** — 20/20 packages typecheck, lint and test (**3,067 unit tests**);
+**509 API integration tests**, up from 489; 48 migrations. The new boot guard
+initially failed all sixteen existing integration suites — which is the guard
+working — and is now satisfied once, in `createTenantFixture`, rather than
+sixteen times.
+
+**Next:** OP-025 the ophthalmology console, which is what proves the framework
+carries a real specialty.
+
 ### 2026-09-08 (later) · Phase 7G · The discharge summary, and the four facts before a body leaves — **Phase 7 complete**
 
 **Built — IP-002 + IP-017 (step 7G of seven), complete.** 4 tables, 16

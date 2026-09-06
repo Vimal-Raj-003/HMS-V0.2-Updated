@@ -48,6 +48,12 @@
       "types": "./dist/scores/index.d.ts",
       "import": "./dist/scores/index.js",
       "default": "./dist/scores/index.js"
+    },
+    "./specialty": {
+      "development": "./src/specialty/index.ts",
+      "types": "./dist/specialty/index.d.ts",
+      "import": "./dist/specialty/index.js",
+      "default": "./dist/specialty/index.js"
     }
   },
   "scripts": {
