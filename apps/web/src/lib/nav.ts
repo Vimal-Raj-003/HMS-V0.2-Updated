@@ -4,6 +4,7 @@ import { DIAGNOSTICS_SCREENS } from '@/features/diagnostics/screens';
 import { INVENTORY_SCREENS } from '@/features/inventory/screens';
 import { PHARMACY_SCREENS } from '@/features/pharmacy/screens';
 import { ER_SCREENS } from '@/features/emergency/screens';
+import { ORTHO_SCREENS } from '@/features/ortho/screens';
 import { RCM_SCREENS } from '@/features/rcm/screens';
 
 /**
@@ -109,6 +110,21 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
     label: 'Emergency',
     href: '/er/board',
     children: ER_SCREENS.map((screen) => ({
+      key: screen.key,
+      label: screen.label,
+      href: screen.href,
+      permission: screen.permission,
+    })),
+  },
+  /**
+   * Phase 6. Directly under Emergency: a fracture registered in the resus bay
+   * is followed up in this clinic, and the two are one journey.
+   */
+  {
+    key: 'ortho',
+    label: 'Orthopaedics',
+    href: '/ortho/fractures',
+    children: ORTHO_SCREENS.map((screen) => ({
       key: screen.key,
       label: screen.label,
       href: screen.href,

@@ -8229,6 +8229,153 @@ const TR009 = group('TR-009', 6, [
   ),
 ]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-002 + OP-009 — the fracture registry and the orthopaedic OPD
+//
+// A provisional entry is `low` and held by anybody who sees the film first,
+// because a fracture nobody registered is a fracture the registry never counts
+// and a follow-up nobody schedules. *Confirming* the classification is the
+// surgeon's, because an AO code is a treatment decision written as a number.
+// ─────────────────────────────────────────────────────────────────────────────
+const TR002 = group('TR-002', 6, [
+  p(
+    'fracture.record.create',
+    'fracture',
+    'create',
+    'phi',
+    'low',
+    'Register a fracture provisionally: bone, side, and what the film shows. Held widely — an unregistered fracture is one nobody follows up.',
+  ),
+  p('fracture.record.read', 'fracture', 'read', 'phi', 'low', 'Open a fracture and its healing timeline.', {
+    phiRead: true,
+  }),
+  p(
+    'fracture.record.list',
+    'fracture',
+    'list',
+    'phi',
+    'low',
+    'See the fracture registry for a patient or a clinic.',
+  ),
+  p(
+    'fracture.record.update',
+    'fracture',
+    'update',
+    'phi',
+    'low',
+    'Amend the classification. Every change keeps a snapshot of what it said before.',
+  ),
+  p(
+    'fracture.classification.confirm',
+    'fracture',
+    'validate',
+    'phi',
+    'medium',
+    'Sign off the AO/OTA classification. An open fracture cannot be confirmed without its Gustilo grade.',
+  ),
+  p(
+    'fracture.plan.set',
+    'fracture_plan',
+    'create',
+    'phi',
+    'medium',
+    'Set the treatment intent and the weight-bearing status. The side is checked against the fracture — a mismatch is refused.',
+  ),
+  p(
+    'fracture.event.record',
+    'fracture',
+    'record',
+    'phi',
+    'low',
+    'Add to the timeline: reduction, surgery, cast, pin-site care.',
+  ),
+  p(
+    'fracture.imaging.assess',
+    'fracture',
+    'annotate',
+    'phi',
+    'low',
+    'Attach a film and score the union: RUST, alignment, implant state.',
+  ),
+  p(
+    'fracture.union.declare',
+    'fracture',
+    'complete',
+    'phi',
+    'medium',
+    // Deliberately *not* `requiresReason`. A fracture that healed at fourteen
+    // weeks needs no justification, and demanding one for every declaration
+    // teaches people to type "healed" into a reason box — which then means
+    // nothing on the declaration that genuinely needs grounds. The early
+    // non-union case asks for them in the service, where the six-month rule
+    // actually lives.
+    'Declare union, or non-union. Non-union before six months needs stated grounds, asked for at the time.',
+  ),
+  p(
+    'fracture.complication.record',
+    'fracture',
+    'record',
+    'phi',
+    'low',
+    'Record an infection, a non-union, a compartment syndrome.',
+  ),
+  p(
+    'fracture.registry.export',
+    'fracture',
+    'export',
+    'phi',
+    'high',
+    'Export the registry dataset. Pseudonymised, and every export is audited with its filter and count.',
+    { requiresReason: true },
+  ),
+]);
+
+const OP009 = group('OP-009', 6, [
+  p(
+    'ortho.episode.create',
+    'ortho_episode',
+    'create',
+    'phi',
+    'low',
+    'Open an orthopaedic OPD episode with its anchor date.',
+  ),
+  p(
+    'ortho.episode.read',
+    'ortho_episode',
+    'read',
+    'phi',
+    'low',
+    'Open an orthopaedic episode and its follow-up schedule.',
+    {
+      phiRead: true,
+    },
+  ),
+  p(
+    'ortho.exam.record',
+    'ortho_episode',
+    'record',
+    'phi',
+    'low',
+    'Record the range-of-motion and power grid.',
+  ),
+  p(
+    'ortho.followup.schedule',
+    'ortho_episode',
+    'plan',
+    'phi',
+    'low',
+    'Generate the follow-up schedule from a protocol, at offsets from the anchor rather than from today.',
+  ),
+  p(
+    'ortho.prom.collect',
+    'ortho_episode',
+    'record',
+    'phi',
+    'low',
+    'Collect a patient-reported outcome measure.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -8296,6 +8443,8 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...TR008,
   ...NC013,
   ...TR009,
+  ...TR002,
+  ...OP009,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

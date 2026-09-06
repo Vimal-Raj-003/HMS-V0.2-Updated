@@ -63,6 +63,7 @@ import {
 // Phase 4 (OP-003, NC-005..NC-008, NC-021). Same spread-not-import treatment.
 import { INVENTORY_CONTROLLERS, INVENTORY_PROVIDERS } from './modules/inventory/inventory.module.js';
 import { EMERGENCY_CONTROLLERS, EMERGENCY_PROVIDERS } from './modules/emergency/emergency.module.js';
+import { ORTHO_CONTROLLERS, ORTHO_PROVIDERS } from './modules/ortho/ortho.module.js';
 import { RCM_CONTROLLERS, RCM_PROVIDERS } from './modules/rcm/rcm.module.js';
 import { PHARMACY_CONTROLLERS, PHARMACY_PROVIDERS } from './modules/pharmacy/pharmacy.module.js';
 import { CashController } from './modules/frontoffice/cash/cash.controller.js';
@@ -126,6 +127,7 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     ...INVENTORY_CONTROLLERS,
     ...RCM_CONTROLLERS,
     ...EMERGENCY_CONTROLLERS,
+    ...ORTHO_CONTROLLERS,
     ...PHARMACY_CONTROLLERS,
   ],
   providers: [
@@ -180,6 +182,7 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     // provides, so nothing needs filtering out of it yet.
     ...RCM_PROVIDERS.filter((provider) => provider !== NumberingService),
     ...EMERGENCY_PROVIDERS.filter((provider) => provider !== NumberingService),
+    ...ORTHO_PROVIDERS,
     { provide: APP_FILTER, useClass: ProblemFilter },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: TenantGuard },

@@ -401,6 +401,85 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-06 (late) · Phase 6 · TR-002 + OP-009 — the fracture registry, and the wrong-site rule
+
+**Built — TR-002 and OP-009, complete.** 12 tables, 16 permission keys, 6
+events, 2 screens. **Exit gate 7 passes**: an open right tibial shaft
+registered from the ER as `42-B2.1`, Gustilo IIIA, with the antibiotic clock
+deliberately breached at 82 minutes and the breach appearing as a recorded fact
+rather than a computed opinion.
+
+**The module has one real database opinion, and it is laterality.** Wrong-site
+surgery in orthopaedics is almost always a side error that survived four
+handoffs — the note says left, the imaging order says right, the consent says
+left, the theatre list says right, and each of four people assumed one of the
+others had checked. Every one of those documents is written by a different
+module.
+
+So `side` is NOT NULL, **`bilateral` is not a value** (two limbs are two
+entries, because a plan, a cast and an implant each belong to one of them), and
+a plan carries its _own_ side so the database can compare the two. Storing it
+once and joining would make the mismatch unrepresentable **and unnoticeable**,
+and unnoticeable is the failure. Proven over HTTP: a left-sided nail on a
+right-sided fracture comes back 409 naming both sides and the bone.
+
+The screen does the cheap half: side is a badge, in colour _and_ in words, in
+the same position on every row and at the top of every record. And the plan
+form makes you _choose_ the side rather than pre-filling it — pre-filling would
+make the two agree by construction and remove the only check that catches the
+surgeon looking at the wrong patient's film.
+
+**The antibiotic clock runs from arrival, and the breach is stored.** Measuring
+from diagnosis would make a four-hour wait for an X-ray invisible, which is
+exactly the delay the indicator exists to find. `fx_open_bundle.arrived_at` is
+recorded at registration so the breach cannot be argued away later by re-dating
+the diagnosis, and a trigger recomputes the breach list on every write — this
+service gets no say in whether the hour was met.
+
+**Constraints proven live**, both directions where it matters: a left plan on a
+right fracture (refused) and the right one (accepted); confirming an open
+fracture with no Gustilo grade; a Gustilo grade on a closed one; an AO type
+outside A/B/C; a subgroup with no group; confirming a fracture classified only
+to segment; Salter-Harris on an adult skeleton; a bundle attached to a closed
+fracture; non-union with no grounds; union with no date; a union dated before
+the injury; editing a version snapshot; a film dated before the injury; and a
+RUST score of 15 on a scale that stops at 12.
+
+**Two things the build got wrong and the repo caught.**
+
+`fracture.union.declare` was written `requiresReason`, so _every_ union
+declaration demanded a written justification — including a fracture that healed
+at fourteen weeks. That teaches people to type "healed" into a reason box,
+which then means nothing on the declaration that genuinely needs grounds. The
+reason is now asked for where the six-month rule actually applies, and the
+screen spec asserts the absence.
+
+And an existing repo-wide invariant — "never grant a `.read` whose sibling
+`.list` is withheld, because the role has no way to obtain the id" — failed on
+the radiologist and the therapist. A test written for Phase 4 caught a Phase 6
+grant, which is the whole point of writing it against every template rather
+than against its own phase.
+
+**A third mis-anchored grant, and a general guard for it.** For the second
+time, a scripted edit anchoring on `permissions: [` skipped a role whose array
+is on one line and landed orthopaedic keys on a **dialysis technician**.
+`phase6-grants.spec.ts` now declares every Phase 6 permission prefix against
+the roles allowed to hold it, so a grant that lands anywhere else fails the
+build — and a prefix with no entry fails too, which is how it immediately
+flagged that OP-006's `er.*` keys had never been reviewed against a list.
+
+**Gates** — 20/20 packages typecheck, lint and test (**2,919 tests**); 596
+routes across 72 controllers; catalogue **1,004 keys**; event registry **713**;
+688 tables, **0 without RLS**; 36 migrations; 72 screens.
+
+**Still missing:** no e2e golden path and no k6 script; no AO/OTA catalogue
+table, so the code is range-checked rather than validated against the published
+group and subgroup list; imaging auto-attach is a flag on the row rather than a
+matcher, because OP-008's study metadata is not wired to it yet.
+
+**Next:** TR-003 (implant traceability), TR-005 (cast and splint), TR-007
+(polytrauma board).
+
 ### 2026-09-06 (evening) · Phase 6 · TR-009 + NC-013 — the ambulance, and exit gate 1
 
 **Built — TR-009 and NC-013, complete.** 20 tables (13 in a new `ops` schema,

@@ -357,6 +357,47 @@ const ER_FLOOR = [
  * not overriding a failed check: those two are the decisions somebody has to
  * own by name.
  */
+/**
+ * TR-002 — anybody who sees the film.
+ *
+ * Registering a fracture provisionally is held as widely as triaging one, and
+ * for the same reason: a fracture nobody entered is a fracture the registry
+ * never counts and a follow-up nobody schedules. Confirming the AO code is not
+ * in here — that is a treatment decision written as a number.
+ */
+const FRACTURE_FLOOR = [
+  'fracture.record.create',
+  'fracture.record.read',
+  'fracture.record.list',
+  'fracture.record.update',
+  'fracture.event.record',
+  'fracture.imaging.assess',
+  'fracture.complication.record',
+] as const;
+
+/** The orthopaedic surgeon: the classification, the plan, and the union call. */
+const FRACTURE_SURGEON = [
+  ...FRACTURE_FLOOR,
+  'fracture.classification.confirm',
+  'fracture.plan.set',
+  'fracture.union.declare',
+  'ortho.episode.create',
+  'ortho.episode.read',
+  'ortho.exam.record',
+  'ortho.followup.schedule',
+  'ortho.prom.collect',
+] as const;
+
+/** The ortho clinic desk and nursing: exams, schedules, outcomes. */
+const ORTHO_CLINIC = [
+  'fracture.record.read',
+  'fracture.record.list',
+  'ortho.episode.read',
+  'ortho.exam.record',
+  'ortho.followup.schedule',
+  'ortho.prom.collect',
+] as const;
+
 const FLEET_DISPATCH = [
   'fleet.vehicle.read',
   'fleet.request.create',
@@ -2044,6 +2085,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'doctor-opd',
     permissions: [
+      ...FRACTURE_SURGEON,
       'mlc.case.read',
       ...DIAGNOSTIC_ORDERING,
       ...INVESTIGATION_REPORTER,
@@ -2077,6 +2119,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...FRACTURE_FLOOR,
       'fleet.request.create',
       'fleet.request.read',
       'mlc.case.read',
@@ -2104,6 +2147,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...FRACTURE_FLOOR,
       ...PREHOSPITAL_RECEIVER,
       'prehospital.prealert.divert',
       ...MLC_OFFICER,
@@ -2156,6 +2200,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...FRACTURE_SURGEON,
       'mlc.case.read',
       'mlc.injury.write',
       ...TRAUMA_TEAM,
@@ -2240,6 +2285,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'radiology-reading',
     permissions: [
+      'fracture.record.read',
+      'fracture.record.list',
+      'fracture.imaging.assess',
       ...DIAGNOSTIC_RESULTS_READER,
       ...RADIOLOGY_READING,
       ...INVESTIGATION_REPORTER,
@@ -2288,6 +2336,7 @@ const templates: readonly RoleTemplate[] = [
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
     permissions: [
+      ...FRACTURE_FLOOR,
       ...TRAUMA_TEAM,
       ...DIAGNOSTIC_RESULTS_READER,
       'lab.order.create',
@@ -2338,6 +2387,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      ...ORTHO_CLINIC,
       ...WARD_DIAGNOSTICS,
 
       ...PATIENT_READ,
@@ -3006,7 +3056,15 @@ const templates: readonly RoleTemplate[] = [
     description: 'Therapy assessments and session records.',
     category: 'therapy',
     homeWorkspace: 'therapy-schedule',
-    permissions: [...BASE_CLINICAL, ...SIGNS_DOCUMENTS],
+    permissions: [
+      ...BASE_CLINICAL,
+      ...SIGNS_DOCUMENTS,
+      'fracture.record.read',
+      'fracture.record.list',
+      'ortho.episode.read',
+      'ortho.exam.record',
+      'ortho.prom.collect',
+    ],
     abacDefaults: { careTeamOnly: true },
     mfaMandatory: false,
     sensitiveGrant: false,
@@ -3054,6 +3112,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'records',
     homeWorkspace: 'mrd-queue',
     permissions: [
+      'fracture.record.list',
+      'fracture.registry.export',
       ...MLC_RECORDS,
       ...TRAUMA_REGISTRY,
       'lab.report.read',
@@ -3532,6 +3592,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'quality',
     permissions: [
+      'fracture.record.list',
       'fleet.report.read',
       'mlc.register.read',
       'trauma.activation.read',

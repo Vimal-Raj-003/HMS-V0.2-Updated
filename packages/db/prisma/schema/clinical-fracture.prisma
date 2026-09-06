@@ -1,0 +1,618 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// TR-002 + OP-009 — the fracture registry and the orthopaedic OPD
+//
+// `phase-06` §6.7, exit gate 7.
+//
+//   fx_fractures         one fracture, AO/OTA classified, with a side
+//   fx_versions          append-only snapshots; a classification that changed
+//   fx_plans             conservative, ORIF, nail, ex-fix — and weight bearing
+//   fx_events            the timeline: reduction, surgery, cast, union
+//   fx_xray_timeline     films, with weeks since injury computed
+//   fx_imaging_findings  RUST/mRUST, alignment, implant state, union status
+//   fx_complications     infection, non-union, malunion, compartment
+//   fx_open_bundle       the antibiotic clock, and every breach of it
+//   ortho_episodes       the OPD episode TR-002 hangs off in clinic
+//   ortho_exams          the ROM and power grid
+//   ortho_followups      protocol offsets from an anchor date
+//   ortho_proms          Oxford, DASH, Harris — outcome, not just healing
+//
+// ── Side is the whole safety story ──────────────────────────────────────────
+//
+// Wrong-site surgery in orthopaedics is almost always a laterality error that
+// survived four handoffs: the note says left, the imaging order says right, the
+// consent says left, and the theatre list says right. `side` is NOT NULL for
+// every paired bone, and §B.1 refuses a fracture whose side disagrees with the
+// plan attached to it. Bilateral is two entries, never one row saying "both" —
+// because a plan, a cast and an implant each belong to one limb.
+//
+// ── The antibiotic clock starts at arrival, not at diagnosis ────────────────
+//
+// An open fracture's antibiotic target is one hour from *arrival*. Measuring
+// from diagnosis would make a four-hour wait for an X-ray invisible, which is
+// exactly the delay the indicator exists to find. `fx_open_bundle` stores the
+// arrival it is measured from, so the breach cannot be argued away later by
+// re-dating the diagnosis.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum FractureSide {
+  left
+  right
+  /// Only for genuinely unpaired structures: sacrum, sternum, a vertebral body.
+  midline
+  /// A bone with no laterality at all. Deliberately rare.
+  not_applicable
+
+  @@schema("clinical")
+}
+
+enum GustiloGrade {
+  I
+  II
+  IIIA
+  IIIB
+  IIIC
+
+  @@schema("clinical")
+}
+
+enum SalterHarris {
+  I
+  II
+  III
+  IV
+  V
+
+  @@schema("clinical")
+}
+
+enum FractureAetiology {
+  traumatic
+  pathological
+  osteoporotic
+  stress
+  periprosthetic
+  iatrogenic
+
+  @@schema("clinical")
+}
+
+enum ClassificationStatus {
+  /// Entered in the ER by whoever saw the film first. Always acceptable.
+  provisional
+  /// An orthopaedic surgeon has signed the classification.
+  confirmed
+
+  @@schema("clinical")
+}
+
+enum FractureStatus {
+  open
+  united
+  closed_other
+  /// Re-fractured, or the metalwork failed. Keeps the original id.
+  reopened
+
+  @@schema("clinical")
+}
+
+enum TreatmentIntent {
+  conservative
+  closed_reduction_cast
+  percutaneous_pinning
+  orif
+  im_nail
+  external_fixation
+  arthroplasty
+  amputation
+  traction
+  observation
+
+  @@schema("clinical")
+}
+
+enum WeightBearing {
+  /// Non-weight-bearing.
+  nwb
+  /// Toe-touch.
+  ttwb
+  /// Partial.
+  pwb
+  /// As tolerated.
+  wbat
+  /// Full.
+  fwb
+
+  @@schema("clinical")
+}
+
+enum FractureEventKind {
+  diagnosed
+  reduction
+  surgery
+  cast_applied
+  cast_changed
+  cast_removed
+  exfix_applied
+  exfix_removed
+  pin_site_care
+  wound_event
+  imaging
+  physio_milestone
+  complication
+  union
+  hardware_removal
+  reopened
+  closed
+  note
+
+  @@schema("clinical")
+}
+
+enum UnionStatus {
+  not_united
+  progressing
+  united
+  delayed
+  nonunion
+
+  @@schema("clinical")
+}
+
+enum FractureComplicationKind {
+  infection
+  nonunion
+  malunion
+  delayed_union
+  compartment_syndrome
+  neurovascular_injury
+  implant_failure
+  stiffness
+  avascular_necrosis
+  dvt
+  fat_embolism
+  refracture
+  other
+
+  @@schema("clinical")
+}
+
+/// One fracture. AO/OTA classified, on one side, in one patient.
+model Fracture {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId String  @map("patient_id") @db.Uuid
+  erVisitId String? @map("er_visit_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+  /// The TR-001 coded injury this fracture corresponds to, when there is one.
+  traumaInjuryId String? @map("trauma_injury_id") @db.Uuid
+  orthoEpisodeId String? @map("ortho_episode_id") @db.Uuid
+
+  boneCode    String @map("bone_code") @db.VarChar(40)
+  boneDisplay String @map("bone_display") @db.VarChar(120)
+
+  /// AO/OTA: bone 1–9, segment 1–4, type A/B/C, group and subgroup 1–3.
+  /// `aoCode` is the rendered form the surgeon actually says out loud: `32-B2.1`.
+  aoBone     Int?    @map("ao_bone")
+  aoSegment  Int?    @map("ao_segment")
+  aoType     String? @map("ao_type") @db.Char(1)
+  aoGroup    Int?    @map("ao_group")
+  aoSubgroup Int?    @map("ao_subgroup")
+  aoQualifiers String[] @default([]) @map("ao_qualifiers")
+  aoCode     String? @map("ao_code") @db.VarChar(24)
+  aoVersion  String  @default("2018") @map("ao_version") @db.VarChar(8)
+
+  /// Mandatory for a paired bone. §B.1 is the wrong-site rule.
+  side FractureSide
+
+  isOpen  Boolean       @default(false) @map("is_open")
+  /// Required before an open fracture can be confirmed — it drives the
+  /// antibiotic regimen and the plastics referral.
+  gustilo GustiloGrade?
+  /// Closed-fracture soft-tissue grading. C3 is a closed injury that still
+  /// threatens the limb, and it is the one people forget to record.
+  tscherne String? @db.VarChar(4)
+
+  paediatric   Boolean       @default(false)
+  salterHarris SalterHarris? @map("salter_harris")
+
+  aetiology          FractureAetiology @default(traumatic)
+  periprostheticClass String?          @map("periprosthetic_class") @db.VarChar(24)
+  dislocation        Boolean           @default(false)
+
+  /// `{ nvDeficit, compartmentRisk, skinThreat, vascularInjury }`. Each one is
+  /// a limb-threatening finding with its own clock.
+  associated Json?
+  /// `{ system, value }` — Neer, Garden, Weber, Schatzker, Sanders…
+  regionalClassification Json? @map("regional_classification")
+
+  icd10 String? @db.VarChar(12)
+  /// The mechanism, copied from TR-001 or entered in clinic.
+  mechanism Json?
+
+  injuryAt          DateTime? @map("injury_at") @db.Timestamptz(6)
+  injuryAtEstimated Boolean   @default(false) @map("injury_at_estimated")
+  diagnosedAt       DateTime  @default(now()) @map("diagnosed_at") @db.Timestamptz(6)
+  diagnosedBy       String?   @map("diagnosed_by") @db.Uuid
+
+  classificationStatus ClassificationStatus @default(provisional) @map("classification_status")
+  confirmedBy          String?              @map("confirmed_by") @db.Uuid
+  confirmedAt          DateTime?            @map("confirmed_at") @db.Timestamptz(6)
+  /// A resident's confirmation stands, and a consultant co-signs within 24 h.
+  cosignRequired Boolean   @default(false) @map("cosign_required")
+  cosignedBy     String?   @map("cosigned_by") @db.Uuid
+  cosignedAt     DateTime? @map("cosigned_at") @db.Timestamptz(6)
+
+  isMlc Boolean @default(false) @map("is_mlc")
+  mlcId String? @map("mlc_id") @db.Uuid
+
+  status FractureStatus @default(open)
+  unionAt DateTime? @map("union_at") @db.Timestamptz(6)
+  timeToUnionWeeks Decimal? @map("time_to_union_weeks") @db.Decimal(4, 1)
+  closedReason String?   @map("closed_reason") @db.VarChar(32)
+  closedAt     DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  /// Declaring non-union before six months needs a surgeon's stated grounds.
+  nonunionOverrideBy     String? @map("nonunion_override_by") @db.Uuid
+  nonunionOverrideReason String? @map("nonunion_override_reason") @db.Text
+
+  version Int     @default(1)
+  notes   String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  versions      FractureVersion[]
+  plans         FracturePlan[]
+  events        FractureEvent[]
+  films         FractureFilm[]
+  complications FractureComplication[]
+  openBundle    OpenFractureBundle?
+
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, diagnosedAt(sort: Desc)])
+  @@index([hospitalId, aoBone, aoSegment, aoType])
+  @@index([hospitalId, isOpen, gustilo])
+  @@map("fx_fractures")
+  @@schema("clinical")
+}
+
+/// Append-only snapshots. A classification that changed is a classification
+/// somebody can be asked about.
+model FractureVersion {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  fractureId String @map("fracture_id") @db.Uuid
+
+  version   Int
+  snapshot  Json
+  changedBy String?  @map("changed_by") @db.Uuid
+  changedAt DateTime @default(now()) @map("changed_at") @db.Timestamptz(6)
+  reason    String?  @db.Text
+
+  fracture Fracture @relation(fields: [fractureId], references: [id], onDelete: Cascade)
+
+  @@unique([fractureId, version], map: "uq_fracture_version")
+  @@index([hospitalId, fractureId, version(sort: Desc)])
+  @@map("fx_versions")
+  @@schema("clinical")
+}
+
+/// What is going to be done about it, and how much weight it may take.
+model FracturePlan {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  fractureId String @map("fracture_id") @db.Uuid
+
+  version Int
+  intent  TreatmentIntent
+  /// Damage control: fix it enough to survive, definitive surgery later.
+  damageControl Boolean @default(false) @map("damage_control")
+  urgency String @default("elective") @db.VarChar(16)
+
+  /// The side this plan is for. §B.1 refuses one that disagrees with the
+  /// fracture — the mismatch that ends in a wrong-site operation.
+  side FractureSide
+
+  plannedProcedureCode String?   @map("planned_procedure_code") @db.VarChar(40)
+  plannedImplantFamily String?   @map("planned_implant_family") @db.VarChar(120)
+  plannedDate          DateTime? @map("planned_date") @db.Timestamptz(6)
+  otRequestId          String?   @map("ot_request_id") @db.Uuid
+
+  weightBearing WeightBearing @default(nwb) @map("weight_bearing")
+  pwbPct        Int?          @map("pwb_pct")
+  wbReviewDate  DateTime?     @map("wb_review_date") @db.Date
+  romRestrictions String?     @map("rom_restrictions") @db.Text
+
+  dvtProphylaxis Boolean @default(false) @map("dvt_prophylaxis")
+  consentDocRef  String? @map("consent_doc_ref") @db.VarChar(300)
+
+  isCurrent Boolean  @default(true) @map("is_current")
+  setBy     String?  @map("set_by") @db.Uuid
+  setAt     DateTime @default(now()) @map("set_at") @db.Timestamptz(6)
+
+  fracture Fracture @relation(fields: [fractureId], references: [id], onDelete: Cascade)
+
+  @@unique([fractureId, version], map: "uq_fracture_plan_version")
+  @@index([hospitalId, fractureId, isCurrent])
+  @@map("fx_plans")
+  @@schema("clinical")
+}
+
+/// The timeline. Everything that happened to this bone, in order.
+model FractureEvent {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  fractureId String @map("fracture_id") @db.Uuid
+
+  kind FractureEventKind
+  at   DateTime          @default(now()) @db.Timestamptz(6)
+  byId String?           @map("by_id") @db.Uuid
+
+  refType String? @map("ref_type") @db.VarChar(32)
+  refId   String? @map("ref_id") @db.Uuid
+  details Json?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  fracture Fracture @relation(fields: [fractureId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, fractureId, at])
+  @@map("fx_events")
+  @@schema("clinical")
+}
+
+/// The films, with the interval that makes them comparable.
+model FractureFilm {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  fractureId String @map("fracture_id") @db.Uuid
+
+  /// The DICOM study, and the OP-008 order it came from.
+  studyUid String? @map("study_uid") @db.VarChar(120)
+  studyId  String? @map("study_id") @db.Uuid
+
+  /// `injury` | `post_reduction` | `post_op` | `healing_2w` … The label is what
+  /// makes a side-by-side comparison mean something.
+  label  String   @db.VarChar(24)
+  takenAt DateTime @map("taken_at") @db.Timestamptz(6)
+
+  /// Computed from `injuryAt`, so a re-dated injury moves every interval at
+  /// once rather than leaving a timeline that no longer adds up.
+  weeksSinceInjury  Decimal? @map("weeks_since_injury") @db.Decimal(5, 1)
+  weeksSinceSurgery Decimal? @map("weeks_since_surgery") @db.Decimal(5, 1)
+
+  /// Attached by the matcher rather than by a person. An ambiguous match goes
+  /// to the unassigned tray instead — a film on the wrong limb is worse than a
+  /// film nobody attached.
+  autoAttached Boolean @default(false) @map("auto_attached")
+  attachedBy   String? @map("attached_by") @db.Uuid
+  isKeyImage   Boolean @default(false) @map("is_key_image")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  fracture Fracture @relation(fields: [fractureId], references: [id], onDelete: Cascade)
+  findings FractureFinding[]
+
+  @@index([hospitalId, fractureId, takenAt])
+  @@map("fx_xray_timeline")
+  @@schema("clinical")
+}
+
+/// What the surgeon saw on the film.
+model FractureFinding {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  fractureId String @map("fracture_id") @db.Uuid
+  filmId     String @map("film_id") @db.Uuid
+
+  assessedBy String?  @map("assessed_by") @db.Uuid
+  assessedAt DateTime @default(now()) @map("assessed_at") @db.Timestamptz(6)
+
+  angulationDeg Decimal? @map("angulation_deg") @db.Decimal(4, 1)
+  translationPct Int?    @map("translation_pct")
+  shorteningMm  Int?     @map("shortening_mm")
+  rotationDeg   Decimal? @map("rotation_deg") @db.Decimal(4, 1)
+
+  /// RUST is 4–12 across four cortices; mRUST is 4–16. Both are scores, not
+  /// opinions, and the range check below says so.
+  rustScore  Int? @map("rust_score")
+  mrustScore Int? @map("mrust_score")
+
+  alignmentMaintained Boolean? @map("alignment_maintained")
+  /// `na` | `intact` | `loosening` | `broken` | `backed_out` | `migrated`.
+  implantStatus String?     @map("implant_status") @db.VarChar(16)
+  jointCongruity String?    @map("joint_congruity") @db.VarChar(16)
+  unionStatus   UnionStatus @default(not_united) @map("union_status")
+  notes         String?     @db.Text
+
+  film FractureFilm @relation(fields: [filmId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, fractureId, assessedAt(sort: Desc)])
+  @@map("fx_imaging_findings")
+  @@schema("clinical")
+}
+
+model FractureComplication {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  fractureId String @map("fracture_id") @db.Uuid
+
+  kind        FractureComplicationKind
+  onsetAt     DateTime                 @map("onset_at") @db.Timestamptz(6)
+  detectedBy  String?                  @map("detected_by") @db.Uuid
+  severity    String                   @default("moderate") @db.VarChar(16)
+  clavienDindo String?                 @map("clavien_dindo") @db.VarChar(8)
+  management  String?                  @db.Text
+  resolvedAt  DateTime?                @map("resolved_at") @db.Timestamptz(6)
+  notes       String?                  @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  fracture Fracture @relation(fields: [fractureId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, fractureId, onsetAt(sort: Desc)])
+  @@map("fx_complications")
+  @@schema("clinical")
+}
+
+/// The open-fracture bundle, and its clocks.
+model OpenFractureBundle {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  fractureId String @unique @map("fracture_id") @db.Uuid
+
+  /// What the antibiotic target is measured from. Stored rather than looked up,
+  /// so a re-dated diagnosis cannot move the breach.
+  arrivedAt DateTime @map("arrived_at") @db.Timestamptz(6)
+
+  antibioticAt        DateTime? @map("antibiotic_at") @db.Timestamptz(6)
+  tetanusAt           DateTime? @map("tetanus_at") @db.Timestamptz(6)
+  photoAt             DateTime? @map("photo_at") @db.Timestamptz(6)
+  dressingAt          DateTime? @map("dressing_at") @db.Timestamptz(6)
+  splintAt            DateTime? @map("splint_at") @db.Timestamptz(6)
+  debridementAt       DateTime? @map("debridement_at") @db.Timestamptz(6)
+  plasticsReferralAt  DateTime? @map("plastics_referral_at") @db.Timestamptz(6)
+  definitiveCoverAt   DateTime? @map("definitive_cover_at") @db.Timestamptz(6)
+
+  /// Recorded, not computed on read: the breach is a fact about what happened,
+  /// and it must survive somebody changing the target later.
+  breaches String[] @default([])
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  fracture Fracture @relation(fields: [fractureId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, fractureId])
+  @@map("fx_open_bundle")
+  @@schema("clinical")
+}
+
+/// OP-009 — the orthopaedic OPD episode a fracture is followed up in.
+model OrthoEpisode {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId   String  @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  /// The anchor every follow-up offset is measured from: the injury, or the
+  /// operation. A protocol that counts from "today" produces a schedule that
+  /// slips every time somebody reschedules.
+  anchorKind String   @default("injury") @map("anchor_kind") @db.VarChar(16)
+  anchorAt   DateTime @map("anchor_at") @db.Timestamptz(6)
+
+  presentingComplaint String? @map("presenting_complaint") @db.Text
+  /// `xray_first`: the patient goes to imaging before the consultation, which
+  /// is what makes an ortho clinic run to time.
+  xrayFirst Boolean @default(false) @map("xray_first")
+
+  status    String   @default("open") @db.VarChar(16)
+  openedAt  DateTime @default(now()) @map("opened_at") @db.Timestamptz(6)
+  closedAt  DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  exams     OrthoExam[]
+  followups OrthoFollowup[]
+  proms     OrthoProm[]
+
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, branchId, openedAt(sort: Desc)])
+  @@map("ortho_episodes")
+  @@schema("clinical")
+}
+
+/// The range-of-motion and power grid.
+model OrthoExam {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+
+  at   DateTime @default(now()) @db.Timestamptz(6)
+  byId String?  @map("by_id") @db.Uuid
+
+  /// `[{ joint, side, movement, activeDeg, passiveDeg, normalDeg, power }]`.
+  /// The normal reference travels with the row so a reading recorded under one
+  /// reference set still means something after somebody edits the master.
+  rom Json @default("[]")
+  /// `{ nerve: finding }` — the examination that decides whether this is an
+  /// emergency.
+  neurovascular Json?
+  specialTests  Json?
+  notes         String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  episode OrthoEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, episodeId, at(sort: Desc)])
+  @@map("ortho_exams")
+  @@schema("clinical")
+}
+
+/// A follow-up due at an offset from the anchor, not from today.
+model OrthoFollowup {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+  fractureId String? @map("fracture_id") @db.Uuid
+
+  protocolKey String @map("protocol_key") @db.VarChar(60)
+  label       String @db.VarChar(80)
+  /// Weeks from the episode's anchor. Negative is meaningless and refused.
+  offsetWeeks Decimal @map("offset_weeks") @db.Decimal(4, 1)
+  dueAt       DateTime @map("due_at") @db.Timestamptz(6)
+
+  /// What has to happen at that visit: a film, a cast change, a PROM.
+  actions String[] @default([])
+
+  status        String    @default("due") @db.VarChar(16)
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz(6)
+  appointmentId String?   @map("appointment_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode OrthoEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@unique([episodeId, protocolKey, offsetWeeks], map: "uq_ortho_followup_offset")
+  @@index([hospitalId, status, dueAt])
+  @@map("ortho_followups")
+  @@schema("clinical")
+}
+
+/// Patient-reported outcome. Whether the bone healed is not whether the patient
+/// got their life back, and only one of those is visible on a film.
+model OrthoProm {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+  fractureId String? @map("fracture_id") @db.Uuid
+
+  /// `oxford_hip` | `oxford_knee` | `dash` | `harris_hip` | `eq5d` | `vas_pain`.
+  instrument String @db.VarChar(40)
+  /// Weeks from the anchor, so a series is comparable across patients.
+  atWeeks Decimal @map("at_weeks") @db.Decimal(4, 1)
+
+  responses Json
+  /// Scored by the instrument's own rule, in `packages/contracts/scores`.
+  score       Decimal? @db.Decimal(6, 2)
+  scoreMax    Decimal? @map("score_max") @db.Decimal(6, 2)
+  /// Whether a higher score is better. Oxford yes, DASH no — and a dashboard
+  /// that gets this backwards reports improvement as decline.
+  higherIsBetter Boolean @default(true) @map("higher_is_better")
+
+  collectedAt DateTime @default(now()) @map("collected_at") @db.Timestamptz(6)
+  collectedBy String?  @map("collected_by") @db.Uuid
+
+  episode OrthoEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, episodeId, instrument, atWeeks])
+  @@map("ortho_proms")
+  @@schema("clinical")
+}

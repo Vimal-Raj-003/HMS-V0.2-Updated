@@ -229,6 +229,102 @@ describe('Phase 6 — trauma and medico-legal grants', () => {
   });
 
   /**
+   * The general form of the mis-anchored-grant failure, for every Phase 6 key.
+   *
+   * It has now happened twice. A scripted edit anchors on `permissions: [` and
+   * silently skips any role whose array is written on one line, landing the
+   * block on the *next* role instead — `MLC_SECURITY` on kitchen staff, and
+   * orthopaedic keys on a dialysis technician. Nothing else catches it: the
+   * types are fine, lint is fine, the seed writes the rows.
+   *
+   * So: every Phase 6 permission is declared here against the set of roles
+   * allowed to hold it. A grant that lands anywhere else fails the build, and
+   * adding a legitimate one means editing this list — which is the point.
+   */
+  it('gives every Phase 6 key only to roles that were meant to have it', () => {
+    const ALLOWED: Readonly<Record<string, readonly string[]>> = {
+      // OP-006. Held widely on purpose — `er.quickreg` is the key that gets an
+      // unconscious patient a tag and a bay in thirty seconds.
+      er: ['doctor_emergency', 'nurse_er_triage', 'receptionist'],
+      triage: ['doctor_emergency', 'nurse_er_triage'],
+      trauma: [
+        'doctor_emergency',
+        'nurse_er_triage',
+        'surgeon',
+        'anaesthetist',
+        'intensivist',
+        'resident_doctor',
+        'mrd_officer',
+        'quality_manager',
+      ],
+      mci: [
+        'doctor_emergency',
+        'medical_superintendent',
+        'hospital_admin',
+        'nurse_er_triage',
+        'quality_manager',
+      ],
+      mlc: [
+        'doctor_emergency',
+        'nurse_er_triage',
+        'surgeon',
+        'doctor_ip',
+        'intensivist',
+        'doctor_consultant_opd',
+        'mrd_officer',
+        'security_officer',
+        'medical_superintendent',
+        'quality_manager',
+        'hospital_admin',
+      ],
+      fleet: [
+        'hospital_admin',
+        'medical_superintendent',
+        'call_centre_agent',
+        'ambulance_crew',
+        'receptionist',
+        'nurse_ward',
+        'nurse_icu',
+        'doctor_ip',
+        'biomedical_engineer',
+        'quality_manager',
+      ],
+      prehospital: ['ambulance_crew', 'doctor_emergency', 'nurse_er_triage'],
+      fracture: [
+        'surgeon',
+        'doctor_consultant_opd',
+        'doctor_emergency',
+        'doctor_ip',
+        'resident_doctor',
+        'radiologist',
+        'nurse_opd',
+        'therapist',
+        'mrd_officer',
+        'quality_manager',
+      ],
+      ortho: ['surgeon', 'doctor_consultant_opd', 'nurse_opd', 'therapist'],
+    };
+
+    const phase6 = new Set(PERMISSION_CATALOGUE.filter((p) => p.phase === 6).map((p) => p.key));
+    const misplaced: string[] = [];
+
+    for (const template of ROLE_TEMPLATES) {
+      for (const key of template.permissions) {
+        if (!phase6.has(key)) continue;
+        const prefix = key.split('.')[0] ?? '';
+        const allowed = ALLOWED[prefix];
+        // A prefix with no entry is a new module whose grants nobody has
+        // reviewed. Failing here is the correct, noisy outcome.
+        if (allowed === undefined || !allowed.includes(template.key)) {
+          misplaced.push(`${template.key} → ${key}`);
+        }
+      }
+    }
+
+    expect([...new Set(misplaced)].sort(), 'Phase 6 keys on roles not in the allow-list').toEqual([]);
+  });
+
+  /**
    * A coder is not a witness. MRD reads the register, issues certified copies
    * and answers requisitions; it does not open cases or document injuries.
    */

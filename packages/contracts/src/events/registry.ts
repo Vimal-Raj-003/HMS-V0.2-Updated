@@ -9308,6 +9308,100 @@ const prehospitalEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * TR-002 + OP-009 — the fracture registry.
+ *
+ * `fracture.open.bundle_breached` is the one that matters operationally: an
+ * antibiotic given ninety-five minutes after arrival is a KPI failure, and the
+ * event carries what was actually breached rather than a flag somebody has to
+ * go and interpret.
+ */
+const fractureEvents: readonly EventDefinition[] = [
+  ev(
+    'fracture.registered',
+    'fracture',
+    'TR-002',
+    'A fracture was entered, provisionally or otherwise. OP-009 opens a follow-up schedule from it and the registry counts it.',
+    z.object({
+      fractureId: uuid,
+      patientId: uuid,
+      boneDisplay: z.string(),
+      side: z.string(),
+      aoCode: z.string().nullable(),
+      isOpen: z.boolean(),
+      gustilo: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'fracture.classification.confirmed',
+    'fracture',
+    'TR-002',
+    'A surgeon signed off the AO/OTA code. Until this, the registry entry is provisional and not exportable.',
+    z.object({
+      fractureId: uuid,
+      aoCode: z.string(),
+      confirmedBy: uuid,
+      cosignRequired: z.boolean(),
+    }),
+    { retentionDays: 5475 },
+  ),
+  ev(
+    'fracture.plan.set',
+    'fracture_plan',
+    'TR-002',
+    'Treatment intent and weight-bearing. Physio and ward nursing both key off the weight-bearing status.',
+    z.object({
+      fractureId: uuid,
+      planId: uuid,
+      intent: z.string(),
+      side: z.string(),
+      weightBearing: z.string(),
+      urgency: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'fracture.open.bundle_breached',
+    'fracture',
+    'TR-002',
+    'An open-fracture bundle target was missed. Carries what was breached — the antibiotic hour, the debridement window, the plastics referral.',
+    z.object({
+      fractureId: uuid,
+      gustilo: z.string().nullable(),
+      breaches: z.array(z.string()),
+      minutesToAntibiotic: z.number().int().nullable(),
+    }),
+    { retentionDays: 5475 },
+  ),
+  ev(
+    'fracture.union.declared',
+    'fracture',
+    'TR-002',
+    'The bone healed, or did not. Non-union before six months carries the surgeon’s grounds.',
+    z.object({
+      fractureId: uuid,
+      status: z.string(),
+      timeToUnionWeeks: z.string().nullable(),
+      overrideReason: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'ortho.followups.scheduled',
+    'ortho_episode',
+    'OP-009',
+    'A follow-up protocol was applied, at offsets from the anchor date rather than from today — so rescheduling one visit does not slide the rest.',
+    z.object({
+      episodeId: uuid,
+      protocolKey: z.string(),
+      anchorAt: z.string(),
+      visitCount: z.number().int(),
+    }),
+    { retentionDays: 5475 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -9371,6 +9465,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...traumaEvents,
   ...mlcEvents,
   ...prehospitalEvents,
+  ...fractureEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));
