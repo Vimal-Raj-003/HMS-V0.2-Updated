@@ -58,6 +58,7 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'IP011', // labour room: the action line, the third stage, APGAR and the wristband pair
   'OP031', // oncology: the derived dose, the vinca never-event and the lifetime cap
   'OP032', // psychiatry: presumed capacity, the admission clocks, restraint and ECT
+  'OP033', // the two ends of life: the adult ceiling, grams, and the burden
 ]);
 
 /**

@@ -1011,6 +1011,25 @@ const PSY_PSYCHIATRIST = [
   'psy.report.read',
 ] as const;
 
+/**
+ * OP-033, IP-015 and OP-034 — the two ends of life.
+ *
+ * Wide on purpose. The safety in this group comes from the arithmetic being the
+ * database's rather than from who is allowed to do it: a nurse who weighs a
+ * child gets the centile, and a prescriber who types milligrams per kilogram
+ * gets the adult ceiling whether they remembered it or not.
+ */
+const LIFESPAN_FLOOR = ['lifespan.read', 'paed.growth.record', 'geri.assessment.record'] as const;
+
+const LIFESPAN_CLINICIAN = [
+  ...LIFESPAN_FLOOR,
+  'paed.dose.calculate',
+  'nicu.admission.manage',
+  'nicu.fluids.prescribe',
+  'geri.medication.review',
+  'lifespan.report.read',
+] as const;
+
 const DERM_DELIVERY = ['derm.lesion.read', 'derm.phototherapy.deliver'] as const;
 
 const DERM_DOCTOR = [
@@ -1126,6 +1145,7 @@ const SPECIALTY_CONSOLE_DOCTOR = [
   ...LABOUR_DOCTOR,
   ...ONCO_DOCTOR,
   ...PSY_PSYCHIATRIST,
+  ...LIFESPAN_CLINICIAN,
 ] as const;
 
 /** A resident records and plans; the signature and the override keys are not theirs. */
@@ -3023,6 +3043,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...LIFESPAN_CLINICIAN,
       ...ONCO_DOCTOR,
       ...LABOUR_DOCTOR,
       ...PROCEDURE_OPERATOR,
@@ -3436,6 +3457,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      ...LIFESPAN_FLOOR,
       ...PSY_NURSING,
       ...ONCO_CHAIR,
       ...IMMUNISATION_FLOOR,
@@ -3496,6 +3518,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...LIFESPAN_FLOOR,
       ...PSY_NURSING,
       ...ONCO_CHAIR,
       ...LABOUR_FLOOR,
@@ -3554,6 +3577,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'icu-flowsheet',
     permissions: [
+      ...LIFESPAN_FLOOR,
       ...DIALYSIS_NURSE,
       ...WOUND_BEDSIDE,
       ...SWALLOW_ACKNOWLEDGER,
@@ -4037,6 +4061,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-ward-indents',
     permissions: [
+      'lifespan.read',
+      'geri.medication.review',
       ...ONCO_PHARMACY,
       'ip.discharge.read',
       'ip.discharge.reconcile',
@@ -4078,6 +4104,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-admin',
     permissions: [
+      'lifespan.read',
+      'geri.medication.review',
       ...ONCO_PHARMACY,
       'mar.read',
       'mar.order.verify',

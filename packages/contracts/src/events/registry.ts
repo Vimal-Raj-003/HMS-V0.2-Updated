@@ -10817,6 +10817,62 @@ const painClinicEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — OP-033, IP-015 and OP-034, the two ends of life.
+ *
+ * Three events, and each is a threshold somebody outside the room acts on: a
+ * child who has crossed into severe underweight, a dose that hit the adult
+ * ceiling, and an anticholinergic burden that has passed the point where it
+ * causes falls.
+ */
+const lifespanEvents: readonly EventDefinition[] = [
+  ev(
+    'paed.growth.faltering',
+    'paed_growth_record',
+    'OP-033',
+    'A child crossed into underweight or severe underweight on the WHO standard. Leaves the clinic because growth faltering is a nutrition referral and sometimes a safeguarding one, and neither happens from a chart nobody re-reads.',
+    z.object({
+      recordId: uuid,
+      patientId: uuid,
+      ageDays: z.number().int(),
+      weightG: z.number().int(),
+      weightForAgeZ: z.string(),
+      nutritionBand: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'paed.dose.capped',
+    'paed_dose',
+    'OP-033',
+    'A weight-based dose hit the adult ceiling. Not an error — it is the rule working — but it means the child is being dosed as an adult, which is a fact the prescriber and the pharmacist both need.',
+    z.object({
+      doseId: uuid,
+      patientId: uuid,
+      drugName: z.string(),
+      weightG: z.number().int(),
+      calcSingleMg: z.string(),
+      finalSingleMg: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'geri.burden.high',
+    'geri_medication_review',
+    'OP-034',
+    'An anticholinergic burden of three or more. Above it the drugs cause the falls and the confusion they are being taken alongside, and cumulatively they raise dementia risk — so it leaves for a pharmacist-led review rather than sitting in a note.',
+    z.object({
+      reviewId: uuid,
+      patientId: uuid,
+      ageYears: z.number().int(),
+      acbScore: z.number().int(),
+      drugCount: z.number().int(),
+      beersCount: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+];
+
+/**
  * Phase 8 — OP-032, psychiatry and mental health.
  *
  * Four events, and every one of them is a clock somebody outside the ward has
@@ -11521,6 +11577,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...labourRoomEvents,
   ...oncologyEvents,
   ...psychiatryEvents,
+  ...lifespanEvents,
   ...procedureEvents,
 ]);
 

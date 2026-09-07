@@ -493,6 +493,58 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
     detail: 'A conversion factor ends on or after the day it takes effect.',
   },
 
+  // ── OP-033 / IP-015 / OP-034 ──────────────────────────────────────────────
+  a_frequency_is_plausible: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A drug is given between once and twenty-four times a day.',
+  },
+  a_per_kilogram_dose_is_positive: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A dose per kilogram is a positive number.',
+  },
+  a_growth_record_names_a_sex: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'The WHO growth standard is published separately for boys and girls, and using the wrong one shifts a centile by about half a band. Record which chart applies.',
+  },
+  an_age_in_days_is_childhood: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A growth record covers 0 to 7300 days — birth to twenty years.',
+  },
+  a_neonatal_gestation_is_plausible: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A gestation at birth runs from 20 to 45 completed weeks, plus 0 to 6 days.',
+  },
+  a_birth_weight_is_in_grams: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A birth weight runs from 200 to 8000 grams. A figure like 3 is three grams — the error a gram-only column exists to make impossible.',
+  },
+  a_neonatal_fluid_rate_is_plausible: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Neonatal fluids run from 20 to 220 mL per kilogram per day.',
+  },
+  a_barthel_index_is_out_of_a_hundred: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'The Barthel index scores 0 to 100 in steps of five.',
+  },
+  falls_are_counted_not_estimated: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Falls in the last year is a count, from 0 to 365.',
+  },
+  uq_nicu_fluid_day: {
+    type: ProblemType.CONFLICT,
+    detail: 'A fluid order for that day already exists on this admission.',
+  },
+  uq_acb_drug: {
+    type: ProblemType.CONFLICT,
+    detail: 'That drug already has an anticholinergic score.',
+  },
+  uq_beers_drug_condition: {
+    type: ProblemType.CONFLICT,
+    detail: 'That Beers criterion is already recorded for this drug and condition.',
+  },
+
   // ── OP-032 ────────────────────────────────────────────────────────────────
   a_discharge_follows_an_admission: {
     type: ProblemType.VALIDATION_FAILED,

@@ -401,6 +401,68 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-20 · Phase 8 · OP-033, IP-015, OP-034 — the two ends of life
+
+**Built — paediatrics, the neonatal unit and geriatrics, complete.** 8 tables
+(6 clinical, 2 reference), 8 permission keys, 3 events, 2 entitlements, 1
+screen, 11 integration tests, 19 database rules proven live in both directions.
+
+Grouped into one console because they are one problem seen twice: a body that
+is not a standard adult, and doses that do not scale to it.
+
+**The adult ceiling.** Paediatric dosing is per kilogram, which works until the
+kilograms reach an adult's — and then fifteen milligrams per kilogram of
+paracetamol on a ninety-kilogram fifteen-year-old is 1350 mg, half again the
+adult single dose. The error is invisible because _every step of the arithmetic
+is correct_ and the prescriber is competent. So the ceiling is the adult dose,
+always, the daily total past the adult maximum is refused outright, and there is
+no override key, route or field — a child who needs more than an adult dose
+needs a different drug, and an override would make the commonest paediatric
+overdose a permitted one. The row records that the cap applied, because a
+prescriber should see that the number in front of them is not the one the
+arithmetic produced.
+
+**Every weight is in grams.** On a neonate, on a toddler, and on a
+fifteen-year-old where it looks odd — and the consistency is the safety. A
+newborn's weight entered in kilograms is a dose out by a factor of a thousand,
+and a range check does not catch it: 3 passes anything written for kilograms.
+The only reliable prevention is to have nowhere to put the number.
+
+**And the arithmetic nobody does.** Weight-for-age against the WHO standard, as
+a z-score and then the centile a parent is actually told. Gestation and
+birth-weight bands. Day of life from the birth, and the volume that hangs from
+the weight, with the enteral feeds coming off it. Anticholinergic burden summed
+from a published table — three points a strong drug, one a weak — because it
+means looking up eleven drugs and so nobody does, and above three the drugs
+cause the falls they are being taken alongside. Beers criteria matched against
+the person's own age. Frailty from the five Fried items, falls risk from the
+count and whether one caused an injury.
+
+**One thing deliberately not a rule.** The standard first-week fluid schedule is
+shown _beside_ the prescription rather than enforced: a growth-restricted baby,
+one under phototherapy and one with a patent ductus all belong off that curve,
+and a constraint would be wrong for each of them. The temptation to make every
+derived figure a rule is the failure mode of this whole approach, and this is
+the case that names it.
+
+**Nothing in this group is a `high` key**, which is the point: the safety comes
+from the arithmetic being the database's rather than from who is allowed to do
+it. A nurse who weighs a child gets the centile; a prescriber who types
+milligrams per kilogram gets the adult ceiling whether they remembered it or not.
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module. Tracked, unchanged.
+
+**Gates** — 13/13 packages typecheck, lint and test (3,018 unit tests); 737 API
+integration tests across 31 files; 58 migrations; 884 non-partition tables;
+1,358 permission keys; 835 events; 65 entitlements; 68 role templates; 104
+screens. One integration run reported a container-startup flake on a single
+file; a clean rerun passed 737/737 and the figure above is that run.
+
+**Next:** the hand-offs — OP-018 telemedicine, OP-021 referral management,
+IP-019 transplant and IP-020 clinical pathways — then OP-024 fertility, and the
+two small ones, OP-037 AYUSH and NC-033 the kitchen.
+
 ### 2026-09-19 · Phase 8 · OP-032 — psychiatry and mental health
 
 **Built — psychiatry, complete.** 8 tables, 12 permission keys, 4 events, 1

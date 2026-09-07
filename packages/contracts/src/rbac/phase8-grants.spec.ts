@@ -958,4 +958,35 @@ describe('OP-010 — the procedure floor', () => {
     // that cannot record a §89 is one detaining somebody with no paperwork.
     expect(permission('psy.admission.manage').clinicalSafetyExempt).toBe(true);
   });
+  it('offers no key that raises a paediatric dose past the adult ceiling', () => {
+    // A child who needs more than an adult dose needs a different drug or a
+    // different diagnosis. A permission would turn the commonest paediatric
+    // overdose into a permitted one.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    for (const absent of ['paed.dose.override', 'paed.dose.uncap', 'nicu.fluids.override']) {
+      expect(keys, absent).not.toContain(absent);
+    }
+    // Nothing in the group is `high`: the safety is in the arithmetic, not the
+    // grant.
+    expect(
+      PERMISSION_CATALOGUE.filter(
+        (p) =>
+          (p.key.startsWith('paed.') || p.key.startsWith('nicu.') || p.key.startsWith('geri.')) &&
+          p.risk === 'high',
+      ),
+    ).toEqual([]);
+  });
+
+  it('gives the weighing and the dosing to the people who actually do them', () => {
+    // A nurse who weighs a child gets the centile; a prescriber who types
+    // milligrams per kilogram gets the adult ceiling whether they remembered it
+    // or not.
+    expect(getRoleTemplate('nurse_opd')?.permissions).toContain('paed.growth.record');
+    expect(getRoleTemplate('doctor_ip')?.permissions).toContain('paed.dose.calculate');
+    // And pharmacy leads the medication review, which is where it belongs.
+    expect(getRoleTemplate('pharmacist_ip')?.permissions).toContain('geri.medication.review');
+    for (const key of ['paed.dose.calculate', 'nicu.fluids.prescribe']) {
+      expect(permission(key).clinicalSafetyExempt, key).toBe(true);
+    }
+  });
 });

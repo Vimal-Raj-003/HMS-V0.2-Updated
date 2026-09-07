@@ -533,6 +533,34 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: 'module.psychiatry.enabled',
   },
+  {
+    key: 'lifespan-board',
+    label: 'Paediatrics and geriatrics',
+    href: '/lifespan/board',
+    area: 'specialty',
+    permission: 'lifespan.read',
+    summary:
+      'One problem at both ends of life: a body that is not a standard adult, and doses that do not scale to it. Growth faltering, the neonatal fluid balance, and the anticholinergic burden nobody adds up.',
+    deniedExplanation:
+      'Weighing a child and assessing an older person are the nursing floor\u2019s; prescribing by weight, the neonatal fluids and the medication review are a prescriber\u2019s and a pharmacist\u2019s.',
+    keywords: [
+      'paediatrics',
+      'children',
+      'growth chart',
+      'centile',
+      'nicu',
+      'neonatal',
+      'preterm',
+      'fluids',
+      'geriatrics',
+      'frailty',
+      'falls',
+      'polypharmacy',
+      'beers',
+      'anticholinergic',
+    ],
+    entitlement: 'module.paediatrics.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

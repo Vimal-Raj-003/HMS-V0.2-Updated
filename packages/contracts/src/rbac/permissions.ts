@@ -11638,6 +11638,90 @@ const OP032 = group('OP-032', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-033, IP-015 and OP-034, the two ends of life
+//
+// One problem seen twice, so one group of keys. Nothing here is `high`, and
+// that is the point: these are ordinary clinical acts whose safety comes from
+// the arithmetic being the database's rather than from who is allowed to do
+// them.
+//
+// ── There is no key that raises a paediatric dose past the adult ceiling ───
+//
+// Because there is no clinical circumstance. A child who needs more than an
+// adult dose needs a different drug or a different diagnosis, and a permission
+// would turn the commonest paediatric overdose into a permitted one.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP033 = group('OP-033', 8, [
+  p(
+    'paed.growth.record',
+    'paed_growth_record',
+    'record',
+    'phi',
+    'medium',
+    'Record a child’s weight, length and head circumference. The centile and the nutrition band are computed against the WHO standard for that age and sex.',
+  ),
+  p(
+    'paed.dose.calculate',
+    'paed_dose',
+    'record',
+    'phi',
+    'medium',
+    'Work out a weight-based dose. The ceiling is the adult dose, always, and it is the database’s.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'nicu.admission.manage',
+    'nicu_admission',
+    'create',
+    'phi',
+    'medium',
+    'Admit to the neonatal unit. The gestation and birth-weight bands are computed, because they decide almost everything that follows.',
+  ),
+  p(
+    'nicu.fluids.prescribe',
+    'nicu_fluid_order',
+    'create',
+    'phi',
+    'medium',
+    'Prescribe a day’s fluids in millilitres per kilogram. The day of life comes from the birth, and the volume that hangs comes from the weight.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'geri.assessment.record',
+    'geri_assessment',
+    'record',
+    'phi',
+    'medium',
+    'Record a comprehensive geriatric assessment. Frailty and falls risk are scored from their items rather than judged.',
+  ),
+  p(
+    'geri.medication.review',
+    'geri_medication_review',
+    'record',
+    'phi',
+    'medium',
+    'Review the medication list. The anticholinergic burden is summed and the Beers criteria matched against the person’s age — neither is remembered.',
+  ),
+  p(
+    'lifespan.read',
+    'paed_growth_record',
+    'read',
+    'phi',
+    'low',
+    'Read growth charts, neonatal fluid balances and geriatric assessments.',
+    { phiRead: true },
+  ),
+  p(
+    'lifespan.report.read',
+    'lifespan_report',
+    'read',
+    'phi',
+    'low',
+    'Growth faltering across the register, neonatal outcomes by gestation band, and polypharmacy and anticholinergic burden across the older population.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -11750,6 +11834,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...IP011,
   ...OP031,
   ...OP032,
+  ...OP033,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

@@ -1,0 +1,317 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-033 · IP-015 · OP-034 — the two ends of life
+//
+// Grouped because they are one problem seen twice: a body that is not a
+// standard adult, and doses that do not scale to it.
+//
+// ── At one end, a child ─────────────────────────────────────────────────────
+//
+// Paediatric doses are per kilogram, which works until the kilograms reach an
+// adult's — and then 15 mg/kg of paracetamol on a ninety-kilogram fifteen-year-
+// old is 1350 mg, which is half again the adult single dose. The error is
+// invisible because every step of the arithmetic is correct. So the ceiling on
+// a weight-based dose is the adult dose, always, and it is the database's.
+//
+// The other half is smaller and worse: a newborn's weight is in grams, and a
+// newborn's weight entered in kilograms is a dose out by a factor of a
+// thousand. There is no kilogram column on a neonate here.
+//
+// ── At the other, someone taking eleven things ──────────────────────────────
+//
+// Anticholinergic burden is a score, three points per strong drug and one per
+// weak, and above three it causes falls, confusion and — cumulatively — a
+// measurable rise in dementia risk. Nobody computes it, because it means
+// looking up eleven drugs in a table. So the table is here and the sum is the
+// database's.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The reference tables the two ends need.
+
+/// A drug's anticholinergic burden: 3 for a strong one, 1 for a weak.
+model AnticholinergicScore {
+  id       String @id @db.Uuid
+  drugKey  String @map("drug_key") @db.VarChar(80)
+  drugName String @map("drug_name") @db.VarChar(160)
+  /// 1, 2 or 3 on the ACB scale.
+  score    Int
+  source   String @default("ACB-2012") @db.VarChar(40)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([drugKey], map: "uq_acb_drug")
+  @@map("anticholinergic_scores")
+  @@schema("mdm")
+}
+
+/// A drug the Beers criteria say to avoid in an older person, and why.
+model BeersCriterion {
+  id       String  @id @db.Uuid
+  drugKey  String  @map("drug_key") @db.VarChar(80)
+  drugName String  @map("drug_name") @db.VarChar(160)
+  /// `avoid`, `avoid_with_condition`, `use_with_caution`, `dose_adjust_renal`.
+  strength String  @db.VarChar(32)
+  /// The condition it turns on, where it turns on one.
+  condition String? @db.VarChar(160)
+  rationale String  @db.Text
+  /// Below which age it does not apply. Sixty-five in the published criteria.
+  minAge   Int     @default(65) @map("min_age")
+  source   String  @default("AGS-Beers-2023") @db.VarChar(40)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([drugKey, condition], map: "uq_beers_drug_condition")
+  @@map("beers_criteria")
+  @@schema("mdm")
+}
+
+/// A child's measurements, with the centiles worked out.
+model GrowthRecord {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  measuredAt DateTime @map("measured_at") @db.Timestamptz(6)
+  /// Days, because a growth chart at three weeks and at three months are
+  /// different charts and the difference is not months.
+  ageDays    Int      @map("age_days")
+  /// `male` or `female`. WHO publishes separate standards, and using the wrong
+  /// one shifts a centile by roughly half a band.
+  sex        String   @db.VarChar(8)
+
+  /// Grams. A child's weight is small enough that kilograms lose the precision
+  /// that matters, and a neonate's weight in kilograms is a dosing error of a
+  /// factor of a thousand.
+  weightG    Int?     @map("weight_g")
+  lengthCm   Decimal? @map("length_cm") @db.Decimal(5, 1)
+  hcCm       Decimal? @map("hc_cm") @db.Decimal(4, 1)
+
+  /// Derived. Standard deviations from the WHO median for age and sex.
+  weightForAgeZ Decimal? @map("weight_for_age_z") @db.Decimal(4, 2)
+  /// Derived from the z-score. What a parent is actually told.
+  weightCentile Decimal? @map("weight_centile") @db.Decimal(5, 2)
+  /// Derived: `severe_wasting`, `underweight`, `normal`, `overweight`. The band
+  /// that decides whether this is a growth chart or a referral.
+  nutritionBand String?  @map("nutrition_band") @db.VarChar(24)
+
+  recordedBy String   @map("recorded_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, patientId, measuredAt(sort: Desc)])
+  @@map("paed_growth_records")
+  @@schema("specialty")
+}
+
+/// A weight-based dose, and the ceiling on it.
+///
+/// This is the record of an arithmetic that is correct at every step and wrong
+/// at the end: milligrams per kilogram, on a child heavy enough that the answer
+/// passes the adult dose.
+model PaedDose {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  drugKey  String @map("drug_key") @db.VarChar(80)
+  drugName String @map("drug_name") @db.VarChar(160)
+
+  /// Grams, like everything else about a child in this build.
+  weightG   Int     @map("weight_g")
+  ageDays   Int     @map("age_days")
+
+  doseMgPerKg Decimal @map("dose_mg_per_kg") @db.Decimal(10, 4)
+  frequency   String  @db.VarChar(24)
+  route       String  @db.VarChar(16)
+
+  /// The single-dose ceiling for an adult. The whole rule is that a child's
+  /// dose does not pass it however many kilograms they weigh.
+  adultMaxSingleMg Decimal? @map("adult_max_single_mg") @db.Decimal(10, 2)
+  /// And the daily one.
+  adultMaxDailyMg  Decimal? @map("adult_max_daily_mg") @db.Decimal(10, 2)
+  dosesPerDay      Int      @default(1) @map("doses_per_day")
+
+  /// Derived: the weight-based figure, before any ceiling.
+  calcSingleMg Decimal? @map("calc_single_mg") @db.Decimal(10, 3)
+  /// Derived: what is actually given, after the ceiling.
+  finalSingleMg Decimal? @map("final_single_mg") @db.Decimal(10, 3)
+  finalDailyMg  Decimal? @map("final_daily_mg") @db.Decimal(10, 3)
+  /// True when the adult ceiling bit. A prescriber should see that the number
+  /// in front of them is not the one the arithmetic produced.
+  capApplied Decimal? @map("cap_applied") @db.Decimal(1, 0)
+
+  prescribedBy String   @map("prescribed_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@map("paed_doses")
+  @@schema("specialty")
+}
+
+/// A baby in the neonatal unit.
+model NicuAdmission {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  admissionId String? @map("admission_id") @db.Uuid
+  newbornId   String? @map("newborn_id") @db.Uuid
+
+  birthAt      DateTime @map("birth_at") @db.Timestamptz(6)
+  /// Completed weeks plus days at birth. Everything in a neonatal unit is
+  /// indexed on it, including which fluid volume is right today.
+  gaWeeksAtBirth Int    @map("ga_weeks_at_birth")
+  gaDaysAtBirth  Int    @default(0) @map("ga_days_at_birth")
+  birthWeightG   Int    @map("birth_weight_g")
+
+  /// Derived: `extremely_preterm`, `very_preterm`, `moderate_preterm`,
+  /// `late_preterm`, `term`, `post_term`.
+  gestationBand String? @map("gestation_band") @db.VarChar(24)
+  /// Derived: `elbw`, `vlbw`, `lbw`, `normal`, `macrosomic`.
+  birthWeightBand String? @map("birth_weight_band") @db.VarChar(16)
+
+  admittedAt   DateTime  @map("admitted_at") @db.Timestamptz(6)
+  dischargedAt DateTime? @map("discharged_at") @db.Timestamptz(6)
+  outcome      String?   @db.VarChar(40)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  fluidOrders NicuFluidOrder[]
+
+  @@index([hospitalId, branchId, dischargedAt])
+  @@index([hospitalId, patientId])
+  @@map("nicu_admissions")
+  @@schema("specialty")
+}
+
+/// A day's fluids.
+///
+/// Neonatal fluids are millilitres per kilogram per day, and the figure climbs
+/// through the first week — sixty on day one to a hundred and fifty by day
+/// seven. Getting the day wrong, or the weight in the wrong unit, is either a
+/// dehydrated baby or a patent ductus.
+model NicuFluidOrder {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  nicuAdmissionId String @map("nicu_admission_id") @db.Uuid
+
+  forDate    DateTime @map("for_date") @db.Date
+  /// Derived from the birth. Day one is the day of birth.
+  dayOfLife  Int      @map("day_of_life")
+  /// Today's weight, in grams.
+  weightG    Int      @map("weight_g")
+
+  mlPerKgPerDay Decimal @map("ml_per_kg_per_day") @db.Decimal(5, 1)
+  /// Derived: what actually hangs.
+  totalMlPerDay Decimal? @map("total_ml_per_day") @db.Decimal(7, 2)
+  mlPerHour     Decimal? @map("ml_per_hour") @db.Decimal(6, 2)
+
+  fluid      String  @db.VarChar(80)
+  additives  Json    @default("[]")
+  /// Enteral feeds, subtracted from the intravenous total.
+  enteralMl  Decimal @default(0) @map("enteral_ml") @db.Decimal(7, 2)
+  ivMlPerDay Decimal? @map("iv_ml_per_day") @db.Decimal(7, 2)
+
+  prescribedBy String   @map("prescribed_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  admission NicuAdmission @relation(fields: [nicuAdmissionId], references: [id], onDelete: Cascade)
+
+  @@unique([nicuAdmissionId, forDate], map: "uq_nicu_fluid_day")
+  @@index([hospitalId, forDate])
+  @@map("nicu_fluid_orders")
+  @@schema("specialty")
+}
+
+/// A comprehensive geriatric assessment.
+model GeriAssessment {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  assessedAt DateTime @map("assessed_at") @db.Timestamptz(6)
+  assessedBy String   @map("assessed_by") @db.Uuid
+  ageYears   Int      @map("age_years")
+
+  /// The five limbs of the Fried phenotype: weight loss, exhaustion, low
+  /// activity, slow gait, weak grip.
+  friedItems Json @map("fried_items")
+  /// Derived: 0–5, and the band. Three or more is frail, and frail changes
+  /// what an operation means.
+  friedScore Int?    @map("fried_score")
+  frailtyBand String? @map("frailty_band") @db.VarChar(16)
+
+  /// Falls in the last year, and whether there was an injury.
+  fallsLastYear Int     @default(0) @map("falls_last_year")
+  fallsInjury   Boolean @default(false) @map("falls_injury")
+  /// Derived: `low`, `moderate`, `high`. Two falls, or one with injury, is high
+  /// — and it is the single best predictor of the next one.
+  fallsRisk     String? @map("falls_risk") @db.VarChar(16)
+
+  /// Barthel index of activities of daily living, 0–100.
+  adlBarthel Int? @map("adl_barthel")
+  cognition  Json @default("{}")
+  mood       Json @default("{}")
+  continence Json @default("{}")
+  social     Json @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  reviews GeriMedicationReview[]
+
+  @@index([hospitalId, patientId, assessedAt(sort: Desc)])
+  @@map("geri_assessments")
+  @@schema("specialty")
+}
+
+/// A medication review, with the burden added up.
+model GeriMedicationReview {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+  assessmentId String? @map("assessment_id") @db.Uuid
+
+  reviewedAt DateTime @map("reviewed_at") @db.Timestamptz(6)
+  reviewedBy String   @map("reviewed_by") @db.Uuid
+  ageYears   Int      @map("age_years")
+
+  /// `[{drugKey, drugName, dose, indication}]`. The list as it stands.
+  medications Json
+
+  /// Derived: how many, because five is where the word polypharmacy starts and
+  /// ten is where it stops being a word and starts being the diagnosis.
+  drugCount Int? @map("drug_count")
+  /// Derived from `mdm.anticholinergic_scores`. Three or more causes falls and
+  /// confusion, and cumulatively raises dementia risk — and nobody adds it up,
+  /// because it means looking up eleven drugs in a table.
+  acbScore  Int? @map("acb_score")
+  /// The drugs that contributed, so the number can be argued with.
+  acbDrugs  Json @default("[]") @map("acb_drugs")
+  /// Derived from `mdm.beers_criteria` against the patient's age.
+  beersFlags Json @default("[]") @map("beers_flags")
+  beersCount Int? @map("beers_count")
+
+  /// What the reviewer decided to do about it, per drug.
+  actions Json @default("[]")
+  /// Continuing a flagged drug is often right — a Beers criterion is a
+  /// prompt, not a prohibition — and this is where the reason goes.
+  justifications Json @default("[]")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assessment GeriAssessment? @relation(fields: [assessmentId], references: [id], onDelete: SetNull)
+
+  @@index([hospitalId, patientId, reviewedAt(sort: Desc)])
+  @@map("geri_medication_reviews")
+  @@schema("specialty")
+}
