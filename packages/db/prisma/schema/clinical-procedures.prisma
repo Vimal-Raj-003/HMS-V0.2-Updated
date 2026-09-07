@@ -1,0 +1,576 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-010 + OP-039 — the procedure console and the OPD nursing floor
+//
+// Most other consoles call OP-010 for their procedures: a laser in the eye
+// clinic, a biopsy in dermatology, a nerve block in the pain clinic. It is
+// built before them for that reason, and the rules here are the ones every one
+// of those inherits.
+//
+// ── A procedure does not start on a promise ─────────────────────────────────
+//
+// Consent where consent is required, a time-out where the procedure is
+// invasive, and a checklist that is either complete or overridden by a named
+// person with a reason. Consent has no override at all: a signature nobody gave
+// cannot be supplied by seniority.
+//
+// ── The time-out is two people and five questions ───────────────────────────
+//
+// Right patient, right procedure, right side, consent seen, allergies known.
+// The WHO surgical checklist exists because teams that were sure got it wrong,
+// and a time-out confirmed by one person is a person agreeing with themselves.
+//
+// ── A sedated patient leaves on a score and an escort ───────────────────────
+//
+// Aldrete 9, and somebody to take them home. A patient discharged from sedation
+// alone is the readmission everybody remembers.
+//
+// ── The room is a resource, and two people cannot have it ───────────────────
+//
+// A GiST exclusion on the room and the time range. Half-open, because a case
+// ending at 14:00 and another starting at 14:00 is a turnover, not a clash.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ProcedureCategory {
+  diagnostic
+  therapeutic
+  /// Breaks the skin or enters a body cavity. Requires a time-out.
+  invasive
+  cosmetic
+  screening
+
+  @@schema("clinical")
+}
+
+enum ProcedureRoomType {
+  minor_ot
+  procedure_room
+  injection_room
+  dressing
+  plaster
+  endoscopy
+  eye_laser
+  observation_bay
+  nebulisation
+
+  @@schema("clinical")
+}
+
+enum ProcedureOrderStatus {
+  ordered
+  scheduled
+  checked_in
+  ready
+  in_progress
+  completed
+  abandoned
+  cancelled
+  no_show
+
+  @@schema("clinical")
+}
+
+enum ProcedureBookingStatus {
+  booked
+  confirmed
+  checked_in
+  done
+  cancelled
+  no_show
+  rescheduled
+
+  @@schema("clinical")
+}
+
+enum AnaesthesiaType {
+  none
+  local
+  regional
+  sedation
+  general
+
+  @@schema("clinical")
+}
+
+enum OpdTaskType {
+  injection
+  iv_fluid
+  infusion
+  nebulisation
+  oxygen
+  dressing
+  suture_removal
+  plaster_apply
+  plaster_check
+  plaster_remove
+  catheter
+  ear_syringing
+  ecg
+  cannulation
+  minor_ot_prep
+  observation
+  other
+
+  @@schema("clinical")
+}
+
+enum OpdTaskStatus {
+  ordered
+  awaiting_payment
+  released
+  queued
+  in_progress
+  observation
+  completed
+  missed
+  cancelled
+  held
+
+  @@schema("clinical")
+}
+
+enum AdminRoute {
+  im
+  iv_push
+  iv_infusion
+  sc
+  id
+  inhalation
+  topical
+  oral
+  other
+
+  @@schema("clinical")
+}
+
+enum IdentityMethod {
+  qr
+  wristband
+  two_identifiers
+
+  @@schema("clinical")
+}
+
+enum ObservationOutcome {
+  uneventful
+  reaction
+  left_early
+
+  @@schema("clinical")
+}
+
+/// A room a procedure happens in, and the only thing two cases can fight over.
+model ProcedureRoom {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  code String            @db.VarChar(24)
+  name String            @db.VarChar(120)
+  type ProcedureRoomType
+
+  /// The NC-006 sub-store this room draws consumables from.
+  subStoreId String? @map("sub_store_id") @db.Uuid
+
+  openHours Json?   @map("open_hours")
+  isActive  Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  bookings ProcedureBooking[]
+
+  @@unique([hospitalId, code], map: "uq_procedure_room_code")
+  @@index([hospitalId, branchId, type, isActive])
+  @@map("procedure_rooms")
+  @@schema("clinical")
+}
+
+/// A procedure somebody asked for.
+model ProcedureOrder {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  orderNo String @map("order_no") @db.VarChar(60)
+
+  patientId   String  @map("patient_id") @db.Uuid
+  encounterId String  @map("encounter_id") @db.Uuid
+  visitId     String? @map("visit_id") @db.Uuid
+
+  procedureCode String            @map("procedure_code") @db.VarChar(40)
+  procedureName String            @map("procedure_name") @db.VarChar(200)
+  category      ProcedureCategory
+
+  /// `bilateral` is a real answer for some procedures and `not_applicable` for
+  /// many. What is refused is silence on a procedure that has a side.
+  side     Laterality @default(not_applicable)
+  siteText String?    @map("site_text") @db.VarChar(200)
+
+  indicationIcd10 String? @map("indication_icd10") @db.VarChar(12)
+  urgency         String  @default("routine") @db.VarChar(16)
+
+  /// Whether this procedure needs a signed consent before it can start. Copied
+  /// from the master at order time, because a master edited afterwards must not
+  /// retroactively make a completed procedure non-compliant.
+  requiresConsent Boolean @default(false) @map("requires_consent")
+  /// The EN-028 consent, once signed.
+  consentId String? @map("consent_id") @db.Uuid
+
+  sedationRequested Boolean @default(false) @map("sedation_requested")
+
+  status ProcedureOrderStatus @default(ordered)
+
+  cancelReason String? @map("cancel_reason") @db.Text
+  /// Which console asked: `OPHTHA`, `OP-039`, `DERM`.
+  sourceModule String? @map("source_module") @db.VarChar(24)
+
+  orderedAt DateTime @default(now()) @map("ordered_at") @db.Timestamptz(6)
+  orderedBy String   @map("ordered_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  bookings   ProcedureBooking[]
+  checklists ProcedureChecklist[]
+  timeouts   ProcedureTimeout[]
+  records    ProcedureRecord[]
+
+  @@unique([hospitalId, orderNo], map: "uq_procedure_order_no")
+  @@index([hospitalId, patientId, orderedAt(sort: Desc)])
+  @@index([hospitalId, branchId, status, orderedAt(sort: Desc)])
+  @@map("procedure_orders")
+  @@schema("clinical")
+}
+
+/// The room and the hour. Two cases cannot hold the same one.
+model ProcedureBooking {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  orderId String @map("order_id") @db.Uuid
+  roomId  String @map("room_id") @db.Uuid
+
+  doctorId       String? @map("doctor_id") @db.Uuid
+  anaesthetistId String? @map("anaesthetist_id") @db.Uuid
+
+  startAt DateTime @map("start_at") @db.Timestamptz(6)
+  endAt   DateTime @map("end_at") @db.Timestamptz(6)
+
+  status ProcedureBookingStatus @default(booked)
+
+  cancelReason      String?   @map("cancel_reason") @db.Text
+  instructionsSentAt DateTime? @map("instructions_sent_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order ProcedureOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  room  ProcedureRoom  @relation(fields: [roomId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, branchId, startAt])
+  @@index([hospitalId, roomId, startAt])
+  @@map("procedure_bookings")
+  @@schema("clinical")
+}
+
+/// What has to be true before the patient is in the room.
+model ProcedureChecklist {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  orderId    String @map("order_id") @db.Uuid
+
+  templateKey String @map("template_key") @db.VarChar(60)
+  /// `[{key, label, required, value, by, at}]`.
+  items Json @default("[]")
+
+  ready   Boolean   @default(false)
+  readyBy String?   @map("ready_by") @db.Uuid
+  readyAt DateTime? @map("ready_at") @db.Timestamptz(6)
+
+  /// A checklist may be overridden — a genuinely urgent case, a form that does
+  /// not fit. It cannot be overridden silently.
+  overrideReason String? @map("override_reason") @db.Text
+  overrideBy     String? @map("override_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order ProcedureOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, templateKey], map: "uq_checklist_per_order")
+  @@index([hospitalId, orderId])
+  @@map("procedure_checklists")
+  @@schema("clinical")
+}
+
+/// The pause before the knife: five questions, two people.
+model ProcedureTimeout {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  orderId    String @map("order_id") @db.Uuid
+
+  /// Two different people. One person confirming is a person agreeing with
+  /// themselves, which is the failure mode the whole ritual exists to catch.
+  confirmedBy1 String @map("confirmed_by_1") @db.Uuid
+  confirmedBy2 String @map("confirmed_by_2") @db.Uuid
+
+  patientOk   Boolean @map("patient_ok")
+  procedureOk Boolean @map("procedure_ok")
+  sideOk      Boolean @map("side_ok")
+  consentOk   Boolean @map("consent_ok")
+  allergyOk   Boolean @map("allergy_ok")
+
+  confirmedAt DateTime @default(now()) @map("confirmed_at") @db.Timestamptz(6)
+
+  order ProcedureOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, orderId])
+  @@map("procedure_timeouts")
+  @@schema("clinical")
+}
+
+/// What actually happened.
+model ProcedureRecord {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  orderId     String @map("order_id") @db.Uuid
+  patientId   String @map("patient_id") @db.Uuid
+  encounterId String @map("encounter_id") @db.Uuid
+
+  performedBy    String   @map("performed_by") @db.Uuid
+  assistants     String[] @default([]) @db.Uuid
+  anaesthetistId String?  @map("anaesthetist_id") @db.Uuid
+
+  startedAt DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt   DateTime? @map("ended_at") @db.Timestamptz(6)
+
+  anaesthesia    AnaesthesiaType @default(none)
+  sedationRecord Json?           @map("sedation_record")
+
+  findings   String? @db.Text
+  technique  String? @db.Text
+  eblMl      Int?    @map("ebl_ml")
+  specimens  Json?
+  complications Json?
+
+  outcome String? @db.VarChar(16)
+
+  signedBy   String?   @map("signed_by") @db.Uuid
+  signedAt   DateTime? @map("signed_at") @db.Timestamptz(6)
+  documentId String?   @map("document_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order    ProcedureOrder     @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  recovery ProcedureRecovery?
+
+  @@index([hospitalId, patientId, startedAt(sort: Desc)])
+  @@index([hospitalId, branchId, startedAt(sort: Desc)])
+  @@map("procedures")
+  @@schema("clinical")
+}
+
+/// Coming round, and going home.
+model ProcedureRecovery {
+  id          String @id @db.Uuid
+  hospitalId  String @map("hospital_id") @db.Uuid
+  procedureId String @unique @map("procedure_id") @db.Uuid
+
+  observations Json? @default("[]")
+
+  /// The modified Aldrete score, 0–10. Nine is the floor for discharge after
+  /// sedation, and it is a floor rather than a guideline because the patient
+  /// who fails it is the one nobody is watching an hour later.
+  aldreteScore Int? @map("aldrete_score")
+
+  escortName         String?   @map("escort_name") @db.VarChar(160)
+  escortRelationship String?   @map("escort_relationship") @db.VarChar(60)
+
+  dischargedAt DateTime? @map("discharged_at") @db.Timestamptz(6)
+  dischargedBy String?   @map("discharged_by") @db.Uuid
+
+  instructions String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  procedure ProcedureRecord @relation(fields: [procedureId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, dischargedAt])
+  @@map("procedure_recovery")
+  @@schema("clinical")
+}
+
+/// What was used, and what the patient is charged for.
+model ProcedureConsumable {
+  id          String @id @db.Uuid
+  hospitalId  String @map("hospital_id") @db.Uuid
+  procedureId String @map("procedure_id") @db.Uuid
+
+  itemId  String  @map("item_id") @db.Uuid
+  batchId String? @map("batch_id") @db.Uuid
+
+  qty Decimal @db.Decimal(12, 3)
+  uom String  @db.VarChar(16)
+
+  /// `kit`, `scanned` or `manual`. A high-value item is scanned, never typed:
+  /// a typed batch number is a batch number nobody can trace in a recall.
+  source String @default("manual") @db.VarChar(12)
+
+  chargeable Boolean @default(true)
+  chargeIntentId String? @map("charge_intent_id") @db.Uuid
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String   @map("recorded_by") @db.Uuid
+
+  @@index([hospitalId, procedureId])
+  @@map("procedure_consumables")
+  @@schema("clinical")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OP-039 — the OPD nursing floor
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// An injection, a dressing, a nebulisation: the work of the OPD nursing rooms.
+model OpdNursingTask {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId   String  @map("patient_id") @db.Uuid
+  encounterId String  @map("encounter_id") @db.Uuid
+  /// The OP-002 order, OP-010 procedure order or TR-005 cast job behind it.
+  orderId     String? @map("order_id") @db.Uuid
+
+  type     OpdTaskType
+  roomType ProcedureRoomType @map("room_type")
+  roomId   String?           @map("room_id") @db.Uuid
+
+  /// Day 3 of 5, for a course of injections.
+  dayNo    Int? @map("day_no") @db.SmallInt
+  dayTotal Int? @map("day_total") @db.SmallInt
+
+  scheduledAt DateTime? @map("scheduled_at") @db.Timestamptz(6)
+  priority    String    @default("routine") @db.VarChar(12)
+
+  status     OpdTaskStatus @default(ordered)
+  holdReason String?       @map("hold_reason") @db.Text
+
+  assignedNurseId String?   @map("assigned_nurse_id") @db.Uuid
+  startedAt       DateTime? @map("started_at") @db.Timestamptz(6)
+  completedAt     DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  administrations OpdMedAdministration[]
+  dressings       OpdDressing[]
+
+  @@index([hospitalId, branchId, roomType, status, scheduledAt])
+  @@index([hospitalId, patientId, status])
+  @@map("opd_nursing_tasks")
+  @@schema("clinical")
+}
+
+/// A drug given in an OPD room.
+///
+/// The same five rights as the inpatient MAR, and the same enforcement: the
+/// identity was verified, the batch was scanned, and a high-alert drug had a
+/// second person who was not the giver.
+model OpdMedAdministration {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  taskId     String @map("task_id") @db.Uuid
+
+  patientId   String @map("patient_id") @db.Uuid
+  encounterId String @map("encounter_id") @db.Uuid
+
+  drugName String  @map("drug_name") @db.VarChar(200)
+  drugId   String? @map("drug_id") @db.Uuid
+
+  orderedDose Decimal  @map("ordered_dose") @db.Decimal(12, 3)
+  givenDose   Decimal  @map("given_dose") @db.Decimal(12, 3)
+  doseUnit    String   @map("dose_unit") @db.VarChar(16)
+  /// A dose that differs from the one ordered is a decision, and it says why.
+  doseChangeReason String? @map("dose_change_reason") @db.Text
+
+  route AdminRoute
+  site  String?    @db.VarChar(60)
+
+  batchNo    String?   @map("batch_no") @db.VarChar(60)
+  expiry     DateTime? @db.Date
+  /// Whether the batch was read off a barcode rather than typed. A typed batch
+  /// is one nobody can find in a recall.
+  barcodeVerified Boolean @default(false) @map("barcode_verified")
+
+  identityMethod IdentityMethod @map("identity_method")
+
+  /// Insulin, heparin, concentrated electrolytes, opioids, chemotherapy. The
+  /// ISMP list is the default; a hospital may add to it, never subtract.
+  highAlert  Boolean @default(false) @map("high_alert")
+  verifierId String? @map("verifier_id") @db.Uuid
+
+  allergyChecked Boolean @default(false) @map("allergy_checked")
+
+  startedAt DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt   DateTime? @map("ended_at") @db.Timestamptz(6)
+  givenBy   String    @map("given_by") @db.Uuid
+
+  /// First parenteral doses are watched. How long is a policy; that somebody
+  /// watched is a record.
+  observationUntil   DateTime?           @map("observation_until") @db.Timestamptz(6)
+  observationOutcome ObservationOutcome? @map("observation_outcome")
+  reaction           Json?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  task OpdNursingTask @relation(fields: [taskId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, startedAt(sort: Desc)])
+  @@index([hospitalId, taskId])
+  @@map("opd_med_administrations")
+  @@schema("clinical")
+}
+
+/// A dressing change, and what the wound looked like.
+model OpdDressing {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  taskId     String @map("task_id") @db.Uuid
+
+  patientId String  @map("patient_id") @db.Uuid
+  woundId   String? @map("wound_id") @db.Uuid
+
+  site       String @db.VarChar(120)
+  assessment Json   @default("{}")
+
+  materials Json? @default("[]")
+
+  /// Sutures out and sutures left in. They have to add up against what was put
+  /// in, when that is known — a retained suture found six weeks later is a
+  /// wound that was never going to heal.
+  suturesRemoved  Int? @map("sutures_removed")
+  suturesRetained Int? @map("sutures_retained")
+
+  infectionSigns Boolean @default(false) @map("infection_signs")
+
+  nextDueAt DateTime? @map("next_due_at") @db.Timestamptz(6)
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String   @map("recorded_by") @db.Uuid
+
+  task OpdNursingTask @relation(fields: [taskId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, recordedAt(sort: Desc)])
+  @@map("opd_dressings")
+  @@schema("clinical")
+}

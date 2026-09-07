@@ -5,6 +5,7 @@ import { INVENTORY_SCREENS } from '@/features/inventory/screens';
 import { PHARMACY_SCREENS } from '@/features/pharmacy/screens';
 import { ER_SCREENS } from '@/features/emergency/screens';
 import { IP_SCREENS } from '@/features/inpatient/screens';
+import { PROCEDURE_SCREENS } from '@/features/procedures/screens';
 import { SPECIALTY_SCREENS } from '@/features/specialty/screens';
 import { ORTHO_SCREENS } from '@/features/ortho/screens';
 import { RCM_SCREENS } from '@/features/rcm/screens';
@@ -158,6 +159,23 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
    * Phase 8. The framework's own screen only — a console's screens belong to
    * the console, and appear under it once it is registered and switched on.
    */
+  /**
+   * Phase 8. Before the specialty consoles, because most of them order into it:
+   * the eye clinic's laser, dermatology's biopsy and the pain clinic's block
+   * all land on this one board.
+   */
+  {
+    key: 'procedures',
+    label: 'Procedures',
+    href: '/procedures/board',
+    children: PROCEDURE_SCREENS.map((screen) => ({
+      key: screen.key,
+      label: screen.label,
+      href: screen.href,
+      permission: screen.permission,
+      ...(screen.entitlement === null ? {} : { entitlement: screen.entitlement }),
+    })),
+  },
   {
     key: 'specialty',
     label: 'Specialty',

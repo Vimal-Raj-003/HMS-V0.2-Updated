@@ -401,6 +401,62 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-10 · Phase 8 · OP-010 and OP-039 — the spine every console orders into
+
+**Built — the procedure console and the OPD nursing floor, complete.** 11
+tables, 16 permission keys, 7 events, 2 screens, 20 integration tests.
+
+Built before the remaining consoles on purpose: the eye clinic's laser,
+dermatology's biopsy and the pain clinic's block are all procedures ordered
+here, and every one of them inherits these rules rather than reinventing them.
+
+**Five rules, proved in both directions**
+
+| Attempt                                                      | What happened                                                |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| Start an invasive procedure with no consent                  | Refused — for the doctor and the resident alike              |
+| Send `force`, `consentWaived`, `emergency`, `override`       | Refused, identically, four times                             |
+| Guess at a `…/consent/waive` endpoint                        | 404 — there is no such act, so there is no such route        |
+| Consent recorded, no time-out                                | Refused, naming what a time-out is                           |
+| A time-out the doctor confirmed alone                        | Refused — a person agreeing with themselves                  |
+| A time-out with the side answered "no"                       | Refused — a "no" stops the procedure; it is not filed        |
+| An incomplete checklist                                      | Refused — overridable, but never silently                    |
+| The resident overriding it                                   | 403                                                          |
+| The doctor overriding it with a reason                       | Recorded, and the procedure starts                           |
+| Discharge from sedation at Aldrete 7                         | Refused                                                      |
+| Discharge at 9 with nobody to take them home                 | Refused                                                      |
+| Editing a signed note, through the API and straight into SQL | Refused both ways                                            |
+| Two cases in one room at one time                            | Refused; back-to-back is a turnover, and the cancel frees it |
+| An expired batch in the injection room                       | Refused — no override exists anywhere in the product         |
+| Giving a drug without reading the allergy list               | Not expressible: the field is `z.literal(true)`              |
+| Half the ordered dose with no reason                         | Refused                                                      |
+| Insulin verified by the nurse giving it                      | Refused; verified by the nurse at the next chair, accepted   |
+| Day 7 of a 5-day course; a hold with no reason               | Both refused                                                 |
+
+**The blockers are on the row, not behind the refusal**
+
+`GET /procedures/orders` returns what each case is still waiting on, computed
+from the same four facts the trigger reads. A list that says "consent not
+signed" before anybody walks a patient into a room is worth more than a refusal
+at the door — and because both read the same facts, the board and the refusal
+cannot tell different stories.
+
+**One defect found while driving it** — the OPD task status update built its
+enum from a `CASE` expression and fell over on the text-to-enum cast, which
+surfaced as a 500 on a perfectly valid insulin administration. Cast added.
+
+**Tested** — 20 integration tests against a real PostgreSQL 17, plus every rule
+proved live over HTTP and in raw SQL in both directions.
+
+**Gates** — 20/20 packages typecheck, lint and test (**3,079 unit tests**);
+**551 API integration tests**, up from 531; 49 migrations; 738 non-partition
+tables; catalogue **1,180 keys**; events **790**; entitlements **46**; 92
+screens.
+
+**Next:** the device-heavy consoles — cardiology, pulmonology, ENT, dental,
+dermatology — which are the first real test of whether the framework's one
+device path carries five different specialties without any of them forking it.
+
 ### 2026-09-09 (later) · Phase 8 · OP-025 the eye clinic — and the licence gate that was never wired
 
 **Built — OP-025, the first console on the framework, complete.** 8 tables, 11

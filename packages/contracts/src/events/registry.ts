@@ -10576,6 +10576,125 @@ const ophthalmologyEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * Phase 8 — OP-010 and OP-039, the procedure spine.
+ *
+ * `procedure.started` carries what was checked before it began, because the
+ * question asked six months later is never "did it happen" — the note answers
+ * that — but "was consent signed, and had two people confirmed the side".
+ */
+const procedureEvents: readonly EventDefinition[] = [
+  ev(
+    'procedure.ordered',
+    'procedure_order',
+    'OP-010',
+    'A procedure was ordered, from whichever console asked. Scheduling, consent, the estimate and the kit all start here.',
+    z.object({
+      orderId: uuid,
+      orderNo: z.string(),
+      patientId: uuid,
+      encounterId: uuid,
+      procedureCode: z.string(),
+      category: z.string(),
+      side: z.string(),
+      sourceModule: z.string().nullable(),
+      requiresConsent: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'procedure.booked',
+    'procedure_booking',
+    'OP-010',
+    'A room and an hour were taken. The room holds one case at a time, and the boards read this.',
+    z.object({
+      bookingId: uuid,
+      orderId: uuid,
+      roomId: uuid,
+      startAt: iso,
+      endAt: iso,
+      doctorId: uuid.nullable(),
+    }),
+    { containsPhi: true, retentionDays: 1825 },
+  ),
+  ev(
+    'procedure.started',
+    'procedure',
+    'OP-010',
+    'A procedure began. Carries what was true before it did — the question afterwards is never whether it happened but whether consent was signed and two people confirmed the side.',
+    z.object({
+      procedureId: uuid,
+      orderId: uuid,
+      patientId: uuid,
+      procedureCode: z.string(),
+      anaesthesia: z.string(),
+      consented: z.boolean(),
+      timeoutConfirmed: z.boolean(),
+      checklistOverridden: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'procedure.signed',
+    'procedure',
+    'OP-010',
+    'The procedure note was signed and became immutable. Coding, billing and the follow-up schedule all key on this.',
+    z.object({
+      procedureId: uuid,
+      orderId: uuid,
+      patientId: uuid,
+      signedBy: uuid,
+      outcome: z.string().nullable(),
+      hasComplications: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'procedure.recovery.discharged',
+    'procedure_recovery',
+    'OP-010',
+    'A patient left recovery. After sedation that means Aldrete 9 and a named escort, and the payload carries both so a later audit does not have to take it on trust.',
+    z.object({
+      procedureId: uuid,
+      patientId: uuid,
+      anaesthesia: z.string(),
+      aldreteScore: z.number().int().nullable(),
+      escortRecorded: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'opdnursing.administered',
+    'opd_med_administration',
+    'OP-039',
+    'A drug was given in an OPD room. Carries whether it was high-alert and whether a second person verified, which is what a pharmacy audit actually asks.',
+    z.object({
+      administrationId: uuid,
+      taskId: uuid,
+      patientId: uuid,
+      drugName: z.string(),
+      route: z.string(),
+      highAlert: z.boolean(),
+      secondPersonVerified: z.boolean(),
+      barcodeVerified: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'opdnursing.reaction',
+    'opd_med_administration',
+    'OP-039',
+    'A reaction during or after an OPD administration. Reaches incident reporting and the allergy master, because a reaction recorded only in a nursing note is one the next prescriber never sees.',
+    z.object({
+      administrationId: uuid,
+      patientId: uuid,
+      drugName: z.string(),
+      outcome: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -10654,6 +10773,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   // Phase 8
   ...specialtyEvents,
   ...ophthalmologyEvents,
+  ...procedureEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

@@ -158,6 +158,10 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   // individually numbered, because the optical shop and the patient both quote
   // it back.
   ['SPEC_RX', '{BR}/SPEC/{FY}/{SEQ:5}', false, 'fy'],
+  // OP-010: the procedure. Not gapless — a procedure ordered and cancelled
+  // before it is booked must not burn a number — but individually numbered,
+  // because the consent form, the specimen label and the bill all quote it.
+  ['PROC', '{BR}/PROC/{FY}/{SEQ:5}', false, 'fy'],
   ['LIC_INVOICE', 'VIMS/{FY}/{SEQ:5}', true, 'fy'],
 ];
 

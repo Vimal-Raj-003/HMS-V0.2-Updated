@@ -12,7 +12,7 @@ import { ROLE_TEMPLATES, getRoleTemplate } from './role-templates.js';
  * quietly comes to mean "uploaded" — and the rail of unseen results, which is
  * the entire reason the state exists, is empty forever.
  */
-const PHASE_8_PREFIXES = ['console', 'device', 'ophtha'] as const;
+const PHASE_8_PREFIXES = ['console', 'device', 'ophtha', 'procedure', 'opdnursing'] as const;
 
 function permission(key: string): PermissionDefinition {
   const found = getPermission(key);
@@ -97,6 +97,23 @@ describe('Phase 8 framework permission catalogue', () => {
         'nurse_opd',
         'optometrist',
       ],
+      procedure: [
+        'branch_admin',
+        'hod',
+        'doctor_consultant_opd',
+        'doctor_ip',
+        'doctor_emergency',
+        'surgeon',
+        'anaesthetist',
+        'resident_doctor',
+        'nurse_opd',
+        'nurse_ward',
+        'nurse_er_triage',
+        'nurse_ot_scrub',
+        'nurse_supervisor',
+        'optometrist',
+      ],
+      opdnursing: ['nurse_opd', 'nurse_ward', 'nurse_er_triage', 'nurse_supervisor'],
     };
 
     const offenders: string[] = [];
@@ -247,5 +264,51 @@ describe('OP-025 — the eye clinic', () => {
     // key: `phase-08` says no console gets its own upload code, and no console
     // gets its own upload permissions either.
     expect(keysWithPrefix('ophtha').some((k) => k.includes('investigation'))).toBe(false);
+  });
+});
+
+/**
+ * OP-010 and OP-039 — the procedure spine every other console calls into.
+ */
+describe('OP-010 — the procedure floor', () => {
+  it('holds the time-out key as widely as the floor itself', () => {
+    // It takes two people in the room, and it does not matter who they are. A
+    // scarce key means waiting for a particular person to walk past, and a
+    // ritual people wait for is a ritual people skip.
+    expect(holdersOf('procedure.timeout.confirm').length).toBeGreaterThanOrEqual(10);
+    expect(permission('procedure.timeout.confirm').risk).toBe('low');
+  });
+
+  it('makes overriding a checklist reasoned rather than rare', () => {
+    // Overriding is a normal act on an urgent case, done by the person about to
+    // do the procedure. The control is that it is signed, not that it is scarce.
+    expect(permission('procedure.checklist.override').requiresReason).toBe(true);
+    expect(permission('procedure.checklist.override').risk).toBe('medium');
+    expect(holdersOf('procedure.checklist.override').length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('offers no key at all for proceeding without consent', () => {
+    // There is no such act, so there is no such key. A permission that could be
+    // granted is a permission somebody eventually grants.
+    const consentBypasses = PERMISSION_CATALOGUE.filter(
+      (p) => p.key.includes('consent') && (p.action === 'override' || p.action === 'bypass'),
+    ).map((p) => p.key);
+    expect(consentBypasses.filter((k) => k.startsWith('procedure.'))).toEqual([]);
+  });
+
+  it('lets a resident perform and not sign', () => {
+    const resident = getRoleTemplate('resident_doctor');
+    expect(resident?.permissions).toContain('procedure.perform');
+    expect(resident?.permissions).not.toContain('procedure.sign');
+    expect(resident?.permissions).not.toContain('procedure.checklist.override');
+  });
+
+  it('gives the OPD nursing floor the second-person key and the giving key alike', () => {
+    // Unlike the device path, both halves belong to nursing: the second person
+    // on a high-alert drug is the nurse at the next chair, and the database —
+    // not the key — is what stops it being the same person twice.
+    const nurse = getRoleTemplate('nurse_opd');
+    expect(nurse?.permissions).toContain('opdnursing.administer');
+    expect(nurse?.permissions).toContain('opdnursing.administer.verify');
   });
 });

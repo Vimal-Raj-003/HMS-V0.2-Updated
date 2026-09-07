@@ -323,6 +323,16 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'The ophthalmology console is not included in your plan.',
     upgradeCta: 'Ask about Specialty Consoles',
   }),
+  ep(
+    'module.procedures.enabled',
+    'feature',
+    'route',
+    'OP-010/OP-039 The procedure console, minor OT and the OPD nursing rooms.',
+    {
+      message: 'The procedure and OPD nursing rooms are not included in your plan.',
+      upgradeCta: 'Ask about Hospital Clinical',
+    },
+  ),
 ]);
 
 const pointsByKey = new Map(ENFORCEMENT_POINTS.map((e) => [e.key, e]));

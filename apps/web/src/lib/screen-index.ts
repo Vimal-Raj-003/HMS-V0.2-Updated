@@ -8,6 +8,7 @@ import { INVENTORY_SCREENS } from '@/features/inventory/screens';
 import { ORTHO_SCREENS } from '@/features/ortho/screens';
 import { PATIENT_SCREENS } from '@/features/patient/screens';
 import { PHARMACY_SCREENS } from '@/features/pharmacy/screens';
+import { PROCEDURE_SCREENS } from '@/features/procedures/screens';
 import { RCM_SCREENS } from '@/features/rcm/screens';
 import { SPECIALTY_SCREENS } from '@/features/specialty/screens';
 
@@ -100,6 +101,7 @@ export const ALL_SCREENS: readonly IndexedScreen[] = Object.freeze([
   ...index(ER_SCREENS, 'emergency'),
   ...index(ORTHO_SCREENS, 'ortho'),
   ...index(IP_SCREENS, 'inpatient'),
+  ...index(PROCEDURE_SCREENS, 'procedures'),
   ...index(SPECIALTY_SCREENS, 'specialty'),
 ]);
 

@@ -9820,6 +9820,160 @@ const OP025 = group('OP-025', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-010 and OP-039, the procedure spine
+//
+// Most other consoles call OP-010 for their procedures — a laser in the eye
+// clinic, a biopsy in dermatology, a block in the pain clinic — so these keys
+// are held by more people than any one console's.
+//
+// ── `procedure.checklist.override` is `medium`, not `high` ──────────────────
+//
+// Overriding a pre-procedure checklist is a normal clinical act on an urgent
+// case, done by the person who is about to do the procedure. A scarce key would
+// push it onto whoever happened to be senior and available, which is how an
+// override becomes a formality performed by somebody who was not in the room.
+// The control is that it is signed and reasoned, not that it is rare.
+//
+// There is no key for proceeding without consent, because there is no such act.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP010 = group('OP-010', 8, [
+  p(
+    'procedure.order.read',
+    'procedure_order',
+    'read',
+    'phi',
+    'low',
+    'Read the procedure list, one order, and the record of what was done.',
+    { phiRead: true },
+  ),
+  p(
+    'procedure.order.create',
+    'procedure_order',
+    'create',
+    'phi',
+    'low',
+    'Order a procedure, from any console. Cancelling one records why.',
+  ),
+  p(
+    'procedure.room.configure',
+    'procedure_room',
+    'configure',
+    'operational',
+    'medium',
+    'Define the procedure rooms, what happens in them, and which sub-store they draw from.',
+  ),
+  p(
+    'procedure.booking.manage',
+    'procedure_booking',
+    'assign',
+    'phi',
+    'low',
+    'Book a room and an hour for a procedure, move it, or release it.',
+  ),
+  p(
+    'procedure.checklist.record',
+    'procedure_checklist',
+    'record',
+    'phi',
+    'low',
+    'Work through the pre-procedure checklist. Held by whoever is preparing the patient.',
+  ),
+  p(
+    'procedure.checklist.override',
+    'procedure_checklist',
+    'override',
+    'phi',
+    'medium',
+    'Proceed with a checklist that is not complete, naming who decided and why. Consent is never overridable this way.',
+    { requiresReason: true },
+  ),
+  p(
+    'procedure.timeout.confirm',
+    'procedure_timeout',
+    'verify',
+    'phi',
+    'low',
+    'Confirm the time-out. Held widely on purpose: it takes two people in the room, whoever they are.',
+  ),
+  p(
+    'procedure.perform',
+    'procedure',
+    'record',
+    'phi',
+    'medium',
+    'Start and document a procedure: findings, technique, specimens, complications.',
+  ),
+  p(
+    'procedure.sign',
+    'procedure',
+    'sign',
+    'phi',
+    'medium',
+    'Sign the procedure note, which makes it immutable. An addendum is a new version.',
+  ),
+  p(
+    'procedure.recovery.record',
+    'procedure_recovery',
+    'record',
+    'phi',
+    'low',
+    'Score recovery and discharge from it. A sedated patient leaves at Aldrete 9 with an escort, and nothing here changes that.',
+  ),
+  p(
+    'procedure.consumable.record',
+    'procedure_consumable',
+    'record',
+    'phi',
+    'low',
+    'Record what was used, from the kit or scanned at the trolley.',
+  ),
+]);
+
+const OP039 = group('OP-039', 8, [
+  p(
+    'opdnursing.task.read',
+    'opd_nursing_task',
+    'list',
+    'phi',
+    'low',
+    'The injection, dressing and plaster room worklists.',
+    { phiRead: true },
+  ),
+  p(
+    'opdnursing.task.manage',
+    'opd_nursing_task',
+    'update',
+    'phi',
+    'low',
+    'Queue, assign, hold or complete a nursing task. Holding one records why.',
+  ),
+  p(
+    'opdnursing.administer',
+    'opd_med_administration',
+    'record',
+    'phi',
+    'low',
+    'Give a drug in an OPD room, with the same five rights as a ward: identity, batch, allergy, dose, route.',
+  ),
+  p(
+    'opdnursing.administer.verify',
+    'opd_med_administration',
+    'verify',
+    'phi',
+    'low',
+    'Be the second person on a high-alert drug. Never the person giving it — the database refuses that.',
+  ),
+  p(
+    'opdnursing.dressing.record',
+    'opd_dressing',
+    'record',
+    'phi',
+    'low',
+    'Record a dressing change, the wound as it looked, and when it is next due.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -9913,6 +10067,8 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   // Phase 8
   ...OP025F,
   ...OP025,
+  ...OP010,
+  ...OP039,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

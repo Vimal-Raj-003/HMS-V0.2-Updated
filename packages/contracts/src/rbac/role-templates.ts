@@ -790,6 +790,45 @@ const OPHTHA_DOCTOR = [
  */
 const OPHTHA_RESIDENT = [...OPHTHA_OPTOMETRY, 'ophtha.exam.record', 'ophtha.surgery.plan'] as const;
 
+/**
+ * OP-010 — the procedure floor.
+ *
+ * The time-out key is held as widely as the floor itself, deliberately. It takes
+ * two people in the room and it does not matter who they are; a scarce key would
+ * mean waiting for a particular person to walk past, and a ritual people wait
+ * for is a ritual people skip.
+ */
+const PROCEDURE_FLOOR = [
+  'procedure.order.read',
+  'procedure.checklist.record',
+  'procedure.timeout.confirm',
+  'procedure.consumable.record',
+] as const;
+
+/** Whoever does the procedure: order it, do it, sign it, discharge from it. */
+const PROCEDURE_OPERATOR = [
+  ...PROCEDURE_FLOOR,
+  'procedure.order.create',
+  'procedure.booking.manage',
+  'procedure.checklist.override',
+  'procedure.perform',
+  'procedure.sign',
+  'procedure.recovery.record',
+] as const;
+
+/** OP-039 — the injection, dressing and plaster rooms. */
+const OPD_NURSING_FLOOR = [
+  'opdnursing.task.read',
+  'opdnursing.task.manage',
+  'opdnursing.administer',
+  'opdnursing.administer.verify',
+  'opdnursing.dressing.record',
+  'procedure.order.read',
+  'procedure.checklist.record',
+  'procedure.timeout.confirm',
+  'procedure.recovery.record',
+] as const;
+
 const FLEET_DISPATCH = [
   'fleet.vehicle.read',
   'fleet.request.create',
@@ -2247,6 +2286,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'branch-admin',
     permissions: [
+      'procedure.room.configure',
       ...CONSOLE_ADMIN,
       ...IP_BILL_DESK,
       'ipbill.policy.manage',
@@ -2459,6 +2499,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'department-dashboard',
     permissions: [
+      ...PROCEDURE_OPERATOR,
       ...OPHTHA_DOCTOR,
       ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
@@ -2521,6 +2562,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'doctor-opd',
     permissions: [
+      ...PROCEDURE_OPERATOR,
       ...OPHTHA_DOCTOR,
       ...CONSOLE_CLINICIAN,
       ...MAR_PRESCRIBER,
@@ -2565,6 +2607,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...PROCEDURE_OPERATOR,
       ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
       ...MORTUARY_CLINICAL,
@@ -2619,6 +2662,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'er-board',
     permissions: [
+      ...PROCEDURE_OPERATOR,
       ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
       ...MORTUARY_CLINICAL,
@@ -2691,6 +2735,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...PROCEDURE_OPERATOR,
       ...OPHTHA_DOCTOR,
       ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
@@ -2747,6 +2792,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'anaesthesia-worklist',
     permissions: [
+      ...PROCEDURE_OPERATOR,
       ...CONSOLE_CLINICIAN,
       ...ICU_BEDSIDE,
       'icu.score.compute',
@@ -2898,6 +2944,9 @@ const templates: readonly RoleTemplate[] = [
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
     permissions: [
+      ...PROCEDURE_FLOOR,
+      'procedure.order.create',
+      'procedure.perform',
       ...OPHTHA_RESIDENT,
       ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CLINICAL,
@@ -2965,6 +3014,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      ...OPD_NURSING_FLOOR,
       ...OPHTHA_OPTOMETRY,
       ...CONSOLE_TECHNICIAN,
       'nursing.ward.read',
@@ -3013,6 +3063,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...OPD_NURSING_FLOOR,
       ...CONSOLE_TECHNICIAN,
       ...DISCHARGE_WARD,
       'mortuary.case.read',
@@ -3108,6 +3159,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'triage-board',
     permissions: [
+      ...OPD_NURSING_FLOOR,
       ...CONSOLE_TECHNICIAN,
       ...ICU_BEDSIDE,
       ...BLOOD_BEDSIDE,
@@ -3160,6 +3212,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'ot-checklist',
     permissions: [
+      ...PROCEDURE_FLOOR,
       ...BLOOD_BEDSIDE,
       'code.call',
       'code.record',
@@ -3214,6 +3267,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-command-centre',
     permissions: [
+      ...OPD_NURSING_FLOOR,
+      'procedure.room.configure',
       ...DISCHARGE_WARD,
       'mortuary.case.read',
       'mortuary.report.read',
@@ -4785,6 +4840,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'therapy',
     homeWorkspace: 'ophtha-worklist',
     permissions: [
+      'procedure.order.read',
+      'procedure.timeout.confirm',
       ...OPHTHA_OPTOMETRY,
       ...CONSOLE_TECHNICIAN,
       ...BASE_CLINICAL,
