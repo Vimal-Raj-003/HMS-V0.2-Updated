@@ -1030,6 +1030,25 @@ const LIFESPAN_CLINICIAN = [
   'lifespan.report.read',
 ] as const;
 
+/**
+ * IP-019 and OP-024 — transplant and assisted reproduction.
+ *
+ * Both statutes are enforced by inspection, and both put the decision that
+ * matters outside the hospital: an Authorisation Committee for a donor who is
+ * not a near relative, a panel of four for a brain-stem death, a bank rather
+ * than a clinic for gametes. So the keys are narrow, and none of them
+ * substitutes for the body the Act names.
+ */
+const TRANSPLANT_TEAM = ['transplant.read', 'transplant.recipient.manage'] as const;
+
+const TRANSPLANT_LEAD = [
+  ...TRANSPLANT_TEAM,
+  'transplant.donation.record',
+  'transplant.brainstem.certify',
+] as const;
+
+const ART_CLINIC = ['art.read', 'art.cycle.manage'] as const;
+
 const DERM_DELIVERY = ['derm.lesion.read', 'derm.phototherapy.deliver'] as const;
 
 const DERM_DOCTOR = [
@@ -1146,6 +1165,7 @@ const SPECIALTY_CONSOLE_DOCTOR = [
   ...ONCO_DOCTOR,
   ...PSY_PSYCHIATRIST,
   ...LIFESPAN_CLINICIAN,
+  ...ART_CLINIC,
 ] as const;
 
 /** A resident records and plans; the signature and the override keys are not theirs. */
@@ -3043,6 +3063,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...TRANSPLANT_TEAM,
       ...LIFESPAN_CLINICIAN,
       ...ONCO_DOCTOR,
       ...LABOUR_DOCTOR,
@@ -3174,6 +3195,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...TRANSPLANT_LEAD,
       ...PROCEDURE_OPERATOR,
       ...OPHTHA_DOCTOR,
       ...SPECIALTY_CONSOLE_DOCTOR,
@@ -3518,6 +3540,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      'transplant.read',
       ...LIFESPAN_FLOOR,
       ...PSY_NURSING,
       ...ONCO_CHAIR,

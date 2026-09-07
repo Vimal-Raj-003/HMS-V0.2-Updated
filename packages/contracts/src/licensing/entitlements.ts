@@ -432,6 +432,14 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'The geriatrics console is not included in your plan.',
     upgradeCta: 'Ask about Specialty Consoles',
   }),
+  ep('module.transplant.enabled', 'feature', 'route', 'IP-019 Transplant.', {
+    message: 'The transplant console is not included in your plan.',
+    upgradeCta: 'Ask about Hospital Clinical',
+  }),
+  ep('module.fertility.enabled', 'feature', 'route', 'OP-024 Fertility and assisted reproduction.', {
+    message: 'The fertility console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
   ep(
     'module.procedures.enabled',
     'feature',

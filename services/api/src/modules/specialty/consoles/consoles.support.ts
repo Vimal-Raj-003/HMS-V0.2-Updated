@@ -493,6 +493,33 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
     detail: 'A conversion factor ends on or after the day it takes effect.',
   },
 
+  // ── IP-019 / OP-024 ───────────────────────────────────────────────────────
+  embryos_transferred_is_within_practice: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'One to three embryos. A triplet pregnancy is the commonest serious harm of this treatment and it is entirely iatrogenic.',
+  },
+  a_gamete_donor_is_of_age: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A gamete donor is between 18 and 55 under the Act.',
+  },
+  a_gamete_is_one_of_two: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A gamete is an oocyte or semen.',
+  },
+  an_urgency_is_known: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A listing is routine, urgent or super-urgent.',
+  },
+  uq_gamete_donor_ref: {
+    type: ProblemType.CONFLICT,
+    detail: 'That donor reference is already registered against this bank.',
+  },
+  uq_art_cycle_no: {
+    type: ProblemType.CONFLICT,
+    detail: 'That cycle number is already recorded for this patient.',
+  },
+
   // ── OP-033 / IP-015 / OP-034 ──────────────────────────────────────────────
   a_frequency_is_plausible: {
     type: ProblemType.VALIDATION_FAILED,

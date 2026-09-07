@@ -1,0 +1,289 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · IP-019 · OP-024 — transplant, and assisted reproduction
+//
+// Two statutes about the same thing: who may consent to what is done to a body,
+// and what may not be bought.
+//
+// ── The Transplantation of Human Organs and Tissues Act, 1994 ──────────────
+//
+// India's organ transplant law exists because of a trade. Through the 1980s
+// Indian kidneys were sold to overseas recipients on a scale that made the
+// country a destination, and the sellers were poor, uninformed and afterwards
+// sicker and no less poor. The Act's answer is narrow and specific: a living
+// donor may donate to a **near relative**, and the Act lists them; anybody else
+// needs an Authorisation Committee to satisfy itself that there is affection or
+// attachment and no money. Everything else in the Act follows from that.
+//
+// So `near_relative` here is not a free-text relationship. It is an enum whose
+// members are the statute's list, and a donor outside it cannot reach an
+// operating theatre without a committee reference.
+//
+// ── And brain-stem death is four doctors, twice, six hours apart ───────────
+//
+// Because the alternative is a transplant team certifying its own donor. The
+// Act names the panel — a registered medical practitioner in charge of the
+// hospital, an Appropriate Authority nominee, a neurologist or neurosurgeon,
+// and the treating doctor — and none of them may be on the transplant team.
+//
+// ── The Assisted Reproductive Technology (Regulation) Act, 2021 ────────────
+//
+// Written after two decades in which Indian ART clinics were unregulated: donor
+// gametes bought and sold, donors used dozens of times, commercial surrogacy,
+// and no register of any of it. The Act's answers are a national registration,
+// a limit of **one lifetime donation** per gamete donor, a bank rather than a
+// clinic sourcing them, and consent from both commissioning parties.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The relationships §2 of THOTA names, and nothing else.
+///
+/// A donor outside this list is not forbidden — they need the Authorisation
+/// Committee, which is the whole design of the Act.
+enum NearRelative {
+  spouse
+  son
+  daughter
+  father
+  mother
+  brother
+  sister
+  grandfather
+  grandmother
+  grandson
+  granddaughter
+
+  @@schema("specialty")
+}
+
+enum DonorType {
+  living_near_relative
+  /// Anybody else. The Act permits it only on the Authorisation Committee's
+  /// satisfaction that there is affection or attachment and no money.
+  living_other
+  deceased_brainstem
+  deceased_cardiac
+
+  @@schema("specialty")
+}
+
+enum TransplantStatus {
+  registered
+  workup
+  committee_pending
+  approved
+  scheduled
+  transplanted
+  declined
+  withdrawn
+
+  @@schema("specialty")
+}
+
+/// A person waiting for an organ.
+model TransplantRecipient {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  organ      String @db.VarChar(24)
+  indication String @db.Text
+
+  bloodGroup String  @map("blood_group") @db.VarChar(8)
+  hlaTyping  Json    @default("{}") @map("hla_typing")
+  /// The national registry number, where the state has one.
+  nottoId    String? @map("notto_id") @db.VarChar(40)
+
+  listedAt DateTime  @map("listed_at") @db.Date
+  urgency  String    @default("routine") @db.VarChar(16)
+  status   TransplantStatus @default(registered)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  donations OrganDonation[]
+
+  @@index([hospitalId, organ, status])
+  @@index([hospitalId, patientId])
+  @@map("transplant_recipients")
+  @@schema("specialty")
+}
+
+/// A donation, and the authority for it.
+///
+/// The whole Act is in this table: who the donor is to the recipient, and — if
+/// they are not on the statute's list — the Authorisation Committee's reference.
+model OrganDonation {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  recipientId String @map("recipient_id") @db.Uuid
+  /// The donor's own patient record, for a living donor.
+  donorPatientId String? @map("donor_patient_id") @db.Uuid
+
+  organ     String    @db.VarChar(24)
+  donorType DonorType @map("donor_type")
+  /// Required and constrained when the type is `living_near_relative`, and
+  /// necessarily absent otherwise.
+  relationship NearRelative?
+  /// How the relationship was established: a document, a photograph, a
+  /// genetic test. The Committee asks, and so does a court.
+  relationshipEvidence Json @default("{}") @map("relationship_evidence")
+
+  /// The Authorisation Committee, for a donor who is not a near relative.
+  /// There is no other route, and no permission that substitutes for one.
+  committeeRef      String?   @map("committee_ref") @db.VarChar(80)
+  committeeDecidedAt DateTime? @map("committee_decided_at") @db.Timestamptz(6)
+
+  donorConsentId     String? @map("donor_consent_id") @db.Uuid
+  recipientConsentId String? @map("recipient_consent_id") @db.Uuid
+
+  /// Set for a deceased donor. Its four certifiers are §B.2's business.
+  brainstemDeathId String? @map("brainstem_death_id") @db.Uuid
+
+  crossmatch Json      @default("{}")
+  status     TransplantStatus @default(registered)
+  performedAt DateTime? @map("performed_at") @db.Timestamptz(6)
+  otCaseId   String?   @map("ot_case_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  recipient TransplantRecipient @relation(fields: [recipientId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, status])
+  @@index([hospitalId, recipientId])
+  @@map("organ_donations")
+  @@schema("specialty")
+}
+
+/// Brain-stem death certification.
+///
+/// Four doctors, two examinations six hours apart, and none of the four on the
+/// transplant team. The alternative is a transplant team certifying its own
+/// donor, which is why the Act names the panel rather than describing it.
+model BrainstemDeath {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  admissionId String? @map("admission_id") @db.Uuid
+
+  /// Apnoea test, brain-stem reflexes, the preconditions and the exclusions.
+  firstExamAt  DateTime  @map("first_exam_at") @db.Timestamptz(6)
+  firstExam    Json      @map("first_exam")
+  secondExamAt DateTime? @map("second_exam_at") @db.Timestamptz(6)
+  secondExam   Json?     @map("second_exam")
+  /// Derived. The Act requires six hours between them.
+  intervalMin  Int?      @map("interval_min")
+
+  /// The four the Act names. All four, all different people.
+  rmpInChargeId  String @map("rmp_in_charge_id") @db.Uuid
+  authorityNomineeId String @map("authority_nominee_id") @db.Uuid
+  neurologistId  String @map("neurologist_id") @db.Uuid
+  treatingDoctorId String @map("treating_doctor_id") @db.Uuid
+
+  /// Who is on the transplant team, so that §B.2 can refuse an overlap.
+  transplantTeamIds String[] @default([]) @map("transplant_team_ids") @db.Uuid
+
+  certifiedAt DateTime? @map("certified_at") @db.Timestamptz(6)
+  form10Ref   String?   @map("form10_ref") @db.VarChar(80)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, certifiedAt(sort: Desc)])
+  @@map("brainstem_death_certifications")
+  @@schema("specialty")
+}
+
+/// A gamete donor, and the one donation the Act allows them.
+///
+/// §21(g) of the ART Act: a donor may donate once in their lifetime. It exists
+/// because donors were being used dozens of times, which is a consanguinity
+/// problem a generation later and an exploitation problem now.
+model GameteDonor {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  /// The national registration the Act requires of the bank, not the clinic.
+  bankRegistrationNo String @map("bank_registration_no") @db.VarChar(60)
+  /// The donor's own identifier at that bank. Clinics do not hold identities.
+  bankDonorRef       String @map("bank_donor_ref") @db.VarChar(60)
+
+  gamete    String @db.VarChar(16)
+  ageYears  Int    @map("age_years")
+  screening Json   @default("{}")
+
+  /// Derived from the donations recorded against this reference. The Act
+  /// allows one, and this is what refuses the second.
+  donationCount Int @default(0) @map("donation_count")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  cycles ArtCycle[]
+
+  @@unique([bankRegistrationNo, bankDonorRef], map: "uq_gamete_donor_ref")
+  @@index([hospitalId, gamete])
+  @@map("art_gamete_donors")
+  @@schema("specialty")
+}
+
+/// A treatment cycle.
+model ArtCycle {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  /// The commissioning couple or woman. Both consents are required where there
+  /// are two.
+  patientId  String  @map("patient_id") @db.Uuid
+  partnerPatientId String? @map("partner_patient_id") @db.Uuid
+
+  /// The clinic's own registration under the Act. A cycle at an unregistered
+  /// clinic is an offence.
+  clinicRegistrationNo String @map("clinic_registration_no") @db.VarChar(60)
+
+  cycleNo   Int      @map("cycle_no")
+  startedAt DateTime @map("started_at") @db.Date
+  /// `iui`, `ivf`, `icsi`, `fet`, `oocyte_donation`, `embryo_donation`.
+  technique String   @db.VarChar(24)
+
+  /// Set when donor gametes are used, and then §B.3 applies.
+  donorId String? @map("donor_id") @db.Uuid
+
+  patientConsentId String? @map("patient_consent_id") @db.Uuid
+  partnerConsentId String? @map("partner_consent_id") @db.Uuid
+
+  stimulation Json @default("{}")
+  /// Oocytes retrieved, fertilised, embryos formed and their grades.
+  laboratory  Json @default("{}")
+
+  /// How many embryos went back. Indian ART practice and the Act's rules limit
+  /// it, because a triplet pregnancy is the commonest serious harm of this
+  /// treatment and it is entirely iatrogenic.
+  embryosTransferred Int? @map("embryos_transferred")
+  transferredAt      DateTime? @map("transferred_at") @db.Timestamptz(6)
+
+  outcome   String? @db.VarChar(40)
+  outcomeAt DateTime? @map("outcome_at") @db.Timestamptz(6)
+
+  /// The National ART Registry submission.
+  registryRef String? @map("registry_ref") @db.VarChar(80)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  donor GameteDonor? @relation(fields: [donorId], references: [id], onDelete: Restrict)
+
+  @@unique([patientId, cycleNo], map: "uq_art_cycle_no")
+  @@index([hospitalId, startedAt(sort: Desc)])
+  @@map("art_cycles")
+  @@schema("specialty")
+}

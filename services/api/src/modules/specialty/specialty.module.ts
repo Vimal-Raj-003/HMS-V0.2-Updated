@@ -13,6 +13,8 @@ import { HealthCheckService } from './programme/healthcheck.service.js';
 import { ImmunisationService } from './programme/immunisation.service.js';
 import { AntenatalController } from './antenatal/antenatal.controller.js';
 import { AntenatalService } from './antenatal/antenatal.service.js';
+import { TransplantController } from './transplant/transplant.controller.js';
+import { TransplantService } from './transplant/transplant.service.js';
 import { LifespanController } from './lifespan/lifespan.controller.js';
 import { LifespanService } from './lifespan/lifespan.service.js';
 import { PsychiatryController } from './psychiatry/psychiatry.controller.js';
@@ -58,6 +60,7 @@ export const SPECIALTY_CONTROLLERS: Type<unknown>[] = [
   OncologyController,
   PsychiatryController,
   LifespanController,
+  TransplantController,
 ];
 
 export const SPECIALTY_PROVIDERS: Provider[] = [
@@ -100,6 +103,7 @@ export const SPECIALTY_PROVIDERS: Provider[] = [
   OncologyService,
   PsychiatryService,
   LifespanService,
+  TransplantService,
 ];
 
 @Module({

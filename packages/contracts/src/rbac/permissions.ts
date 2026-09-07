@@ -11722,6 +11722,85 @@ const OP033 = group('OP-033', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — IP-019 and OP-024, transplant and assisted reproduction
+//
+// Two statutes about who may consent to a body, and what may not be bought, so
+// one group of keys.
+//
+// ── There is no key that substitutes for the Authorisation Committee ───────
+//
+// A living donor who is not a near relative under the Act needs the Committee,
+// and that is the only route. India's transplant law exists because organs were
+// bought from people who were poor, and the Committee is the single thing
+// standing between a record and that trade. A permission would be a way round
+// it with a name on it.
+//
+// ── Nor one that certifies brain-stem death alone ──────────────────────────
+//
+// Four doctors, twice, six hours apart, none on the transplant team. The panel
+// is the safeguard; a key cannot be.
+//
+// ── And none that lets a gamete donor donate twice ─────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+const IP019 = group('IP-019', 8, [
+  p(
+    'transplant.read',
+    'transplant_recipient',
+    'read',
+    'phi',
+    'low',
+    'Read the transplant register: recipients, donations, and the authority each rests on.',
+    { phiRead: true },
+  ),
+  p(
+    'transplant.recipient.manage',
+    'transplant_recipient',
+    'update',
+    'phi',
+    'medium',
+    'List and work up a recipient.',
+  ),
+  p(
+    'transplant.donation.record',
+    'organ_donation',
+    'create',
+    'phi',
+    'high',
+    'Record a donation and the authority for it — a relationship the Act names, or the Authorisation Committee’s reference. There is no third route and no key that makes one.',
+    { requiresReason: true },
+  ),
+  p(
+    'transplant.brainstem.certify',
+    'brainstem_death_certification',
+    'sign',
+    'phi',
+    'high',
+    'Record a brain-stem death certification. Four named doctors, two examinations six hours apart, and none of the four on the transplant team — all enforced by the database rather than by this key.',
+    { requiresReason: true },
+  ),
+  p(
+    'art.cycle.manage',
+    'art_cycle',
+    'create',
+    'phi',
+    'medium',
+    'Run an assisted-reproduction cycle. The clinic’s registration, both consents and the embryo limit are the database’s.',
+  ),
+  p(
+    'art.donor.manage',
+    'art_gamete_donor',
+    'update',
+    'phi',
+    'high',
+    'Register a gamete donor against a bank’s reference. The Act allows one donation in a lifetime, and the count is the database’s.',
+    { requiresReason: true },
+  ),
+  p('art.read', 'art_cycle', 'read', 'phi', 'low', 'Read cycles, outcomes and the donor register.', {
+    phiRead: true,
+  }),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -11835,6 +11914,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP031,
   ...OP032,
   ...OP033,
+  ...IP019,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

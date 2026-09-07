@@ -10817,6 +10817,59 @@ const painClinicEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — IP-019 and OP-024, transplant and assisted reproduction.
+ *
+ * Three events, all statutory returns rather than clinical alerts. Both Acts
+ * are enforced by inspection, and both require the hospital to tell somebody
+ * outside it.
+ */
+const transplantEvents: readonly EventDefinition[] = [
+  ev(
+    'transplant.brainstem.certified',
+    'brainstem_death_certification',
+    'IP-019',
+    'A brain-stem death was certified. Leaves at once: the transplant coordinator, the family conversation and the national registry all start from this moment, and the organs have hours rather than days.',
+    z.object({
+      certificationId: uuid,
+      patientId: uuid,
+      firstExamAt: z.string(),
+      secondExamAt: z.string(),
+      intervalMin: z.number().int(),
+      form10Ref: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 36500 },
+  ),
+  ev(
+    'transplant.committee.required',
+    'organ_donation',
+    'IP-019',
+    'A living donor who is not a near relative under the Act. Leaves the ward because the Authorisation Committee is not a hospital body, it meets on a schedule, and the workup should not start before it has.',
+    z.object({
+      donationId: uuid,
+      recipientId: uuid,
+      organ: z.string(),
+      donorType: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 36500 },
+  ),
+  ev(
+    'art.cycle.completed',
+    'art_cycle',
+    'OP-024',
+    'A treatment cycle reached an outcome. Feeds the National ART Registry, which the Act requires and which is the only source of outcome data anybody has.',
+    z.object({
+      cycleId: uuid,
+      patientId: uuid,
+      technique: z.string(),
+      embryosTransferred: z.number().int().nullable(),
+      outcome: z.string(),
+      donorUsed: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 36500 },
+  ),
+];
+
+/**
  * Phase 8 — OP-033, IP-015 and OP-034, the two ends of life.
  *
  * Three events, and each is a threshold somebody outside the room acts on: a
@@ -11578,6 +11631,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...oncologyEvents,
   ...psychiatryEvents,
   ...lifespanEvents,
+  ...transplantEvents,
   ...procedureEvents,
 ]);
 

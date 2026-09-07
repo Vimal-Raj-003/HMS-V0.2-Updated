@@ -561,6 +561,32 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: 'module.paediatrics.enabled',
   },
+  {
+    key: 'transplant-register',
+    label: 'Transplant and fertility',
+    href: '/transplant/register',
+    area: 'specialty',
+    permission: 'transplant.read',
+    summary:
+      'Two registers, two statutes, and the same question in both: who may consent to what is done to a body, and what may not be bought.',
+    deniedExplanation:
+      'Listing a recipient is the coordinator\u2019s. Recording a donation and certifying brain-stem death are named, reasoned acts, because the authority behind each is a body outside the hospital.',
+    keywords: [
+      'transplant',
+      'organ',
+      'donor',
+      'near relative',
+      'authorisation committee',
+      'brain stem death',
+      'thota',
+      'fertility',
+      'ivf',
+      'art',
+      'gamete',
+      'embryo',
+    ],
+    entitlement: 'module.transplant.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

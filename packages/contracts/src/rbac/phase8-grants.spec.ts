@@ -989,4 +989,32 @@ describe('OP-010 — the procedure floor', () => {
       expect(permission(key).clinicalSafetyExempt, key).toBe(true);
     }
   });
+  it('offers no key that substitutes for the Authorisation Committee or the panel', () => {
+    // India's transplant law exists because organs were bought from people who
+    // were poor. The Committee is the single thing standing between a record
+    // and that trade, and a permission would be a way round it with a name on
+    // it.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    for (const absent of [
+      'transplant.committee.waive',
+      'transplant.committee.override',
+      'transplant.brainstem.expedite',
+      'art.donor.reuse',
+      'art.donor.override',
+    ]) {
+      expect(keys, absent).not.toContain(absent);
+    }
+    // The two that create an authority are high and reasoned.
+    for (const key of ['transplant.donation.record', 'transplant.brainstem.certify']) {
+      expect(permission(key).risk, key).toBe('high');
+      expect(permission(key).requiresReason, key).toBe(true);
+    }
+  });
+
+  it('keeps the donation record and the certification narrow', () => {
+    expect(getRoleTemplate('surgeon')?.permissions).toContain('transplant.donation.record');
+    expect(getRoleTemplate('nurse_ward')?.permissions).toContain('transplant.read');
+    expect(getRoleTemplate('nurse_ward')?.permissions).not.toContain('transplant.brainstem.certify');
+    expect(getRoleTemplate('doctor_ip')?.permissions).not.toContain('transplant.donation.record');
+  });
 });

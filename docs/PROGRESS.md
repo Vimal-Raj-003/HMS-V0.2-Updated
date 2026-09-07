@@ -401,6 +401,72 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-21 · Phase 8 · IP-019, OP-024 — transplant and assisted reproduction
+
+**Built — the transplant register and the fertility clinic, complete.** 5
+tables, 7 permission keys, 3 events, 2 entitlements, 1 screen, 11 integration
+tests, 22 database rules proven live in both directions.
+
+Grouped because they are two statutes about the same thing: who may consent to
+what is done to a body, and what may not be bought.
+
+**A near relative, or the Authorisation Committee.** India's transplant law
+exists because of a trade. Through the 1980s Indian kidneys were sold to
+overseas recipients on a scale that made the country a destination, and the
+sellers were poor, uninformed, and afterwards sicker and no less poor. The Act's
+answer is narrow: donate to somebody on a listed set of relationships, or
+convince a committee there is affection and no money.
+
+So `NearRelative` here is an enum whose members are §2's list, not a free-text
+field — because letting a clinic type "cousin" is how a donation with no
+committee behind it comes to look like a family one. A donor outside the list
+cannot reach a theatre without a committee reference and a decision date, and
+the refusal says why at length, because the person who meets it needs to know
+it is not a workflow gap. There is no waive, no expedite and no override key.
+
+**Four doctors, twice, six hours apart.** The panel exists so that the team
+taking the organ is not the panel declaring the donor dead, so four means four
+distinct people and none of them may appear in the transplant team. The interval
+_is_ the test — a single examination cannot distinguish brain-stem death from a
+reversible state — so a second examination inside six hours is refused, and the
+console counts down to when it may lawfully be done.
+
+**One donation in a lifetime.** §21(g) of the ART Act, written because donors
+were used dozens of times: an exploitation problem now and a consanguinity
+problem in twenty years. The count is a SECURITY DEFINER trigger's, keyed on the
+_bank's_ own reference rather than a clinic identity — which matches the Act's
+design, in which banks source donors and clinics do not hold their identities —
+and `hms_app` cannot write it.
+
+**And no column anywhere records a payment.** Both Acts prohibit consideration,
+and a migration-time assertion refuses any column that would hold one. Third use
+of that technique, after the PC-PNDT foetal-sex check and the restraint enum.
+
+**One defect, already familiar.** The donation-count trigger could not write a
+table the application is deliberately denied — the same shape as the oncology
+lifetime total, and the same fix: the REVOKE and the SECURITY DEFINER are one
+decision seen from two sides. A second, smaller one: recording the second
+brain-stem examination reused a reasoned key without carrying a reason, so the
+schema now carries it, because that examination _is_ the moment of
+certification.
+
+**Deferred, recorded.** The national NOTTO/ROTTO allocation interface and organ
+offer sequencing (Phase 11 owns the registries), surrogacy under the separate
+Surrogacy (Regulation) Act 2021, embryo and gamete cryostorage with its consent
+renewals, and the monthly returns both Acts require.
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module. Tracked, unchanged.
+
+**Gates** — 13/13 packages typecheck, lint and test (3,018 unit tests); 748 API
+integration tests across 32 files; 59 migrations; 889 non-partition tables;
+1,365 permission keys; 838 events; 67 entitlements; 68 role templates; 105
+screens.
+
+**Next:** the hand-offs — OP-018 telemedicine with its prescribing lists,
+OP-021 referral management and IP-020 clinical pathways — then the last two,
+OP-037 AYUSH and NC-033 the kitchen, which close Phase 8.
+
 ### 2026-09-20 · Phase 8 · OP-033, IP-015, OP-034 — the two ends of life
 
 **Built — paediatrics, the neonatal unit and geriatrics, complete.** 8 tables
