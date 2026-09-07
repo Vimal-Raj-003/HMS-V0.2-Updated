@@ -162,6 +162,11 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   // before it is booked must not burn a number — but individually numbered,
   // because the consent form, the specimen label and the bill all quote it.
   ['PROC', '{BR}/PROC/{FY}/{SEQ:5}', false, 'fy'],
+  // OP-026: the dental treatment plan. Not gapless — a plan drafted and
+  // abandoned in the chair must not burn a number — but individually numbered,
+  // because the patient signs it, pays against it in instalments, and quotes it
+  // back a year later when they come for the second phase.
+  ['DENT_PLAN', '{BR}/DP/{FY}/{SEQ:5}', false, 'fy'],
   ['LIC_INVOICE', 'VIMS/{FY}/{SEQ:5}', true, 'fy'],
 ];
 

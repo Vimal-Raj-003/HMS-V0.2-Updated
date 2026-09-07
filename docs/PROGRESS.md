@@ -401,6 +401,107 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-11 · Phase 8 · OP-029, OP-030, OP-028, OP-026, OP-027 — five specialties, one arithmetic
+
+**Built — the five device-heavy consoles, complete.** 27 tables, 49 permission
+keys, 6 events, 5 entitlement keys, 3 role templates, 5 screens, 31 integration
+tests, 63 database rules proven live in both directions.
+
+These five were built together because they are the same problem five times.
+In every one of them the number that decides something is _derived_ from numbers
+a device already produced — and in every one of them it is, somewhere in the
+world, typed into a box:
+
+| Console | The number that decides                   | What it decides                   |
+| ------- | ----------------------------------------- | --------------------------------- |
+| OP-029  | QTc, from the QT and the rate (Bazett)    | whether a drug is safe to give    |
+| OP-030  | FEV1/FVC, and the bronchodilator response | asthma or COPD, for life          |
+| OP-028  | the four-frequency average and its band   | a disability certificate          |
+| OP-026  | the chart state and the DMFT              | a claim, and what is in the mouth |
+| OP-027  | PASI from its components                  | whether a biologic stays funded   |
+
+Every one is computed by a trigger here, and **there is no column, request field
+or route to override it**. That is the proof rather than a service check: a guard
+in a service is a guard a later endpoint can forget to call, and a field that
+does not exist cannot be sent.
+
+Two of them are worth spelling out because they are not obvious:
+
+- **Reversibility needs both ATS/ERS thresholds, not either.** 12 per cent _and_
+  200 mL. A report saying "no significant reversibility" over 340 mL and 15 per
+  cent is a lifetime of the wrong inhaler, and it is invisible afterwards —
+  the wrong conclusion and the right one look identical on paper.
+- **A negative air-bone gap is refused at entry.** Sound through the skull cannot
+  need more energy than sound through the canal. Beyond one 5 dB step it is a
+  masking error or a swapped transducer, and it is the commonest mistake in
+  audiometry. Caught in the booth it is a repeated frequency; caught later it is
+  a patient told they have a conductive loss they do not have.
+
+**The dental chart is the strongest form of the idea.** `dental_tooth_events` is
+append-only and `dental_charts.state` is rebuilt from it by a SECURITY DEFINER
+trigger — and `hms_app` holds **no INSERT, UPDATE or DELETE privilege on the
+chart at all**. There is no endpoint that writes it because there could not be
+one. The only way to change what a tooth looks like is to record what happened
+to it, which is why "when did this filling appear?" keeps an answer.
+
+**Three documented overrides, all of them named.** Where a rule has a legitimate
+exception it is a route with a permission and an audit row, never a hole:
+
+- `cardio.ecg.acknowledge_critical` — the handover that unblocks a STEMI. Held by
+  doctors, **never** by the technician who recorded the tracing: a technician
+  closing the loop on their own tracing means it reads as closed while nobody
+  was told, which is the exact failure the flag exists to catch.
+- `dental.plan.supersede` — re-pricing a quotation the patient already signed. It
+  does not edit the accepted plan (the trigger refuses); it cancels it and drafts
+  a replacement that must be presented and consented to again. The signed
+  document survives at the price they agreed.
+- `derm.phototherapy.raise_ceiling` — moving the limit that stops a narrowband
+  UVB burn. A separate route from delivering a session, because the two being one
+  call is precisely how a limit gets moved by the person who wanted to exceed it.
+
+The latter two **ship unassigned**, the same stance as OP-025's delegated
+spectacle signature: a key that exists to get past a database rule is not handed
+out with a job title, and a hospital decides who holds it.
+
+**Three new sub-roles, not five.** A role is worth minting only where the _scope
+of the signature_ differs — `cardiopulmonary_technician`, `audiologist`,
+`dental_hygienist` (docs/05 rows 66–68). The consoles themselves are held by the
+ordinary clinical templates and narrowed by the licence and the department,
+because a hospital that has to mint a role per specialty ends up with sixty roles
+it grants by guesswork. Row 67 is the one place a technician signs: producing and
+interpreting the audiogram is the audiologist's registered scope, not a
+delegation from the ENT surgeon.
+
+**Tested.** 63 rules proven live against PostgreSQL 17 in both directions before
+any TypeScript was written — each refusing the unsafe write _and_ accepting the
+safe one — then 31 integration tests, then the whole thing driven over HTTP as
+four different roles. The HTTP drive found the two 403s that should be 403s: the
+HOD cannot run the audiology booth, and cannot supersede a signed plan until an
+administrator grants the key.
+
+**Deferred, recorded.** Each console's periphery: cath lab bookings and cardiac
+device follow-up (OP-029 §4), the TB/Nikshay register and home oxygen (OP-030),
+vertigo batteries and allergy immunotherapy (OP-028), orthodontic cases and the
+dental laboratory workflow (OP-026), cosmetic packages and systemic-drug
+monitoring (OP-027). All are administrative or scheduling layers over rules that
+now exist; none of them changes a clinical gate.
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module, so none yet meets `CLAUDE.md` §7's full Definition of
+Done. Tracked, unchanged from the last three entries.
+
+**Gates** — 20/20 packages typecheck, lint and test (3,084 unit tests); 582 API
+integration tests across 22 files; 49 migrations; 759 non-partition tables; 1,229
+permission keys; 796 events; 51 entitlements; 68 role templates; 12 seeded
+consoles with 60 device result types; 95 screens.
+
+**Next:** the therapy consoles — OP-015/IP-021/TR-010 physiotherapy and rehab,
+OP-016 the pain clinic, OP-017 wound care, OP-035 dietetics, OP-037 speech and
+swallow, OP-011/NC-033 the dialysis unit. A different shape from these five: the
+unit of work is a _course_ of sessions with a plan behind it, and the rule that
+matters is that a session cannot be billed twice or delivered against a plan
+nobody reviewed.
+
 ### 2026-09-10 · Phase 8 · OP-010 and OP-039 — the spine every console orders into
 
 **Built — the procedure console and the OPD nursing floor, complete.** 11

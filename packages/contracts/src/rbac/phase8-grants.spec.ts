@@ -12,7 +12,18 @@ import { ROLE_TEMPLATES, getRoleTemplate } from './role-templates.js';
  * quietly comes to mean "uploaded" — and the rail of unseen results, which is
  * the entire reason the state exists, is empty forever.
  */
-const PHASE_8_PREFIXES = ['console', 'device', 'ophtha', 'procedure', 'opdnursing'] as const;
+const PHASE_8_PREFIXES = [
+  'console',
+  'device',
+  'ophtha',
+  'procedure',
+  'opdnursing',
+  'cardio',
+  'pulmo',
+  'ent',
+  'dental',
+  'derm',
+] as const;
 
 function permission(key: string): PermissionDefinition {
   const found = getPermission(key);
@@ -64,6 +75,9 @@ describe('Phase 8 framework permission catalogue', () => {
         'dietician',
         'receptionist',
         'optometrist',
+        'cardiopulmonary_technician',
+        'audiologist',
+        'dental_hygienist',
       ],
       device: [
         'medical_superintendent',
@@ -87,6 +101,9 @@ describe('Phase 8 framework permission catalogue', () => {
         'therapist',
         'dietician',
         'optometrist',
+        'cardiopulmonary_technician',
+        'audiologist',
+        'dental_hygienist',
       ],
       ophtha: [
         'medical_superintendent',
@@ -112,8 +129,55 @@ describe('Phase 8 framework permission catalogue', () => {
         'nurse_ot_scrub',
         'nurse_supervisor',
         'optometrist',
+        'cardiopulmonary_technician',
+        'dental_hygienist',
       ],
       opdnursing: ['nurse_opd', 'nurse_ward', 'nurse_er_triage', 'nurse_supervisor'],
+      // The five device-heavy consoles. Every one of them is held by the same
+      // general clinical roles — the *console* is narrowed by the licence and
+      // the department, not by minting a role per specialty — plus the one
+      // sub-role whose scope genuinely differs.
+      cardio: [
+        'medical_superintendent',
+        'hod',
+        'doctor_consultant_opd',
+        'surgeon',
+        'resident_doctor',
+        'cardiopulmonary_technician',
+      ],
+      pulmo: [
+        'medical_superintendent',
+        'hod',
+        'doctor_consultant_opd',
+        'surgeon',
+        'resident_doctor',
+        'cardiopulmonary_technician',
+      ],
+      ent: [
+        'medical_superintendent',
+        'hod',
+        'doctor_consultant_opd',
+        'surgeon',
+        'resident_doctor',
+        'audiologist',
+      ],
+      dental: [
+        'medical_superintendent',
+        'hod',
+        'doctor_consultant_opd',
+        'surgeon',
+        'resident_doctor',
+        'dental_hygienist',
+      ],
+      derm: [
+        'medical_superintendent',
+        'hod',
+        'doctor_consultant_opd',
+        'surgeon',
+        'resident_doctor',
+        // The phototherapy cabin is an OPD treatment room.
+        'nurse_opd',
+      ],
     };
 
     const offenders: string[] = [];
@@ -301,6 +365,91 @@ describe('OP-010 — the procedure floor', () => {
     expect(resident?.permissions).toContain('procedure.perform');
     expect(resident?.permissions).not.toContain('procedure.sign');
     expect(resident?.permissions).not.toContain('procedure.checklist.override');
+  });
+
+  it('never lets the technician who recorded a critical ECG acknowledge it', () => {
+    // An acknowledgement is a handover to somebody who can act. A technician
+    // closing the loop on their own tracing means the loop reads as closed and
+    // nobody was told — which is exactly the failure the flag exists to catch.
+    const tech = getRoleTemplate('cardiopulmonary_technician');
+    expect(tech?.permissions).toContain('cardio.ecg.record');
+    expect(tech?.permissions).not.toContain('cardio.ecg.acknowledge_critical');
+    expect(tech?.permissions).not.toContain('cardio.ecg.interpret');
+    expect(permission('cardio.ecg.acknowledge_critical').clinicalSafetyExempt).toBe(true);
+  });
+
+  it('never lets the technician who ran a spirometry interpret it', () => {
+    const tech = getRoleTemplate('cardiopulmonary_technician');
+    expect(tech?.permissions).toContain('pulmo.pft.perform');
+    expect(tech?.permissions).not.toContain('pulmo.pft.interpret');
+    expect(tech?.permissions).not.toContain('pulmo.sleep.sign');
+    expect(tech?.permissions).not.toContain('pulmo.pap.prescribe');
+  });
+
+  it('lets the audiologist sign, because the audiogram is their profession', () => {
+    // The one console where the person at the machine signs. Not a concession:
+    // producing and interpreting the audiogram is the registered scope.
+    const audiologist = getRoleTemplate('audiologist');
+    expect(audiologist?.permissions).toContain('ent.audiology.perform');
+    expect(audiologist?.permissions).toContain('ent.audiology.sign');
+    expect(audiologist?.permissions).toContain('ent.hearing_aid.dispense');
+    // And they do not sign the surgeon's examination.
+    expect(audiologist?.permissions).not.toContain('ent.exam.sign');
+  });
+
+  it('lets the hygienist chart but never price or present a plan', () => {
+    // A treatment plan is a quotation the patient will consent to and pay for.
+    const hygienist = getRoleTemplate('dental_hygienist');
+    expect(hygienist?.permissions).toContain('dental.chart.record');
+    expect(hygienist?.permissions).toContain('dental.perio.record');
+    expect(hygienist?.permissions).not.toContain('dental.plan.create');
+    expect(hygienist?.permissions).not.toContain('dental.plan.present');
+    expect(hygienist?.permissions).not.toContain('dental.plan.supersede');
+  });
+
+  it('gives the three documented ways past a database rule a holder and a reason', () => {
+    // Each of these is the sanctioned route around a constraint that stays in
+    // the database. The point of naming them is that the exception has an owner
+    // and an audit row, rather than the rule having a hole.
+    for (const key of ['dental.plan.supersede', 'derm.phototherapy.raise_ceiling']) {
+      const def = permission(key);
+      expect(def.risk, `${key} should be high risk`).toBe('high');
+      expect(def.requiresReason, `${key} should demand a reason`).toBe(true);
+      expect(def.action, `${key} should read as an override`).toBe('override');
+    }
+  });
+
+  it('ships both documented overrides unassigned, for the admin to grant', () => {
+    // The same stance as OP-025's delegated spectacle signature: a key that
+    // exists to get past a database rule is not handed out with a job title. A
+    // hospital decides who moves a phototherapy ceiling and who re-prices a
+    // plan a patient already signed, and the grant is the decision.
+    for (const key of ['derm.phototherapy.raise_ceiling', 'dental.plan.supersede']) {
+      const holders = holdersOf(key).filter((h) => h !== 'super_admin');
+      expect(holders, `${key} should ship unassigned`).toEqual([]);
+    }
+
+    // And in particular they are nowhere near the room that would use them.
+    expect(holdersOf('derm.phototherapy.raise_ceiling')).not.toContain('nurse_opd');
+    expect(holdersOf('dental.plan.supersede')).not.toContain('dental_hygienist');
+    // The ordinary acts they gate the exception to are held normally.
+    expect(getRoleTemplate('nurse_opd')?.permissions).toContain('derm.phototherapy.deliver');
+    expect(getRoleTemplate('hod')?.permissions).toContain('dental.plan.present');
+  });
+
+  it('offers no key for typing a derived number', () => {
+    // The QTc, the FEV1/FVC ratio, the four-frequency average, the PASI and the
+    // dental chart are all computed. If any of them could be typed there would
+    // be a permission for it — the absence is the proof.
+    const forbidden = PERMISSION_CATALOGUE.filter((p) =>
+      /(qtc|ratio|pta_avg|pasi|chart)\.(set|write|type|edit)/.test(p.key),
+    );
+    expect(forbidden).toEqual([]);
+    // And the dental chart has a read key and a *log* write key, never a chart
+    // write key.
+    expect(PERMISSION_CATALOGUE.map((p) => p.key)).toContain('dental.chart.read');
+    expect(PERMISSION_CATALOGUE.map((p) => p.key)).not.toContain('dental.chart.write');
+    expect(permission('dental.chart.record').resource).toBe('dental_tooth_event');
   });
 
   it('gives the OPD nursing floor the second-person key and the giving key alike', () => {

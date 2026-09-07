@@ -9974,6 +9974,414 @@ const OP039 = group('OP-039', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-029, OP-030, OP-028, OP-026, OP-027: the device-heavy consoles
+//
+// Five specialties, and not one `*.investigation.order` key between them: an
+// ECG, a spirometry trace, an audiogram, an OPG and a dermoscopy image are all
+// ordered, attached and reviewed with the framework's `device.result.*`. What
+// each console registers is the act only it has.
+//
+// ── Where the risk actually sits ────────────────────────────────────────────
+//
+// Signing a report is `medium` in all five, because a signature is a clinical
+// opinion somebody else will act on. Three keys are higher, and they are the
+// three where the console is the last thing standing between a person and a
+// harm the database cannot express as a constraint:
+//
+//   · `cardio.ecg.acknowledge_critical` — the handover that unblocks a STEMI
+//   · `derm.phototherapy.raise_ceiling` — the deliberate act of moving the
+//     limit that §B.5.2 refuses to let a session cross
+//   · `dental.plan.supersede`           — re-presenting a quotation a patient
+//     already signed, at a different price
+//
+// Each of the three is the *documented* way past a rule, which is why it is a
+// permission rather than an absence of one: the rule stays in the database, and
+// the exception has a name, a holder and an audit row.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP029 = group('OP-029', 8, [
+  p(
+    'cardio.consult.read',
+    'cardio_consult',
+    'read',
+    'phi',
+    'low',
+    'Read a cardiology consultation: the risk scores, the function classes and the plan.',
+    { phiRead: true },
+  ),
+  p(
+    'cardio.consult.record',
+    'cardio_consult',
+    'record',
+    'phi',
+    'low',
+    'Record the cardiology consultation and its published risk instruments.',
+  ),
+  p('cardio.consult.sign', 'cardio_consult', 'sign', 'phi', 'medium', 'Sign the cardiology consultation.'),
+  p(
+    'cardio.ecg.record',
+    'cardio_ecg',
+    'record',
+    'phi',
+    'low',
+    'File a tracing and its intervals. The corrected QT is derived from them, never typed.',
+  ),
+  p(
+    'cardio.ecg.read',
+    'cardio_ecg',
+    'read',
+    'phi',
+    'low',
+    'View tracings and their machine and human interpretations side by side.',
+    { phiRead: true },
+  ),
+  p(
+    'cardio.ecg.interpret',
+    'cardio_ecg',
+    'sign',
+    'phi',
+    'medium',
+    'Read and sign a tracing. A preliminary read is a technician’s; a final read is the record.',
+  ),
+  p(
+    'cardio.ecg.acknowledge_critical',
+    'cardio_ecg',
+    'update',
+    'phi',
+    'high',
+    'Acknowledge a critical tracing, naming who was told. Until this happens the tracing cannot be signed off, because one that sat in a queue is indistinguishable afterwards from one that was seen.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'cardio.echo.report',
+    'cardio_echo',
+    'record',
+    'phi',
+    'low',
+    'Record echocardiogram measurements, wall motion and conclusions.',
+  ),
+  p('cardio.echo.sign', 'cardio_echo', 'sign', 'phi', 'medium', 'Sign an echocardiogram report.'),
+  p(
+    'cardio.stress.conduct',
+    'cardio_stress_test',
+    'record',
+    'phi',
+    'medium',
+    'Conduct and record a stress test. The supervising physician is named on the record because an unsupervised maximal exercise in suspected coronary disease is not a test.',
+  ),
+  p(
+    'cardio.anticoag.manage',
+    'cardio_anticoag',
+    'record',
+    'phi',
+    'medium',
+    'Enrol a patient on anticoagulation, and record INR visits with the daily dose grid that must sum to the weekly dose.',
+  ),
+  p(
+    'cardio.report.read',
+    'cardio_report',
+    'list',
+    'phi',
+    'low',
+    'Door-to-balloon times, critical-ECG turnaround, time in therapeutic range and echo throughput.',
+  ),
+]);
+
+const OP030 = group('OP-030', 8, [
+  p(
+    'pulmo.consult.read',
+    'pulmo_consult',
+    'read',
+    'phi',
+    'low',
+    'Read a respiratory consultation: exposure history, the symptom scores and the stage.',
+    { phiRead: true },
+  ),
+  p(
+    'pulmo.consult.record',
+    'pulmo_consult',
+    'record',
+    'phi',
+    'low',
+    'Record the respiratory consultation, its scores and its GOLD or GINA stage.',
+  ),
+  p('pulmo.consult.sign', 'pulmo_consult', 'sign', 'phi', 'medium', 'Sign the respiratory consultation.'),
+  p(
+    'pulmo.pft.perform',
+    'pulmo_pft',
+    'record',
+    'phi',
+    'low',
+    'Perform a pulmonary function study and enter the manoeuvres and the ATS/ERS quality grade. The ratio and the reversibility are derived from the values.',
+  ),
+  p(
+    'pulmo.pft.interpret',
+    'pulmo_pft',
+    'sign',
+    'phi',
+    'medium',
+    'Interpret and sign a pulmonary function study. A study graded F cannot be signed at all.',
+  ),
+  p(
+    'pulmo.sleep.score',
+    'pulmo_sleep_study',
+    'record',
+    'phi',
+    'low',
+    'Score a sleep study. The severity band is derived from the apnoea-hypopnoea index.',
+  ),
+  p(
+    'pulmo.sleep.sign',
+    'pulmo_sleep_study',
+    'sign',
+    'phi',
+    'medium',
+    'Sign a sleep study report. An insurer, a supplier and a licensing authority all read it.',
+  ),
+  p(
+    'pulmo.pap.prescribe',
+    'pulmo_pap_rx',
+    'record',
+    'phi',
+    'medium',
+    'Prescribe positive airway pressure. The pressures a mode needs, in the order it needs them.',
+  ),
+  p(
+    'pulmo.pap.review_compliance',
+    'pulmo_pap_compliance',
+    'review',
+    'phi',
+    'low',
+    'Review what the machine’s card says the patient actually did.',
+  ),
+  p(
+    'pulmo.report.read',
+    'pulmo_report',
+    'list',
+    'phi',
+    'low',
+    'Spirometry throughput, sleep-study turnaround, PAP adherence and exacerbation rates.',
+  ),
+]);
+
+const OP028 = group('OP-028', 8, [
+  p(
+    'ent.exam.read',
+    'ent_exam',
+    'read',
+    'phi',
+    'low',
+    'Read the ENT examination: ear, nose, throat and neck, each of them sided.',
+    { phiRead: true },
+  ),
+  p('ent.exam.record', 'ent_exam', 'record', 'phi', 'low', 'Record the ENT examination and its drawings.'),
+  p('ent.exam.sign', 'ent_exam', 'sign', 'phi', 'medium', 'Sign the ENT examination.'),
+  p(
+    'ent.audiology.perform',
+    'ent_audiology_test',
+    'record',
+    'phi',
+    'low',
+    'Run a test in the booth and enter thresholds. The four-frequency average, the degree and the type are derived from them.',
+  ),
+  p(
+    'ent.audiology.sign',
+    'ent_audiology_test',
+    'sign',
+    'phi',
+    'medium',
+    'Sign an audiology report. A test with no calibration check recorded cannot be signed.',
+  ),
+  p(
+    'ent.audiology.read',
+    'ent_audiology_test',
+    'read',
+    'phi',
+    'low',
+    'View audiograms, tympanograms and the derived summary per ear.',
+    { phiRead: true },
+  ),
+  p(
+    'ent.hearing_aid.dispense',
+    'ent_hearing_aid',
+    'record',
+    'phi',
+    'medium',
+    'Fit, trial and dispense a hearing aid against its serial number.',
+  ),
+  p(
+    'ent.report.read',
+    'ent_report',
+    'list',
+    'phi',
+    'low',
+    'Booth utilisation, newborn screening yield, hearing-aid dispensing and referral outcomes.',
+  ),
+]);
+
+const OP026 = group('OP-026', 8, [
+  p(
+    'dental.chart.read',
+    'dental_chart',
+    'read',
+    'phi',
+    'low',
+    'Read the odontogram and the tooth history behind it.',
+    { phiRead: true },
+  ),
+  p(
+    'dental.chart.record',
+    'dental_tooth_event',
+    'record',
+    'phi',
+    'low',
+    'Chart a tooth: a condition found, work planned, work done. The chart itself is rebuilt from these, never edited.',
+  ),
+  p(
+    'dental.perio.record',
+    'dental_perio_chart',
+    'record',
+    'phi',
+    'low',
+    'Record pocket depths, recession, bleeding and mobility.',
+  ),
+  p(
+    'dental.plan.create',
+    'dental_treatment_plan',
+    'create',
+    'financial',
+    'low',
+    'Build a treatment plan and price it.',
+  ),
+  p(
+    'dental.plan.present',
+    'dental_treatment_plan',
+    'update',
+    'financial',
+    'medium',
+    'Present a plan to the patient and record how they agreed to it.',
+  ),
+  p(
+    'dental.plan.supersede',
+    'dental_treatment_plan',
+    'override',
+    'financial',
+    'high',
+    'Supersede an accepted plan with a re-priced version. Accepted prices are immutable, so this is the only route to changing one — and it re-presents the plan to the patient rather than editing what they signed.',
+    { requiresReason: true },
+  ),
+  p(
+    'dental.sitting.record',
+    'dental_sitting',
+    'record',
+    'phi',
+    'low',
+    'Record a sitting: what was done, the anaesthetic, the materials and the next visit.',
+  ),
+  p(
+    'dental.lab_order.manage',
+    'dental_lab_order',
+    'record',
+    'operational',
+    'low',
+    'Send work to the dental laboratory and receive it back.',
+  ),
+  p(
+    'dental.report.read',
+    'dental_report',
+    'list',
+    'phi',
+    'low',
+    'Plan acceptance rates, chair utilisation, remake rates and DMFT by cohort.',
+  ),
+]);
+
+const OP027 = group('OP-027', 8, [
+  p(
+    'derm.lesion.read',
+    'derm_lesion',
+    'read',
+    'phi',
+    'low',
+    'Read the lesion map and the serial observations on each lesion.',
+    { phiRead: true },
+  ),
+  p(
+    'derm.lesion.record',
+    'derm_lesion',
+    'record',
+    'phi',
+    'low',
+    'Map a lesion and record how it looks today, so that "it has changed" becomes a query rather than a memory.',
+  ),
+  p(
+    'derm.score.record',
+    'derm_score',
+    'record',
+    'phi',
+    'low',
+    'Record a severity score’s components. PASI, EASI, SCORAD and BSA are computed from them.',
+  ),
+  p(
+    'derm.photo.capture',
+    'derm_photo',
+    'record',
+    'phi',
+    'medium',
+    'Capture clinical photographs against a lesion and a consent tier.',
+  ),
+  p(
+    'derm.photo.view_sensitive',
+    'derm_photo',
+    'read',
+    'phi',
+    'high',
+    'View photographs of a site marked sensitive. A dermatology archive is the most casually browsed collection of images in a hospital, so this is a key somebody holds rather than a checkbox somebody clears.',
+    { phiRead: true, requiresReason: true },
+  ),
+  p(
+    'derm.biopsy.manage',
+    'derm_biopsy',
+    'record',
+    'phi',
+    'medium',
+    'Send a biopsy, receive its report, and close it against a follow-up. A malignant report cannot be closed without one.',
+  ),
+  p(
+    'derm.phototherapy.prescribe',
+    'derm_phototherapy_course',
+    'create',
+    'phi',
+    'medium',
+    'Prescribe a course of light therapy: the starting dose, the increment, the ceiling and the shielding.',
+  ),
+  p(
+    'derm.phototherapy.deliver',
+    'derm_phototherapy_session',
+    'record',
+    'phi',
+    'low',
+    'Deliver and record a session. The database refuses a dose above the ceiling, or an escalation after erythema.',
+  ),
+  p(
+    'derm.phototherapy.raise_ceiling',
+    'derm_phototherapy_course',
+    'override',
+    'phi',
+    'high',
+    'Raise a course’s maximum dose. The ceiling is what stops a burn, so moving it is a prescriber’s deliberate act with a reason attached, not a technician’s adjustment.',
+    { requiresReason: true },
+  ),
+  p(
+    'derm.report.read',
+    'derm_report',
+    'list',
+    'phi',
+    'low',
+    'Biopsy turnaround, malignancy yield, phototherapy cumulative doses and score trajectories.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -10069,6 +10477,11 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP025,
   ...OP010,
   ...OP039,
+  ...OP029,
+  ...OP030,
+  ...OP028,
+  ...OP026,
+  ...OP027,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

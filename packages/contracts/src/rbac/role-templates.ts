@@ -60,6 +60,9 @@ export type WorkspaceKey =
   // Phase 8. A console's home is its own worklist, so the specialty sub-roles
   // land on the lane they run rather than on a generic clinical dashboard.
   | 'ophtha-worklist'
+  | 'cardiopulmonary-lab'
+  | 'audiology-booth'
+  | 'dental-chair'
   | 'counselling-sessions'
   | 'mrd-queue'
   | 'stores'
@@ -789,6 +792,121 @@ const OPHTHA_DOCTOR = [
  * signed by nobody senior is a document a referring optician relies on.
  */
 const OPHTHA_RESIDENT = [...OPHTHA_OPTOMETRY, 'ophtha.exam.record', 'ophtha.surgery.plan'] as const;
+
+/**
+ * OP-029, OP-030, OP-028, OP-026, OP-027 — the five device-heavy consoles.
+ *
+ * Each splits the same way the eye clinic does, and for the same reason: the
+ * split is at the signature, not at the measurement. A technician runs the
+ * machine and enters everything; the report is a clinical opinion somebody else
+ * will act on, so it is signed by whoever the hospital stands behind.
+ *
+ * The audiologist is the exception, and deliberately so — audiology is a
+ * registered profession whose whole scope is producing and interpreting the
+ * audiogram, so the signature belongs to them rather than being lent to them.
+ */
+const CARDIO_TECHNICIAN = ['cardio.ecg.record', 'cardio.ecg.read', 'cardio.stress.conduct'] as const;
+
+const CARDIO_DOCTOR = [
+  ...CARDIO_TECHNICIAN,
+  'cardio.consult.read',
+  'cardio.consult.record',
+  'cardio.consult.sign',
+  'cardio.ecg.interpret',
+  'cardio.ecg.acknowledge_critical',
+  'cardio.echo.report',
+  'cardio.echo.sign',
+  'cardio.anticoag.manage',
+  'cardio.report.read',
+] as const;
+
+const PULMO_TECHNICIAN = ['pulmo.pft.perform', 'pulmo.sleep.score'] as const;
+
+const PULMO_DOCTOR = [
+  ...PULMO_TECHNICIAN,
+  'pulmo.consult.read',
+  'pulmo.consult.record',
+  'pulmo.consult.sign',
+  'pulmo.pft.interpret',
+  'pulmo.sleep.sign',
+  'pulmo.pap.prescribe',
+  'pulmo.pap.review_compliance',
+  'pulmo.report.read',
+] as const;
+
+const ENT_AUDIOLOGY = [
+  'ent.audiology.perform',
+  'ent.audiology.read',
+  'ent.audiology.sign',
+  'ent.hearing_aid.dispense',
+] as const;
+
+const ENT_DOCTOR = [
+  'ent.exam.read',
+  'ent.exam.record',
+  'ent.exam.sign',
+  'ent.audiology.read',
+  'ent.report.read',
+] as const;
+
+const DENTAL_HYGIENE = ['dental.chart.read', 'dental.chart.record', 'dental.perio.record'] as const;
+
+const DENTAL_DOCTOR = [
+  ...DENTAL_HYGIENE,
+  'dental.plan.create',
+  'dental.plan.present',
+  'dental.sitting.record',
+  'dental.lab_order.manage',
+  'dental.report.read',
+] as const;
+
+const DERM_DELIVERY = ['derm.lesion.read', 'derm.phototherapy.deliver'] as const;
+
+const DERM_DOCTOR = [
+  'derm.lesion.read',
+  'derm.lesion.record',
+  'derm.score.record',
+  'derm.photo.capture',
+  'derm.biopsy.manage',
+  'derm.phototherapy.prescribe',
+  'derm.phototherapy.deliver',
+  'derm.report.read',
+] as const;
+
+/**
+ * Every console a hospital's general clinical roles can be pointed at.
+ *
+ * The keys are held broadly and the *console* is narrowed by two things that
+ * are not permissions: the licence (`module.<key>.enabled`) and the department
+ * the encounter belongs to. A cardiologist and a dermatologist hold the same
+ * template and see different screens, because a hospital that has to mint a
+ * role per specialty ends up with sixty roles and grants them by guesswork.
+ */
+const SPECIALTY_CONSOLE_DOCTOR = [
+  ...CARDIO_DOCTOR,
+  ...PULMO_DOCTOR,
+  ...ENT_DOCTOR,
+  ...DENTAL_DOCTOR,
+  ...DERM_DOCTOR,
+] as const;
+
+/** A resident records and plans; the signature and the override keys are not theirs. */
+const SPECIALTY_CONSOLE_RESIDENT = [
+  ...CARDIO_TECHNICIAN,
+  'cardio.consult.read',
+  'cardio.consult.record',
+  ...PULMO_TECHNICIAN,
+  'pulmo.consult.read',
+  'pulmo.consult.record',
+  'ent.exam.read',
+  'ent.exam.record',
+  'ent.audiology.read',
+  ...DENTAL_HYGIENE,
+  'dental.sitting.record',
+  'derm.lesion.read',
+  'derm.lesion.record',
+  'derm.score.record',
+] as const;
 
 /**
  * OP-010 — the procedure floor.
@@ -2501,6 +2619,7 @@ const templates: readonly RoleTemplate[] = [
     permissions: [
       ...PROCEDURE_OPERATOR,
       ...OPHTHA_DOCTOR,
+      ...SPECIALTY_CONSOLE_DOCTOR,
       ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
       ...MORTUARY_CLINICAL,
@@ -2564,6 +2683,7 @@ const templates: readonly RoleTemplate[] = [
     permissions: [
       ...PROCEDURE_OPERATOR,
       ...OPHTHA_DOCTOR,
+      ...SPECIALTY_CONSOLE_DOCTOR,
       ...CONSOLE_CLINICIAN,
       ...MAR_PRESCRIBER,
       ...WARD_FLOOR,
@@ -2737,6 +2857,7 @@ const templates: readonly RoleTemplate[] = [
     permissions: [
       ...PROCEDURE_OPERATOR,
       ...OPHTHA_DOCTOR,
+      ...SPECIALTY_CONSOLE_DOCTOR,
       ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
       ...MORTUARY_CLINICAL,
@@ -2948,6 +3069,7 @@ const templates: readonly RoleTemplate[] = [
       'procedure.order.create',
       'procedure.perform',
       ...OPHTHA_RESIDENT,
+      ...SPECIALTY_CONSOLE_RESIDENT,
       ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CLINICAL,
       'mortuary.case.read',
@@ -3016,6 +3138,10 @@ const templates: readonly RoleTemplate[] = [
     permissions: [
       ...OPD_NURSING_FLOOR,
       ...OPHTHA_OPTOMETRY,
+      // The phototherapy cabin is an OPD treatment room, and the person under
+      // the lamps is looked after by the nurse who runs it. Delivering a
+      // session is theirs; moving the ceiling that stops a burn is not.
+      ...DERM_DELIVERY,
       ...CONSOLE_TECHNICIAN,
       'nursing.ward.read',
       'mar.read',
@@ -4853,6 +4979,95 @@ const templates: readonly RoleTemplate[] = [
     sensitiveGrant: false,
     requiresCoSign: false,
   },
+  /**
+   * The cardio-pulmonary laboratory is one room and one set of staff in every
+   * hospital that has one: the person who hooks up an ECG also runs the
+   * treadmill and the spirometer. Splitting it into a cardiac technician and a
+   * pulmonary technician would be inventing an org chart nobody has.
+   *
+   * They record everything and interpret nothing. The one key that matters here
+   * is the one they *do not* hold: `cardio.ecg.acknowledge_critical`, because
+   * an acknowledgement is a handover to somebody who can act, and a technician
+   * acknowledging their own critical tracing closes the loop without anybody
+   * having been told.
+   */
+  {
+    key: 'cardiopulmonary_technician',
+    docsRow: 66,
+    name: 'Cardio-Pulmonary Lab Technician',
+    description:
+      'Runs ECGs, treadmills, spirometry and sleep studies. Records the numbers and the effort grade; the interpretation and the critical acknowledgement belong to a doctor.',
+    category: 'diagnostics',
+    homeWorkspace: 'cardiopulmonary-lab',
+    permissions: [
+      ...CARDIO_TECHNICIAN,
+      ...PULMO_TECHNICIAN,
+      ...CONSOLE_TECHNICIAN,
+      ...BASE_CLINICAL,
+      ...LABEL_PRINTER,
+      'procedure.order.read',
+      'procedure.timeout.confirm',
+    ],
+    abacDefaults: { ownDepartmentOnly: true },
+    mfaMandatory: false,
+    sensitiveGrant: false,
+    requiresCoSign: false,
+  },
+  /**
+   * Audiology is the one console where the technician signs, and that is not a
+   * concession — it is the profession. An audiologist's registered scope is
+   * producing and interpreting the audiogram, fitting the aid and verifying it
+   * in the ear. The ENT surgeon reads the report; they do not write it.
+   */
+  {
+    key: 'audiologist',
+    docsRow: 67,
+    name: 'Audiologist / Speech-Language Pathologist',
+    description:
+      'Runs the booth, signs the audiogram, and fits and verifies hearing aids. The four-frequency average and the degree of loss are derived from the thresholds they enter.',
+    category: 'therapy',
+    homeWorkspace: 'audiology-booth',
+    permissions: [
+      ...ENT_AUDIOLOGY,
+      'ent.exam.read',
+      'ent.report.read',
+      ...CONSOLE_TECHNICIAN,
+      ...BASE_CLINICAL,
+      ...LABEL_PRINTER,
+    ],
+    abacDefaults: { ownDepartmentOnly: true },
+    mfaMandatory: false,
+    sensitiveGrant: false,
+    requiresCoSign: false,
+  },
+  /**
+   * A registered dental hygienist charts, scales and records periodontal
+   * findings. They do not price work and they do not present a plan, because a
+   * treatment plan is a quotation the patient will be asked to consent to and
+   * pay for.
+   */
+  {
+    key: 'dental_hygienist',
+    docsRow: 68,
+    name: 'Dental Hygienist',
+    description:
+      'Charts the mouth, records the periodontal examination and carries out hygiene procedures. Cannot price or present a treatment plan.',
+    category: 'therapy',
+    homeWorkspace: 'dental-chair',
+    permissions: [
+      ...DENTAL_HYGIENE,
+      'dental.sitting.record',
+      ...CONSOLE_TECHNICIAN,
+      ...BASE_CLINICAL,
+      ...LABEL_PRINTER,
+      'procedure.order.read',
+      'procedure.timeout.confirm',
+    ],
+    abacDefaults: { ownDepartmentOnly: true },
+    mfaMandatory: false,
+    sensitiveGrant: false,
+    requiresCoSign: false,
+  },
   {
     key: 'device',
     docsRow: 64,
@@ -4898,9 +5113,9 @@ const rowNumbers = new Set(templates.map((t) => t.docsRow));
 if (rowNumbers.size !== templates.length) {
   throw new Error('Two role templates claim the same docs/05 row number.');
 }
-if (templates.length !== 65) {
+if (templates.length !== 68) {
   throw new Error(
-    `docs/05 defines 65 system role templates; the registry has ${templates.length}. ` +
+    `docs/05 defines 68 system role templates; the registry has ${templates.length}. ` +
       `Add the missing template or update docs/05 — the two must agree.`,
   );
 }

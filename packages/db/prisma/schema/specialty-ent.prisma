@@ -1,0 +1,313 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-028 — the ENT and audiology console
+//
+// An audiogram is a graph of thirty numbers, and every one of them is a
+// judgement made in a soundproof booth by a technician turning a dial. The
+// graph is then read by somebody who was not there. That gap is where the
+// console's rules live.
+//
+// ── Bone conduction cannot be better than air by a physiological impossibility
+//
+// Sound reaching the cochlea through the skull cannot need *more* energy than
+// sound reaching it through the ear canal: the bone threshold is at or below
+// the air threshold. A "negative air-bone gap" beyond a few decibels of
+// measurement noise is not a finding, it is a masking error or a mislabelled
+// transducer — and it is the single most common audiometry mistake. Caught at
+// the point of entry it is a repeated frequency; caught later it is a patient
+// told they have conductive loss they do not have.
+//
+// ── The four-frequency average is derived ───────────────────────────────────
+//
+// PTA at 500, 1000, 2000 and 4000 Hz, and the degree of loss from it, are
+// arithmetic. They decide disability certification, hearing-aid funding and
+// school placement, so they are computed from the thresholds in a trigger and
+// there is no box to type them into.
+//
+// ── An uncalibrated booth does not produce a signable test ──────────────────
+//
+// Daily biological calibration is the whole basis of an audiometric number. A
+// test run on an uncalibrated system is not a worse test, it is not a test.
+//
+// ── One threshold per ear, per conduction, per frequency ────────────────────
+//
+// A unique index, because two entries for 1 kHz left-air is a graph that draws
+// itself differently depending on row order.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AudioTestType {
+  /// Pure-tone audiometry: the graph.
+  pta
+  speech
+  /// Tympanometry: middle-ear pressure and compliance.
+  tymp
+  /// Otoacoustic emissions.
+  oae
+  /// Auditory brainstem response.
+  bera
+  assr
+  freefield
+  /// Visual reinforcement audiometry, for infants.
+  vra
+  /// Play audiometry, for toddlers.
+  play
+  /// Real-ear measurement, for verifying a fitted aid.
+  rem
+
+  @@schema("specialty")
+}
+
+enum AudioTestStatus {
+  ordered
+  in_progress
+  signed
+  reviewed
+  /// Could not test. A real outcome, not a failure to record one.
+  cnt
+
+  @@schema("specialty")
+}
+
+enum Conduction {
+  /// Through the ear canal, with headphones or inserts.
+  ac
+  /// Through the skull, with a bone vibrator.
+  bc
+
+  @@schema("specialty")
+}
+
+enum HlDegree {
+  normal
+  slight
+  mild
+  moderate
+  mod_severe
+  severe
+  profound
+
+  @@schema("specialty")
+}
+
+enum HlType {
+  normal
+  conductive
+  snhl
+  mixed
+
+  @@schema("specialty")
+}
+
+enum TympType {
+  A
+  As
+  Ad
+  B
+  C
+
+  @@schema("specialty")
+}
+
+enum HearingAidStatus {
+  trial
+  dispensed
+  returned
+  serviced
+
+  @@schema("specialty")
+}
+
+/// The ENT examination: four regions, each of them sided.
+model EntExam {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId   String @map("patient_id") @db.Uuid
+  encounterId String @unique @map("encounter_id") @db.Uuid
+
+  /// `{right:{eac, tm:{perf, site, size, retraction, chole, grommet},
+  /// tuningForks, hbGrade}, left:{...}}`. Sided at the top level, because an
+  /// ear finding without an ear is not a finding.
+  ear    Json @default("{}")
+  nose   Json @default("{}")
+  throat Json @default("{}")
+  neck   Json @default("{}")
+
+  /// SVG overlays on the standard diagrams — a drum drawing is worth more than
+  /// a paragraph, and it is what the next clinician actually looks at.
+  drawings Json @default("{}")
+
+  stopBang Int? @map("stop_bang")
+  epworth  Int?
+
+  formResponseId String? @map("form_response_id") @db.Uuid
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+  version  Int       @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@map("ent_exams")
+  @@schema("specialty")
+}
+
+/// One session in the booth.
+model AudiologyTest {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  deviceOrderId String? @map("device_order_id") @db.Uuid
+
+  testType AudioTestType @map("test_type")
+  source   String        @default("manual") @db.VarChar(12)
+  boothId  String?       @map("booth_id") @db.VarChar(40)
+
+  audiologistId String   @map("audiologist_id") @db.Uuid
+  performedAt   DateTime @map("performed_at") @db.Timestamptz(6)
+
+  /// The day's biological check. A trigger refuses `signed` without it.
+  calibrationOk Boolean @default(false) @map("calibration_ok")
+
+  status AudioTestStatus @default(ordered)
+
+  pdfKey          String? @map("pdf_key") @db.VarChar(500)
+  chargeIntentId  String? @map("charge_intent_id") @db.Uuid
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  thresholds AudiogramThreshold[]
+  results    AudiologyResult[]
+
+  @@index([hospitalId, patientId, performedAt(sort: Desc)])
+  @@index([hospitalId, branchId, status, performedAt(sort: Desc)])
+  @@map("ent_audiology_tests")
+  @@schema("specialty")
+}
+
+/// One point on the graph.
+model AudiogramThreshold {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  testId     String @map("test_id") @db.Uuid
+
+  /// `left` or `right`. Never `bilateral`: an audiogram has two curves.
+  ear        Laterality
+  conduction Conduction
+  /// 125, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 6000, 8000.
+  freqHz     Int @map("freq_hz")
+
+  /// −10 to 120 dB HL. Below −10 is not a hearing threshold, above 120 is past
+  /// the output of the audiometer — both are transcription errors.
+  thresholdDb Int @map("threshold_db")
+
+  /// Whether the other ear was masked. An unmasked bone threshold cannot be
+  /// attributed to an ear at all, so it is recorded and shown as provisional.
+  masked Boolean @default(false)
+  /// The patient did not respond at the limit of the machine. Stored beside
+  /// the threshold rather than as a magic value, because "no response at 100"
+  /// and "threshold 100" are different facts.
+  noResponse Boolean @default(false) @map("no_response")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  test AudiologyTest @relation(fields: [testId], references: [id], onDelete: Cascade)
+
+  @@unique([testId, ear, conduction, freqHz], map: "uq_audiogram_point")
+  @@index([hospitalId, testId])
+  @@map("ent_audiogram_thresholds")
+  @@schema("specialty")
+}
+
+/// What the session concluded, per ear.
+model AudiologyResult {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  testId     String @map("test_id") @db.Uuid
+
+  ear Laterality
+
+  /// Derived by a trigger from the 500/1000/2000/4000 air thresholds. Never
+  /// typed: it is the number a disability certificate is issued on.
+  ptaAvg Decimal? @map("pta_avg") @db.Decimal(5, 1)
+  /// Derived from `pta_avg` against the standard bands.
+  degree HlDegree?
+  /// Derived from the air-bone gap: conductive, sensorineural or mixed.
+  type HlType?
+
+  configuration String? @db.VarChar(40)
+
+  srt    Int?
+  sdsPct Int? @map("sds_pct")
+  mcl    Int?
+  ucl    Int?
+
+  tympType    TympType? @map("tymp_type")
+  ecvMl       Decimal?  @map("ecv_ml") @db.Decimal(4, 2)
+  peakDapa    Int?      @map("peak_dapa")
+  complianceMl Decimal? @map("compliance_ml") @db.Decimal(4, 2)
+
+  reflexes Json @default("{}")
+  oae      Json @default("{}")
+  abr      Json @default("{}")
+
+  interpretation String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  test AudiologyTest @relation(fields: [testId], references: [id], onDelete: Cascade)
+
+  @@unique([testId, ear], map: "uq_audiology_result_ear")
+  @@index([hospitalId, testId])
+  @@map("ent_audiology_results")
+  @@schema("specialty")
+}
+
+/// A device fitted to one ear.
+model HearingAid {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  ear   Laterality
+  model String     @db.VarChar(120)
+  /// Unique across the whole database, not per hospital: a serial number
+  /// identifies a physical object, and the same object cannot be dispensed by
+  /// two branches. The same argument as TR-003's implant UDI.
+  serial String @unique @db.VarChar(80)
+
+  itemId String? @map("item_id") @db.Uuid
+
+  status HearingAidStatus @default(trial)
+
+  /// `{gain, rem, aidedThresholds}` — what the aid actually delivers in this
+  /// ear, measured, not what the fitting software predicted.
+  fitting Json @default("{}")
+
+  dispensedAt   DateTime? @map("dispensed_at") @db.Timestamptz(6)
+  warrantyUntil DateTime? @map("warranty_until") @db.Date
+  billId        String?   @map("bill_id") @db.Uuid
+  serviceLog    Json      @default("[]") @map("service_log")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, branchId, status])
+  @@map("ent_hearing_aids")
+  @@schema("specialty")
+}

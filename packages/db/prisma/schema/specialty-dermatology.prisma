@@ -1,0 +1,320 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-027 — the dermatology console
+//
+// Dermatology is measured in photographs and scores, and both of them are
+// evidence: a lesion that grew 3 mm in six months is a melanoma referral, and a
+// PASI that fell from 18 to 4 is what keeps a biologic funded. The console's
+// job is to make sure the second photograph is comparable to the first and the
+// second score was computed the same way as the first.
+//
+// ── A lesion is a thing with a life, not a note in a visit ──────────────────
+//
+// `derm_lesions` is the identity — numbered per patient, on a body site — and
+// `derm_lesion_observations` are the visits it appeared in. That is what makes
+// "this one has changed" a query instead of a memory. A serial photograph
+// series belongs to the lesion, so the comparison view is a join, not a search
+// through a folder.
+//
+// ── A score is derived from its components ─────────────────────────────────
+//
+// PASI, EASI and SCORAD all have published formulas over sub-scores that are
+// themselves recorded. A trigger computes the total from the components, so a
+// score cannot drift toward whatever number keeps therapy approved — in either
+// direction. Where a score has no formula the console can compute (a
+// questionnaire total, a physician's global assessment), the value stands
+// alone and the trigger leaves it.
+//
+// ── Phototherapy dose is the burn ──────────────────────────────────────────
+//
+// Narrowband UVB works by delivering slightly more energy each session until it
+// stops working. The failure mode is a burn, and it is caused by exactly two
+// things: a dose above what the course allows, and an increase after erythema.
+// Both are refused by the database.
+//
+//   · a session's dose cannot exceed the course's `max_dose_mj`
+//   · after a session graded erythema 2 or worse, the next session's dose
+//     cannot be higher than that session's
+//
+// A machine that will happily deliver 3000 mJ to a skin type II patient is why
+// this rule is not a warning banner.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum LesionStatus {
+  active
+  resolved
+  excised
+  /// Being watched. Photographed each visit, measured each visit.
+  monitor
+
+  @@schema("specialty")
+}
+
+enum DermScoreType {
+  /// Psoriasis Area and Severity Index. Derived.
+  pasi
+  /// Eczema Area and Severity Index. Derived.
+  easi
+  /// SCORing Atopic Dermatitis. Derived.
+  scorad
+  /// Body Surface Area, per cent. Derived from the region blob.
+  bsa
+  /// Dermatology Life Quality Index — a questionnaire total.
+  dlqi
+  iga_acne
+  /// Severity of ALopecia Tool.
+  salt
+  /// Vitiligo Area Scoring Index.
+  vasi
+  /// Urticaria Activity Score over seven days.
+  uas7
+  hurley
+  ihs4
+  leprosy_grade
+  other
+
+  @@schema("specialty")
+}
+
+enum BiopsyStatus {
+  sent
+  received
+  reported
+  reviewed
+  action_planned
+
+  @@schema("specialty")
+}
+
+enum PhototherapyModality {
+  /// Narrowband UVB. The workhorse.
+  nbuvb
+  /// Psoralen plus UVA — the psoralen makes the skin far more sensitive.
+  puva
+  excimer
+  uva1
+
+  @@schema("specialty")
+}
+
+/// A lesion, followed across visits.
+model DermLesion {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  /// Numbered within the patient, so "lesion 3" means one thing in a note, a
+  /// photograph filename and a histology request.
+  lesionNo Int @map("lesion_no")
+
+  bodySiteSnomed String?    @map("body_site_snomed") @db.VarChar(40)
+  /// The key of the region on the body map the console draws.
+  regionKey      String     @map("region_key") @db.VarChar(40)
+  side           Laterality @default(not_applicable)
+
+  morphology  String  @db.VarChar(40)
+  sizeMm      Decimal? @map("size_mm") @db.Decimal(5, 1)
+  colour      String? @db.VarChar(40)
+  descriptors Json    @default("{}")
+
+  firstSeenEncounterId String? @map("first_seen_encounter_id") @db.Uuid
+
+  status LesionStatus @default(active)
+
+  /// Genital, breast, facial. Drives a blurred thumbnail and a tighter access
+  /// rule on the photographs — a dermatology archive is the most casually
+  /// browsed collection of images in a hospital.
+  sensitive Boolean @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  observations DermLesionObservation[]
+  biopsies     DermBiopsy[]
+
+  @@unique([hospitalId, patientId, lesionNo], map: "uq_derm_lesion_no")
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, branchId, status])
+  @@map("derm_lesions")
+  @@schema("specialty")
+}
+
+/// What the lesion looked like on one day.
+model DermLesionObservation {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  lesionId   String  @map("lesion_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  /// `{sizeMm, borders, colours, dermoscopy, abcde}`.
+  findings Json @default("{}")
+  itchNrs  Int? @map("itch_nrs")
+
+  /// OP-022 attachment ids. Serial photographs of this lesion, in order.
+  photos String[] @default([]) @db.Uuid
+
+  observedAt DateTime @default(now()) @map("observed_at") @db.Timestamptz(6)
+  observedBy String   @map("observed_by") @db.Uuid
+
+  lesion DermLesion @relation(fields: [lesionId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, lesionId, observedAt(sort: Desc)])
+  @@map("derm_lesion_observations")
+  @@schema("specialty")
+}
+
+/// A severity score, and the components it was computed from.
+model DermScore {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  scoreType DermScoreType @map("score_type")
+
+  /// For PASI: `{head:{area,erythema,induration,desquamation}, trunk:{...},
+  /// upperLimbs:{...}, lowerLimbs:{...}}`. For a questionnaire: the answers.
+  components Json @default("{}")
+
+  /// Derived from `components` for the formula-bearing scores. Typed only for
+  /// those that have no formula, and a trigger decides which is which.
+  value Decimal? @db.Decimal(6, 2)
+
+  formResponseId String? @map("form_response_id") @db.Uuid
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String   @map("recorded_by") @db.Uuid
+
+  @@index([hospitalId, patientId, scoreType, recordedAt(sort: Desc)])
+  @@index([hospitalId, branchId, scoreType])
+  @@map("derm_scores")
+  @@schema("specialty")
+}
+
+/// A piece of skin sent to the laboratory.
+model DermBiopsy {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  /// The OP-010 procedure it was taken during.
+  procedureId String? @map("procedure_id") @db.Uuid
+  lesionId    String  @map("lesion_id") @db.Uuid
+
+  /// The OP-004 accession. One specimen, one number, one report.
+  specimenNo String? @map("specimen_no") @db.VarChar(40)
+  labOrderId String? @map("lab_order_id") @db.Uuid
+
+  type   String   @db.VarChar(16)
+  sizeMm Decimal? @map("size_mm") @db.Decimal(5, 1)
+  /// Direct immunofluorescence needs Michel's medium, not formalin. Getting
+  /// this wrong destroys the specimen and it cannot be retaken from the same
+  /// lesion.
+  dif Boolean @default(false)
+
+  clinicalDx String? @map("clinical_dx") @db.VarChar(240)
+
+  status BiopsyStatus @default(sent)
+
+  resultSummary  String?  @map("result_summary") @db.Text
+  /// A malignant report cannot be closed without a follow-up task. A biopsy
+  /// result nobody acted on is the commonest dermatology negligence claim.
+  malignancyFlag Boolean  @default(false) @map("malignancy_flag")
+  margins        String?  @db.VarChar(80)
+  followupTaskId String?  @map("followup_task_id") @db.Uuid
+
+  reviewedBy String?   @map("reviewed_by") @db.Uuid
+  reviewedAt DateTime? @map("reviewed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  lesion DermLesion @relation(fields: [lesionId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, branchId, status])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, malignancyFlag, followupTaskId])
+  @@map("derm_biopsies")
+  @@schema("specialty")
+}
+
+/// A course of light therapy: the ceiling, the step, and the shielding.
+model PhototherapyCourse {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  modality PhototherapyModality
+  /// Fitzpatrick I–VI. It sets the starting dose, and getting it wrong by two
+  /// steps is a burn on the first session.
+  skinType Int @map("skin_type")
+
+  /// Minimal erythema dose, mJ/cm², when it was measured.
+  medMj Decimal? @map("med_mj") @db.Decimal(8, 2)
+
+  startDoseMj  Decimal @map("start_dose_mj") @db.Decimal(8, 2)
+  /// How much more energy each session, as a percentage of the last.
+  incrementPct Decimal @map("increment_pct") @db.Decimal(5, 2)
+  /// The ceiling. A trigger refuses any session above it.
+  maxDoseMj    Decimal @map("max_dose_mj") @db.Decimal(8, 2)
+
+  freqPerWeek Int @map("freq_per_week")
+
+  /// Eyes and genitals. Not optional, and recorded per course because the
+  /// cataract and the skin cancer arrive twenty years later.
+  shielding Json @default("{}")
+  /// For PUVA: agent, dose, and the time before exposure.
+  psoralen  Json @default("{}")
+
+  deviceId String? @map("device_id") @db.Uuid
+
+  /// Sum of the sessions' doses. Derived; it is the number that decides when
+  /// a patient has had a lifetime's worth of UV.
+  cumulativeDoseMj Decimal @default(0) @map("cumulative_dose_mj") @db.Decimal(12, 2)
+  sessionsCount    Int     @default(0) @map("sessions_count")
+
+  status String @default("active") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sessions PhototherapySession[]
+
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, branchId, status])
+  @@map("derm_phototherapy_courses")
+  @@schema("specialty")
+}
+
+/// One time under the lamps.
+model PhototherapySession {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  courseId   String @map("course_id") @db.Uuid
+
+  seq    Int
+  doseMj Decimal @map("dose_mj") @db.Decimal(8, 2)
+
+  /// 0 none, 1 faint, 2 well-defined, 3 painful, 4 blistering. A grade of 2 or
+  /// more stops the escalation: the next session cannot be a higher dose.
+  erythemaGrade Int     @default(0) @map("erythema_grade")
+  adverse       Json    @default("{}")
+
+  technicianId   String  @map("technician_id") @db.Uuid
+  chargeIntentId String? @map("charge_intent_id") @db.Uuid
+
+  administeredAt DateTime @default(now()) @map("administered_at") @db.Timestamptz(6)
+
+  course PhototherapyCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, seq], map: "uq_phototherapy_session_seq")
+  @@index([hospitalId, courseId, administeredAt(sort: Desc)])
+  @@map("derm_phototherapy_sessions")
+  @@schema("specialty")
+}

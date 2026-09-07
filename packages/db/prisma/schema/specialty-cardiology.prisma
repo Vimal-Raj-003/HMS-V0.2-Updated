@@ -1,0 +1,353 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-029 — the cardiology console
+//
+// The first of the five device-heavy consoles, and the one that decides whether
+// the framework's single device path survives contact with a specialty that
+// generates a result every few minutes. It brings typed tables for what an ECG
+// and an echo actually say; it brings no worklist, no upload path and no print
+// pipeline, because an ECG is a `specialty.device_orders` row like every other
+// console's scan.
+//
+// ── A critical ECG is not final until somebody has been told ────────────────
+//
+// The framework already refuses to mark a result reviewed by itself. Cardiology
+// needs the stronger form: an ECG whose machine or reader flagged a
+// life-threatening pattern — a STEMI, a complete block, a VT — cannot reach
+// `final` until an acknowledgement names who was told and when. A tracing that
+// sat in a queue is the classic door-to-balloon failure, and it always looks,
+// afterwards, exactly like a tracing that was seen.
+//
+// ── QTc is derived, never typed ─────────────────────────────────────────────
+//
+// The same argument as logMAR in OP-025, with a sharper edge: QTc decides
+// whether a drug is safe to give. Bazett from the QT and the rate, in a
+// trigger, so the number the pharmacist screens against and the number in the
+// note cannot disagree. A hand-typed QTc is a number nobody can reproduce.
+//
+// ── A warfarin dose grid adds up to its weekly dose ─────────────────────────
+//
+// Seven daily doses and a weekly total are the same fact written twice, and
+// warfarin is the drug where the two drifting apart puts a patient in hospital.
+// The database refuses a grid that does not sum, so the nurse who reads the
+// grid and the doctor who wrote the total are reading one number.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Where a tracing came from, and how far along its reading is.
+enum EcgStatus {
+  /// Recorded. Nobody has read it.
+  acquired
+  /// A first read, by a technician or the machine. Not the record.
+  preliminary
+  /// Read and signed by a cardiologist. The record.
+  final
+
+  @@schema("specialty")
+}
+
+enum EcgSource {
+  /// Pushed by the machine through an EN-042 adapter.
+  device
+  /// A PDF or an image somebody attached.
+  upload
+  /// Intervals read off paper and typed in. Still a tracing.
+  manual
+
+  @@schema("specialty")
+}
+
+enum EchoType {
+  tte
+  tee
+  stress
+  fetal
+  paeds
+
+  @@schema("specialty")
+}
+
+enum StressProtocol {
+  bruce
+  mod_bruce
+  naughton
+  /// Dobutamine or adenosine. No treadmill, so no METs and no stage table.
+  pharmacological
+
+  @@schema("specialty")
+}
+
+enum StressResult {
+  positive
+  negative
+  equivocal
+  inconclusive
+
+  @@schema("specialty")
+}
+
+enum AnticoagDrug {
+  warfarin
+  acenocoumarol
+  /// Apixaban, rivaroxaban, dabigatran, edoxaban. No INR, so no grid.
+  doac
+
+  @@schema("specialty")
+}
+
+/// The cardiology consultation: risk scores, function, and the plan.
+model CardioConsult {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId String @map("patient_id") @db.Uuid
+  /// One cardiology consult per encounter. A second opinion is a second
+  /// encounter, because it carries its own consent and its own bill.
+  encounterId String @unique @map("encounter_id") @db.Uuid
+
+  /// New York Heart Association class I–IV: how far the patient can walk.
+  nyha Int?
+  /// Canadian Cardiovascular Society angina class I–IV.
+  ccs Int?
+
+  /// `{cha2ds2vasc, hasbled, ascvdPct, grace, timi, heart}`. Every one of them
+  /// is a published instrument with published inputs; the components live here
+  /// beside the total so a score can be re-derived when the instrument is
+  /// revised, rather than being a number with no working shown.
+  scores Json @default("{}")
+
+  cvHistory Json @default("{}") @map("cv_history")
+  exam      Json @default("{}")
+  plan      Json @default("{}")
+
+  problemCodes String[] @default([]) @map("problem_codes")
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+  version  Int       @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@map("cardio_consults")
+  @@schema("specialty")
+}
+
+/// A twelve-lead tracing and what it says.
+model EcgRecord {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  /// The `specialty.device_orders` row this tracing answers, when it was
+  /// ordered. Null for a tracing taken at the bedside without an order —
+  /// which happens, and is not a reason to refuse to file it.
+  deviceOrderId String? @map("device_order_id") @db.Uuid
+
+  source     EcgSource
+  acquiredAt DateTime  @map("acquired_at") @db.Timestamptz(6)
+  techId     String?   @map("tech_id") @db.Uuid
+
+  /// Beats per minute. Needed for the QTc, so a tracing with intervals but no
+  /// rate gets no corrected interval rather than a wrong one.
+  hr    Int?
+  prMs  Int? @map("pr_ms")
+  qrsMs Int? @map("qrs_ms")
+  qtMs  Int? @map("qt_ms")
+  /// Bazett, derived by a trigger from `qt_ms` and `hr`. Never typed.
+  qtcMs Int? @map("qtc_ms")
+  axisDeg Int? @map("axis_deg")
+
+  /// What the machine said, verbatim. Kept separate from the human read
+  /// because the two disagreeing is the interesting case.
+  machineInterp String[] @default([]) @map("machine_interp")
+  readInterp    String[] @default([]) @map("read_interp")
+  readBy        String?  @map("read_by") @db.Uuid
+  readAt        DateTime? @map("read_at") @db.Timestamptz(6)
+
+  leadQuality String? @map("lead_quality") @db.VarChar(24)
+  waveformKey String? @map("waveform_key") @db.VarChar(500)
+  pdfKey      String? @map("pdf_key") @db.VarChar(500)
+
+  /// A life-threatening pattern. Set by the reader or the adapter; it is what
+  /// the acknowledgement gate below turns on.
+  critical Boolean @default(false)
+  /// Who was told, and when. A trigger refuses `final` on a critical tracing
+  /// without both.
+  criticalAckBy String?   @map("critical_ack_by") @db.Uuid
+  criticalAckAt DateTime? @map("critical_ack_at") @db.Timestamptz(6)
+  criticalAckTo String?   @map("critical_ack_to") @db.VarChar(160)
+
+  status EcgStatus @default(acquired)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, patientId, acquiredAt(sort: Desc)])
+  @@index([hospitalId, branchId, status, acquiredAt(sort: Desc)])
+  @@index([hospitalId, critical, criticalAckAt])
+  @@map("cardio_ecg_records")
+  @@schema("specialty")
+}
+
+/// An echocardiogram: chambers, function, valves.
+model EchoReport {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  deviceOrderId String? @map("device_order_id") @db.Uuid
+  studyUid      String? @map("study_uid") @db.VarChar(120)
+
+  type EchoType
+
+  /// Ejection fraction, per cent. Typed as a column rather than buried in the
+  /// measurements blob because every guideline in cardiology is a threshold on
+  /// it — 40, 50 — and a threshold you cannot index is a threshold nobody
+  /// reports on.
+  efPct Decimal? @map("ef_pct") @db.Decimal(4, 1)
+
+  /// `{lvidd, lvids, ivs, pw, la, ao, eA, eEprime, tapse, pasp, gls,
+  /// valves:{mv,av,tv,pv:{gradient, area, regurgGrade}}}`.
+  measurements Json @default("{}")
+  /// The seventeen-segment model.
+  wallMotion Json @default("{}") @map("wall_motion")
+
+  conclusions String? @db.Text
+  keyImages   String[] @default([]) @map("key_images") @db.Uuid
+
+  techId     String?   @map("tech_id") @db.Uuid
+  reportedBy String?   @map("reported_by") @db.Uuid
+  signedBy   String?   @map("signed_by") @db.Uuid
+  signedAt   DateTime? @map("signed_at") @db.Timestamptz(6)
+  pdfKey     String?   @map("pdf_key") @db.VarChar(500)
+  version    Int       @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, branchId, signedAt])
+  @@map("cardio_echo_reports")
+  @@schema("specialty")
+}
+
+/// A treadmill or pharmacological stress test.
+model StressTest {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  protocol StressProtocol
+
+  /// `[{stage, min, speed, grade, hr, bp, mets, symptoms, stChanges}]`.
+  stages Json @default("[]")
+
+  targetHr  Int? @map("target_hr")
+  maxHrPct  Int? @map("max_hr_pct")
+  /// Duke treadmill score: exercise minutes − 5×ST deviation − 4×angina index.
+  dukeScore Decimal? @map("duke_score") @db.Decimal(5, 1)
+
+  /// Why it stopped. A test that ended is a test that ended for a reason, and
+  /// "target heart rate reached" and "chest pain with 3 mm depression" are
+  /// different tests. A trigger requires it once a result is recorded.
+  terminationReason String? @map("termination_reason") @db.VarChar(200)
+
+  result StressResult?
+
+  /// The doctor who was physically present. A stress test without one is not a
+  /// stress test, it is an unsupervised maximal exercise in a patient with
+  /// suspected coronary disease.
+  physicianId String @map("physician_id") @db.Uuid
+  consentId   String? @map("consent_id") @db.Uuid
+  checklist   Json    @default("{}")
+
+  reportKey String?   @map("report_key") @db.VarChar(500)
+  signedAt  DateTime? @map("signed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, branchId, result])
+  @@map("cardio_stress_tests")
+  @@schema("specialty")
+}
+
+/// A patient on an anticoagulant, and the range they are meant to sit in.
+model AnticoagEnrolment {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  drug       AnticoagDrug
+  indication String       @db.VarChar(160)
+
+  /// The therapeutic window. Null for a DOAC, which is not monitored by INR —
+  /// and a trigger refuses a window on one, because a target INR beside a
+  /// drug that has no target is how a clinic starts chasing a number that
+  /// means nothing.
+  targetInrLow  Decimal? @map("target_inr_low") @db.Decimal(3, 1)
+  targetInrHigh Decimal? @map("target_inr_high") @db.Decimal(3, 1)
+
+  startDate DateTime  @map("start_date") @db.Date
+  endDate   DateTime? @map("end_date") @db.Date
+  status    String    @default("active") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  inrVisits InrVisit[]
+
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, branchId, status])
+  @@map("cardio_anticoag_enrolments")
+  @@schema("specialty")
+}
+
+/// One INR check and the dose that came out of it.
+model InrVisit {
+  id          String @id @db.Uuid
+  hospitalId  String @map("hospital_id") @db.Uuid
+  enrolmentId String @map("enrolment_id") @db.Uuid
+
+  measuredAt DateTime @map("measured_at") @db.Timestamptz(6)
+  inr        Decimal  @db.Decimal(4, 2)
+  /// Point-of-care meter or the laboratory. They do not always agree, and a
+  /// dose change on a POC reading that the lab later contradicts is worth
+  /// being able to find.
+  source String @db.VarChar(12)
+
+  /// Milligrams per week.
+  weeklyDoseMg Decimal @map("weekly_dose_mg") @db.Decimal(6, 2)
+  /// Seven daily doses, Monday first: `[2.5, 2.5, 5, 2.5, 2.5, 5, 2.5]`. A
+  /// trigger requires exactly seven entries summing to `weekly_dose_mg`.
+  doseGrid Json @map("dose_grid")
+
+  nextAt DateTime? @map("next_at") @db.Date
+  /// Bleeding, thrombosis, missed doses, interacting drugs started.
+  events Json @default("[]")
+  /// Time in therapeutic range, rolling. Derived by the service from the
+  /// enrolment's window and this visit's history — reported, not typed.
+  ttrPct Decimal? @map("ttr_pct") @db.Decimal(5, 2)
+
+  recordedBy String   @map("recorded_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  enrolment AnticoagEnrolment @relation(fields: [enrolmentId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, enrolmentId, measuredAt(sort: Desc)])
+  @@map("cardio_inr_visits")
+  @@schema("specialty")
+}

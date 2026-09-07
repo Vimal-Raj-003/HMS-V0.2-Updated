@@ -291,9 +291,14 @@ const DEPARTMENTS: readonly (readonly [string, string, string])[] = [
   ['ANAES', 'Anaesthesiology', 'clinical'],
   ['OBGYN', 'Obstetrics & Gynaecology', 'clinical'],
   ['PAED', 'Paediatrics', 'clinical'],
-  // Phase 8. A specialty console maps to a department, so the first console
-  // needs one to map to.
+  // Phase 8. A specialty console maps to a department, so each console needs
+  // one to map to.
   ['OPHTH', 'Ophthalmology', 'clinical'],
+  ['CARDIO', 'Cardiology', 'clinical'],
+  ['PULMO', 'Pulmonology & Sleep Medicine', 'clinical'],
+  ['ENT', 'ENT & Audiology', 'clinical'],
+  ['DENTAL', 'Dentistry', 'clinical'],
+  ['DERM', 'Dermatology', 'clinical'],
   ['LAB', 'Laboratory Medicine', 'diagnostic'],
   ['RAD', 'Radiology & Imaging', 'diagnostic'],
   ['PHARM', 'Pharmacy', 'support'],

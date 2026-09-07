@@ -10577,6 +10577,114 @@ const ophthalmologyEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — OP-029, OP-030, OP-028, OP-026, OP-027: the device-heavy consoles.
+ *
+ * Five specialties, and only six events between them. That is deliberate: an
+ * event exists here when a fact has to reach somebody who does not have the
+ * console open, and every one of these six is a fact that travels.
+ *
+ * The three that carry a clinical hazard are the ones where a screen is not a
+ * way of telling anybody: a critical ECG needs a person, not a banner; a
+ * malignant biopsy needs a recall, not a worklist; a phototherapy burn needs
+ * the prescriber, who is not in the room. The other three are the money and the
+ * downstream paperwork — a signed report, an accepted quotation, a dispensed
+ * device — which several modules key on.
+ */
+const deviceConsoleEvents: readonly EventDefinition[] = [
+  ev(
+    'cardio.ecg.critical',
+    'cardio_ecg',
+    'OP-029',
+    'A tracing was flagged critical. Leaves the console because the tracing cannot be signed off until somebody is told, and the person who has to be told is not looking at this screen.',
+    z.object({
+      ecgId: uuid,
+      patientId: uuid,
+      encounterId: uuid.nullable(),
+      findings: z.array(z.string()),
+      qtcMs: z.number().int().nullable(),
+      acquiredAt: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'pulmo.pft.signed',
+    'pulmo_pft',
+    'OP-030',
+    'A pulmonary function study was interpreted and signed, with its derived ratio and reversibility. The respiratory clinic, the pre-anaesthetic assessment and the disability desk all read it.',
+    z.object({
+      studyId: uuid,
+      patientId: uuid,
+      qualityGrade: z.string(),
+      preRatio: z.string().nullable(),
+      reversible: z.boolean().nullable(),
+      signedBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'ent.audiology.signed',
+    'ent_audiology_test',
+    'OP-028',
+    'An audiology report was signed, carrying the derived four-frequency average and the degree of loss per ear. A disability certificate, a hearing-aid subsidy and a school placement are issued on it.',
+    z.object({
+      testId: uuid,
+      patientId: uuid,
+      testType: z.string(),
+      results: z.array(
+        z.object({ ear: z.string(), ptaAvg: z.string().nullable(), degree: z.string().nullable() }),
+      ),
+      signedBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'dental.plan.accepted',
+    'dental_treatment_plan',
+    'OP-026',
+    'A patient accepted a treatment plan, and how they said yes. The estimate, the instalment schedule and the chair bookings all key on this — and the prices are immutable from here.',
+    z.object({
+      planId: uuid,
+      planNo: z.string(),
+      patientId: uuid,
+      acceptedTotal: z.string(),
+      acceptedVia: z.string(),
+      itemCount: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'derm.biopsy.malignant',
+    'derm_biopsy',
+    'OP-027',
+    'A biopsy reported a malignancy. Leaves the console because the recall, not the worklist, is what stops this becoming the report nobody acted on.',
+    z.object({
+      biopsyId: uuid,
+      patientId: uuid,
+      lesionId: uuid,
+      specimenNo: z.string().nullable(),
+      margins: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'derm.phototherapy.erythema',
+    'derm_phototherapy_session',
+    'OP-027',
+    'A session caused grade 2 or worse erythema. The database has already stopped the escalation; this tells the prescriber, who is not in the treatment room.',
+    z.object({
+      sessionId: uuid,
+      courseId: uuid,
+      patientId: uuid,
+      seq: z.number().int(),
+      doseMj: z.string(),
+      erythemaGrade: z.number().int(),
+      cumulativeDoseMj: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+];
+
+/**
  * Phase 8 — OP-010 and OP-039, the procedure spine.
  *
  * `procedure.started` carries what was checked before it began, because the
@@ -10773,6 +10881,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   // Phase 8
   ...specialtyEvents,
   ...ophthalmologyEvents,
+  ...deviceConsoleEvents,
   ...procedureEvents,
 ]);
 

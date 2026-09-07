@@ -95,10 +95,19 @@
 | 63  | Vendor                                    | Vendor portal                    | POs, invoices, consignment                                                |
 | 64  | Kiosk / TV / Device                       | n/a                              | display/read-only scoped tokens                                           |
 | 65  | Optometrist                               | Eye clinic refraction lane       | acuity, refraction, pressure; signs a spectacle Rx only where delegated   |
+| 66  | Cardio-Pulmonary Lab Technician           | Cardio-pulmonary lab             | ECG, treadmill, spirometry, sleep studies; records, never interprets      |
+| 67  | Audiologist / Speech-Language Pathologist | Audiology booth                  | runs and **signs** the audiogram; fits and verifies hearing aids          |
+| 68  | Dental Hygienist                          | Dental chair                     | charts the mouth and the periodontium; cannot price or present a plan     |
 
-> Row 65 is the first of the **specialty sub-roles** OP-025 §0.7 asks each console to add. They are ordinary
+> Rows 65–68 are the **specialty sub-roles** OP-025 §0.7 asks each console to add. They are ordinary
 > templates, not a new mechanism: a console that needs a chair-side role adds one row here and one template in
 > `packages/contracts/src/rbac/role-templates.ts`, and the registry test refuses to let the two drift apart.
+>
+> There are four of them rather than one per console, because a role is worth minting only where the **scope of
+> the signature** differs. The five device-heavy consoles are held by the ordinary clinical templates and
+> narrowed by the licence and the department; a hospital that has to mint a role per specialty ends up with sixty
+> roles it grants by guesswork. Row 67 is the one place a technician signs — producing and interpreting the
+> audiogram is the audiologist's registered scope, not a delegation from the ENT surgeon.
 
 ## Permission catalogue conventions
 

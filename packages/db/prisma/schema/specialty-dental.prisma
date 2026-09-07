@@ -1,0 +1,298 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-026 — the dental console
+//
+// Dentistry is the specialty where the chart *is* the anatomy. Thirty-two
+// teeth, five surfaces each, and every clinical act names one of them. Get the
+// tooth wrong and you have extracted the wrong tooth — the dental equivalent of
+// wrong-site surgery, and the commonest wrong-site event in medicine.
+//
+// ── The chart is a log, and the snapshot is derived from it ─────────────────
+//
+// `dental_tooth_events` is append-only: every condition, plan and completion is
+// a row with a time. `dental_charts.state` is a materialised snapshot rebuilt
+// by a trigger from that log, never written by hand. A chart that can be edited
+// directly is a chart where "when did this filling appear?" has no answer, and
+// that question is asked every time a claim is queried.
+//
+// ── A tooth number is a real tooth ─────────────────────────────────────────
+//
+// FDI two-digit notation: quadrant then position. 11–18, 21–28, 31–38, 41–48
+// for adult teeth; 51–55, 61–65, 71–75, 81–85 for primary. 19, 29 and 50 are
+// not teeth. A CHECK, because a typo in a quadrant digit moves the work to the
+// other side of the mouth and reads as perfectly plausible.
+//
+// ── An extracted tooth receives no new work ─────────────────────────────────
+//
+// The strongest rule in this console. Once the log says a tooth is extracted or
+// congenitally absent, a trigger refuses to plan or complete anything on it.
+// Planning a crown on a missing tooth is a consent failure, a billing failure
+// and — when the patient arrives for the appointment — the moment somebody
+// looks for a tooth that is not there.
+//
+// ── An accepted plan's price does not move ──────────────────────────────────
+//
+// A treatment plan is a quotation the patient consented to, often in
+// instalments. Once accepted, an item's price is immutable: a change is a new
+// version of the plan, presented again. Silent re-pricing after acceptance is
+// the single largest source of dental complaints.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Dentition {
+  permanent
+  primary
+  mixed
+
+  @@schema("specialty")
+}
+
+/// Where a tooth event sits in its life.
+enum ToothEventStatus {
+  /// Found on examination. Already there when the patient walked in.
+  existing
+  /// Proposed. Not done, not billed, not consented.
+  planned
+  /// Carried out. The chart changes here.
+  done
+  /// Proposed and then not done. Kept, because why it was dropped matters.
+  cancelled
+
+  @@schema("specialty")
+}
+
+enum PlanStatus {
+  draft
+  presented
+  accepted
+  partial
+  declined
+  completed
+  cancelled
+
+  @@schema("specialty")
+}
+
+enum PlanItemStatus {
+  proposed
+  accepted
+  declined
+  in_progress
+  completed
+  cancelled
+
+  @@schema("specialty")
+}
+
+/// The materialised chart: what every tooth looks like right now.
+///
+/// Rebuilt by a trigger from `dental_tooth_events`. There is no endpoint that
+/// writes `state`, and `hms_app` cannot update the column — the only way to
+/// change the chart is to record what happened.
+model DentalChart {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId String @map("patient_id") @db.Uuid
+
+  dentition Dentition @default(permanent)
+
+  /// `{"11": {"conditions": [...], "surfaces": {"O": "amalgam"}}, ...}` keyed
+  /// by FDI number. Derived. Never typed.
+  state Json @default("{}")
+
+  /// Decayed, missing, filled — the epidemiological index. Derived with the
+  /// state, so a school screening report and the chart cannot disagree.
+  dmft Int?
+
+  ohis        Decimal? @db.Decimal(4, 2)
+  occlusion   Json     @default("{}")
+  softTissue  Json     @default("{}") @map("soft_tissue")
+
+  /// When the log last changed this snapshot.
+  rebuiltAt DateTime @default(now()) @map("rebuilt_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, patientId], map: "uq_dental_chart_patient")
+  @@index([hospitalId, branchId, rebuiltAt(sort: Desc)])
+  @@map("dental_charts")
+  @@schema("specialty")
+}
+
+/// Append-only: everything that has ever been said about a tooth.
+model ToothEvent {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  /// FDI two-digit notation. A CHECK restricts it to teeth that exist.
+  toothFdi Int @map("tooth_fdi")
+
+  /// Mesial, Occlusal, Distal, Buccal, Lingual, Incisal, Root. Empty for a
+  /// whole-tooth act like an extraction. A trigger refuses an occlusal surface
+  /// on an incisor, which has an incisal edge instead.
+  surfaces String[] @default([])
+
+  /// `caries`, `filling_amalgam`, `crown_pfm`, `rct`, `extraction`,
+  /// `implant`, `missing`, `impacted`, `mobility_2`. Free text against a
+  /// hospital-configured code list rather than an enum, because dental coding
+  /// varies by country and by insurer.
+  conditionCode String @map("condition_code") @db.VarChar(40)
+
+  status ToothEventStatus
+
+  planItemId  String? @map("plan_item_id") @db.Uuid
+  procedureId String? @map("procedure_id") @db.Uuid
+
+  notes String? @db.Text
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String   @map("recorded_by") @db.Uuid
+
+  @@index([hospitalId, patientId, toothFdi, recordedAt(sort: Desc)])
+  @@index([hospitalId, branchId, recordedAt(sort: Desc)])
+  @@index([hospitalId, planItemId])
+  @@map("dental_tooth_events")
+  @@schema("specialty")
+}
+
+/// A quotation the patient is asked to consent to.
+model DentalTreatmentPlan {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  /// From the `DENT_PLAN` numbering series.
+  planNo String @map("plan_no") @db.VarChar(32)
+
+  status PlanStatus @default(draft)
+
+  estimateId String? @map("estimate_id") @db.Uuid
+  consentId  String? @map("consent_id") @db.Uuid
+
+  total         Decimal @default(0) @db.Decimal(14, 2)
+  acceptedTotal Decimal @default(0) @map("accepted_total") @db.Decimal(14, 2)
+
+  instalmentSchedule Json @default("[]") @map("instalment_schedule")
+
+  presentedBy String?   @map("presented_by") @db.Uuid
+  presentedAt DateTime? @map("presented_at") @db.Timestamptz(6)
+  acceptedAt  DateTime? @map("accepted_at") @db.Timestamptz(6)
+  /// How the patient said yes: an e-signature, the portal, or verbally in
+  /// front of a witness. A plan cannot be accepted without one of the three.
+  acceptedVia String? @map("accepted_via") @db.VarChar(20)
+
+  version Int @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  items DentalPlanItem[]
+
+  @@unique([hospitalId, planNo], map: "uq_dental_plan_no")
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, branchId, status, createdAt(sort: Desc)])
+  @@map("dental_treatment_plans")
+  @@schema("specialty")
+}
+
+/// One line of the quotation: a procedure on named teeth, at a price.
+model DentalPlanItem {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  planId     String @map("plan_id") @db.Uuid
+
+  seq           Int
+  procedureCode String @map("procedure_code") @db.VarChar(40)
+  description   String @db.VarChar(240)
+
+  /// The teeth this line covers. Every entry is checked against the FDI set
+  /// and against the chart, so a line cannot quote work on a tooth the log
+  /// says is gone.
+  teeth    Int[]  @default([])
+  surfaces Json   @default("{}")
+
+  phase    Int    @default(1)
+  priority String @default("phase1") @db.VarChar(12)
+
+  quantity        Int @default(1)
+  sittingsPlanned Int @default(1) @map("sittings_planned")
+  sittingsDone    Int @default(0) @map("sittings_done")
+
+  /// Immutable once the plan is accepted. A trigger enforces it.
+  unitPrice    Decimal @map("unit_price") @db.Decimal(14, 2)
+  discount     Decimal @default(0) @db.Decimal(14, 2)
+  tax          Decimal @default(0) @db.Decimal(14, 2)
+  payerShare   Decimal @default(0) @map("payer_share") @db.Decimal(14, 2)
+  patientShare Decimal @default(0) @map("patient_share") @db.Decimal(14, 2)
+
+  status PlanItemStatus @default(proposed)
+
+  /// Lines in the same group are alternatives — a bridge or an implant, not
+  /// both. The estimate counts one of them.
+  altGroup String? @map("alt_group") @db.VarChar(24)
+
+  dentistId   String?   @map("dentist_id") @db.Uuid
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plan DentalTreatmentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, seq], map: "uq_dental_plan_item_seq")
+  @@index([hospitalId, planId, status])
+  @@map("dental_plan_items")
+  @@schema("specialty")
+}
+
+/// One appointment in the chair, and what was done in it.
+model DentalSitting {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  planId     String? @map("plan_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  /// The OP-010 procedure record, which carries the consent, the time-out and
+  /// the recovery. A dental sitting does not re-implement any of them.
+  procedureId String? @map("procedure_id") @db.Uuid
+
+  /// `[{planItemId, step, donePct}]`.
+  items Json @default("[]")
+
+  /// Local anaesthetic: agent, cartridges, vasoconstrictor. The number of
+  /// cartridges matters — the maximum safe dose is weight-based and the
+  /// overdoses happen in children.
+  la Json @default("{}")
+
+  /// `[{itemId, batch, qty}]` — consumed from NC-006 stock.
+  materials Json @default("[]")
+
+  implantUdi      String? @map("implant_udi") @db.VarChar(80)
+  rctDetail       Json    @default("{}") @map("rct_detail")
+  extractionDetail Json   @default("{}") @map("extraction_detail")
+  orthoDetail     Json    @default("{}") @map("ortho_detail")
+
+  photos        Json @default("[]")
+  nextVisitDays Int? @map("next_visit_days")
+
+  performedAt DateTime @default(now()) @map("performed_at") @db.Timestamptz(6)
+  performedBy String   @map("performed_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, patientId, performedAt(sort: Desc)])
+  @@index([hospitalId, branchId, performedAt(sort: Desc)])
+  @@index([hospitalId, planId])
+  @@map("dental_sittings")
+  @@schema("specialty")
+}

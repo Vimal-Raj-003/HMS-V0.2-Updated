@@ -323,6 +323,26 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'The ophthalmology console is not included in your plan.',
     upgradeCta: 'Ask about Specialty Consoles',
   }),
+  ep('module.cardiology.enabled', 'feature', 'route', 'OP-029 The cardiology console.', {
+    message: 'The cardiology console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
+  ep('module.pulmonology.enabled', 'feature', 'route', 'OP-030 The pulmonology console.', {
+    message: 'The pulmonology console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
+  ep('module.ent.enabled', 'feature', 'route', 'OP-028 The ENT and audiology console.', {
+    message: 'The ENT and audiology console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
+  ep('module.dental.enabled', 'feature', 'route', 'OP-026 The dental console.', {
+    message: 'The dental console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
+  ep('module.dermatology.enabled', 'feature', 'route', 'OP-027 The dermatology console.', {
+    message: 'The dermatology console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
   ep(
     'module.procedures.enabled',
     'feature',

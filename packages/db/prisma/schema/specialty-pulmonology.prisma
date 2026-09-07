@@ -1,0 +1,330 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-030 — the pulmonology console
+//
+// Spirometry is the specialty where the *derived* numbers are the diagnosis.
+// FEV1/FVC below 0.70 is obstruction; a 12 % and 200 mL improvement after a
+// bronchodilator is asthma rather than COPD; an AHI of 31 is severe apnoea and
+// funds a CPAP machine. Every one of those is arithmetic on numbers the device
+// already produced, and every one of them is typed into a box somewhere in the
+// world today.
+//
+// ── The ratio and the reversibility are derived, never typed ────────────────
+//
+// A trigger computes FEV1/FVC and the post-bronchodilator change from the
+// values themselves. Not because clinicians cannot divide, but because a report
+// that says "no significant reversibility" over numbers that show 340 mL and
+// 15 % is a diagnosis of COPD in a patient with asthma, and it is invisible
+// afterwards: the wrong conclusion and the right conclusion look identical on
+// paper. Removing the box removes the failure.
+//
+// ── An unacceptable study is not signed ─────────────────────────────────────
+//
+// ATS/ERS grade the effort A to F. An F is not a bad result, it is not a
+// result: the patient coughed, or stopped early, or the seal leaked. Signing
+// one puts a number into a trend that will be compared against real ones for
+// years. The database refuses it; the technician repeats the test.
+//
+// ── Apnoea severity is derived from the AHI ─────────────────────────────────
+//
+// The bands are fixed and published — 5, 15, 30 — and the severity is what the
+// insurer, the device supplier and the driving licence authority read. It is
+// computed from the index, so nobody can round a 14.6 into "moderate" to get a
+// machine funded, and nobody can round a 31 into "moderate" to avoid a
+// conversation.
+//
+// ── A bilevel prescription has two pressures, and they are ordered ──────────
+//
+// IPAP below EPAP is a machine that cannot deliver a breath. CPAP with a range
+// is a mode confusion. The shapes are different per mode, so the check is per
+// mode, in the database, before the order reaches the supplier.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PftStatus {
+  ordered
+  performed
+  interpreted
+  reviewed
+
+  @@schema("specialty")
+}
+
+enum SleepStudyType {
+  /// Full attended polysomnography in a laboratory bed.
+  psg
+  /// Home sleep apnoea test, unattended.
+  hst
+  /// A titration night: the pressure is found, not the diagnosis.
+  titration
+  /// Diagnose in the first half of the night, titrate in the second.
+  split
+
+  @@schema("specialty")
+}
+
+enum SleepStudyStatus {
+  scheduled
+  in_progress
+  scored
+  reported
+  no_show
+  cancelled
+
+  @@schema("specialty")
+}
+
+enum OsaSeverity {
+  none
+  mild
+  moderate
+  severe
+
+  @@schema("specialty")
+}
+
+enum PapMode {
+  /// One pressure, all night.
+  cpap
+  /// A range the machine moves within.
+  apap
+  /// Two pressures: one to breathe in against, one to breathe out against.
+  bipap
+  /// Adaptive servo-ventilation.
+  asv
+
+  @@schema("specialty")
+}
+
+/// The respiratory consultation: exposure, scores, stage.
+model PulmoConsult {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId   String @map("patient_id") @db.Uuid
+  encounterId String @unique @map("encounter_id") @db.Uuid
+
+  /// `{status, packYears, quitDate}`. Pack-years is the single most useful
+  /// number in the chart and the one most often absent.
+  smoking Json @default("{}")
+  /// Biomass, occupational dust, birds, mould, asbestos.
+  exposures Json @default("[]")
+
+  /// `{mmrc, cat, act, acq, epworth, stopBang}`.
+  scores Json @default("{}")
+
+  /// GOLD A–E for COPD; GINA step 1–5 for asthma. Stored as text because the
+  /// classifications are revised and a stale enum is worse than a stale label.
+  goldGroup String? @map("gold_group") @db.VarChar(8)
+  ginaStep  Int?    @map("gina_step")
+
+  dxCodes String[] @default([]) @map("dx_codes")
+  plan    Json     @default("{}")
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+  version  Int       @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, branchId, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@map("pulmo_consults")
+  @@schema("specialty")
+}
+
+/// A pulmonary function study. Spirometry, and whatever else was run with it.
+model PftStudy {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  deviceOrderId String? @map("device_order_id") @db.Uuid
+
+  /// `spiro`, `bd`, `dlco`, `volumes`, `feno`, `sixmwt`, `mip_mep`.
+  tests  String[] @default([])
+  source String   @default("manual") @db.VarChar(12)
+
+  performedAt DateTime @map("performed_at") @db.Timestamptz(6)
+  techId      String?  @map("tech_id") @db.Uuid
+
+  /// Age, sex, height, weight, ethnicity, haemoglobin. Predicted values are
+  /// meaningless without them, and height is the one that gets guessed.
+  demographics Json @default("{}")
+
+  /// ATS/ERS effort grade A–F. A trigger refuses to let an `F` be signed.
+  qualityGrade String? @map("quality_grade") @db.Char(1)
+
+  // ── Pre-bronchodilator, the numbers the device produced ──────────────────
+  preFvc  Decimal? @map("pre_fvc") @db.Decimal(5, 2)
+  preFev1 Decimal? @map("pre_fev1") @db.Decimal(5, 2)
+  /// Derived by a trigger from `pre_fev1 / pre_fvc`. Never typed.
+  preRatio Decimal? @map("pre_ratio") @db.Decimal(4, 3)
+  prePef   Decimal? @map("pre_pef") @db.Decimal(5, 2)
+
+  // ── Post-bronchodilator ──────────────────────────────────────────────────
+  postFvc  Decimal? @map("post_fvc") @db.Decimal(5, 2)
+  postFev1 Decimal? @map("post_fev1") @db.Decimal(5, 2)
+  /// Derived, as above.
+  postRatio Decimal? @map("post_ratio") @db.Decimal(4, 3)
+
+  /// Derived: per-cent change in FEV1, absolute change in millilitres, and
+  /// whether both ATS/ERS thresholds were met. Not a field anyone can set.
+  revFev1Pct Decimal? @map("rev_fev1_pct") @db.Decimal(5, 1)
+  revFev1Ml  Int?     @map("rev_fev1_ml")
+  reversible Boolean? @map("reversible")
+
+  /// Predicted values, lower limit of normal and z-scores from the reference
+  /// equation in use. Kept as a blob because the equation set is configurable
+  /// and each brings its own keys.
+  predicted Json @default("{}")
+
+  dlco    Json @default("{}")
+  volumes Json @default("{}")
+  fenoPpb Int? @map("feno_ppb")
+  sixmwt  Json @default("{}")
+
+  /// What the pattern is, before a human reads it. Advisory, and labelled so
+  /// on screen, because an automatic interpretation that looks like a signature
+  /// is the whole problem this console is trying not to create.
+  interpretationAuto String? @map("interpretation_auto") @db.Text
+  interpretation     String? @db.Text
+
+  curvesKey String? @map("curves_key") @db.VarChar(500)
+  pdfKey    String? @map("pdf_key") @db.VarChar(500)
+
+  status   PftStatus @default(ordered)
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, patientId, performedAt(sort: Desc)])
+  @@index([hospitalId, branchId, status])
+  @@map("pulmo_pft_studies")
+  @@schema("specialty")
+}
+
+/// A night in a laboratory bed, or a box sent home.
+model SleepStudy {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  type SleepStudyType
+
+  bedId        String?   @map("bed_id") @db.Uuid
+  scheduledAt  DateTime  @map("scheduled_at") @db.Timestamptz(6)
+  techId       String?   @map("tech_id") @db.Uuid
+  deviceSerial String?   @map("device_serial") @db.VarChar(60)
+
+  hookupChecklist Json @default("{}") @map("hookup_checklist")
+
+  /// Apnoea-hypopnoea index: events per hour of sleep. The number everything
+  /// downstream is decided on.
+  ahi Decimal? @db.Decimal(5, 1)
+  /// `{rdi, odi, t90, arousalIdx, efficiency, stages, remAhi, supineAhi, plmi}`.
+  scored Json @default("{}")
+
+  /// Derived by a trigger from the AHI. Never typed.
+  severity OsaSeverity?
+
+  interpretation String?   @db.Text
+  reportKey      String?   @map("report_key") @db.VarChar(500)
+  signedBy       String?   @map("signed_by") @db.Uuid
+  signedAt       DateTime? @map("signed_at") @db.Timestamptz(6)
+
+  status SleepStudyStatus @default(scheduled)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  papPrescriptions PapPrescription[]
+
+  @@index([hospitalId, patientId, scheduledAt(sort: Desc)])
+  @@index([hospitalId, branchId, status, scheduledAt])
+  @@map("pulmo_sleep_studies")
+  @@schema("specialty")
+}
+
+/// The machine, the mode and the pressures.
+model PapPrescription {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  studyId String? @map("study_id") @db.Uuid
+
+  mode PapMode
+
+  /// CPAP: `pressure_cm` alone. APAP: `pressure_min`/`pressure_max`. BiPAP and
+  /// ASV: `epap`/`ipap`. A trigger enforces the shape per mode and the
+  /// ordering within it, because a prescription that reaches the supplier with
+  /// IPAP below EPAP is a machine that cannot deliver a breath.
+  pressureCm  Decimal? @map("pressure_cm") @db.Decimal(4, 1)
+  pressureMin Decimal? @map("pressure_min") @db.Decimal(4, 1)
+  pressureMax Decimal? @map("pressure_max") @db.Decimal(4, 1)
+  epap        Decimal? @db.Decimal(4, 1)
+  ipap        Decimal? @db.Decimal(4, 1)
+
+  mask       String? @db.VarChar(80)
+  humidifier Boolean @default(false)
+
+  deviceItemId String? @map("device_item_id") @db.Uuid
+  serial       String? @db.VarChar(60)
+  /// Rental, purchase, or the patient's own machine.
+  ownership String @default("rental") @db.VarChar(12)
+
+  startDate DateTime @map("start_date") @db.Date
+  status    String   @default("active") @db.VarChar(16)
+
+  prescribedBy String   @map("prescribed_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  study      SleepStudy?     @relation(fields: [studyId], references: [id], onDelete: SetNull)
+  compliance PapCompliance[]
+
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, branchId, status])
+  @@map("pulmo_pap_prescriptions")
+  @@schema("specialty")
+}
+
+/// What the machine's card says the patient actually did.
+model PapCompliance {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  rxId       String @map("rx_id") @db.Uuid
+
+  periodFrom DateTime @map("period_from") @db.Date
+  periodTo   DateTime @map("period_to") @db.Date
+
+  usageHoursAvg  Decimal @map("usage_hours_avg") @db.Decimal(4, 2)
+  /// The insurer's number: nights of four hours or more, as a percentage.
+  pctNightsGe4h  Int     @map("pct_nights_ge4h")
+  residualAhi    Decimal? @map("residual_ahi") @db.Decimal(5, 1)
+  leak           Decimal? @db.Decimal(6, 2)
+
+  /// SD card, the manufacturer's cloud, or the patient's word.
+  source String @db.VarChar(12)
+
+  reportKey  String?   @map("report_key") @db.VarChar(500)
+  reviewedBy String?   @map("reviewed_by") @db.Uuid
+  reviewedAt DateTime? @map("reviewed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  rx PapPrescription @relation(fields: [rxId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, rxId, periodFrom(sort: Desc)])
+  @@map("pulmo_pap_compliance")
+  @@schema("specialty")
+}

@@ -41,6 +41,11 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'SP001', // the specialty console framework: the tab registry, the result lifecycle, the charge intent
   'OP025', // ophthalmology: the acuity ladder, quarter-dioptre steps, the signed prescription, the lens
   'OP010', // procedures and OPD nursing: consent, the time-out, the Aldrete floor, the five rights
+  'OP029', // cardiology: the derived QTc, the acknowledged critical ECG, the warfarin grid
+  'OP030', // pulmonology: the derived ratio and reversibility, the unsignable grade F, the PAP mode
+  'OP028', // ENT: the air-bone gap, the derived four-frequency average, the calibrated booth
+  'OP026', // dental: real teeth and their surfaces, the absent tooth, the materialised chart, the fixed price
+  'OP027', // dermatology: the derived score, the phototherapy ceiling, the malignant biopsy's follow-up
 ]);
 
 /**
