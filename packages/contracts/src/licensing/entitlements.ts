@@ -392,6 +392,14 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'The dialysis console is not included in your plan.',
     upgradeCta: 'Ask about Specialty Consoles',
   }),
+  // The antenatal console is gated; the statutory halves are not. A hospital in
+  // arrears whose Form F register stops working is a hospital committing an
+  // offence, and a woman whose termination cannot be recorded within the Act's
+  // gates is worse off than one whose record is simply missing.
+  ep('module.antenatal.enabled', 'feature', 'route', 'OP-040 The antenatal and gynaecology clinic.', {
+    message: 'The antenatal console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
   ep(
     'module.procedures.enabled',
     'feature',

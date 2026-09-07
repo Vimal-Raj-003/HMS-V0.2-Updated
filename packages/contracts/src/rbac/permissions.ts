@@ -11120,6 +11120,162 @@ const OP012 = group('OP-012', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-040, the antenatal clinic
+//
+// The keys divide along the line the statutes draw, not the line seniority
+// would. Running a clinic — booking, visits, the schedule, postnatal — is wide.
+// Two acts are narrow because Parliament made them so.
+//
+// ── `pcpndt.form_f.sign` is not a clinical key ─────────────────────────────
+//
+// Only a sonologist on the centre's PC-PNDT register may sign a Form F, and the
+// database checks the register rather than the grant — because the register is
+// what an inspector reads and a permission is not. The key exists so that the
+// console can show the form; the registration is what makes the signature
+// lawful.
+//
+// ── `obg.mtp.record` is `high`, and its holder is the practitioner ─────────
+//
+// A termination recorded outside the Act's gates is a criminal offence with a
+// doctor's name on it, and the gates are enforced by the database. What the key
+// controls is who may be that name.
+//
+// ── And `obg.edd.override` is the one documented way past a derivation ─────
+//
+// Two scans four weeks apart can genuinely disagree, and a clinician who has
+// looked at both is entitled to decide. So the override exists, carries a
+// mandatory rationale that is stored on the record rather than only in audit,
+// and marks the date as `clinical` so every later reader knows it is soft.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP040 = group('OP-040', 8, [
+  p(
+    'obg.pregnancy.read',
+    'pregnancy',
+    'read',
+    'phi',
+    'low',
+    'Read the antenatal record: dating, gestational age, the visit history, the schedule and the risk flags.',
+    { phiRead: true },
+  ),
+  p(
+    'obg.pregnancy.register',
+    'pregnancy',
+    'create',
+    'phi',
+    'medium',
+    'Book a pregnancy. The estimated date of delivery is computed from the period and any dating scan; it is not typed.',
+  ),
+  p(
+    'obg.pregnancy.update',
+    'pregnancy',
+    'update',
+    'phi',
+    'medium',
+    'Revise the booking: the dating scan, the blood group and Rhesus status, the obstetric history, the risk flags.',
+  ),
+  p(
+    'obg.edd.override',
+    'pregnancy',
+    'override',
+    'phi',
+    'high',
+    'Set the working estimated date of delivery by clinical judgement, against both the period and the scan. Every date in the record moves with it, so it carries a rationale that is stored on the record and marks the dating as clinical.',
+    { requiresReason: true },
+  ),
+  p(
+    'obg.visit.record',
+    'anc_visit',
+    'record',
+    'phi',
+    'medium',
+    'Record an antenatal visit. The gestational age and the obstetric early warning score are computed from what is entered.',
+  ),
+  p(
+    'obg.visit.sign',
+    'anc_visit',
+    'sign',
+    'phi',
+    'medium',
+    'Sign the visit. A visit carrying a danger sign cannot be signed without a plan.',
+  ),
+  p(
+    'obg.schedule.manage',
+    'anc_schedule_item',
+    'update',
+    'phi',
+    'medium',
+    'Mark a scheduled visit, test, scan or dose done, ordered, or waived with a reason. Anti-D is waived, never quietly skipped.',
+  ),
+  p(
+    'obg.delivery_plan.write',
+    'delivery_plan',
+    'create',
+    'phi',
+    'medium',
+    'Write the plan for the birth: mode, indication, date, anaesthetic review, blood, consents and the newborn plan.',
+  ),
+  p(
+    'obg.pnc.record',
+    'pnc_visit',
+    'record',
+    'phi',
+    'medium',
+    'Record a postnatal visit, including the Edinburgh depression screen whose referral threshold is computed rather than judged.',
+  ),
+  p(
+    'pcpndt.form_f.write',
+    'pcpndt_form_f',
+    'create',
+    'phi',
+    'medium',
+    'Draft Form F for an obstetric ultrasound under the PC-PNDT Act.',
+  ),
+  p(
+    'pcpndt.form_f.sign',
+    'pcpndt_form_f',
+    'sign',
+    'phi',
+    'high',
+    'Sign and lock Form F. Only a sonologist on the centre’s statutory register may do so, and the database checks the register rather than this key.',
+  ),
+  p(
+    'pcpndt.register.manage',
+    'pcpndt_sonologist',
+    'configure',
+    'operational',
+    'high',
+    'Maintain the centre’s register of sonologists qualified under the PC-PNDT Act. Adding somebody to it is what makes their signature lawful.',
+    { sensitiveGrant: true, requiresReason: true },
+  ),
+  p(
+    'obg.mtp.record',
+    'mtp_case',
+    'create',
+    'phi',
+    'high',
+    'Record a termination under the MTP Act. The gestational gates, the number of opinions and the Medical Board requirement are enforced by the database; this key decides whose name is on the record.',
+    { requiresReason: true },
+  ),
+  p(
+    'obg.mtp.read',
+    'mtp_case',
+    'read',
+    'phi',
+    'high',
+    'Read the MTP register. Restricted to the treating team, medical records and the medical superintendent; excluded from the general timeline, the patient portal and any outbound sharing.',
+    { phiRead: true },
+  ),
+  p(
+    'obg.report.read',
+    'obg_report',
+    'read',
+    'phi',
+    'low',
+    'Antenatal coverage, high-risk load, the anti-D register, Form F returns and the monthly MTP return.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -11228,6 +11384,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP013,
   ...OP014,
   ...OP012,
+  ...OP040,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

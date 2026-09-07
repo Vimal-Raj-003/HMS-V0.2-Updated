@@ -1,0 +1,486 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-040 — the antenatal clinic
+//
+// Every other console in this phase has one patient. This one has two, and the
+// second cannot speak, is not yet born, and in one of these tables is the
+// reason the table is restricted by law.
+//
+// ── The estimated date of delivery decides everything else ─────────────────
+//
+// Whether a baby is preterm. Whether growth is restricted. When to induce. When
+// a pregnancy is post-dates. All of it is arithmetic from one date, and the
+// date is got wrong routinely, because a woman's memory of a last period is not
+// evidence and an early scan is. So the EDD is *derived*: Naegele from the
+// last period, superseded by a dating scan when the two differ by more than the
+// published tolerance for the window the scan was done in. Gestational age has
+// no field anywhere — it is the working EDD and today, and a typed gestational
+// age is a number that stops updating.
+//
+// ── There is no field for the sex of a foetus ──────────────────────────────
+//
+// Not restricted, not permissioned, not audited — absent. The Pre-Conception
+// and Pre-Natal Diagnostic Techniques Act exists because sex-selective abortion
+// removed tens of millions of girls from the Indian population, and it is
+// enforced by inspecting records. A system with a column for it, however well
+// guarded, is a system that can be made to hold it. The whole antenatal half of
+// this build has no such column, and a test asserts it across every table here.
+//
+// What the Act does require is Form F: a declaration, per scan, naming the
+// machine, the registered sonologist, the referring doctor, the indication, and
+// the patient's own attestation that the sex was not disclosed. An obstetric
+// ultrasound report cannot be finalised without one, and the form locks when it
+// is signed.
+//
+// ── And the MTP gates are statute, not policy ──────────────────────────────
+//
+// The Medical Termination of Pregnancy Act as amended in 2021: up to twenty
+// weeks, one registered medical practitioner's opinion; twenty to twenty-four,
+// two opinions and one of seven named grounds; beyond twenty-four, a Medical
+// Board. Consent is the woman's, and a guardian's only if she is a minor or
+// mentally ill — never a husband's. Getting these wrong is not a data quality
+// problem; it is a criminal offence with the doctor's name on it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum EddSource {
+  lmp
+  usg
+  /// A clinician's judgement, when neither a period nor a scan can be trusted.
+  /// Recorded as such so a later reader knows the date is soft.
+  clinical
+
+  @@schema("specialty")
+}
+
+enum RiskCategory {
+  low
+  moderate
+  high
+
+  @@schema("specialty")
+}
+
+enum PregnancyEpisodeStatus {
+  active
+  delivered
+  aborted
+  mtp
+  ectopic
+  transferred
+  lost_to_followup
+
+  @@schema("specialty")
+}
+
+/// The three windows of the 2021 amendment.
+enum MtpCategory {
+  /// Up to twenty weeks: one registered medical practitioner's opinion.
+  le20
+  /// Twenty to twenty-four weeks: two opinions and one of the named grounds.
+  wk20_24
+  /// Beyond twenty-four: a Medical Board, for substantial foetal abnormality.
+  gt24_board
+
+  @@schema("specialty")
+}
+
+enum MtpMethod {
+  medical
+  mva
+  eva
+  de
+  other
+
+  @@schema("specialty")
+}
+
+/// A pregnancy, from booking to outcome.
+model Pregnancy {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  ancNo String @map("anc_no") @db.VarChar(32)
+
+  /// The last menstrual period, and whether she is sure of it. "Uncertain"
+  /// is not a nicety: it is what decides whether a scan five days off is a
+  /// disagreement or a correction.
+  lmp        DateTime? @db.Date
+  lmpCertain Boolean   @default(false) @map("lmp_certain")
+  cycleDays  Int       @default(28) @map("cycle_days")
+
+  /// Naegele, cycle-adjusted. Derived by trigger; there is no request field.
+  eddLmp DateTime? @map("edd_lmp") @db.Date
+
+  /// `{crlMm, gaDaysAtScan, scanDate, studyRef}` from the earliest dating scan.
+  usgDating Json?     @map("usg_dating")
+  eddUsg    DateTime? @map("edd_usg") @db.Date
+
+  /// The one every other date in this record is computed from. Derived: the
+  /// scan wins when it disagrees with the period by more than the tolerance for
+  /// its own window, and the period wins otherwise.
+  workingEdd DateTime  @map("working_edd") @db.Date
+  eddSource  EddSource @map("edd_source")
+  /// Why the working EDD is what it is, in a sentence, written by the trigger.
+  eddRationale String? @map("edd_rationale") @db.Text
+
+  /// G-P-L-A-E. Five numbers that a clinician reads as one word.
+  gravida   Int
+  para      Int   @default(0)
+  living    Int   @default(0)
+  abortions Int   @default(0)
+  ectopic   Int   @default(0)
+
+  obstetricHistory Json @default("[]") @map("obstetric_history")
+  medicalHistory   Json @default("{}") @map("medical_history")
+
+  bookingBmi Decimal? @map("booking_bmi") @db.Decimal(4, 1)
+  bloodGroup String?  @map("blood_group") @db.VarChar(8)
+  /// Rhesus negative is the single most consequential field in this table, and
+  /// the consequence lands on a child not yet conceived. See §B.4.
+  rhNegative Boolean? @map("rh_negative")
+
+  riskCategory RiskCategory @default(low) @map("risk_category")
+  /// `[{code, since, source, active}]`. Derived by the risk engine; a screen
+  /// reads them.
+  riskFlags Json @default("[]") @map("risk_flags")
+
+  rchId  String? @map("rch_id") @db.VarChar(32)
+  pmsma  Boolean @default(false)
+  scheme String  @default("none") @db.VarChar(16)
+
+  status  PregnancyEpisodeStatus @default(active)
+  outcome Json            @default("{}")
+  closedAt DateTime?      @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  visits        AncVisit[]
+  scheduleItems AncScheduleItem[]
+  deliveryPlans DeliveryPlan[]
+  formFs        PcpndtFormF[]
+  pncVisits     PncVisit[]
+
+  @@unique([hospitalId, ancNo], map: "uq_pregnancy_anc_no")
+  @@index([hospitalId, branchId, status])
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, workingEdd])
+  @@map("pregnancies")
+  @@schema("specialty")
+}
+
+/// One antenatal visit.
+model AncVisit {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  pregnancyId String  @map("pregnancy_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  visitNo   Int      @map("visit_no")
+  visitedAt DateTime @map("visited_at") @db.Timestamptz(6)
+
+  /// Derived from the working EDD and the visit date. No request field: a
+  /// gestational age somebody typed is a number that was right once.
+  gaDays Int? @map("ga_days")
+
+  complaints  Json     @default("{}")
+  /// Bleeding, leaking, headache, visual disturbance, epigastric pain, reduced
+  /// movements, fever. Any one of them turns the visit red.
+  dangerSigns String[] @default([]) @map("danger_signs")
+
+  bpSys      Int?     @map("bp_sys")
+  bpDia      Int?     @map("bp_dia")
+  bpSysRight Int?     @map("bp_sys_right")
+  bpDiaRight Int?     @map("bp_dia_right")
+  weightKg   Decimal? @map("weight_kg") @db.Decimal(5, 2)
+  pallor     String?  @db.VarChar(16)
+  oedema     String?  @db.VarChar(16)
+
+  pulse         Int?
+  respRate      Int?     @map("resp_rate")
+  temperatureC  Decimal? @map("temperature_c") @db.Decimal(4, 1)
+  /// `alert`, `voice`, `pain`, `unresponsive`. Anything but alert scores two on
+  /// its own, which is what makes the score a red rather than an arithmetic.
+  consciousness String?  @db.VarChar(16)
+
+  urineAlbumin String? @map("urine_albumin") @db.VarChar(16)
+  urineSugar   String? @map("urine_sugar") @db.VarChar(16)
+
+  /// Symphysio-fundal height in centimetres. Compared against gestational age:
+  /// more than three centimetres either way is growth restriction or excess
+  /// liquor, and both are found by this one measurement in a clinic with no
+  /// scanner.
+  sfhCm        Decimal? @map("sfh_cm") @db.Decimal(4, 1)
+  lie          String?  @db.VarChar(24)
+  presentation String?  @db.VarChar(24)
+  engagement   String?  @db.VarChar(24)
+  fhr          Int?
+  fetalMovements String? @map("fetal_movements") @db.VarChar(24)
+
+  exam Json @default("{}")
+
+  /// Modified Early Obstetric Warning Score. Derived from the vitals recorded
+  /// here; a typed score is a score somebody rounded down.
+  meowsScore Int? @map("meows_score")
+  /// Derived alongside it: what the score obliges somebody to do.
+  meowsAction String? @map("meows_action") @db.VarChar(80)
+
+  supplements   Json     @default("{}")
+  immunisation  Json     @default("{}")
+  counselling   String[] @default([])
+  plan          String?  @db.Text
+  nextVisitAt   DateTime? @map("next_visit_at") @db.Date
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pregnancy Pregnancy @relation(fields: [pregnancyId], references: [id], onDelete: Cascade)
+
+  @@unique([pregnancyId, visitNo], map: "uq_anc_visit_no")
+  @@index([hospitalId, pregnancyId, visitedAt(sort: Desc)])
+  @@map("anc_visits")
+  @@schema("specialty")
+}
+
+/// What is due, and when. Regenerated when the EDD moves.
+model AncScheduleItem {
+  id          String @id @db.Uuid
+  hospitalId  String @map("hospital_id") @db.Uuid
+  pregnancyId String @map("pregnancy_id") @db.Uuid
+
+  /// `visit`, `lab`, `usg`, `vaccine`, `supplement`, `anti_d`.
+  kind String @db.VarChar(16)
+  code String @db.VarChar(40)
+  name String @db.VarChar(120)
+
+  dueGaWeeks Int      @map("due_ga_weeks")
+  /// Derived from the working EDD and `due_ga_weeks`. When the EDD moves, every
+  /// one of these moves with it — which is the point of storing the week rather
+  /// than only the date.
+  dueAt      DateTime @map("due_at") @db.Date
+
+  orderId       String?  @map("order_id") @db.Uuid
+  status        String   @default("due") @db.VarChar(16)
+  resultSummary Json     @default("{}") @map("result_summary")
+  waivedReason  String?  @map("waived_reason") @db.VarChar(200)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pregnancy Pregnancy @relation(fields: [pregnancyId], references: [id], onDelete: Cascade)
+
+  @@unique([pregnancyId, kind, code], map: "uq_anc_schedule_item")
+  @@index([hospitalId, dueAt, status])
+  @@map("anc_schedule_items")
+  @@schema("specialty")
+}
+
+/// The plan for the birth, from thirty-four weeks.
+model DeliveryPlan {
+  id          String @id @db.Uuid
+  hospitalId  String @map("hospital_id") @db.Uuid
+  pregnancyId String @map("pregnancy_id") @db.Uuid
+
+  version Int @default(1)
+
+  plannedMode String    @map("planned_mode") @db.VarChar(24)
+  indication  String?   @db.Text
+  plannedDate DateTime? @map("planned_date") @db.Date
+  place       String?   @db.VarChar(120)
+
+  pacId              String? @map("pac_id") @db.Uuid
+  bloodRequestId     String? @map("blood_request_id") @db.Uuid
+  admissionBookingId String? @map("admission_booking_id") @db.Uuid
+
+  consents     Json    @default("{}")
+  newbornPlan  Json    @default("{}") @map("newborn_plan")
+  birthCompanion String? @map("birth_companion") @db.VarChar(120)
+  transport    String?  @db.VarChar(120)
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pregnancy Pregnancy @relation(fields: [pregnancyId], references: [id], onDelete: Cascade)
+
+  @@unique([pregnancyId, version], map: "uq_delivery_plan_version")
+  @@index([hospitalId, pregnancyId])
+  @@map("delivery_plans")
+  @@schema("specialty")
+}
+
+/// Form F, under the PC-PNDT Act.
+///
+/// One per obstetric ultrasound. An ultrasound report cannot be finalised
+/// without a signed one, and it locks when it is signed. Note what is not here:
+/// no result field carries a sex, because there is nowhere in this build to put
+/// one.
+model PcpndtFormF {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  scanOrderId String  @map("scan_order_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  pregnancyId String? @map("pregnancy_id") @db.Uuid
+
+  /// The machine and the centre, both of which are registered under the Act and
+  /// both of which an inspector will ask for.
+  machineId    String @map("machine_id") @db.Uuid
+  centreRegNo  String @map("centre_reg_no") @db.VarChar(60)
+  /// Only a sonologist registered under the Act may sign. Enforced against
+  /// `mdm.pcpndt_sonologists`.
+  sonologistId String @map("sonologist_id") @db.Uuid
+
+  referringDoctor String @map("referring_doctor") @db.VarChar(160)
+  indicationCode  String @map("indication_code") @db.VarChar(40)
+
+  /// The woman's own attestation, and the sonologist's, that the sex of the
+  /// foetus was not disclosed to anybody. The Act's central requirement.
+  declaration Json
+
+  resultSummary String? @map("result_summary") @db.Text
+
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+  locked   Boolean   @default(false)
+
+  submittedInReturnId String? @map("submitted_in_return_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pregnancy Pregnancy? @relation(fields: [pregnancyId], references: [id], onDelete: SetNull)
+
+  @@unique([hospitalId, scanOrderId], map: "uq_form_f_per_scan")
+  @@index([hospitalId, signedAt(sort: Desc)])
+  @@map("pcpndt_form_f")
+  @@schema("specialty")
+}
+
+/// The sonologists a hospital has registered under the Act.
+///
+/// Reference data with a legal edge: a report signed by somebody not on this
+/// list is an offence by the centre, and the centre is the hospital.
+model PcpndtSonologist {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  userId          String    @map("user_id") @db.Uuid
+  registrationNo  String    @map("registration_no") @db.VarChar(60)
+  qualification   String    @db.VarChar(120)
+  validFrom       DateTime  @map("valid_from") @db.Date
+  validTo         DateTime? @map("valid_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, userId, registrationNo], map: "uq_pcpndt_sonologist")
+  @@index([hospitalId, validTo])
+  @@map("pcpndt_sonologists")
+  @@schema("specialty")
+}
+
+/// A termination, under the MTP Act as amended in 2021.
+///
+/// The gates in §B.5 are the statute. The register serial is gapless because
+/// the Rules require a register, and a register with a hole in it is the thing
+/// an inspection is looking for.
+model MtpCase {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  /// Gapless, per centre. The register views print this and a code rather than
+  /// a name.
+  mtpSerial   Int     @map("mtp_serial")
+  pregnancyId String? @map("pregnancy_id") @db.Uuid
+
+  /// By ultrasound, not by dates. The gates turn on it.
+  gaDaysByUsg Int         @map("ga_days_by_usg")
+  category    MtpCategory
+  /// One of the seven grounds. Required from twenty weeks.
+  grounds     String?     @db.VarChar(40)
+
+  minor             Boolean @default(false)
+  guardianConsentId String? @map("guardian_consent_id") @db.Uuid
+
+  /// One opinion below twenty weeks, two from twenty to twenty-four — and the
+  /// two must be two different doctors.
+  opinionIds  String[] @map("opinion_ids") @db.Uuid
+  formCConsentId String @map("form_c_consent_id") @db.Uuid
+  /// Beyond twenty-four weeks, a Medical Board. There is no other route.
+  medicalBoardRef String? @map("medical_board_ref") @db.VarChar(120)
+
+  method      MtpMethod?
+  regimen     Json      @default("{}")
+  procedureId String?   @map("procedure_id") @db.Uuid
+  performedAt DateTime? @map("performed_at") @db.Timestamptz(6)
+  performedBy String?   @map("performed_by") @db.Uuid
+
+  complications Json    @default("[]")
+  followup      Json    @default("{}")
+  /// Rhesus-negative women need anti-D after a termination too, and it is
+  /// forgotten more often here than after a birth.
+  antiDGiven    Boolean @default(false) @map("anti_d_given")
+  contraception Json    @default("{}")
+
+  pocsoReportTaskId String? @map("pocso_report_task_id") @db.Uuid
+  registerLocked    Boolean @default(false) @map("register_locked")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, mtpSerial], map: "uq_mtp_serial")
+  @@index([hospitalId, performedAt(sort: Desc)])
+  @@map("mtp_cases")
+  @@schema("specialty")
+}
+
+/// Postnatal visits: day three, seven, fourteen, forty-two.
+model PncVisit {
+  id          String @id @db.Uuid
+  hospitalId  String @map("hospital_id") @db.Uuid
+  pregnancyId String @map("pregnancy_id") @db.Uuid
+
+  dayNo     Int      @map("day_no")
+  visitedAt DateTime @map("visited_at") @db.Timestamptz(6)
+
+  findings Json @default("{}")
+
+  bpSys Int? @map("bp_sys")
+  bpDia Int? @map("bp_dia")
+
+  /// Edinburgh Postnatal Depression Scale. Thirteen or more, or any answer but
+  /// "never" to the tenth question, is a referral — and the tenth question is
+  /// about self-harm, which is why it is scored separately from the total.
+  epdsTotal  Int?     @map("epds_total")
+  epdsItem10 Int?     @map("epds_item10")
+  /// Derived from the two. A screen that computed its own would eventually
+  /// disagree with the referral rule.
+  epdsReferral Boolean @default(false) @map("epds_referral")
+
+  breastfeeding String? @db.VarChar(40)
+  contraception Json    @default("{}")
+  referral      String? @db.Text
+
+  recordedBy String   @map("recorded_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pregnancy Pregnancy @relation(fields: [pregnancyId], references: [id], onDelete: Cascade)
+
+  @@unique([pregnancyId, dayNo], map: "uq_pnc_visit_day")
+  @@index([hospitalId, pregnancyId, visitedAt(sort: Desc)])
+  @@map("pnc_visits")
+  @@schema("specialty")
+}

@@ -54,6 +54,7 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'OP013', // immunisation: the minimum age and interval, the vial clock, the cold chain hold
   'OP014', // health check-ups: the station sequence, and the report that covers every station
   'OP012', // dialysis: the isolation zone, the machine, the fluid, and the dialyser count
+  'OP040', // antenatal: the dating rule, anti-D, PC-PNDT Form F and the MTP gates
 ]);
 
 /**

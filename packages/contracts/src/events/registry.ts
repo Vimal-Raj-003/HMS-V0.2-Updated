@@ -10817,6 +10817,93 @@ const painClinicEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — OP-040, the antenatal clinic.
+ *
+ * Five events, and three of them exist because somebody outside the clinic has
+ * to act on a clock: a Rhesus-negative woman whose anti-D is due, a statutory
+ * register that has to be returned monthly, and a working date that has moved
+ * and taken eight appointments with it.
+ */
+const antenatalEvents: readonly EventDefinition[] = [
+  ev(
+    'obg.pregnancy.registered',
+    'pregnancy',
+    'OP-040',
+    'A pregnancy was booked. Carries the working estimated date of delivery and where it came from, because everything downstream — the visit schedule, the scan windows, whether a baby is preterm — is arithmetic on it.',
+    z.object({
+      pregnancyId: uuid,
+      patientId: uuid,
+      ancNo: z.string(),
+      workingEdd: z.string(),
+      eddSource: z.string(),
+      gravida: z.number().int(),
+      rhNegative: z.boolean().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'obg.edd.changed',
+    'pregnancy',
+    'OP-040',
+    'The working estimated date of delivery moved. Leaves because every scheduled visit, test and scan moved with it, and anything holding an appointment — the patient, the scan list, a referral — is now holding the wrong date.',
+    z.object({
+      pregnancyId: uuid,
+      patientId: uuid,
+      previousEdd: z.string(),
+      workingEdd: z.string(),
+      eddSource: z.string(),
+      rationale: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'obg.anti_d.due',
+    'anc_schedule_item',
+    'OP-040',
+    'A Rhesus-negative woman is due anti-D. Leaves the clinic because the harm of missing it lands on her next baby rather than this one, and nobody in the room will ever meet the person it harms.',
+    z.object({
+      pregnancyId: uuid,
+      patientId: uuid,
+      itemId: uuid,
+      dueAt: z.string(),
+      dueGaWeeks: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'obg.visit.danger_sign',
+    'anc_visit',
+    'OP-040',
+    'A visit recorded a danger sign or an early-warning action. Leaves immediately: bleeding, leaking, a headache with visual disturbance or reduced movements are the presentations that go from an outpatient clinic to a theatre in an afternoon.',
+    z.object({
+      visitId: uuid,
+      pregnancyId: uuid,
+      patientId: uuid,
+      gaDays: z.number().int(),
+      dangerSigns: z.array(z.string()),
+      meowsScore: z.number().int().nullable(),
+      action: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'pcpndt.form_f.signed',
+    'pcpndt_form_f',
+    'OP-040',
+    'A Form F was signed and locked. Feeds the monthly statutory return, which is submitted to the appropriate authority and is the record an inspection reads.',
+    z.object({
+      formFId: uuid,
+      scanOrderId: uuid,
+      sonologistId: uuid,
+      centreRegNo: z.string(),
+      indicationCode: z.string(),
+      signedAt: z.string(),
+    }),
+    { containsPhi: false, retentionDays: 10950 },
+  ),
+];
+
+/**
  * Phase 8 — OP-012 and IP-022, dialysis.
  *
  * Five events, and every one of them is a fact somebody outside the unit has to
@@ -11173,6 +11260,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...painClinicEvents,
   ...programmeEvents,
   ...dialysisEvents,
+  ...antenatalEvents,
   ...procedureEvents,
 ]);
 

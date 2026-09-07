@@ -239,7 +239,7 @@ export type DiscardRequest = z.infer<typeof discardSchema>;
 export const programQuerySchema = z.object({
   patientId: uuid.optional(),
   zone: z.enum(['general', 'hbv', 'hcv', 'hiv']).optional(),
-  activeOnly: queryFlag,
+  activeOnly: queryFlag().default(false),
   limit: z.coerce.number().int().min(1).max(200).default(100),
 });
 export type ProgramQuery = z.infer<typeof programQuerySchema>;
@@ -249,7 +249,7 @@ export const sessionQuerySchema = z.object({
   patientId: uuid.optional(),
   machineId: uuid.optional(),
   on: z.string().date().optional(),
-  liveOnly: queryFlag,
+  liveOnly: queryFlag().default(false),
   limit: z.coerce.number().int().min(1).max(200).default(100),
 });
 export type SessionQuery = z.infer<typeof sessionQuerySchema>;
@@ -257,7 +257,7 @@ export type SessionQuery = z.infer<typeof sessionQuerySchema>;
 export const dialyserQuerySchema = z.object({
   programId: uuid.optional(),
   label: z.string().max(60).optional(),
-  usableOnly: queryFlag,
+  usableOnly: queryFlag().default(false),
   limit: z.coerce.number().int().min(1).max(200).default(100),
 });
 export type DialyserQuery = z.infer<typeof dialyserQuerySchema>;

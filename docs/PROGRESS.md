@@ -401,6 +401,93 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-16 · Phase 8 · OP-040 — the antenatal clinic
+
+**Built — the antenatal half of obstetrics, complete.** 8 tables, 15 permission
+keys, 5 events, 1 entitlement, 1 screen, 20 integration tests, 36 database rules
+proven live in both directions.
+
+Every console before this one has one patient. This one has two, and the second
+cannot speak. Two of its tables exist because Parliament said so, and getting
+them wrong is not a data quality problem — it is a criminal offence with a
+doctor's name on it.
+
+**The date is the module.** Whether a baby is preterm, whether growth is
+restricted, when to induce, when a pregnancy is post-dates: all of it is
+arithmetic from one date, and the date is got wrong routinely, because a woman's
+memory of a last period is not evidence and an early scan is. So the estimated
+date of delivery is derived — Naegele adjusted for cycle length, superseded by a
+dating scan when the two disagree by more than the tolerance for the window the
+scan was done in, five days before nine weeks widening to twenty-one after
+twenty-eight. It is not a refusal: the trigger writes the better date and says,
+in a sentence stored on the record, why. Gestational age has no field anywhere.
+
+And when the date moves, **the calendar moves with it**. Each scheduled item
+carries the _week_ it is due rather than only a date, so correcting a dating
+corrects eight appointments instead of leaving the anomaly scan booked for
+twenty-two weeks, by which time the window for the decisions it informs has
+closed.
+
+**Anti-D has the strangest shape in the build.** A Rhesus-negative woman
+carrying a Rhesus-positive baby makes antibodies unless she is given anti-D, and
+the harm of missing it lands not on this pregnancy — which proceeds normally —
+but on her _next_ baby, who can die of haemolytic disease. Nobody in the room
+when the dose is missed will ever meet the person it harms. So the item is
+raised by the database when the blood group is recorded, and the pregnancy
+cannot be closed while it is outstanding: given, or waived with a reason, and
+no third state. It gets its own section at the top of the clinic board.
+
+**There is no field for the sex of a foetus.** Not restricted, not permissioned,
+not audited — absent. The PC-PNDT Act exists because sex-selective abortion
+removed tens of millions of girls from the Indian population, and it is enforced
+by inspecting records; a column for it, however well guarded, is a column that
+can be filled. §B.6 asserts the absence across all eight tables **at migration
+time**, so a future migration that adds one fails at deployment, next to the
+paragraph explaining why. What the Act does require — Form F, with the woman's
+attestation and the sonologist's, signed only by somebody on the centre's
+statutory register — is enforced against the register rather than against a
+permission, because the register is what an inspector reads.
+
+**The MTP gates are the statute.** Below twenty weeks, one practitioner's
+opinion. Twenty to twenty-four, two opinions **from two different doctors** and
+one of the named grounds. Beyond twenty-four, a Medical Board and no other
+route — four opinions do not substitute. A minor needs a guardian's consent; no
+woman needs a husband's, and a second migration-time assertion refuses any
+column that would record one. The register serial is gapless and assigned by
+the database, because the Rules require a register and a hole in one is exactly
+what an inspection looks for.
+
+**Six defects the proofs and the tests found, five real.** In `RAISE`, `%` is
+the placeholder and `%s` prints the value followed by a stray "s" — so a
+refusal read "22sw0sd". `AFTER UPDATE OF working_edd` watches the _statement's_
+column list, not the value, and the value is set by a BEFORE trigger — so the
+reschedule never fired on the case it exists for; `WHEN (NEW.x IS DISTINCT FROM
+OLD.x)` is the correct form. Prisma's `@@unique(map:)` creates a unique index
+rather than a named constraint, so `ON CONFLICT ON CONSTRAINT` fails. And
+`queryFlag` is a factory: two consoles had used it bare, which made every
+filtered list endpoint a 500 the moment anybody passed a parameter — latent in
+dialysis too, now covered by a test that calls each one. The sixth was my proof:
+a scan I meant to be nine days out was five, and the rule was right.
+
+**Deferred, recorded.** Gynaecology consults and cervical screening recalls
+(OP-040 §3.9, a different console shape that happens to share a department),
+family planning registers and sterilisation forms (§3.8, which need NC-012's
+consent standards), the risk engine's rule set (EN-029 owns versioned rules) and
+the monthly Form F / Form II statutory returns (Phase 11's reporting).
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module. Tracked, unchanged.
+
+**Gates** — 13/13 packages typecheck, lint and test (3,018 unit tests); 676 API
+integration tests across 27 files; 54 migrations; 850 non-partition tables;
+1,317 permission keys; 817 events; 60 entitlements; 68 role templates; 100
+screens.
+
+**Next:** IP-011, the labour room and the newborn — the other half of the same
+journey, and the first console that _creates a patient_. The partograph's action
+line, the wristband pair that cannot mismatch, APGAR, and a birth report with a
+twenty-one-day statutory clock on it.
+
 ### 2026-09-15 · Phase 8 · OP-012, IP-022 — the dialysis unit
 
 **Built — dialysis, complete.** 7 tables, 13 permission keys, 5 events, 1

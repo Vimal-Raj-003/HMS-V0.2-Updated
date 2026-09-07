@@ -893,6 +893,43 @@ const DIALYSIS_DOCTOR = [
   'dialysis.report.read',
 ] as const;
 
+/**
+ * OP-040 — the antenatal clinic.
+ *
+ * The split follows the statutes rather than seniority. Running a clinic is
+ * wide: a nurse records the visit, marks the schedule and does the postnatal
+ * screen, and the gestational age and warning score are the database's either
+ * way. Four keys are not wide, and each for a named reason.
+ *
+ *   · `obg.edd.override` moves every date in the record, so it belongs to
+ *     whoever can defend the judgement in front of a growth chart.
+ *   · `obg.mtp.record` and `obg.mtp.read` are the register the MTP Rules
+ *     require. The Act names a registered medical practitioner, and so does
+ *     this.
+ *   · `pcpndt.form_f.sign` goes to radiology, but the *register* — the list
+ *     that makes a signature lawful — ships unassigned, because the person who
+ *     decides who may sign under the PC-PNDT Act should be chosen in advance
+ *     rather than inherited.
+ */
+const ANC_FLOOR = [
+  'obg.pregnancy.read',
+  'obg.visit.record',
+  'obg.schedule.manage',
+  'obg.pnc.record',
+] as const;
+
+const ANC_CLINICIAN = [
+  ...ANC_FLOOR,
+  'obg.pregnancy.register',
+  'obg.pregnancy.update',
+  'obg.visit.sign',
+  'obg.delivery_plan.write',
+  'obg.edd.override',
+  'obg.mtp.record',
+  'obg.mtp.read',
+  'obg.report.read',
+] as const;
+
 const DERM_DELIVERY = ['derm.lesion.read', 'derm.phototherapy.deliver'] as const;
 
 const DERM_DOCTOR = [
@@ -1004,6 +1041,7 @@ const SPECIALTY_CONSOLE_DOCTOR = [
   'immunisation.report.read',
   ...HEALTHCHECK_CLINICAL,
   ...DIALYSIS_DOCTOR,
+  ...ANC_CLINICIAN,
 ] as const;
 
 /** A resident records and plans; the signature and the override keys are not theirs. */
@@ -3179,6 +3217,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'diagnostics',
     homeWorkspace: 'radiology-reading',
     permissions: [
+      'pcpndt.form_f.write',
+      'pcpndt.form_f.sign',
       ...CONSOLE_CLINICIAN,
       'polytrauma.case.read',
       'polytrauma.case.list',
@@ -3312,6 +3352,7 @@ const templates: readonly RoleTemplate[] = [
     permissions: [
       ...IMMUNISATION_FLOOR,
       ...HEALTHCHECK_FLOOR,
+      ...ANC_FLOOR,
       ...WOUND_BEDSIDE,
       'slp.swallow_order.read',
       ...OPD_NURSING_FLOOR,

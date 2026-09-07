@@ -428,6 +428,33 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: 'module.dialysis.enabled',
   },
+  {
+    key: 'antenatal-clinic',
+    label: 'Antenatal clinic',
+    href: '/antenatal/clinic',
+    area: 'specialty',
+    permission: 'obg.pregnancy.read',
+    summary:
+      'Who is booked, how far on they are, and what the calendar says is late \u2014 with the anti-D register at the top, because that one is a child who has not been conceived.',
+    deniedExplanation:
+      'Running the clinic is held by the nursing floor and the obstetric team alike. Moving an estimated date of delivery, and the two statutory registers, are separate named keys.',
+    keywords: [
+      'antenatal',
+      'anc',
+      'pregnancy',
+      'obstetrics',
+      'edd',
+      'gestation',
+      'anti-d',
+      'rhesus',
+      'form f',
+      'pcpndt',
+      'mtp',
+      'postnatal',
+      'epds',
+    ],
+    entitlement: 'module.antenatal.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

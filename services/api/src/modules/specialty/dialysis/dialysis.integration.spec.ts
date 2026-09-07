@@ -562,6 +562,21 @@ describe('OP-012 · the machine as a physical resource', () => {
     expect(detail(res)).toContain('breakdown');
   });
 
+  it('answers every filtered list, because a schema nothing calls is a schema that can be wrong', async () => {
+    // Each of these carries a `queryFlag`, and a flag schema is only exercised
+    // when somebody actually passes the parameter.
+    for (const url of [
+      '/api/v1/dialysis/sessions?liveOnly=true',
+      '/api/v1/dialysis/programs?activeOnly=true&zone=general',
+      '/api/v1/dialysis/dialysers?usableOnly=true',
+      '/api/v1/dialysis/machines',
+    ]) {
+      const res = await call({ method: 'GET', url, token: tech.token });
+      expect(res.statusCode, `${url}: ${res.body}`).toBe(200);
+      expect(Array.isArray(res.json())).toBe(true);
+    }
+  });
+
   it('shows the board with each machine, who is on it and who is next', async () => {
     const res = await call({ method: 'GET', url: '/api/v1/dialysis/board', token: tech.token });
     expect(res.statusCode).toBe(200);

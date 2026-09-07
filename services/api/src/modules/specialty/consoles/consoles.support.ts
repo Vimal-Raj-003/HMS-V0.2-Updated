@@ -493,6 +493,98 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
     detail: 'A conversion factor ends on or after the day it takes effect.',
   },
 
+  // ── OP-040 ────────────────────────────────────────────────────────────────
+  the_obstetric_formula_adds_up: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'The obstetric formula does not add up. Gravida counts this pregnancy too, so it cannot be less than the deliveries, miscarriages and ectopics together.',
+  },
+  a_cycle_is_a_cycle: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A menstrual cycle runs from 20 to 45 days. The dating is adjusted from it.',
+  },
+  a_closed_pregnancy_has_a_closing_time: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A pregnancy that is no longer active carries the moment it closed, and an active one does not.',
+  },
+  a_danger_sign_needs_a_plan: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'This visit records a danger sign, so it cannot be signed without a plan. Ticking one and signing is the commonest way a stillbirth comes to have a normal antenatal record behind it.',
+    nextAction: 'Write what is being done about it — a scan, a cardiotocograph, a same-day review.',
+  },
+  a_signed_visit_names_its_signer: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A signature has a name and a time, or neither.',
+  },
+  antenatal_vitals_are_plausible: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'One of those observations is outside what a person has. A systolic below the diastolic is usually two fields swapped, and a fundal height of 5 cm is usually inches.',
+  },
+  a_schedule_item_status_is_known: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A scheduled item is due, ordered, done, overdue or waived.',
+  },
+  a_waived_item_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'Waiving a scheduled item needs a reason. For anti-D that reason is usually that the baby is Rhesus negative — and it is the difference between a decision and an omission.',
+  },
+  a_registration_runs_forwards: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A PC-PNDT registration ends after it begins.',
+  },
+  a_gestation_is_a_gestation: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A gestational age by ultrasound runs from 2 to about 43 weeks, in days.',
+  },
+  a_performed_termination_names_its_method_and_doctor: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A termination that has been performed records the method and the practitioner who performed it.',
+  },
+  the_epds_is_scored_in_range: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'The Edinburgh scale totals 0 to 30, and each of its ten questions scores 0 to 3.',
+  },
+  a_postnatal_day_is_after_the_birth: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A postnatal day runs from 0 to 365.',
+  },
+  uq_pregnancy_anc_no: {
+    type: ProblemType.CONFLICT,
+    detail: 'That antenatal card number is already in use at this hospital.',
+  },
+  uq_anc_visit_no: {
+    type: ProblemType.CONFLICT,
+    detail: 'Two visits were numbered at the same moment. Try again.',
+  },
+  uq_form_f_per_scan: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'That scan already has a Form F. One scan, one form — which is what makes the register countable.',
+  },
+  uq_mtp_serial: {
+    type: ProblemType.CONFLICT,
+    detail: 'Two register entries took the same serial at the same moment. Try again.',
+  },
+  uq_pcpndt_sonologist: {
+    type: ProblemType.CONFLICT,
+    detail: 'That registration is already on the centre’s PC-PNDT register.',
+  },
+  uq_anc_schedule_item: {
+    type: ProblemType.CONFLICT,
+    detail: 'That item is already on this pregnancy’s schedule.',
+  },
+  uq_delivery_plan_version: {
+    type: ProblemType.CONFLICT,
+    detail: 'Two delivery plan versions were written at the same moment. Try again.',
+  },
+  uq_pnc_visit_day: {
+    type: ProblemType.CONFLICT,
+    detail: 'A postnatal visit for that day is already recorded.',
+  },
+
   // ── OP-012 / IP-022 ───────────────────────────────────────────────────────
   dry_weight_is_a_weight: {
     type: ProblemType.VALIDATION_FAILED,

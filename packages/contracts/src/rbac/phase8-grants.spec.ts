@@ -46,6 +46,8 @@ function holdersOf(key: string): readonly string[] {
   return ROLE_TEMPLATES.filter((role) => role.permissions.includes(key)).map((role) => role.key);
 }
 
+const ANC_WIDE = ['obg.pregnancy.read', 'obg.visit.record', 'obg.schedule.manage', 'obg.pnc.record'];
+
 describe('Phase 8 framework permission catalogue', () => {
   it('registers every key the framework declares', () => {
     for (const prefix of PHASE_8_PREFIXES) {
@@ -763,5 +765,61 @@ describe('OP-010 — the procedure floor', () => {
     expect(
       PERMISSION_CATALOGUE.filter((p) => p.key.startsWith('dialysis.') && p.action === 'delete'),
     ).toEqual([]);
+  });
+  it('keeps the two statutory registers narrow and the clinic wide', () => {
+    // A nurse runs the antenatal clinic: the visit, the schedule, the postnatal
+    // screen. The gestational age and the warning score are the database's
+    // either way, so nothing is gained by withholding the recording key.
+    for (const key of ANC_WIDE) {
+      expect(getRoleTemplate('nurse_opd')?.permissions.includes(key), key).toBe(true);
+    }
+    // The two registers Parliament requires are not.
+    for (const key of ['obg.mtp.record', 'obg.mtp.read']) {
+      expect(getRoleTemplate('nurse_opd')?.permissions.includes(key), key).toBe(false);
+      expect(permission(key).risk, key).toBe('high');
+    }
+    expect(getRoleTemplate('doctor_consultant_opd')?.permissions).toContain('obg.mtp.record');
+  });
+
+  it('ships the PC-PNDT register unassigned and lets the database judge the signature', () => {
+    // Adding somebody to the centre's register is what makes their signature
+    // lawful, so it is chosen in advance rather than inherited by whoever
+    // administers the system today.
+    const register = permission('pcpndt.register.manage');
+    expect(register.risk).toBe('high');
+    expect(register.sensitiveGrant).toBe(true);
+    expect(register.requiresReason).toBe(true);
+    expect(holdersOf('pcpndt.register.manage').filter((h) => h !== 'super_admin')).toEqual([]);
+
+    // Signing is radiology's key — but holding it is not what makes a signature
+    // lawful; being on the register is, and the trigger checks the register.
+    expect(getRoleTemplate('radiologist')?.permissions).toContain('pcpndt.form_f.sign');
+  });
+
+  it('offers no key that names the sex of a foetus or a husband’s consent', () => {
+    // The PC-PNDT Act exists because sex-selective abortion removed tens of
+    // millions of girls from the Indian population. A permission for it would
+    // be an admission that somewhere a column holds it — and none does.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    for (const absent of [
+      'obg.fetal_sex.read',
+      'obg.fetal_sex.disclose',
+      'pcpndt.sex.record',
+      'obg.mtp.spousal_consent',
+    ]) {
+      expect(keys, absent).not.toContain(absent);
+    }
+    // And no key skips a Medical Board or forces a termination past the gates.
+    expect(keys.filter((k) => k.startsWith('obg.mtp.') && k.includes('override'))).toEqual([]);
+  });
+
+  it('makes moving the estimated date of delivery a reasoned act', () => {
+    // Every date in the record moves with it: the anomaly scan window, whether
+    // a baby is preterm, when a pregnancy is post-dates.
+    const override = permission('obg.edd.override');
+    expect(override.risk).toBe('high');
+    expect(override.requiresReason).toBe(true);
+    expect(getRoleTemplate('nurse_opd')?.permissions).not.toContain('obg.edd.override');
+    expect(getRoleTemplate('doctor_consultant_opd')?.permissions).toContain('obg.edd.override');
   });
 });
