@@ -57,6 +57,9 @@ export type WorkspaceKey =
   | 'diet-worklist'
   | 'therapy-schedule'
   | 'dialysis-board'
+  // Phase 8. A console's home is its own worklist, so the specialty sub-roles
+  // land on the lane they run rather than on a generic clinical dashboard.
+  | 'ophtha-worklist'
   | 'counselling-sessions'
   | 'mrd-queue'
   | 'stores'
@@ -756,6 +759,36 @@ const CONSOLE_ADMIN = [
   'console.registry.configure',
   'console.device_type.configure',
 ] as const;
+
+/**
+ * OP-025 — the eye clinic.
+ *
+ * The optometrist's half and the ophthalmologist's half are separated at the
+ * signature, not at the measurement: an optometrist records everything and
+ * signs nothing unless the hospital has delegated the spectacle prescription
+ * to them, which is `OPTOMETRIST_DELEGATED`.
+ */
+const OPHTHA_OPTOMETRY = ['ophtha.visit.read', 'ophtha.visit.create', 'ophtha.optometry.record'] as const;
+
+const OPHTHA_DOCTOR = [
+  ...OPHTHA_OPTOMETRY,
+  'ophtha.exam.record',
+  'ophtha.exam.sign',
+  'ophtha.spectacle_rx.sign',
+  'ophtha.spectacle_rx.print',
+  'ophtha.surgery.plan',
+  'ophtha.surgery.book',
+  'ophtha.report.read',
+] as const;
+
+/**
+ * A resident records and plans, and does not sign.
+ *
+ * The same line Phase 2 drew for prescriptions and Phase 7 for discharge
+ * summaries: a resident's clinical output is countersigned, and an eye visit
+ * signed by nobody senior is a document a referring optician relies on.
+ */
+const OPHTHA_RESIDENT = [...OPHTHA_OPTOMETRY, 'ophtha.exam.record', 'ophtha.surgery.plan'] as const;
 
 const FLEET_DISPATCH = [
   'fleet.vehicle.read',
@@ -2298,6 +2331,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      'ophtha.visit.read',
+      'ophtha.report.read',
       ...CONSOLE_CLINICIAN,
       ...CONSOLE_ADMIN,
       ...DISCHARGE_CONSULTANT,
@@ -2424,6 +2459,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'department-dashboard',
     permissions: [
+      ...OPHTHA_DOCTOR,
       ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
       ...MORTUARY_CLINICAL,
@@ -2485,6 +2521,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'doctor-opd',
     permissions: [
+      ...OPHTHA_DOCTOR,
       ...CONSOLE_CLINICIAN,
       ...MAR_PRESCRIBER,
       ...WARD_FLOOR,
@@ -2654,6 +2691,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ot-schedule',
     permissions: [
+      ...OPHTHA_DOCTOR,
       ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
       ...MORTUARY_CLINICAL,
@@ -2860,6 +2898,7 @@ const templates: readonly RoleTemplate[] = [
     // Deliberately NOT granted break-glass or any `*.override` key: docs/06 §5.2 #16
     // says the allergy hard-stop "disables for roles without `override` (residents)".
     permissions: [
+      ...OPHTHA_RESIDENT,
       ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CLINICAL,
       'mortuary.case.read',
@@ -2926,6 +2965,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      ...OPHTHA_OPTOMETRY,
       ...CONSOLE_TECHNICIAN,
       'nursing.ward.read',
       'mar.read',
@@ -4730,6 +4770,32 @@ const templates: readonly RoleTemplate[] = [
     sensitiveGrant: false,
     requiresCoSign: false,
   },
+  /**
+   * OP-025 §0.7 asks each console to add its own sub-roles. The optometrist is
+   * the first: they run the refraction lane, record everything a doctor reads,
+   * and sign nothing — unless the hospital has delegated the spectacle
+   * prescription, which is a separate key the admin grants deliberately.
+   */
+  {
+    key: 'optometrist',
+    docsRow: 65,
+    name: 'Optometrist',
+    description:
+      'Runs the refraction lane: acuity, refraction, pressure and the lensmeter. Signs a spectacle prescription only where the hospital delegates it.',
+    category: 'therapy',
+    homeWorkspace: 'ophtha-worklist',
+    permissions: [
+      ...OPHTHA_OPTOMETRY,
+      ...CONSOLE_TECHNICIAN,
+      ...BASE_CLINICAL,
+      ...LABEL_PRINTER,
+      'ophtha.spectacle_rx.print',
+    ],
+    abacDefaults: { ownDepartmentOnly: true },
+    mfaMandatory: false,
+    sensitiveGrant: false,
+    requiresCoSign: false,
+  },
   {
     key: 'device',
     docsRow: 64,
@@ -4775,9 +4841,9 @@ const rowNumbers = new Set(templates.map((t) => t.docsRow));
 if (rowNumbers.size !== templates.length) {
   throw new Error('Two role templates claim the same docs/05 row number.');
 }
-if (templates.length !== 64) {
+if (templates.length !== 65) {
   throw new Error(
-    `docs/05 defines 64 system role templates; the registry has ${templates.length}. ` +
+    `docs/05 defines 65 system role templates; the registry has ${templates.length}. ` +
       `Add the missing template or update docs/05 — the two must agree.`,
   );
 }

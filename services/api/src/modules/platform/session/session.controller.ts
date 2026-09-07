@@ -2,6 +2,7 @@ import { Controller, Get, Inject, Injectable } from '@nestjs/common';
 import { getContext } from '../../../core/context/request-context.js';
 import { AuthenticatedOnly } from '../../../core/policy/permission.decorator.js';
 import { AuthService } from '../auth/auth.service.js';
+import { LicenceService } from '../admin/licence.service.js';
 import { AppError } from '../../../core/problem/app-error.js';
 
 export interface SessionSummary {
@@ -13,6 +14,20 @@ export interface SessionSummary {
   /** Every permission key the session currently holds. */
   readonly permissions: readonly string[];
   readonly homeWorkspace: string | null;
+  /**
+   * The `module.*` keys this hospital's licence currently allows.
+   *
+   * Sent with the session for the same reason permissions are: `docs/06` §4.1
+   * says an item the user cannot use is never rendered, and a module the
+   * hospital has not licensed is exactly such an item. Without this the
+   * `entitlement` field on every screen catalogue was documentation — declared,
+   * never read — and `phase-08` gate 11 ("toggle a console off: no nav item, no
+   * route, no search result") could not be satisfied at all.
+   *
+   * It is not the control. The API's licence guard is, and it re-resolves on
+   * every request; this only decides what is worth drawing.
+   */
+  readonly enabledModules: readonly string[];
 }
 
 /**
@@ -30,7 +45,10 @@ export interface SessionSummary {
  */
 @Injectable()
 export class SessionService {
-  constructor(@Inject(AuthService) private readonly auth: AuthService) {}
+  constructor(
+    @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(LicenceService) private readonly licence: LicenceService,
+  ) {}
 
   async summary(): Promise<SessionSummary> {
     const ctx = getContext();
@@ -51,6 +69,15 @@ export class SessionService {
 
     const displayName = await this.auth.displayNameFor(ctx.hospitalId, ctx.userId);
 
+    // Only the module family: a limit or a quota is not something the
+    // navigation can act on, and sending them all would be a list of every
+    // commercial term the hospital signed, on every page load.
+    const entitlements = await this.licence.entitlements();
+    const enabledModules = entitlements
+      .filter((e) => e.family === 'feature' && e.allowed && e.key.startsWith('module.'))
+      .map((e) => e.key)
+      .sort();
+
     return {
       user: { id: ctx.userId, displayName },
       hospitalId: ctx.hospitalId,
@@ -60,6 +87,7 @@ export class SessionService {
       // Sorted so the response is stable and diffable in a snapshot test.
       permissions: [...policy.permissions].sort(),
       homeWorkspace: await this.auth.homeWorkspaceFor(ctx.hospitalId, ctx.userId),
+      enabledModules,
     };
   }
 }

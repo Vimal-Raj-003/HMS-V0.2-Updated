@@ -9712,6 +9712,114 @@ const OP025F = group('OP-025', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-025, the ophthalmology console
+//
+// The console's own keys. Ordering, attaching and reviewing an OCT are the
+// framework's (`device.result.*`), because the OCT arrives through the same
+// path as a spirometry trace and an audiogram.
+//
+// ── Two keys for one signature ──────────────────────────────────────────────
+//
+// A spectacle prescription is normally signed by the doctor. Many hospitals
+// delegate it to the optometrist who did the refraction, and many do not — it
+// is a question of local regulation and of who the hospital is prepared to
+// stand behind. `sign_delegated` is that decision, made once by the hospital
+// rather than argued at the counter, and a prescription signed under it says so
+// on its face.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP025 = group('OP-025', 8, [
+  p(
+    'ophtha.visit.read',
+    'ophtha_visit',
+    'read',
+    'phi',
+    'low',
+    'Read an eye visit: the acuities, the refraction, the pressures and the examination.',
+    { phiRead: true },
+  ),
+  p(
+    'ophtha.visit.create',
+    'ophtha_visit',
+    'create',
+    'phi',
+    'low',
+    'Open an eye visit against a consultation, and move it through the clinic\u2019s lanes.',
+  ),
+  p(
+    'ophtha.optometry.record',
+    'ophtha_visit',
+    'record',
+    'phi',
+    'low',
+    'Record visual acuity, refraction and intraocular pressure. Held by optometrists as well as doctors.',
+  ),
+  p(
+    'ophtha.exam.record',
+    'ophtha_exam',
+    'record',
+    'phi',
+    'low',
+    'Record the slit-lamp and fundus examination, the retinopathy grade and the cup-disc ratio.',
+  ),
+  p(
+    'ophtha.exam.sign',
+    'ophtha_exam',
+    'sign',
+    'phi',
+    'medium',
+    'Sign the eye visit. The summary, the prescription and the recall all follow from it.',
+  ),
+  p(
+    'ophtha.spectacle_rx.sign',
+    'ophtha_spectacle_rx',
+    'sign',
+    'phi',
+    'medium',
+    'Sign a spectacle or contact-lens prescription. It leaves the building and cannot be changed afterwards.',
+  ),
+  p(
+    'ophtha.spectacle_rx.sign_delegated',
+    'ophtha_spectacle_rx',
+    'sign',
+    'phi',
+    'medium',
+    'Sign a spectacle prescription as the optometrist who refracted, where the hospital delegates that. Recorded on the prescription as a delegated signature.',
+  ),
+  p(
+    'ophtha.spectacle_rx.print',
+    'ophtha_spectacle_rx',
+    'print',
+    'phi',
+    'low',
+    'Print or reissue a prescription. A reissue is watermarked as a duplicate.',
+  ),
+  p(
+    'ophtha.surgery.plan',
+    'ophtha_surgery_plan',
+    'plan',
+    'phi',
+    'medium',
+    'Plan an eye operation: the procedure, the eye, the lens and the biometry it was chosen from.',
+  ),
+  p(
+    'ophtha.surgery.book',
+    'ophtha_surgery_plan',
+    'update',
+    'phi',
+    'medium',
+    'Move a plan through counselling to a theatre booking, or cancel it with a reason.',
+  ),
+  p(
+    'ophtha.report.read',
+    'ophtha_report',
+    'list',
+    'phi',
+    'low',
+    'Cataract conversion, lens usage, retinopathy screening yield and the national blindness-programme return.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -9804,6 +9912,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
 
   // Phase 8
   ...OP025F,
+  ...OP025,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

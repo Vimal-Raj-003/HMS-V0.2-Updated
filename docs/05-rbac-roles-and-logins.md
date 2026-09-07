@@ -94,6 +94,11 @@
 | 62  | TPA / Insurer User                        | Payer portal                     | pre-auth, claims for their payer only                                     |
 | 63  | Vendor                                    | Vendor portal                    | POs, invoices, consignment                                                |
 | 64  | Kiosk / TV / Device                       | n/a                              | display/read-only scoped tokens                                           |
+| 65  | Optometrist                               | Eye clinic refraction lane       | acuity, refraction, pressure; signs a spectacle Rx only where delegated   |
+
+> Row 65 is the first of the **specialty sub-roles** OP-025 §0.7 asks each console to add. They are ordinary
+> templates, not a new mechanism: a console that needs a chair-side role adds one row here and one template in
+> `packages/contracts/src/rbac/role-templates.ts`, and the registry test refuses to let the two drift apart.
 
 ## Permission catalogue conventions
 

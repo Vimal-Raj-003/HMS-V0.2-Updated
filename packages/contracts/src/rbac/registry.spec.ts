@@ -181,17 +181,17 @@ describe('permission catalogue', () => {
 });
 
 describe('system role templates', () => {
-  it('defines exactly the 64 templates docs/05 enumerates', () => {
-    expect(ROLE_TEMPLATES).toHaveLength(64);
+  it('defines exactly the 65 templates docs/05 enumerates', () => {
+    expect(ROLE_TEMPLATES).toHaveLength(65);
   });
 
-  it('covers docs/05 rows 1 to 64 with no gaps and no duplicates', () => {
+  it('covers docs/05 rows 1 to 65 with no gaps and no duplicates', () => {
     const rows = ROLE_TEMPLATES.map((t) => t.docsRow).sort((a, b) => a - b);
-    expect(rows).toEqual(Array.from({ length: 64 }, (_, i) => i + 1));
+    expect(rows).toEqual(Array.from({ length: 65 }, (_, i) => i + 1));
   });
 
   it('gives every template a unique key and a home workspace', () => {
-    expect(new Set(ROLE_TEMPLATES.map((t) => t.key)).size).toBe(64);
+    expect(new Set(ROLE_TEMPLATES.map((t) => t.key)).size).toBe(65);
     for (const t of ROLE_TEMPLATES) {
       expect(t.homeWorkspace, `${t.key} has no home workspace`).toBeTruthy();
       expect(t.name.length).toBeGreaterThan(2);

@@ -23,6 +23,16 @@ export interface RoleNavItem {
   readonly icon?: ReactNode;
   /** Permission key from `@vims/contracts` — the item is hidden without it. */
   readonly permission?: string;
+  /**
+   * Licence key from `@vims/contracts` — the item is hidden when the hospital
+   * has not bought the module.
+   *
+   * A permission answers "may this person"; an entitlement answers "did this
+   * hospital buy it". Both must be true before an item is drawn, and a module
+   * that is switched off must leave no door behind — `phase-08` gate 11 asks
+   * for exactly that, console by console.
+   */
+  readonly entitlement?: string;
   /** Live count badge (Rx queue, pending validations, DLQ…). */
   readonly count?: number;
   /** Max 2 levels (docs/06 §4.1). */
@@ -32,6 +42,15 @@ export interface RoleNavItem {
 export interface RoleNavProps {
   readonly items: readonly RoleNavItem[];
   readonly grantedPermissions: ReadonlySet<string>;
+  /**
+   * The `module.*` keys the hospital's licence allows.
+   *
+   * Optional so a caller with no licence state — a story, a test of the
+   * permission filter alone — behaves as it always did. Omitting it means
+   * "licensing is not being modelled here", not "nothing is licensed": the
+   * alternative would empty the menu for every existing caller.
+   */
+  readonly licensedModules?: ReadonlySet<string>;
   readonly activeKey?: string;
   readonly collapsed?: boolean;
   /** Accessible name of the navigation landmark, from the caller's i18n catalogue. */
@@ -43,11 +62,17 @@ export interface RoleNavProps {
 export function filterByPermission(
   items: readonly RoleNavItem[],
   granted: ReadonlySet<string>,
+  licensed?: ReadonlySet<string>,
 ): RoleNavItem[] {
   const out: RoleNavItem[] = [];
   for (const item of items) {
     if (item.permission !== undefined && !granted.has(item.permission)) continue;
-    const children = item.children === undefined ? undefined : filterByPermission(item.children, granted);
+    if (item.entitlement !== undefined && licensed !== undefined && !licensed.has(item.entitlement)) {
+      continue;
+    }
+    const children =
+      item.children === undefined ? undefined : filterByPermission(item.children, granted, licensed);
+    // A group whose every child was filtered away is a door onto an empty room.
     if (item.children !== undefined && (children === undefined || children.length === 0)) continue;
     out.push(children === undefined ? item : { ...item, children });
   }
@@ -163,13 +188,14 @@ function Branch({
 export function RoleNav({
   items,
   grantedPermissions,
+  licensedModules,
   activeKey,
   collapsed = false,
   label,
   onNavigate,
   className,
 }: RoleNavProps): React.JSX.Element {
-  const visible = filterByPermission(items, grantedPermissions);
+  const visible = filterByPermission(items, grantedPermissions, licensedModules);
 
   return (
     <nav

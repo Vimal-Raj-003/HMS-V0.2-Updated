@@ -239,6 +239,90 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'Stores and purchase are not included in your plan.',
     upgradeCta: 'Ask about Hospital Operations',
   }),
+
+  // ── phases 1-8, added when the gap above recurred ──────────────────────────
+  //
+  // The comment on the block above describes this defect being fixed once, for
+  // phases 1-4. It came back: by Phase 8 ten more keys were named by screens
+  // (`entitlement: 'module.inpatient.enabled'` and friends) and defined
+  // nowhere, so `seedLicences` wrote no row for them, no hospital could enable
+  // them, and the field on the screen was documentation rather than a gate.
+  //
+  // `apps/web/src/lib/entitlements.spec.ts` now fails if any screen names a key
+  // this list does not define, which is the part that was missing the first
+  // time.
+  ep(
+    'module.appointments.enabled',
+    'feature',
+    'route',
+    'OP-001/EN-006 Appointments, queue and token boards.',
+    {
+      message: 'Appointment scheduling is not included in your plan.',
+      upgradeCta: 'Ask about Front Office',
+    },
+  ),
+  ep(
+    'module.cash_counter.enabled',
+    'feature',
+    'route',
+    'NC-001/OP-005 Cash counter, receipts and day close.',
+    {
+      message: 'The cash counter is not included in your plan.',
+      upgradeCta: 'Ask about Front Office',
+    },
+  ),
+  ep('module.vitals_room.enabled', 'feature', 'route', 'OP-007 Vitals room and pre-consultation nursing.', {
+    message: 'The vitals room is not included in your plan.',
+    upgradeCta: 'Ask about Hospital Clinical',
+  }),
+  ep('module.opd_cpoe.enabled', 'feature', 'route', 'OP-002 Doctor console, e-prescribing and orders.', {
+    message: 'The doctor console is not included in your plan.',
+    upgradeCta: 'Ask about Hospital Clinical',
+  }),
+  ep('module.investigations.enabled', 'feature', 'route', 'OP-022 The investigation and report console.', {
+    message: 'The investigation console is not included in your plan.',
+    upgradeCta: 'Ask about Hospital Diagnostics',
+  }),
+  ep('module.rcm.enabled', 'feature', 'route', 'RC-002/RC-003/RC-006 Tariffs, claims and revenue cycle.', {
+    message: 'Revenue cycle management is not included in your plan.',
+    upgradeCta: 'Ask about Hospital Revenue',
+  }),
+  ep('module.emergency.enabled', 'feature', 'route', 'OP-006/TR-001 Emergency intake, triage and trauma.', {
+    message: 'The emergency module is not included in your plan.',
+    upgradeCta: 'Ask about Emergency & Trauma',
+  }),
+  ep(
+    'module.ortho.enabled',
+    'feature',
+    'route',
+    'OP-009/TR-002/TR-003 Orthopaedics, fractures and implants.',
+    {
+      message: 'The orthopaedic module is not included in your plan.',
+      upgradeCta: 'Ask about Emergency & Trauma',
+    },
+  ),
+  ep(
+    'module.inpatient.enabled',
+    'feature',
+    'route',
+    'IP-001 to IP-018 Beds, wards, theatre, ICU and discharge.',
+    {
+      message: 'The inpatient module is not included in your plan.',
+      upgradeCta: 'Ask about Hospital Inpatient',
+    },
+  ),
+
+  // ── Phase 8 specialty consoles ────────────────────────────────────────────
+  //
+  // One key per console, because `phase-08` gate 11 requires each to be
+  // switchable on its own: "Every console is toggled off: no nav item, no
+  // route, no search result … Toggle one back on and it works without a
+  // restart." A shared `module.specialty.enabled` would make that impossible to
+  // satisfy for one console at a time.
+  ep('module.ophthalmology.enabled', 'feature', 'route', 'OP-025 The ophthalmology console.', {
+    message: 'The ophthalmology console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
 ]);
 
 const pointsByKey = new Map(ENFORCEMENT_POINTS.map((e) => [e.key, e]));

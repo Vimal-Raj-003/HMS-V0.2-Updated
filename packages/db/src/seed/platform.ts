@@ -153,6 +153,11 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   // a coroner reads as a missing body, and the argument that the number was
   // simply never used is one nobody wants to be making.
   ['MORTUARY', '{BR}/MOR/{FY}/{SEQ:4}', true, 'fy'],
+  // OP-025: the spectacle prescription. Not gapless — a prescription started and
+  // abandoned when the patient changed their mind must not burn a number — but
+  // individually numbered, because the optical shop and the patient both quote
+  // it back.
+  ['SPEC_RX', '{BR}/SPEC/{FY}/{SEQ:5}', false, 'fy'],
   ['LIC_INVOICE', 'VIMS/{FY}/{SEQ:5}', true, 'fy'],
 ];
 

@@ -7,7 +7,7 @@
 
 | Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current phase          | **Phases 0–7 complete.** Phase 7 (Inpatient) finished on 2026-09-08 with step 7G — discharge, the versioned summary and the mortuary — and all ten of its provable exit gates pass. Gate 11 (the load test) has not been run: k6 is not installed here. Phase 8 (specialty consoles) is next and has no code.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Current phase          | **Phases 0–7 complete; Phase 8 in progress.** The specialty console framework (OP-025 §0) and the ophthalmology console are done and proved; roughly 33 consoles remain. **Phases 0–7 complete.** Phase 7 (Inpatient) finished on 2026-09-08 with step 7G — discharge, the versioned summary and the mortuary — and all ten of its provable exit gates pass. Gate 11 (the load test) has not been run: k6 is not installed here. Phase 8 (specialty consoles) is next and has no code.                                                                                                                                                                                                                                                                  |
 | Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                 |
 | Repo status            | **714 non-partition tables** outside the system schemas across fourteen tenant schemas (`clinical` 174, `core` 124, `billing` 96, `inventory` 82, `mdm` 66, `lab` 38, `rad` 34, `integration` 26, `patient` 18, `pharmacy` 17, `ops` 12, `engage` 11, `queue` 8, `finance` 2) — **0 business tables without RLS**; the only four without it are pg_partman's own `ext.part_config`, `ext.part_config_sub`, `ext.db_capabilities` and `public._prisma_migrations`. Read out of a live container, not copied from a commit. **46 migrations. 742 API routes. 88 Next.js screens.** Permission catalogue **1,144 keys**; event registry **773**.                                                                                                           |
 | Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **3,062 unit tests, 20/20 packages**; `pnpm test:integration` **489 tests, 18/18 files** — including the Phase-1 scheduling flake fixed this session, which failed only at certain times of day. **Never run: both k6 scripts** (k6 is not installed here) and no Playwright golden path exists for any Phase 5–7 module.                                                                                                                                                                                                                                                                                                                                    |
@@ -400,6 +400,88 @@ been hiding.
 
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
+
+### 2026-09-09 (later) · Phase 8 · OP-025 the eye clinic — and the licence gate that was never wired
+
+**Built — OP-025, the first console on the framework, complete.** 8 tables, 11
+permission keys, 5 events, 1 new role template, 4 screens, 22 integration
+tests. Plus the cross-cutting fix below, which Phase 8's own exit gate 11
+forced into the open.
+
+**Four rules, proved in both directions**
+
+| Attempt                                          | What happened                                                   |
+| ------------------------------------------------ | --------------------------------------------------------------- |
+| An acuity of both eyes at once                   | Refused — two eyes that measure the same are two measurements   |
+| 6/18 entered with a made-up logMAR of 9.99       | Stored as 0.48; the trigger owns the conversion, not the caller |
+| CF, HM, NLP                                      | 1.90, 2.30, 3.00 — the ladder below the chart has fixed values  |
+| A child who fixes and follows                    | No number at all; an invented point is worse than a gap         |
+| A Snellen value of "good"                        | Refused, in words that say what a Snellen acuity looks like     |
+| A sphere of −2.13                                | Refused — no lens is ground to it                               |
+| An axis of 0; a cylinder with no axis            | Both refused                                                    |
+| A pressure of 140 mmHg; a cup-disc ratio of 1.4  | Both refused                                                    |
+| Dilation with no drug named                      | Refused — the drops are a medication with a hazard attached     |
+| The nurse examining; the resident signing        | 403 both times                                                  |
+| Editing a signed spectacle prescription          | Refused — an optical shop may already be grinding to it         |
+| An optometrist signing without the delegated key | 403; with it, signed and recorded as delegated                  |
+| A lens power with no biometry; with no formula   | Both refused — the eye is not adjustable afterwards             |
+| Biometry eight months old                        | Planned with, labelled `biometryStale` — the surgeon's call     |
+| A second live plan for the same eye              | Refused; the other eye is a different plan                      |
+| Cancelling a plan with no reason                 | Refused — the patient was told it was happening                 |
+
+**What the console does not have**
+
+No worklist, no upload path, no print pipeline. `SpecialtyWorklist` and
+`InvestigationsPane` are imported from the framework unchanged, and an OCT is a
+`specialty.device_orders` row like every other console's scan — which is why
+there is no `ophtha_investigation_orders` table and no route to order one.
+
+**A defect gate 11 uncovered, older than this phase**
+
+Gate 11 asks that a console toggled off leave "no nav item, no route, no search
+result". None of that was possible:
+
+- **Ten module entitlement keys named by screens since Phase 1 existed
+  nowhere.** `module.inpatient.enabled` and nine others were declared on screen
+  catalogues and defined in no enforcement point, so the seed wrote no licence
+  row and no hospital could enable those modules.
+- **The `entitlement` field was never read.** Not by the navigation, not by the
+  gates, not by anything. It was documentation.
+- **The ⌘K palette indexed `ADMIN_SCREENS` alone** — by Phase 8 it could not
+  find the bed board, the ER board or the eye clinic.
+
+All three are fixed: the session carries the hospital's licensed modules, the
+navigation and the palette filter on them, every screen gate refuses with the
+licence's own plain-language message rather than "ask your administrator", and
+`apps/web/src/lib/entitlements.spec.ts` fails if a screen ever again names a key
+the catalogue does not define. `entitlements.ts` records the same defect being
+fixed once before, for phases 1–4; the reason it came back is that nothing
+failed, and that is now the part that changed.
+
+**Two smaller things found on the way**
+
+A malformed identifier in a URL answered 500 — the server blaming itself for a
+truncated link, and burying real 500s. It answers 404 now, narrowed to uuid
+casts so a bad numeric cast in our own SQL still surfaces. And the licence flag
+grid sorted with `localeCompare`, which is not stable across ICU builds however
+much the test guarding it is named "stable"; it sorts by code point now.
+
+**Tested** — 22 OP-025 integration tests and 6 new entitlement tests, plus every
+rule proved live over HTTP and in raw SQL in both directions. The ophthalmology
+console is seeded for both demo hospitals with five device result types, so a
+fresh database has a working console rather than an empty registry.
+
+**Gates** — 20/20 packages typecheck, lint and test (**3,073 unit tests**);
+**531 API integration tests**, up from 509; 48 migrations; 727 non-partition
+tables with RLS on every business one; catalogue **1,164 keys**; event registry
+**783**; entitlements **45**; roles **65**; 90 screens.
+
+**Not built in OP-025, and tracked** — the optical shop (`optical_orders`,
+§3.3), which is gated behind a hospital setting and is a counter workflow of its
+own with stock and GST treatment. Half of it would be worse than none.
+
+**Next:** OP-010 and OP-039, the procedure and OPD-nursing spine that most other
+consoles call into.
 
 ### 2026-09-09 · Phase 8 · The framework thirty consoles are built on — OP-025 §0
 

@@ -50,6 +50,7 @@ function wrapperWith(permissions: readonly string[]) {
             branchId: 'b1',
             roles: ['receptionist'],
             permissions,
+            enabledModules: [],
           }}
         >
           <ToastProvider>{children}</ToastProvider>

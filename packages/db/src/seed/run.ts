@@ -31,6 +31,7 @@ import { DEV_PASSWORD, seedUsers } from './users.js';
 import { seedModuleConfiguration } from './modules.js';
 import { seedActivity } from './activity.js';
 import { seedMasters } from './masters.js';
+import { seedSpecialtyConsoles } from './specialty.js';
 import { seedFrontOffice } from './frontoffice.js';
 import { seedPatientPopulation } from './patients.js';
 import { seedClinical } from './clinical.js';
@@ -123,6 +124,7 @@ export async function runSeed(db: Pool, tier: Tier): Promise<ReturnType<typeof t
     await seedSchemes(ctx, tenancy);
     await seedLeakage(ctx, tenancy);
     await seedEmergency(ctx, tenancy);
+    await seedSpecialtyConsoles(ctx, tenancy);
   }
   await seedActivity(ctx, tenancy);
   await seedPatientPopulation(ctx, tenancy);

@@ -9,9 +9,10 @@ import {
   CommandList,
   Kbd,
 } from '@vims/ui';
+import type { Route } from 'next';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { ADMIN_SCREENS } from '@/features/admin/screens';
+import { openableScreens } from '@/lib/screen-index';
 import { useSession } from '@/lib/session-context';
 
 /**
@@ -28,7 +29,7 @@ import { useSession } from '@/lib/session-context';
  */
 export function CommandPalette(): React.JSX.Element {
   const router = useRouter();
-  const { granted } = useSession();
+  const { granted, licensed } = useSession();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -43,7 +44,11 @@ export function CommandPalette(): React.JSX.Element {
     };
   }, []);
 
-  const screens = ADMIN_SCREENS.filter((screen) => granted.has(screen.permission));
+  // Every catalogue, not only administration's. Until Phase 8 this indexed
+  // `ADMIN_SCREENS` alone, so the palette could not find the bed board or the
+  // eye clinic — a search box that knew about a tenth of the product.
+  const screens = openableScreens(granted, licensed);
+  const adminScreens = screens.filter((screen) => screen.catalogue === 'admin');
 
   return (
     <>
@@ -66,7 +71,7 @@ export function CommandPalette(): React.JSX.Element {
         open={open}
         onOpenChange={setOpen}
         title="Command palette"
-        description="Jump to a screen. Only the screens your roles allow are listed."
+        description="Jump to a screen. Only screens your roles allow, in modules this hospital has, are listed."
         closeLabel="Close the command palette"
       >
         <CommandInput placeholder="Type a screen or what you want to do…" />
@@ -85,7 +90,7 @@ export function CommandPalette(): React.JSX.Element {
                 <span className="truncate text-xs text-fg-muted">Your role&rsquo;s home workspace.</span>
               </span>
             </CommandItem>
-            {screens.length === 0 ? null : (
+            {adminScreens.length === 0 ? null : (
               <CommandItem
                 value="administration admin console control plane"
                 onSelect={() => {
@@ -107,7 +112,7 @@ export function CommandPalette(): React.JSX.Element {
                 value={`${screen.label} ${screen.keywords.join(' ')}`}
                 onSelect={() => {
                   setOpen(false);
-                  router.push(screen.href);
+                  router.push(screen.href as Route);
                 }}
               >
                 <span className="flex min-w-0 flex-col">

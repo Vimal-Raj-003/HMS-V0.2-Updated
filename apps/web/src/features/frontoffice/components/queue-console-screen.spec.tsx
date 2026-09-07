@@ -96,6 +96,7 @@ function session(permissions: readonly string[]): WorkspaceSession {
     branchId: 'branch-1',
     roles: ['receptionist'],
     permissions,
+    enabledModules: [],
   };
 }
 

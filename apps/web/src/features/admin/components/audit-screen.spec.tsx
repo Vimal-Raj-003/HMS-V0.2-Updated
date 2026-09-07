@@ -67,6 +67,7 @@ function Wrapper({ children }: { readonly children: ReactNode }): React.JSX.Elem
           branchId: 'b1',
           roles: ['hospital_admin'],
           permissions: ['admin.audit.read'],
+          enabledModules: [],
         }}
       >
         {children}

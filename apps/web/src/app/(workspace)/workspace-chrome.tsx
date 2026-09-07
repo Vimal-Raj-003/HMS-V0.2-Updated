@@ -30,6 +30,9 @@ export function WorkspaceChrome({ session, children }: WorkspaceChromeProps): Re
   const pathname = usePathname();
   const [signingOut, setSigningOut] = useState(false);
   const granted = useMemo(() => new Set(session.permissions), [session.permissions]);
+  // A module the hospital has not licensed leaves no door behind: not a menu
+  // item, not a palette entry, not a greyed-out row somebody asks about.
+  const licensed = useMemo(() => new Set(session.enabledModules), [session.enabledModules]);
 
   // `RoleNav` highlights by item key, so the active key is derived from the
   // route rather than stored — a stored one goes stale on back/forward.
@@ -79,7 +82,13 @@ export function WorkspaceChrome({ session, children }: WorkspaceChromeProps): Re
 
           <div className="flex">
             <div data-testid="role-nav" className="hidden w-56 shrink-0 border-e border-control p-3 md:block">
-              <RoleNav items={PHASE0_NAV} grantedPermissions={granted} activeKey={activeKey} label="Main" />
+              <RoleNav
+                items={PHASE0_NAV}
+                grantedPermissions={granted}
+                licensedModules={licensed}
+                activeKey={activeKey}
+                label="Main"
+              />
             </div>
             <main id="main" className="min-w-0 flex-1 p-6">
               {children}

@@ -33,6 +33,8 @@ export interface SessionSummary {
   readonly roles: readonly string[];
   readonly permissions: readonly string[];
   readonly homeWorkspace: string | null;
+  /** The `module.*` keys this hospital's licence allows. */
+  readonly enabledModules: readonly string[];
 }
 
 export async function fetchSession(): Promise<SessionSummary | null> {

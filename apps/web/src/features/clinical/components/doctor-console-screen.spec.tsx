@@ -69,6 +69,7 @@ function session(permissions: readonly string[]): WorkspaceSession {
     branchId: 'branch-1',
     roles: ['doctor_consultant_opd'],
     permissions,
+    enabledModules: [],
   };
 }
 

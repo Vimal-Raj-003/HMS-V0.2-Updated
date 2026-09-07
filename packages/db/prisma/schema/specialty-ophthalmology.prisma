@@ -1,0 +1,428 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-025 — the ophthalmology console
+//
+// The console that proves the framework. It brings typed tables and its own
+// screens; it brings no worklist, no upload path and no print pipeline, because
+// those are the framework's and `phase-08` calls a second copy of them a defect.
+// There is no `ophtha_investigation_orders` here for exactly that reason — an
+// OCT is a `specialty.device_orders` row like every other console's scan.
+//
+// ── Every measurement names one eye ─────────────────────────────────────────
+//
+// `bilateral` is a diagnosis or a plan, never a reading. Two eyes that happen
+// to measure the same are two measurements that agree, and the day they stop
+// agreeing a single row has nowhere to put the difference. The database refuses
+// `bilateral` and `not_applicable` on anything measured.
+//
+// ── logMAR is derived, never typed ──────────────────────────────────────────
+//
+// A trend is only worth plotting if every point on it was converted the same
+// way. 6/18 is 0.48 whoever entered it, and the conversion lives in a trigger
+// so a chart and a chart note cannot disagree about whether a patient improved.
+//
+// ── Dioptres come in quarter steps ──────────────────────────────────────────
+//
+// A sphere of −2.13 is a typo. No lens is ground to it, the optical shop would
+// ring back, and the ring-back happens after the patient has gone home.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum OphthaStage {
+  registered
+  refraction
+  dilating
+  doctor
+  imaging
+  counselling
+  done
+
+  @@schema("specialty")
+}
+
+enum VaNotation {
+  snellen_6
+  snellen_20
+  logmar
+  etdrs
+  n_notation
+  /// Counting fingers, hand movements, perception of light with and without
+  /// projection, and no perception at all. The bottom of the ladder, where a
+  /// fraction stops meaning anything.
+  cf
+  hm
+  pl
+  pl_proj
+  nlp
+  /// A child who fixes and follows. Not a number, and not a failure to measure.
+  csm
+
+  @@schema("specialty")
+}
+
+enum VaContext {
+  ucva
+  bcva
+  pinhole
+  with_glasses
+  near
+  post_op
+
+  @@schema("specialty")
+}
+
+enum RefractionKind {
+  auto
+  retinoscopy
+  subjective
+  cycloplegic
+  old_glasses
+  final_rx
+  contact_lens
+
+  @@schema("specialty")
+}
+
+enum IopMethod {
+  nct
+  goldmann
+  icare
+  tonopen
+  schiotz
+
+  @@schema("specialty")
+}
+
+enum DrGrade {
+  none
+  mild_npdr
+  moderate_npdr
+  severe_npdr
+  pdr
+
+  @@schema("specialty")
+}
+
+enum ExamSegment {
+  anterior
+  posterior
+  adnexa
+  motility
+
+  @@schema("specialty")
+}
+
+enum SpectacleRxKind {
+  spectacle
+  contact_lens
+
+  @@schema("specialty")
+}
+
+enum SurgeryPlanStatus {
+  planned
+  counselled
+  booked
+  done
+  cancelled
+
+  @@schema("specialty")
+}
+
+/// One eye-clinic visit, hung off the encounter the rest of the chart uses.
+model OphthaVisit {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId   String @map("patient_id") @db.Uuid
+  /// One eye visit per encounter. A second is a second visit, not a second tab.
+  encounterId String @unique @map("encounter_id") @db.Uuid
+
+  stage OphthaStage @default(registered)
+
+  /// Dilating drops are a medication and a hazard: the patient must not drive
+  /// for hours afterwards, and in a shallow anterior chamber they can close the
+  /// angle. Recorded, not assumed.
+  dilatedAt     DateTime? @map("dilated_at") @db.Timestamptz(6)
+  dilatingDrug  String?   @map("dilating_drug") @db.VarChar(120)
+  cycloplegic   Boolean   @default(false)
+
+  chiefComplaintCodes String[] @default([]) @map("chief_complaint_codes")
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  visualAcuities VisualAcuity[]
+  refractions    Refraction[]
+  iopReadings    IopReading[]
+  examFindings   ExamFinding[]
+  diagnoses      OphthaDiagnosis[]
+
+  @@index([hospitalId, branchId, stage, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@map("ophtha_visits")
+  @@schema("specialty")
+}
+
+/// What the patient can see, and how it was measured.
+model VisualAcuity {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  visitId    String @map("visit_id") @db.Uuid
+
+  /// `left` or `right`. Never `bilateral` — that is two measurements agreeing.
+  eye      Laterality
+  context  VaContext
+  notation VaNotation
+
+  /// As written: "6/18", "20/60", "N6", "CF 2m". Kept verbatim because the
+  /// notation a clinic uses is part of the record.
+  value String @db.VarChar(24)
+
+  /// Derived by a trigger from `notation` and `value`, so every point on a
+  /// trend was converted the same way. Lower is better; 0.0 is 6/6.
+  logmar Decimal? @db.Decimal(4, 2)
+
+  distanceM Decimal? @map("distance_m") @db.Decimal(4, 2)
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String   @map("recorded_by") @db.Uuid
+
+  visit OphthaVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, visitId, eye])
+  @@map("ophtha_visual_acuity")
+  @@schema("specialty")
+}
+
+/// A refraction, from whichever of the five ways it was obtained.
+model Refraction {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  visitId    String @map("visit_id") @db.Uuid
+
+  eye  Laterality
+  kind RefractionKind
+
+  /// Dioptres, in quarter steps. Stored in minus-cylinder convention whatever
+  /// the clinic types; the transposition helper never changes what is stored.
+  sph Decimal? @db.Decimal(5, 2)
+  cyl Decimal? @db.Decimal(5, 2)
+  /// 1–180. Zero is written as 180, because an axis of zero is the same
+  /// meridian and two spellings of one axis is one more thing to reconcile.
+  axis  Int?
+  add   Decimal? @db.Decimal(4, 2)
+  prism Decimal? @db.Decimal(4, 2)
+  base  String?  @db.VarChar(12)
+
+  vaAchieved String? @map("va_achieved") @db.VarChar(24)
+  pdMono     Decimal? @map("pd_mono") @db.Decimal(4, 1)
+  pdBino     Decimal? @map("pd_bino") @db.Decimal(4, 1)
+  vertexMm   Decimal? @map("vertex_mm") @db.Decimal(4, 1)
+
+  /// Keratometry, when the same device gave it.
+  k1     Decimal? @db.Decimal(5, 2)
+  k1Axis Int?     @map("k1_axis")
+  k2     Decimal? @db.Decimal(5, 2)
+  k2Axis Int?     @map("k2_axis")
+
+  /// `device` or `manual`. A value the autorefractor pushed and a value
+  /// somebody typed are different evidence, and an override of the first by the
+  /// second is worth being able to find.
+  source String @default("manual") @db.VarChar(12)
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String   @map("recorded_by") @db.Uuid
+
+  visit OphthaVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, visitId, kind, eye])
+  @@map("ophtha_refractions")
+  @@schema("specialty")
+}
+
+/// Intraocular pressure. The number glaucoma is managed on.
+model IopReading {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  visitId    String @map("visit_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  eye    Laterality
+  method IopMethod
+
+  valueMmhg Decimal  @map("value_mmhg") @db.Decimal(4, 1)
+  /// Central corneal thickness, and the pressure corrected for it. A thin
+  /// cornea reads low, which is how glaucoma is missed in exactly the eyes most
+  /// at risk of it.
+  cctUm         Int?     @map("cct_um")
+  correctedMmhg Decimal? @map("corrected_mmhg") @db.Decimal(4, 1)
+
+  /// Dilation raises pressure in a narrow angle. A reading taken after drops is
+  /// not comparable with one taken before.
+  postDilation Boolean @default(false) @map("post_dilation")
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String   @map("recorded_by") @db.Uuid
+
+  visit OphthaVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, patientId, recordedAt(sort: Desc)])
+  @@index([hospitalId, visitId, eye])
+  @@map("ophtha_iop_readings")
+  @@schema("specialty")
+}
+
+/// What the slit lamp and the fundus showed.
+model ExamFinding {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  visitId    String @map("visit_id") @db.Uuid
+
+  segment ExamSegment
+  eye     Laterality
+
+  /// Typed per segment by the console's Zod schema. What is queried — the DR
+  /// grade, the cup-disc ratio — is lifted into columns below; the rest is the
+  /// narrative a clinician writes.
+  findings Json @default("{}")
+
+  /// Diabetic retinopathy grade and macular oedema: the two fields a screening
+  /// programme reports on, so they are columns and not JSON.
+  drGrade DrGrade? @map("dr_grade")
+  dme     Boolean? @map("dme")
+  /// Vertical cup-to-disc ratio, 0.0–1.0. The glaucoma trend.
+  cdrVertical Decimal? @map("cdr_vertical") @db.Decimal(3, 2)
+
+  /// The drawing, in object storage. A fundus sketch is worth more than any
+  /// structured field and cannot be reduced to one.
+  drawingKey String? @map("drawing_key") @db.VarChar(200)
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String   @map("recorded_by") @db.Uuid
+
+  visit OphthaVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@unique([visitId, segment, eye], map: "uq_exam_finding_per_segment_eye")
+  @@index([hospitalId, visitId])
+  @@map("ophtha_exam_findings")
+  @@schema("specialty")
+}
+
+/// A diagnosis, which — unlike a measurement — may be of both eyes.
+model OphthaDiagnosis {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  visitId    String @map("visit_id") @db.Uuid
+
+  eye       Laterality
+  icd10     String  @db.VarChar(12)
+  snomed    String? @db.VarChar(24)
+  isPrimary Boolean @default(false) @map("is_primary")
+  note      String? @db.Text
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String   @map("recorded_by") @db.Uuid
+
+  visit OphthaVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, visitId])
+  @@map("ophtha_diagnoses")
+  @@schema("specialty")
+}
+
+/// The prescription the patient takes to the optical shop.
+model SpectacleRx {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId String @map("patient_id") @db.Uuid
+  visitId   String @map("visit_id") @db.Uuid
+
+  rxNo String          @map("rx_no") @db.VarChar(60)
+  kind SpectacleRxKind @default(spectacle)
+
+  /// Per eye and per distance: `{right: {distance: {...}, near: {...}}, ...}`.
+  /// The powers are copied from a refraction and may be edited by the signer,
+  /// which is why they live here rather than being a pointer.
+  lines Json
+
+  pdMono Decimal? @map("pd_mono") @db.Decimal(4, 1)
+  pdBino Decimal? @map("pd_bino") @db.Decimal(4, 1)
+
+  lensAdvice Json? @map("lens_advice")
+
+  /// Twelve months by default. A prescription with no expiry is one an optical
+  /// shop will fill in three years' time on a changed eye.
+  validUntil DateTime @map("valid_until") @db.Date
+
+  signedBy String   @map("signed_by") @db.Uuid
+  signedAt DateTime @default(now()) @map("signed_at") @db.Timestamptz(6)
+  /// Set when an optometrist signed under delegation, so the register shows
+  /// who actually put their name to it.
+  signedUnderDelegation Boolean @default(false) @map("signed_under_delegation")
+
+  printedAt DateTime? @map("printed_at") @db.Timestamptz(6)
+  pdfKey    String?   @map("pdf_key") @db.VarChar(200)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, rxNo], map: "uq_spectacle_rx_no")
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@map("ophtha_spectacle_rx")
+  @@schema("specialty")
+}
+
+/// A cataract or other eye operation, planned from biometry.
+model SurgeryPlan {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId String @map("patient_id") @db.Uuid
+  visitId   String @map("visit_id") @db.Uuid
+
+  procedureCode String     @map("procedure_code") @db.VarChar(40)
+  eye           Laterality
+  anaesthesia   String     @db.VarChar(40)
+
+  /// The lens, and the numbers it was chosen from. A power with no biometry
+  /// behind it is a guess, and the eye is not adjustable afterwards.
+  iolModel     String?  @map("iol_model") @db.VarChar(120)
+  iolPower     Decimal? @map("iol_power") @db.Decimal(4, 2)
+  iolFormula   String?  @map("iol_formula") @db.VarChar(40)
+  targetRefraction Decimal? @map("target_refraction") @db.Decimal(4, 2)
+  backupPower  Decimal? @map("backup_power") @db.Decimal(4, 2)
+
+  /// Axial length, keratometry and anterior chamber depth, with the date they
+  /// were measured. Biometry older than six months is flagged on the screen —
+  /// eyes change, and a cataract changes them faster.
+  biometry     Json?     @db.JsonB
+  biometryAt   DateTime? @map("biometry_at") @db.Timestamptz(6)
+
+  preopChecklist Json? @map("preop_checklist")
+
+  status SurgeryPlanStatus @default(planned)
+
+  consentId   String? @map("consent_id") @db.Uuid
+  estimateId  String? @map("estimate_id") @db.Uuid
+  otCaseId    String? @map("ot_case_id") @db.Uuid
+
+  /// The national blindness-control programme's register line.
+  npcbviFlag Boolean @default(false) @map("npcbvi_flag")
+
+  cancelReason String? @map("cancel_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId])
+  @@map("ophtha_surgery_plans")
+  @@schema("specialty")
+}

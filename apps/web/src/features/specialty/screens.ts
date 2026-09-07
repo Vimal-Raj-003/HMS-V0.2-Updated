@@ -45,6 +45,32 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: null,
   },
+  {
+    key: 'eye-clinic',
+    label: 'Eye clinic',
+    href: '/ophtha/clinic',
+    area: 'specialty',
+    permission: 'ophtha.visit.read',
+    summary:
+      'The refraction lane, the examination and the lens plan \u2014 one column per eye, an acuity ladder that has a bottom, and powers that move in quarter dioptres.',
+    deniedExplanation:
+      'The eye clinic is held by ophthalmologists, optometrists and the nurses who run the lanes. Recording is wide; signing the visit is the consultant\u2019s, and signing a spectacle prescription is a further key a hospital delegates deliberately.',
+    keywords: [
+      'ophthalmology',
+      'eye',
+      'refraction',
+      'visual acuity',
+      'spectacle',
+      'glasses',
+      'intraocular pressure',
+      'glaucoma',
+      'cataract',
+      'retinopathy',
+      'oct',
+      'logmar',
+    ],
+    entitlement: 'module.ophthalmology.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { PermissionDenied } from '@/features/admin/components/problem-card';
+import { ModuleNotLicensed, PermissionDenied } from '@/features/admin/components/problem-card';
 import { useSession } from '@/lib/session-context';
 import { frontOfficeScreen } from '../screens';
 
@@ -27,10 +27,17 @@ export function FrontOfficeGate({
   readonly children: ReactNode;
 }): React.JSX.Element {
   const screen = frontOfficeScreen(screenKey);
-  const { granted } = useSession();
+  const { granted, licensed } = useSession();
 
   if (!granted.has(screen.permission)) {
     return <PermissionDenied permission={screen.permission} inPlainWords={screen.deniedExplanation} />;
+  }
+  // Reached only by typing a URL — the navigation and the palette do not offer
+  // a screen in a module this hospital has not licensed. The words are
+  // commercial rather than "ask your administrator for access", because that
+  // errand would go nowhere.
+  if (screen.entitlement !== null && !licensed.has(screen.entitlement)) {
+    return <ModuleNotLicensed entitlement={screen.entitlement} />;
   }
   return <>{children}</>;
 }

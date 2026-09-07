@@ -215,5 +215,11 @@ export function resolveFlags(
     };
   });
 
-  return [...fromEntitlements, ...fromRows].sort((a, b) => a.key.localeCompare(b.key));
+  // Code-point order, not `localeCompare`. The test above this one is called
+  // "stable", and `localeCompare` is not: it folds punctuation away under the
+  // host's collation, so `module.opd_cpoe` and `module.opd` swap places
+  // depending on the ICU build Node was compiled against. An administrator
+  // watching the flag grid reshuffle between two servers has no way to tell
+  // that from a flag having actually moved.
+  return [...fromEntitlements, ...fromRows].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }

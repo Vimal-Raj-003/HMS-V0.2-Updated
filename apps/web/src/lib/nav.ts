@@ -52,6 +52,7 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
       label: screen.label,
       href: screen.href,
       permission: screen.permission,
+      ...(screen.entitlement === null ? {} : { entitlement: screen.entitlement }),
     })),
   },
   /**
@@ -76,6 +77,7 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
       label: screen.label,
       href: screen.href,
       permission: screen.permission,
+      ...(screen.entitlement === null ? {} : { entitlement: screen.entitlement }),
     })),
   },
   /**
@@ -97,6 +99,7 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
       label: screen.label,
       href: screen.href,
       permission: screen.permission,
+      ...(screen.entitlement === null ? {} : { entitlement: screen.entitlement }),
     })),
   },
   /**
@@ -116,6 +119,7 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
       label: screen.label,
       href: screen.href,
       permission: screen.permission,
+      ...(screen.entitlement === null ? {} : { entitlement: screen.entitlement }),
     })),
   },
   /**
@@ -131,6 +135,7 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
       label: screen.label,
       href: screen.href,
       permission: screen.permission,
+      ...(screen.entitlement === null ? {} : { entitlement: screen.entitlement }),
     })),
   },
   /**
@@ -146,6 +151,7 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
       label: screen.label,
       href: screen.href,
       permission: screen.permission,
+      ...(screen.entitlement === null ? {} : { entitlement: screen.entitlement }),
     })),
   },
   /**
@@ -161,6 +167,7 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
       label: screen.label,
       href: screen.href,
       permission: screen.permission,
+      ...(screen.entitlement === null ? {} : { entitlement: screen.entitlement }),
     })),
   },
   {
@@ -172,12 +179,17 @@ export const PHASE0_NAV: readonly RoleNavItem[] = [
       label: screen.label,
       href: screen.href,
       permission: screen.permission,
+      ...(screen.entitlement === null ? {} : { entitlement: screen.entitlement }),
     })),
   },
   {
     key: 'administration',
     label: 'Administration',
     href: '/admin',
+    // Administration carries no entitlement: a hospital that cannot reach its
+    // own licence screen cannot fix its licence, and locking somebody out of the
+    // thing that unlocks everything else is the one failure mode worth ruling
+    // out by construction.
     children: ADMIN_SCREENS.map((screen) => ({
       key: screen.key,
       label: screen.label,

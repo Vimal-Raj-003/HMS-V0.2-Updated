@@ -12,7 +12,7 @@ import { ROLE_TEMPLATES, getRoleTemplate } from './role-templates.js';
  * quietly comes to mean "uploaded" — and the rail of unseen results, which is
  * the entire reason the state exists, is empty forever.
  */
-const PHASE_8_PREFIXES = ['console', 'device'] as const;
+const PHASE_8_PREFIXES = ['console', 'device', 'ophtha'] as const;
 
 function permission(key: string): PermissionDefinition {
   const found = getPermission(key);
@@ -63,6 +63,7 @@ describe('Phase 8 framework permission catalogue', () => {
         'counsellor',
         'dietician',
         'receptionist',
+        'optometrist',
       ],
       device: [
         'medical_superintendent',
@@ -85,6 +86,16 @@ describe('Phase 8 framework permission catalogue', () => {
         'dialysis_technician',
         'therapist',
         'dietician',
+        'optometrist',
+      ],
+      ophtha: [
+        'medical_superintendent',
+        'hod',
+        'doctor_consultant_opd',
+        'surgeon',
+        'resident_doctor',
+        'nurse_opd',
+        'optometrist',
       ],
     };
 
@@ -196,5 +207,45 @@ describe('the console component catalogue', () => {
         { key: 'investigations', label: 'Investigations', component: 'generic.investigations' },
       ]),
     ).toEqual([]);
+  });
+});
+
+/**
+ * OP-025 — the first console on the framework.
+ *
+ * The rules worth a test are the two the console draws differently from the
+ * framework: who signs, and who signs a prescription that leaves the building.
+ */
+describe('OP-025 — the eye clinic', () => {
+  it('lets an optometrist record everything and sign nothing', () => {
+    const optometrist = getRoleTemplate('optometrist');
+    expect(optometrist?.permissions).toContain('ophtha.optometry.record');
+    expect(optometrist?.permissions).not.toContain('ophtha.exam.sign');
+    // Delegation is a decision the hospital makes deliberately, by granting the
+    // key — not a default that arrives with the role.
+    expect(optometrist?.permissions).not.toContain('ophtha.spectacle_rx.sign_delegated');
+    expect(optometrist?.permissions).not.toContain('ophtha.spectacle_rx.sign');
+  });
+
+  it('lets a resident examine and plan but not sign', () => {
+    const resident = getRoleTemplate('resident_doctor');
+    expect(resident?.permissions).toContain('ophtha.exam.record');
+    expect(resident?.permissions).toContain('ophtha.surgery.plan');
+    expect(resident?.permissions).not.toContain('ophtha.exam.sign');
+    expect(resident?.permissions).not.toContain('ophtha.spectacle_rx.sign');
+  });
+
+  it('ships the delegated-signature key unassigned, for the admin to grant', () => {
+    // A key nobody holds by default and everybody can be given is how a
+    // one-line local regulation becomes a configuration rather than a fork.
+    expect(permission('ophtha.spectacle_rx.sign_delegated').risk).toBe('medium');
+    expect(holdersOf('ophtha.spectacle_rx.sign_delegated')).toEqual([]);
+  });
+
+  it('keeps the ophthalmology console off the framework device keys it does not need', () => {
+    // An OCT is ordered with `device.result.order`, not with an ophthalmology
+    // key: `phase-08` says no console gets its own upload code, and no console
+    // gets its own upload permissions either.
+    expect(keysWithPrefix('ophtha').some((k) => k.includes('investigation'))).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 'use client';
 
+import { getEnforcementPoint } from '@vims/contracts';
 import { TriangleAlert, ShieldAlert } from '@/lib/icons';
 import { Button } from '@vims/ui';
 import { ApiProblem } from '@/lib/api';
@@ -82,6 +83,42 @@ export function PermissionDenied({
       <p className="mt-3 text-sm text-fg-muted">
         Ask your hospital administrator to raise an access request for this permission. Quote the key above —
         it is the exact thing they need to grant.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The module this screen belongs to is not in the hospital's plan.
+ *
+ * Deliberately a different state from `PermissionDenied`, with different words
+ * and a different next step: "ask your administrator for access" sends somebody
+ * on a fruitless errand when the answer is commercial. The message comes from
+ * the entitlement catalogue, which is written in plain language for exactly
+ * this — `EN-040 §3.2`: never "SKU", never "entitlement".
+ *
+ * Reached only by typing a URL: the navigation and the palette do not offer a
+ * screen in an unlicensed module at all.
+ */
+export function ModuleNotLicensed({ entitlement }: { readonly entitlement: string }): React.JSX.Element {
+  const point = getEnforcementPoint(entitlement);
+
+  return (
+    <div
+      role="status"
+      data-testid="module-not-licensed"
+      className="mx-auto max-w-[60ch] rounded-lg border border-strong bg-layer-1 p-6 text-center"
+    >
+      <ShieldAlert className="mx-auto size-6 text-fg-subtle" aria-hidden="true" />
+      <p className="mt-2 text-md font-medium text-fg-default">This module is not in your plan</p>
+      <p className="mt-1 text-sm text-fg-muted">
+        {point?.message ?? 'This part of the product is not included in your plan.'}
+      </p>
+      {point?.upgradeCta === undefined ? null : (
+        <p className="mt-3 text-sm text-fg-muted">{point.upgradeCta}.</p>
+      )}
+      <p className="mt-3 font-mono text-xs text-fg-subtle">
+        <span data-testid="missing-entitlement">{entitlement}</span>
       </p>
     </div>
   );

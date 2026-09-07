@@ -98,6 +98,27 @@ export class ProblemFilter implements ExceptionFilter {
       };
     }
 
+    // A malformed identifier is the caller's mistake, not ours.
+    //
+    // Postgres raises 22P02 for `'' :: uuid` and for `'abc' :: uuid`, which is
+    // what a truncated URL or a client bug produces. Answering 500 blames the
+    // server for a bad request and buries the real 500s in noise; answering 404
+    // is both true — nothing can be named by that id — and indistinguishable
+    // from a well-formed id that does not exist, which is the same
+    // no-existence-oracle rule the tenant guard follows.
+    //
+    // Narrowed to uuid deliberately. A 22P02 on a numeric or a date is a cast
+    // *we* wrote wrongly, and that must stay a 500 so it gets fixed.
+    if (isMalformedUuid(exception)) {
+      return {
+        type: ProblemType.NOT_FOUND,
+        detail: 'No such record.',
+        status: 404,
+        errors: [],
+        extras: {},
+      };
+    }
+
     // Deliberately generic: the real reason is logged, never returned.
     return {
       type: ProblemType.INTERNAL_ERROR,
@@ -107,4 +128,17 @@ export class ProblemFilter implements ExceptionFilter {
       extras: {},
     };
   }
+}
+
+/**
+ * True for Postgres's "invalid input syntax for type uuid".
+ *
+ * The code alone is not enough: 22P02 covers every failed literal cast, and a
+ * bad numeric cast is a defect in our own SQL that must keep surfacing as a 500.
+ */
+function isMalformedUuid(exception: unknown): boolean {
+  if (typeof exception !== 'object' || exception === null) return false;
+  const candidate = exception as { code?: unknown; message?: unknown };
+  if (candidate.code !== '22P02') return false;
+  return typeof candidate.message === 'string' && candidate.message.includes('type uuid');
 }

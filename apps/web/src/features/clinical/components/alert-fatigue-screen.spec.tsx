@@ -22,6 +22,7 @@ function session(): WorkspaceSession {
     branchId: null,
     roles: ['quality_manager'],
     permissions: ['cdss.report.read'],
+    enabledModules: [],
   };
 }
 

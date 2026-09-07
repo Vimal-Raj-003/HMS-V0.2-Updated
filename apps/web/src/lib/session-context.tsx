@@ -21,10 +21,20 @@ export interface WorkspaceSession {
   readonly branchId: string | null;
   readonly roles: readonly string[];
   readonly permissions: readonly string[];
+  /**
+   * The `module.*` keys this hospital's licence allows.
+   *
+   * A permission answers "may this person"; an entitlement answers "did this
+   * hospital buy it". Both have to be true before a menu item is worth drawing,
+   * and until Phase 8 only the first was actually checked — every screen
+   * catalogue declared an `entitlement` that nothing read.
+   */
+  readonly enabledModules: readonly string[];
 }
 
 interface SessionContextValue extends WorkspaceSession {
   readonly granted: ReadonlySet<string>;
+  readonly licensed: ReadonlySet<string>;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -37,7 +47,11 @@ export function SessionProvider({
   readonly children: ReactNode;
 }): React.JSX.Element {
   const value = useMemo<SessionContextValue>(
-    () => ({ ...session, granted: new Set(session.permissions) }),
+    () => ({
+      ...session,
+      granted: new Set(session.permissions),
+      licensed: new Set(session.enabledModules),
+    }),
     [session],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
@@ -58,4 +72,19 @@ export function useSession(): SessionContextValue {
  */
 export function useCan(permission: string): boolean {
   return useSession().granted.has(permission);
+}
+
+/**
+ * Whether the hospital's licence allows a module.
+ *
+ * `null` means the screen is not gated on a module at all — the queue console,
+ * for instance, is part of the platform and has no separate licence — so it is
+ * always allowed.
+ *
+ * Like `useCan`, this is not a security control: the API's licence guard is.
+ * It decides what is worth drawing.
+ */
+export function useEntitled(entitlement: string | null): boolean {
+  const { licensed } = useSession();
+  return entitlement === null || licensed.has(entitlement);
 }

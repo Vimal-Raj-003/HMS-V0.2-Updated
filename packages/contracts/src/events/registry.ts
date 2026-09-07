@@ -10490,6 +10490,92 @@ const specialtyEvents: readonly EventDefinition[] = [
   ),
 ];
 
+/**
+ * Phase 8 — OP-025, the ophthalmology console.
+ *
+ * `ophtha.iop.high` is the one that leaves the console. A pressure of 34 read
+ * by a technician at a machine in the corridor has to reach the doctor before
+ * the patient walks out, and a banner on a screen nobody has open is not a way
+ * of telling them.
+ */
+const ophthalmologyEvents: readonly EventDefinition[] = [
+  ev(
+    'ophtha.refraction.recorded',
+    'ophtha_visit',
+    'OP-025',
+    'A refraction was recorded, and the patient is ready for the doctor.',
+    z.object({
+      visitId: uuid,
+      patientId: uuid,
+      encounterId: uuid,
+      eyes: z.array(z.string()),
+      source: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'ophtha.iop.high',
+    'ophtha_visit',
+    'OP-025',
+    'An intraocular pressure at or above the alert threshold. Leaves the console because the doctor may not have the screen open, and the patient is about to go home.',
+    z.object({
+      visitId: uuid,
+      patientId: uuid,
+      eye: z.string(),
+      valueMmhg: z.string(),
+      method: z.string(),
+      postDilation: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'ophtha.exam.signed',
+    'ophtha_visit',
+    'OP-025',
+    'The eye visit was signed: the summary, the FHIR bundle and the patient\u2019s copy all follow from here.',
+    z.object({
+      visitId: uuid,
+      patientId: uuid,
+      encounterId: uuid,
+      signedBy: uuid,
+      diagnosisCount: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'ophtha.spectacle_rx.signed',
+    'ophtha_spectacle_rx',
+    'OP-025',
+    'A spectacle or contact-lens prescription was signed. Reaches the optical counter and the patient\u2019s portal; carries whether an optometrist signed it under delegation.',
+    z.object({
+      rxId: uuid,
+      rxNo: z.string(),
+      patientId: uuid,
+      kind: z.string(),
+      validUntil: z.string(),
+      signedBy: uuid,
+      underDelegation: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'ophtha.surgery.planned',
+    'ophtha_surgery_plan',
+    'OP-025',
+    'An eye operation was planned. Theatre scheduling, the lens consignment and the estimate all key on this.',
+    z.object({
+      planId: uuid,
+      patientId: uuid,
+      procedureCode: z.string(),
+      eye: z.string(),
+      iolModel: z.string().nullable(),
+      iolPower: z.string().nullable(),
+      biometryAgeDays: z.number().int().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+];
+
 export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...adminEvents,
   ...auditEvents,
@@ -10567,6 +10653,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
 
   // Phase 8
   ...specialtyEvents,
+  ...ophthalmologyEvents,
 ]);
 
 const eventsByType = new Map(EVENT_REGISTRY.map((d) => [d.type, d]));

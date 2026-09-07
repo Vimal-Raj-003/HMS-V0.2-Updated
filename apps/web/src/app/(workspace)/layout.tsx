@@ -28,6 +28,7 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
         branchId: session.branchId,
         roles: session.roles,
         permissions: session.permissions,
+        enabledModules: session.enabledModules,
       }}
     >
       {children}
