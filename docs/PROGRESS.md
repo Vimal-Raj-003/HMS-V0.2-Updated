@@ -401,6 +401,114 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-12 · Phase 8 · OP-015, OP-017, OP-011, OP-035 — one spine, four disciplines
+
+**Built — the therapy consoles, complete.** 14 tables, 29 permission keys, 4
+events, 4 entitlement keys, 4 screens, 20 integration tests, 46 database rules
+proven live in both directions.
+
+Physiotherapy, wound care, dietetics and speech and swallow are four different
+clinical worlds with one administrative shape: somebody is referred, somebody
+assesses them, a plan is written with goals on it, and then the same twenty
+minutes happens twice a week for eight weeks.
+
+So the **episode, the goal, the plan, the session and the bill live once**, in
+`therapy_*`, and each console brings only what nobody else has — a wound's
+measurements, a diet plan's meals, a swallow order's IDDSI levels. A fourth copy
+of "a course of sessions" would have been four places to fix the day somebody
+notices sessions being billed twice.
+
+**Three rules in the spine, and each is a way a therapy department loses money
+or evidence:**
+
+- **A session needs a live plan behind a signed assessment.** Treatment before
+  assessment is the finding in every physiotherapy audit ever written, and it is
+  not carelessness — it is a busy department starting the exercises while the
+  paperwork catches up. The result is a course nobody can justify when the payer
+  asks for the clinical reasoning.
+- **A session is billed once**, by a partial unique index on the charge intent.
+  Therapy is the one place in a hospital where the same short act repeats forty
+  times against one authorisation, and a duplicate is invisible in a list of
+  forty identical rows.
+- **Sessions delivered do not exceed sessions authorised.** The eleventh session
+  of a package of ten is either fraud or four hours of unpaid work, and which one
+  depends entirely on whether somebody extended it. So the eleventh waits, the
+  therapist sees the count _before_ booking, and an event tells the payer desk.
+
+**And a discharge closes every goal.** A goal carries a metric, a baseline and a
+target — "improve mobility" is a sentiment — and every active one is resolved
+before the episode closes. A department's whole account of itself is those
+answers, and an episode discharged with three open goals is three outcomes that
+silently never existed.
+
+**Per discipline, the arithmetic again:**
+
+| Console | Derived, never typed                                  | What it decides                |
+| ------- | ----------------------------------------------------- | ------------------------------ |
+| OP-017  | area = π/4 × L × W, reduction vs baseline, trajectory | whether a wound gets escalated |
+| OP-011  | kcal, macros, sodium, potassium, phosphate from meals | whether a renal plan is safe   |
+
+A wound is `healed` only with a closing assessment that measures zero — a wound
+closed on the record while the last measurement says 4 cm² is a district nurse
+arriving to a discharged patient with an open ulcer, and it is how pressure-ulcer
+statistics come to be wrong in the direction nobody audits. And a diet plan whose
+meals exceed its own restriction is refused **by nutrient and by amount**: a renal
+plan 1,100 mg over on potassium is the most consequential arithmetic error in
+outpatient dietetics and nothing but a sum will find it.
+
+**OP-035's swallow order is the sharpest rule in the phase.** A therapist assesses
+at eleven and writes level 4 fluids; the tray arriving at twelve was plated at
+ten. So:
+
+- an order names a **food level (3–7) and a fluid level (0–4)**, or it is nil by
+  mouth and names neither. The numbers overlap without meaning the same thing —
+  "level 4" is pureed food _and_ extremely thick fluid — and a kitchen reading one
+  for the other sends a tray that can kill somebody;
+- it is **`pending` until the kitchen and the ward have both acknowledged it**, so
+  a ward looks at "waiting for the kitchen" rather than a green tick that is not
+  true yet;
+- the **therapist who wrote it cannot acknowledge it**, and one person cannot
+  stand in for both departments. Reading a piece of paper twice does not mean two
+  departments changed what they are doing;
+- **one live order per patient**, because two is a ward with two answers to what
+  somebody may safely eat and the one they act on is whichever they read.
+
+**Three defects the tests found, all real.** The integration run turned up three
+500s where 409s belonged: two missing constraint translations, and one genuine
+service bug — superseding a diet plan that had not started yet set its end date
+before its start, which the period CHECK correctly refused. Fixed by ending such
+a plan on the day it would have begun. The migration's own proof run found a
+fourth: `round(pi() * …)` is double precision, and two wound assessments sharing
+a timestamp made "the last assessment" ambiguous, so the healed check now
+tie-breaks on entry order.
+
+**Grants.** `therapy.authorisation.extend` sits with `insurance_desk`, not with
+the therapist — the therapist asks and the desk that owns the authorisation
+decides. `wound.status.override` ships unassigned, like the other database
+overrides. And `slp.swallow_order.acknowledge` is held by `kitchen_staff`,
+`nurse_ward` and `nurse_icu`, and by nobody who can write an order.
+
+**Deferred, recorded.** The exercise and modality masters and protocol templates
+(OP-015 §4), NPWT rental episodes and wound protocol rules (OP-017), recipes,
+ward diet orders and meal dispatch (OP-011, which NC-033 owns), and the SLP home
+programme logs (OP-035). All are catalogue or scheduling layers over rules that
+now exist.
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module. Tracked, unchanged.
+
+**Gates** — 13/13 packages typecheck, lint and test (3,009 unit tests, counted
+per package rather than carried forward — the 3,084 in the entry below was the
+latter, and is corrected there); 602 API integration tests across 23 files; 50
+migrations; 773 non-partition tables; 1,258 permission keys; 800 events; 55
+entitlements; 68 role templates; 94 screens.
+
+**Next:** OP-016, the pain management clinic. Deliberately on its own, because
+its rules are not clinical arithmetic but opioid governance — the morphine
+equivalent, the treatment agreement, the duplicate-prescription check and the
+second reviewer above 90 MME. A different kind of database rule from anything in
+Phase 8 so far, and the one with a statutory register behind it.
+
 ### 2026-09-11 · Phase 8 · OP-029, OP-030, OP-028, OP-026, OP-027 — five specialties, one arithmetic
 
 **Built — the five device-heavy consoles, complete.** 27 tables, 49 permission
@@ -490,10 +598,10 @@ now exist; none of them changes a clinical gate.
 script for any module, so none yet meets `CLAUDE.md` §7's full Definition of
 Done. Tracked, unchanged from the last three entries.
 
-**Gates** — 20/20 packages typecheck, lint and test (3,084 unit tests); 582 API
+**Gates** — 20/20 packages typecheck, lint and test (3,003 unit tests); 582 API
 integration tests across 22 files; 49 migrations; 759 non-partition tables; 1,229
 permission keys; 796 events; 51 entitlements; 68 role templates; 12 seeded
-consoles with 60 device result types; 95 screens.
+consoles with 60 device result types; 90 screens.
 
 **Next:** the therapy consoles — OP-015/IP-021/TR-010 physiotherapy and rehab,
 OP-016 the pain clinic, OP-017 wound care, OP-035 dietetics, OP-037 speech and

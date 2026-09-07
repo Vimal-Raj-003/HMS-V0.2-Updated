@@ -10382,6 +10382,279 @@ const OP027 = group('OP-027', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-015, OP-017, OP-011, OP-035: the therapy consoles
+//
+// Four disciplines over one spine, so most of these keys are `therapy.*` and
+// are held by every therapist regardless of which discipline they practise —
+// the *episode* carries the discipline, and the department carries the
+// therapist. Minting `physio.session.record` and `slp.session.record` would
+// have been two keys for one act.
+//
+// ── Three keys are the exception, and each is somebody else's risk ──────────
+//
+//   · `therapy.authorisation.extend` — the eleventh session of a package of
+//     ten. Whether that is fraud or unpaid work depends entirely on this key
+//     having been used, so it is `high` and carries a reason.
+//   · `wound.status.override` — closing a wound the last measurement says is
+//     open. There is a legitimate case (the patient healed elsewhere and was
+//     seen by somebody with no ruler), and it is not the therapist's to assume.
+//   · `swallow.order.acknowledge` — held by the kitchen and the ward, *not* by
+//     the speech therapist who wrote the order. A therapist acknowledging
+//     their own recommendation on behalf of a kitchen that has not seen it is
+//     the exact failure the acknowledgement exists to catch.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP015 = group('OP-015', 8, [
+  p(
+    'therapy.episode.read',
+    'therapy_episode',
+    'read',
+    'phi',
+    'low',
+    'Read a course of therapy: the referral, the assessments, the goals and every session.',
+    { phiRead: true },
+  ),
+  p(
+    'therapy.episode.create',
+    'therapy_episode',
+    'create',
+    'phi',
+    'low',
+    'Open a course of therapy from a referral, or from a patient who referred themselves.',
+  ),
+  p(
+    'therapy.assessment.record',
+    'therapy_assessment',
+    'record',
+    'phi',
+    'low',
+    'Record an initial, review or discharge assessment.',
+  ),
+  p(
+    'therapy.assessment.sign',
+    'therapy_assessment',
+    'sign',
+    'phi',
+    'medium',
+    'Sign an assessment. No plan can be activated until one is signed, because treatment before assessment is a course nobody can justify.',
+  ),
+  p(
+    'therapy.goal.manage',
+    'therapy_goal',
+    'record',
+    'phi',
+    'low',
+    'Set goals with a metric, a baseline and a target, and record what happened to each at discharge.',
+  ),
+  p(
+    'therapy.plan.write',
+    'therapy_plan',
+    'create',
+    'phi',
+    'medium',
+    'Write and activate a treatment plan behind a signed assessment.',
+  ),
+  p(
+    'therapy.session.record',
+    'therapy_session',
+    'record',
+    'phi',
+    'low',
+    'Deliver and record a session against the live plan. Held by every therapist and every therapy assistant on the floor.',
+  ),
+  p(
+    'therapy.authorisation.extend',
+    'therapy_episode',
+    'override',
+    'financial',
+    'high',
+    'Extend the number of sessions a package or a payer authorised. The eleventh session of a package of ten is either fraud or unpaid work, and which one depends on this key having been used.',
+    { requiresReason: true },
+  ),
+  p(
+    'therapy.episode.discharge',
+    'therapy_episode',
+    'update',
+    'phi',
+    'medium',
+    'Close a course of therapy. Every goal is resolved first, because the department’s outcome data is those answers.',
+  ),
+  p(
+    'therapy.report.read',
+    'therapy_report',
+    'list',
+    'phi',
+    'low',
+    'Waiting times, sessions per episode, goal attainment and discharge outcomes by discipline.',
+  ),
+]);
+
+const OP017 = group('OP-017', 8, [
+  p(
+    'wound.read',
+    'wound',
+    'read',
+    'phi',
+    'low',
+    'Read the wound register, its measurements and its photographs.',
+    { phiRead: true },
+  ),
+  p(
+    'wound.record',
+    'wound',
+    'record',
+    'phi',
+    'low',
+    'Open a wound and record its assessments. Area and the reduction against baseline are computed from the ruler, not typed.',
+  ),
+  p(
+    'wound.photo.capture',
+    'wound_photo',
+    'record',
+    'phi',
+    'low',
+    'Photograph a wound, with or without a scale marker — the record says which, because only one of them can be the source of a size.',
+  ),
+  p(
+    'wound.dressing.record',
+    'wound_dressing_event',
+    'record',
+    'phi',
+    'low',
+    'Record a dressing change and what it consumed. A dressing clinic that does not record what it used has no idea what it costs.',
+  ),
+  p(
+    'wound.plan.write',
+    'wound',
+    'update',
+    'phi',
+    'medium',
+    'Set or change the dressing regime, compression, offloading and negative-pressure therapy.',
+  ),
+  p(
+    'wound.status.override',
+    'wound',
+    'override',
+    'phi',
+    'high',
+    'Close a wound whose last measurement is not zero — a patient who healed elsewhere, or was last seen by somebody with no ruler. Otherwise a wound closed on the record and open on the patient is how a discharged patient loses their district nurse.',
+    { requiresReason: true },
+  ),
+  p(
+    'wound.report.read',
+    'wound_report',
+    'list',
+    'phi',
+    'low',
+    'Healing rates by aetiology, stalled wounds at four weeks, hospital-acquired pressure ulcers and dressing cost per wound.',
+  ),
+]);
+
+const OP011 = group('OP-011', 8, [
+  p(
+    'nutrition.assessment.record',
+    'nutrition_assessment',
+    'record',
+    'phi',
+    'low',
+    'Record a nutrition assessment: anthropometry, requirements, the 24-hour recall and the malnutrition class.',
+  ),
+  p(
+    'nutrition.assessment.read',
+    'nutrition_assessment',
+    'read',
+    'phi',
+    'low',
+    'Read nutrition assessments and diet plans.',
+    { phiRead: true },
+  ),
+  p(
+    'nutrition.plan.write',
+    'diet_plan',
+    'create',
+    'phi',
+    'medium',
+    'Build and sign a diet plan. Its energy, macros and minerals are summed from the meals, and a plan that breaks its own restriction is refused.',
+  ),
+  p(
+    'nutrition.food.manage',
+    'food_item',
+    'configure',
+    'operational',
+    'low',
+    'Maintain the hospital’s own food items and recipes on top of the national composition tables.',
+  ),
+  p(
+    'nutrition.ip_order.write',
+    'ip_diet_order',
+    'create',
+    'phi',
+    'medium',
+    'Order a ward diet: the code, the texture, the allergens and any tube feed.',
+  ),
+  p(
+    'nutrition.report.read',
+    'nutrition_report',
+    'list',
+    'phi',
+    'low',
+    'Malnutrition prevalence, screening coverage, plan adherence and diet cost per patient day.',
+  ),
+]);
+
+const OP035 = group('OP-035', 8, [
+  p(
+    'slp.assessment.record',
+    'slp_assessment',
+    'record',
+    'phi',
+    'low',
+    'Record a speech, language, voice, fluency or swallow assessment and its instrument scores.',
+  ),
+  p(
+    'slp.assessment.sign',
+    'slp_assessment',
+    'sign',
+    'phi',
+    'medium',
+    'Sign a speech and language assessment.',
+  ),
+  p(
+    'slp.swallow_order.write',
+    'swallow_order',
+    'create',
+    'phi',
+    'high',
+    'Write an IDDSI swallow order: a food level, a fluid level and the strategies — or nil by mouth. Getting the two levels the wrong way round sends a tray that can kill somebody, so this is the speech therapist’s alone.',
+  ),
+  p(
+    'slp.swallow_order.acknowledge',
+    'swallow_order',
+    'update',
+    'phi',
+    'medium',
+    'Acknowledge a swallow order as the kitchen or the ward. Held by neither the therapist who wrote it nor anybody who cannot change what arrives on the tray — an acknowledgement by the author is the failure the rule exists to catch.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'slp.swallow_order.read',
+    'swallow_order',
+    'read',
+    'phi',
+    'low',
+    'See what a patient may safely eat and drink, and whether the kitchen and the ward have read it.',
+    { phiRead: true },
+  ),
+  p(
+    'slp.report.read',
+    'slp_report',
+    'list',
+    'phi',
+    'low',
+    'Dysphagia prevalence, order acknowledgement times, goal attainment and discharge destinations.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -10482,6 +10755,10 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP028,
   ...OP026,
   ...OP027,
+  ...OP015,
+  ...OP017,
+  ...OP011,
+  ...OP035,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

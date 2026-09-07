@@ -1,0 +1,204 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-011 — dietetics and nutrition
+//
+// A diet plan is a list of foods with quantities, and a set of targets it is
+// supposed to meet. Those two things are written by the same person minutes
+// apart and then diverge forever: the plan says 1,800 kcal at the top and the
+// meals below it add up to 2,400.
+//
+// ── The totals are summed from the meals ───────────────────────────────────
+//
+// Energy, protein, carbohydrate, fat, sodium, potassium and phosphate, computed
+// by a trigger from `food_items.per_100g` × the quantity in each meal. Not
+// because dieticians cannot add up, but because the plan changes six times
+// during a consultation and the header is updated five of those times.
+//
+// ── A restriction is checked against what the plan actually contains ───────
+//
+// A renal plan that restricts potassium to 2,000 mg and contains 3,100 is the
+// single most consequential arithmetic error in outpatient dietetics, and it is
+// invisible unless something adds the meals up. The database refuses it, and
+// says which nutrient and by how much.
+//
+// ── Food is a master, and a master is versioned ────────────────────────────
+//
+// `food_items` carries the IFCT composition per 100 g and the household
+// portions Indian kitchens actually measure in — a katori, a chapati, a tumbler
+// — because a plan expressed in grams is a plan nobody follows.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum VegClass {
+  veg
+  egg
+  non_veg
+  vegan
+
+  @@schema("mdm")
+}
+
+enum MalnutritionClass {
+  none
+  moderate
+  severe
+
+  @@schema("specialty")
+}
+
+enum DietPlanStatus {
+  draft
+  active
+  superseded
+  closed
+
+  @@schema("specialty")
+}
+
+/// A food, with what it contains and what a household portion of it weighs.
+///
+/// `hospital_id` null is the global IFCT seed. A hospital adds its own kitchen's
+/// preparations without forking the reference data underneath.
+model FoodItem {
+  id         String  @id @db.Uuid
+  hospitalId String? @map("hospital_id") @db.Uuid
+
+  code       String  @db.VarChar(40)
+  name       String  @db.VarChar(160)
+  /// `{hi: "…", ta: "…"}`. A dietician explaining a plan uses the word the
+  /// patient's kitchen uses.
+  localNames Json    @default("{}") @map("local_names")
+  foodGroup  String  @map("food_group") @db.VarChar(40)
+
+  /// `{kcal, protein, carb, fat, fibre, na, k, po4, ca, fe, sugar}` per 100 g.
+  /// The plan's totals are summed from this, so a missing key is a nutrient the
+  /// totals silently under-count — a trigger requires energy and the macros.
+  per100g Json @map("per_100g")
+
+  allergens String[] @default([])
+  vegClass  VegClass @map("veg_class")
+
+  /// `[{unit: "katori", grams: 150}]`. A plan in grams is a plan nobody follows.
+  portionUnits Json @default("[]") @map("portion_units")
+
+  costPer100g Decimal? @map("cost_per_100g") @db.Decimal(10, 2)
+  isActive    Boolean  @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, code], map: "uq_food_item_code")
+  @@index([hospitalId, foodGroup, isActive])
+  @@map("food_items")
+  @@schema("mdm")
+}
+
+/// What the dietician found.
+model NutritionAssessment {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  episodeId   String? @map("episode_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+
+  dieticianId String @map("dietician_id") @db.Uuid
+
+  /// Height, weight, mid-arm circumference, handgrip.
+  anthropometry Json @default("{}")
+  bmi           Decimal? @db.Decimal(5, 2)
+  weightLossPct3m Decimal? @map("weight_loss_pct_3m") @db.Decimal(5, 2)
+
+  /// Basal and total energy expenditure, and what the patient therefore needs.
+  bmr          Int?
+  tdee         Int?
+  requirements Json @default("{}")
+
+  /// The 24-hour recall and what it added up to.
+  recall24h    Json @default("{}") @map("recall_24h")
+  intakeTotals Json @default("{}") @map("intake_totals")
+
+  /// Derived by the service from the requirement and the intake; reported, not
+  /// a gate.
+  gapAnalysis Json @default("{}") @map("gap_analysis")
+
+  malnutritionClass MalnutritionClass @default(none) @map("malnutrition_class")
+  /// Subjective Global Assessment A/B/C, and NRS-2002 where the ward uses it.
+  sga      String? @db.Char(1)
+  nrs2002  Int?
+
+  /// Problem, Etiology, Signs — the standard nutrition diagnosis sentence.
+  pesStatement String? @map("pes_statement") @db.Text
+
+  preferences   Json     @default("{}")
+  foodAllergies String[] @default([]) @map("food_allergies")
+
+  formResponseId String?   @map("form_response_id") @db.Uuid
+  signedBy       String?   @map("signed_by") @db.Uuid
+  signedAt       DateTime? @map("signed_at") @db.Timestamptz(6)
+  version        Int       @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plans DietPlan[]
+
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, branchId, malnutritionClass])
+  @@map("nutrition_assessments")
+  @@schema("specialty")
+}
+
+/// The plan itself: meals, targets, and restrictions the meals must respect.
+model DietPlan {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  assessmentId String @map("assessment_id") @db.Uuid
+  name         String @db.VarChar(160)
+
+  /// `[{meal: "breakfast", items: [{foodId, qty, unit}]}]`. The single source
+  /// of what the patient eats, and of the totals below.
+  meals Json @default("[]")
+
+  /// Summed from `meals` by a trigger: `{kcal, protein, carb, fat, na, k, po4}`.
+  /// Never typed, because a plan changes six times in a consultation and the
+  /// header gets updated five of them.
+  totals Json @default("{}")
+
+  kcalTarget   Int?  @map("kcal_target")
+  macroTargets Json  @default("{}") @map("macro_targets")
+
+  /// `{naMg, kMg, po4Mg, fluidMl}`. A trigger refuses a plan whose meals exceed
+  /// its own restrictions and names the nutrient and the excess — a renal plan
+  /// 1,100 mg over on potassium is the most consequential arithmetic error in
+  /// outpatient dietetics.
+  restrictions Json @default("{}")
+
+  supplements  Json    @default("[]")
+  instructions String? @db.Text
+  costPerDay   Decimal? @map("cost_per_day") @db.Decimal(10, 2)
+
+  validFrom DateTime  @map("valid_from") @db.Date
+  validTo   DateTime? @map("valid_to") @db.Date
+
+  status DietPlanStatus @default(draft)
+
+  documentId String?   @map("document_id") @db.Uuid
+  signedBy   String?   @map("signed_by") @db.Uuid
+  signedAt   DateTime? @map("signed_at") @db.Timestamptz(6)
+  version    Int       @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assessment NutritionAssessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, branchId, status, validFrom])
+  @@map("diet_plans")
+  @@schema("specialty")
+}

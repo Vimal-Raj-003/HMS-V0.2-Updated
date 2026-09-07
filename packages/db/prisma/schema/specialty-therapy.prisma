@@ -1,0 +1,363 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-015 · OP-017 · OP-011 · OP-035 — the therapy spine
+//
+// Physiotherapy, wound care, dietetics and speech and swallow are four
+// different clinical worlds with one shape: somebody is referred, somebody
+// assesses them, a plan is written with goals on it, and then the same twenty
+// minutes happens once or twice a week for eight weeks. What differs is the
+// assessment and the plan; what does not differ is the episode, the goal, the
+// session and the bill.
+//
+// So the episode, the goal and the session live here once, and each console
+// brings only its own assessment and its own plan. A fourth copy of "a course
+// of sessions" would be four places to fix the day somebody notices sessions
+// are being billed twice.
+//
+// ── A session is delivered against a live plan, or not at all ───────────────
+//
+// Treatment before assessment is the finding in every physiotherapy audit ever
+// written, and it is not carelessness — it is a busy department starting the
+// exercises while the paperwork catches up. The database refuses the session,
+// because the alternative is a course of treatment nobody can show a clinical
+// justification for when the insurer asks.
+//
+// ── A session is billed once ───────────────────────────────────────────────
+//
+// A partial unique index on the charge intent. Therapy is the one place in a
+// hospital where the same short act repeats dozens of times against one
+// authorisation, and a duplicate charge is invisible in a list of forty
+// identical rows.
+//
+// ── Sessions delivered do not exceed sessions authorised ───────────────────
+//
+// A package of ten sittings that delivered fourteen is either fraud or fourteen
+// hours of unpaid work, and which one it is depends entirely on whether
+// somebody extended the authorisation. So extending it is an act with a reason
+// and a name, and the eleventh session is refused until it happens.
+//
+// ── A goal is measurable, and a discharge closes it ────────────────────────
+//
+// "Improve mobility" is a sentiment. A goal carries a metric, a baseline and a
+// target, because otherwise the outcome report at the end of the episode has
+// nothing to report. And every active goal is resolved before the episode
+// closes — met, partly met, not met or revised — so the department's outcome
+// data is what happened rather than what got written down.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Which console an episode belongs to. The tables are shared; the clinical
+/// world is not.
+enum TherapyDiscipline {
+  /// OP-015 — physiotherapy, occupational therapy and rehabilitation.
+  physio
+  /// OP-017 — the wound care clinic.
+  wound
+  /// OP-011 — dietetics and nutrition.
+  nutrition
+  /// OP-035 — speech, language and swallow.
+  speech
+
+  @@schema("specialty")
+}
+
+enum TherapyEpisodeStatus {
+  /// Referred, not yet seen.
+  triaged
+  /// Being assessed. No plan yet, so no sessions.
+  assessing
+  active
+  /// Paused with a reason: an admission, a flare, a patient who stopped coming.
+  on_hold
+  discharged
+
+  @@schema("specialty")
+}
+
+enum TherapyPlanStatus {
+  draft
+  active
+  /// Replaced by a later version. Kept, because a session was delivered under it.
+  superseded
+  completed
+  on_hold
+
+  @@schema("specialty")
+}
+
+enum TherapyGoalStatus {
+  active
+  met
+  partially_met
+  not_met
+  /// Rewritten because the goal itself was wrong. A different fact from failing.
+  revised
+  discontinued
+
+  @@schema("specialty")
+}
+
+enum TherapySessionStatus {
+  scheduled
+  attended
+  /// Booked, not attended, not cancelled in time. Billable in many contracts.
+  no_show
+  cancelled
+
+  @@schema("specialty")
+}
+
+enum TherapySetting {
+  op
+  ip
+  icu
+  tele
+  home
+
+  @@schema("specialty")
+}
+
+/// One course of treatment, from referral to discharge.
+model TherapyEpisode {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  discipline TherapyDiscipline
+  setting    TherapySetting    @default(op)
+
+  /// The OP-021 referral, when there was one. Self-referral is real and is not
+  /// a missing referral.
+  referralId String? @map("referral_id") @db.Uuid
+  source     String  @default("opd") @db.VarChar(16)
+
+  referringDoctorId String? @map("referring_doctor_id") @db.Uuid
+  diagnosisIcd10    String? @map("diagnosis_icd10") @db.VarChar(16)
+
+  /// Weight-bearing status, range-of-motion limits, cardiac ceilings, an open
+  /// wound. Carried on the episode rather than the plan, because a precaution
+  /// outlives the plan that was written under it and the therapist who reads it
+  /// at session nine was not there at session one.
+  precautions Json @default("{}")
+
+  /// How many sessions the referral, the package or the insurer authorised.
+  /// Null means an open-ended course, which is a decision rather than an
+  /// absence — a trigger will not count against it.
+  sessionsAuthorised Int? @map("sessions_authorised")
+  /// Extending it is an act. Both are set together, or neither.
+  authorisationExtendedBy     String?   @map("authorisation_extended_by") @db.Uuid
+  authorisationExtendedAt     DateTime? @map("authorisation_extended_at") @db.Timestamptz(6)
+  authorisationExtendedReason String?   @map("authorisation_extended_reason") @db.Text
+
+  leadTherapistId String? @map("lead_therapist_id") @db.Uuid
+
+  status     TherapyEpisodeStatus @default(triaged)
+  slaDueAt   DateTime?            @map("sla_due_at") @db.Timestamptz(6)
+  openedAt   DateTime             @default(now()) @map("opened_at") @db.Timestamptz(6)
+  closedAt   DateTime?            @map("closed_at") @db.Timestamptz(6)
+  /// Why the course ended: goals met, transferred, lost to follow-up, died.
+  outcome    String?              @db.VarChar(40)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assessments TherapyAssessment[]
+  goals       TherapyGoal[]
+  plans       TherapyPlan[]
+  sessions    TherapySession[]
+
+  @@index([hospitalId, branchId, discipline, status])
+  @@index([hospitalId, patientId, discipline, openedAt(sort: Desc)])
+  @@index([hospitalId, status, slaDueAt])
+  @@map("therapy_episodes")
+  @@schema("specialty")
+}
+
+/// The clinical judgement a plan is allowed to exist because of.
+///
+/// The `findings` blob is the console's own: a physiotherapist's range of
+/// motion and manual muscle testing, a dietician's 24-hour recall, a speech
+/// therapist's swallow trials. There is no shared shape and inventing one would
+/// have flattened four disciplines into the average of four disciplines.
+model TherapyAssessment {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  encounterId String? @map("encounter_id") @db.Uuid
+  admissionId String? @map("admission_id") @db.Uuid
+
+  /// `initial`, `reassessment`, `discharge`.
+  kind String @db.VarChar(20)
+
+  findings Json @default("{}")
+  /// Standardised instruments with their scores, kept beside the findings so a
+  /// Barthel of 45 can be re-derived when the instrument is revised.
+  scores Json @default("{}")
+
+  impression     String? @db.Text
+  formResponseId String? @map("form_response_id") @db.Uuid
+
+  therapistId String    @map("therapist_id") @db.Uuid
+  signedBy    String?   @map("signed_by") @db.Uuid
+  signedAt    DateTime? @map("signed_at") @db.Timestamptz(6)
+  version     Int       @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode TherapyEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  plans   TherapyPlan[]
+
+  @@index([hospitalId, episodeId, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, kind])
+  @@map("therapy_assessments")
+  @@schema("specialty")
+}
+
+/// Something the patient will be able to do, by a date, measured.
+model TherapyGoal {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+
+  description String @db.VarChar(400)
+
+  /// What is measured, what it is now, and what it needs to be. A goal missing
+  /// any of the three is refused: without them there is nothing to report at
+  /// discharge, and "improve mobility" is a sentiment rather than a goal.
+  metric   String @db.VarChar(80)
+  baseline String @db.VarChar(80)
+  target   String @db.VarChar(80)
+
+  /// ICF or the discipline's own coding, when the department uses one.
+  code       String?   @db.VarChar(24)
+  targetDate DateTime? @map("target_date") @db.Date
+
+  status     TherapyGoalStatus @default(active)
+  /// Required once the goal leaves `active`. A goal that was not met and does
+  /// not say why is an outcome nobody can learn from.
+  outcomeNote String?   @map("outcome_note") @db.Text
+  resolvedAt  DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy  String?   @map("resolved_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode TherapyEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, episodeId, status])
+  @@map("therapy_goals")
+  @@schema("specialty")
+}
+
+/// What will be done, how often, and for how many sessions.
+model TherapyPlan {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+
+  /// The signed assessment this plan follows from. Not nullable, and a trigger
+  /// checks it is signed: a plan with no assessment behind it is a course of
+  /// treatment nobody can justify.
+  assessmentId String @map("assessment_id") @db.Uuid
+
+  version Int @default(1)
+
+  /// `[{type, refId, dose, durationMin, equipment}]`. The exercise, the
+  /// modality, the dressing, the meal plan, the swallow exercise — whatever the
+  /// discipline's plan is made of.
+  items Json @default("[]")
+
+  /// Sessions a week, and how many in total this plan intends.
+  frequencyPerWeek Int? @map("frequency_per_week")
+  sessionsPlanned  Int? @map("sessions_planned")
+
+  /// What the precautions were when this plan was written. A snapshot, because
+  /// the episode's precautions change and a session delivered last month was
+  /// delivered under last month's.
+  precautionsSnapshot Json @default("{}") @map("precautions_snapshot")
+
+  /// What the patient does between sessions.
+  homeProgramme Json @default("{}") @map("home_programme")
+
+  status TherapyPlanStatus @default(draft)
+
+  therapistId String    @map("therapist_id") @db.Uuid
+  signedBy    String?   @map("signed_by") @db.Uuid
+  signedAt    DateTime? @map("signed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode    TherapyEpisode    @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  assessment TherapyAssessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  sessions   TherapySession[]
+
+  @@unique([episodeId, version], map: "uq_therapy_plan_version")
+  @@index([hospitalId, episodeId, status])
+  @@map("therapy_plans")
+  @@schema("specialty")
+}
+
+/// The twenty minutes itself.
+model TherapySession {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  /// The plan this session was delivered under. A trigger refuses a session
+  /// against a plan that is not active, and against an episode that is not.
+  planId String @map("plan_id") @db.Uuid
+
+  /// Counts up within the episode, so "session 9 of 10" is a fact rather than
+  /// an arithmetic exercise across three plan versions.
+  seq Int
+
+  setting TherapySetting @default(op)
+  status  TherapySessionStatus @default(scheduled)
+
+  scheduledAt DateTime  @map("scheduled_at") @db.Timestamptz(6)
+  startedAt   DateTime? @map("started_at") @db.Timestamptz(6)
+  endedAt     DateTime? @map("ended_at") @db.Timestamptz(6)
+  durationMin Int?      @map("duration_min")
+
+  /// `[{goalId, trials, correct, accuracyPct, cueLevel}]` for speech;
+  /// `[{itemRef, setsDone, repsDone, resistance}]` for physio. Per discipline,
+  /// against goals that belong to this episode.
+  workDone Json @default("[]") @map("work_done")
+
+  /// What the patient reported, and what the therapist saw.
+  response String? @db.Text
+  homework String? @db.Text
+
+  painPre  Int? @map("pain_pre")
+  painPost Int? @map("pain_post")
+
+  therapistId String  @map("therapist_id") @db.Uuid
+  caregiverPresent Boolean @default(false) @map("caregiver_present")
+
+  /// The charge this session raises. Unique where present, so the same twenty
+  /// minutes cannot be billed twice — which in a list of forty identical rows
+  /// is otherwise invisible.
+  chargeIntentId String? @map("charge_intent_id") @db.Uuid
+  /// Billable units, where the payer counts them rather than sessions.
+  units Decimal? @db.Decimal(5, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode TherapyEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  plan    TherapyPlan    @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@unique([episodeId, seq], map: "uq_therapy_session_seq")
+  @@index([hospitalId, branchId, scheduledAt])
+  @@index([hospitalId, episodeId, scheduledAt(sort: Desc)])
+  @@index([hospitalId, therapistId, scheduledAt])
+  @@map("therapy_sessions")
+  @@schema("specialty")
+}

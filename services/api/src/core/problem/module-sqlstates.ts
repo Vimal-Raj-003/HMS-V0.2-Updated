@@ -46,6 +46,10 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'OP028', // ENT: the air-bone gap, the derived four-frequency average, the calibrated booth
   'OP026', // dental: real teeth and their surfaces, the absent tooth, the materialised chart, the fixed price
   'OP027', // dermatology: the derived score, the phototherapy ceiling, the malignant biopsy's follow-up
+  'OP015', // therapy: the live plan, the authorisation, the goals a discharge has to close
+  'OP017', // wound care: the derived area and trajectory, the wound that heals by closing
+  'OP011', // dietetics: totals summed from the meals, and a plan that keeps its own restriction
+  'OP035', // speech and swallow: the complete IDDSI order, and the kitchen that has read it
 ]);
 
 /**

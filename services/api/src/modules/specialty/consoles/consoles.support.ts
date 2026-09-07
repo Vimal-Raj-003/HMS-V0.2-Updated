@@ -276,6 +276,104 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
     type: ProblemType.CONFLICT,
     detail: 'That session number already exists on this course.',
   },
+
+  // ── OP-015, OP-017, OP-011, OP-035 ────────────────────────────────────────
+  a_goal_is_measurable: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A goal carries a metric, a baseline and a target. "Improve mobility" is a sentiment, and an outcome report over sentiments is empty.',
+  },
+  a_resolved_goal_says_what_happened: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A goal that is no longer active records what happened to it and who decided. That is the department\u2019s outcome data.',
+  },
+  an_extension_names_itself: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Extending an authorisation records who extended it, when, and why.',
+  },
+  an_authorisation_is_a_positive_number: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'An authorisation is for at least one session. Leave it empty for an open-ended course.',
+  },
+  an_attended_session_happened: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'An attended session records when it started and how long it lasted.',
+  },
+  session_pain_scores_are_zero_to_ten: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Pain scores run from 0 to 10.',
+  },
+  uq_one_active_therapy_plan: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'This episode already has an active plan. Writing a new one supersedes it \u2014 two active plans is two courses of treatment against one authorisation.',
+    nextAction: 'Refresh the episode and write the new plan from the current assessment.',
+  },
+  uq_therapy_plan_version: {
+    type: ProblemType.CONFLICT,
+    detail: 'That plan version already exists on this episode.',
+  },
+  uq_therapy_session_seq: {
+    type: ProblemType.CONFLICT,
+    detail: 'That session number already exists on this episode.',
+  },
+  uq_therapy_session_charge: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'That charge has already been raised against another session. Therapy is where the same short act repeats forty times against one authorisation, and a duplicate charge is invisible in a list of forty identical rows.',
+    nextAction: 'Check whether this session has already been billed.',
+  },
+  wound_measurements_are_measurements: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Those dimensions are outside what a wound measures. Check the units.',
+  },
+  wound_number_is_positive: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A wound number starts at 1.',
+  },
+  uq_wound_no: {
+    type: ProblemType.CONFLICT,
+    detail: 'That wound number is already used for this patient.',
+  },
+  a_food_has_a_composition: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A food carries at least its energy, protein, carbohydrate and fat per 100 g. Without them a plan built on it silently under-counts.',
+  },
+  a_plan_period_runs_forwards: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A diet plan ends on or after the day it starts.',
+  },
+  an_active_diet_plan_is_signed: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'An active diet plan is signed. A kitchen cooks from it.',
+  },
+  uq_one_active_diet_plan: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'This patient already has an active diet plan. Two is a kitchen and a patient reading different documents.',
+    nextAction: 'Activate the new plan, which supersedes the old one, rather than creating a second.',
+  },
+  sga_is_a_b_or_c: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A Subjective Global Assessment is A, B or C.',
+  },
+  an_iddsi_order_is_complete: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'An IDDSI order names a food level (3\u20137) and a fluid level (0\u20134), or it is nil by mouth and names neither. The numbers overlap without meaning the same thing, so a kitchen cannot infer the missing one.',
+  },
+  iddsi_levels_are_iddsi_levels: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'IDDSI numbers food 3 to 7 and drinks 0 to 4.',
+  },
+  uq_one_live_swallow_order: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'This patient already has a live swallow order. Two is a ward with two answers to what they may safely eat, and the one they act on is whichever they happened to read.',
+    nextAction: 'Supersede the existing order with the new one, giving a reason.',
+  },
 };
 
 /** Wraps a unit of work so Postgres's refusals arrive as problems a person can act on. */

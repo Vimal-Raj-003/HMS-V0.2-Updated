@@ -10685,6 +10685,82 @@ const deviceConsoleEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — OP-015, OP-017, OP-011, OP-035: the therapy consoles.
+ *
+ * Four events, and three of them exist because somebody who is not in the room
+ * has to act. A stalled wound needs a review by whoever runs the clinic; an
+ * exhausted authorisation needs the desk that talks to the payer; a swallow
+ * order needs the kitchen that is plating the next meal.
+ *
+ * The fourth — a discharged episode — is the outcome data, and it leaves the
+ * console because a rehabilitation department's whole account of itself is the
+ * goals it closed.
+ */
+const therapyEvents: readonly EventDefinition[] = [
+  ev(
+    'therapy.episode.discharged',
+    'therapy_episode',
+    'OP-015',
+    'A course of therapy ended, with every goal resolved. The outcome report, the discharge summary and the referrer’s letter all follow from here.',
+    z.object({
+      episodeId: uuid,
+      patientId: uuid,
+      discipline: z.string(),
+      outcome: z.string(),
+      sessionsDelivered: z.number().int(),
+      goalsMet: z.number().int(),
+      goalsTotal: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'therapy.authorisation.exhausted',
+    'therapy_episode',
+    'OP-015',
+    'The last authorised session on an episode has been delivered. Leaves the console because the next one is refused, and the person who can extend it is at the payer desk rather than on the therapy floor.',
+    z.object({
+      episodeId: uuid,
+      patientId: uuid,
+      discipline: z.string(),
+      sessionsAuthorised: z.number().int(),
+      sessionsDelivered: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 2555 },
+  ),
+  ev(
+    'wound.stalled',
+    'wound',
+    'OP-017',
+    'A wound has not reduced enough by four weeks. Leaves the console because a stalled wound is a review by whoever runs the clinic, not a note in a chart the same nurse will write again next week.',
+    z.object({
+      woundId: uuid,
+      patientId: uuid,
+      aetiology: z.string(),
+      areaCm2: z.string(),
+      areaReductionPct: z.string(),
+      weeksOpen: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'slp.swallow_order.issued',
+    'swallow_order',
+    'OP-035',
+    'A swallow order was written and is waiting for the kitchen and the ward. This is the event that makes the tray change: until both acknowledge it the order is not in force, and the meal being plated right now was decided before it existed.',
+    z.object({
+      orderId: uuid,
+      patientId: uuid,
+      admissionId: uuid.nullable(),
+      npo: z.boolean(),
+      foodLevel: z.number().int().nullable(),
+      fluidLevel: z.number().int().nullable(),
+      supersedesId: uuid.nullable(),
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+];
+
+/**
  * Phase 8 — OP-010 and OP-039, the procedure spine.
  *
  * `procedure.started` carries what was checked before it began, because the
@@ -10882,6 +10958,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...specialtyEvents,
   ...ophthalmologyEvents,
   ...deviceConsoleEvents,
+  ...therapyEvents,
   ...procedureEvents,
 ]);
 

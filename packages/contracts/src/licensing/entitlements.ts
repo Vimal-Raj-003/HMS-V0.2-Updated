@@ -344,6 +344,31 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     upgradeCta: 'Ask about Specialty Consoles',
   }),
   ep(
+    'module.therapy.enabled',
+    'feature',
+    'route',
+    'OP-015 Physiotherapy, rehabilitation and the shared therapy spine.',
+    {
+      message: 'The therapy console is not included in your plan.',
+      upgradeCta: 'Ask about Specialty Consoles',
+    },
+  ),
+  ep('module.wound_care.enabled', 'feature', 'route', 'OP-017 The wound care clinic.', {
+    message: 'The wound care clinic is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
+  ep('module.nutrition.enabled', 'feature', 'route', 'OP-011 Dietetics and nutrition.', {
+    message: 'The dietetics console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
+  // OP-035's swallow order is the one console screen that is never licence
+  // gated: an IDDSI recommendation the ward cannot read is a patient eating
+  // the wrong texture, and EN-040 §5 does not let billing state cause that.
+  ep('module.speech_therapy.enabled', 'feature', 'route', 'OP-035 Speech, language and swallow.', {
+    message: 'The speech therapy console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
+  ep(
     'module.procedures.enabled',
     'feature',
     'route',

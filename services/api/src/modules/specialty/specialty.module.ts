@@ -8,6 +8,11 @@ import { DentalService } from './consoles/dental.service.js';
 import { DermatologyService } from './consoles/dermatology.service.js';
 import { EntService } from './consoles/ent.service.js';
 import { PulmonologyService } from './consoles/pulmonology.service.js';
+import { NutritionService } from './therapy/nutrition.service.js';
+import { SpeechService } from './therapy/speech.service.js';
+import { TherapyController } from './therapy/therapy.controller.js';
+import { TherapyService } from './therapy/therapy.service.js';
+import { WoundService } from './therapy/wound.service.js';
 import { OphthalmologyController } from './ophthalmology/ophthalmology.controller.js';
 import { OphthalmologyService } from './ophthalmology/ophthalmology.service.js';
 import { SpecialtyController } from './specialty.controller.js';
@@ -27,6 +32,7 @@ export const SPECIALTY_CONTROLLERS: Type<unknown>[] = [
   SpecialtyController,
   OphthalmologyController,
   ConsolesController,
+  TherapyController,
 ];
 
 export const SPECIALTY_PROVIDERS: Provider[] = [
@@ -43,6 +49,15 @@ export const SPECIALTY_PROVIDERS: Provider[] = [
   EntService,
   DentalService,
   DermatologyService,
+
+  // OP-015, OP-017, OP-011, OP-035. One spine service and three disciplines,
+  // because the episode, the goal, the session and the bill are the same rows
+  // in all four — and a fourth copy of "a course of sessions" would be four
+  // places to fix the day somebody notices sessions billed twice.
+  TherapyService,
+  WoundService,
+  NutritionService,
+  SpeechService,
 ];
 
 @Module({
@@ -57,6 +72,10 @@ export const SPECIALTY_PROVIDERS: Provider[] = [
     EntService,
     DentalService,
     DermatologyService,
+    TherapyService,
+    WoundService,
+    NutritionService,
+    SpeechService,
   ],
 })
 export class SpecialtyModule {}

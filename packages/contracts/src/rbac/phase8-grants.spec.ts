@@ -23,6 +23,10 @@ const PHASE_8_PREFIXES = [
   'ent',
   'dental',
   'derm',
+  'therapy',
+  'wound',
+  'nutrition',
+  'slp',
 ] as const;
 
 function permission(key: string): PermissionDefinition {
@@ -177,6 +181,54 @@ describe('Phase 8 framework permission catalogue', () => {
         'resident_doctor',
         // The phototherapy cabin is an OPD treatment room.
         'nurse_opd',
+      ],
+      // The therapy spine is held by therapists of every discipline, plus the
+      // doctors who refer into it and the desk that owns the authorisation.
+      therapy: [
+        'medical_superintendent',
+        'hod',
+        'doctor_consultant_opd',
+        'surgeon',
+        'resident_doctor',
+        'therapist',
+        'dietician',
+        'insurance_desk',
+      ],
+      wound: [
+        'medical_superintendent',
+        'hod',
+        'doctor_consultant_opd',
+        'surgeon',
+        'resident_doctor',
+        'therapist',
+        'nurse_opd',
+        'nurse_ward',
+        'nurse_icu',
+        'nurse_supervisor',
+      ],
+      nutrition: [
+        'medical_superintendent',
+        'hod',
+        'doctor_consultant_opd',
+        'surgeon',
+        'resident_doctor',
+        'dietician',
+      ],
+      // Writing a swallow order and acknowledging one are held by different
+      // people on purpose; the allow-list is the union, and the tests below
+      // check the split itself.
+      slp: [
+        'medical_superintendent',
+        'hod',
+        'doctor_consultant_opd',
+        'surgeon',
+        'resident_doctor',
+        'therapist',
+        'dietician',
+        'nurse_opd',
+        'nurse_ward',
+        'nurse_icu',
+        'kitchen_staff',
       ],
     };
 
@@ -450,6 +502,85 @@ describe('OP-010 — the procedure floor', () => {
     expect(PERMISSION_CATALOGUE.map((p) => p.key)).toContain('dental.chart.read');
     expect(PERMISSION_CATALOGUE.map((p) => p.key)).not.toContain('dental.chart.write');
     expect(permission('dental.chart.record').resource).toBe('dental_tooth_event');
+  });
+
+  it('never lets the person who writes a swallow order acknowledge it', () => {
+    // The whole safety rule. A therapist assesses at eleven and writes level 4
+    // fluids; the tray arriving at twelve was plated at ten. The order is not
+    // in force until the kitchen and the ward say they have read it — and a
+    // therapist acknowledging on their behalf is the failure, done tidily.
+    const therapist = getRoleTemplate('therapist');
+    expect(therapist?.permissions).toContain('slp.swallow_order.write');
+    expect(therapist?.permissions).not.toContain('slp.swallow_order.acknowledge');
+
+    const acknowledgers = holdersOf('slp.swallow_order.acknowledge').filter((h) => h !== 'super_admin');
+    // The two places a tray is decided: the kitchen that plates it and the ward
+    // that hands it over.
+    expect(acknowledgers).toContain('kitchen_staff');
+    expect(acknowledgers).toContain('nurse_ward');
+    expect(acknowledgers).not.toContain('therapist');
+    for (const who of acknowledgers) {
+      expect(
+        getRoleTemplate(who)?.permissions.includes('slp.swallow_order.write'),
+        `${who} should not both write and acknowledge a swallow order`,
+      ).toBe(false);
+    }
+  });
+
+  it('lets everyone who might offer a patient a drink read the swallow order', () => {
+    // A nurse who cannot see what a patient may safely swallow is a nurse who
+    // will offer them a glass of water.
+    for (const who of ['nurse_ward', 'nurse_icu', 'nurse_opd', 'dietician', 'kitchen_staff']) {
+      expect(
+        getRoleTemplate(who)?.permissions.includes('slp.swallow_order.read'),
+        `${who} should be able to read the swallow order`,
+      ).toBe(true);
+    }
+    // And the acknowledgement is never licence-gated: a ward that cannot
+    // acknowledge because of a billing dispute is a ward on the old order.
+    expect(permission('slp.swallow_order.acknowledge').clinicalSafetyExempt).toBe(true);
+  });
+
+  it('keeps the dietician out of the texture decision and the therapist out of the diet plan', () => {
+    // A diet plan that contradicts the swallow finding is the aspiration.
+    const dietician = getRoleTemplate('dietician');
+    expect(dietician?.permissions).toContain('nutrition.plan.write');
+    expect(dietician?.permissions).toContain('slp.swallow_order.read');
+    expect(dietician?.permissions).not.toContain('slp.swallow_order.write');
+
+    const therapist = getRoleTemplate('therapist');
+    expect(therapist?.permissions).not.toContain('nutrition.plan.write');
+  });
+
+  it('puts extending a therapy authorisation with the desk that owns it', () => {
+    // The eleventh session of a package of ten is either fraud or unpaid work.
+    // The therapist asks; the desk that talks to the payer decides.
+    const holders = holdersOf('therapy.authorisation.extend').filter((h) => h !== 'super_admin');
+    expect(holders).toContain('insurance_desk');
+    expect(holders).not.toContain('therapist');
+    const def = permission('therapy.authorisation.extend');
+    expect(def.risk).toBe('high');
+    expect(def.requiresReason).toBe(true);
+  });
+
+  it('ships closing an open wound unassigned, like the other database overrides', () => {
+    const holders = holdersOf('wound.status.override').filter((h) => h !== 'super_admin');
+    expect(holders).toEqual([]);
+    expect(permission('wound.status.override').requiresReason).toBe(true);
+    // While recording a measurement is held right across the bedside.
+    for (const who of ['nurse_ward', 'nurse_icu', 'nurse_opd', 'therapist']) {
+      expect(getRoleTemplate(who)?.permissions.includes('wound.record'), who).toBe(true);
+    }
+  });
+
+  it('offers no key for typing a wound area or a diet plan total', () => {
+    // Both are summed in the database. If either could be typed there would be
+    // a permission for it.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    expect(keys).not.toContain('wound.area.set');
+    expect(keys).not.toContain('nutrition.totals.set');
+    expect(keys).toContain('wound.record');
+    expect(keys).toContain('nutrition.plan.write');
   });
 
   it('gives the OPD nursing floor the second-person key and the giving key alike', () => {

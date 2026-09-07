@@ -1,0 +1,164 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-035 — speech, language and swallow
+//
+// Most of this console is therapy like any other and uses the shared episode,
+// goal, plan and session. One part of it is not, and it is the reason this file
+// exists: the swallow recommendation.
+//
+// ── An IDDSI order names a food level and a fluid level, and NPO names neither
+//
+// The International Dysphagia Diet Standardisation Initiative numbers foods 3
+// to 7 and drinks 0 to 4, and the numbers overlap without meaning the same
+// thing. "Level 4" is pureed food *and* extremely thick fluid, and a kitchen
+// reading one when the therapist meant the other sends a tray that can kill
+// somebody. So an order carries both, explicitly, or it carries nil-by-mouth
+// and neither — the database will not take a half-specified one.
+//
+// ── The order is not in force until the kitchen and the ward have read it ──
+//
+// This is the whole failure mode. A speech therapist assesses at eleven, writes
+// level 4 fluids, and the tray that arrives at twelve was plated at ten. The
+// order records an acknowledgement from the kitchen and from the ward, and
+// until both are there the order is pending rather than active — which means
+// the ward is looking at "waiting for the kitchen" rather than at a green tick
+// that is not true yet.
+//
+// ── An order supersedes; it does not overlap ───────────────────────────────
+//
+// One live swallow order per patient, by partial unique index. Two live orders
+// is a ward with two answers to "what can this person eat", and the one they
+// act on is whichever they happened to read.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum SlpDomain {
+  swallow
+  articulation
+  language
+  voice
+  fluency
+  motor_speech
+  cognitive_communication
+  aac
+
+  @@schema("specialty")
+}
+
+enum SwallowOrderStatus {
+  /// Written, and not yet acted on by the kitchen or the ward.
+  pending
+  /// Both have acknowledged. This is the only status that means anything is
+  /// different about what arrives on the tray.
+  active
+  superseded
+  cancelled
+
+  @@schema("specialty")
+}
+
+/// A speech and language assessment.
+///
+/// The therapy episode carries the course; this carries what the instruments
+/// said, because a swallow assessment and an articulation assessment share
+/// nothing but a patient.
+model SlpAssessment {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  episodeId   String  @map("episode_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  domains SlpDomain[]
+
+  /// `swallow_clinical`, `fees`, `vfss`, `artic`, `language`, `voice`,
+  /// `fluency`, `motor_speech`, `cog_comm`, `aac`, `reassess`.
+  kind String @db.VarChar(24)
+
+  /// `[{tool, raw, standardScore, percentile}]`.
+  tools Json @default("[]")
+
+  /// `{oralMotor, trials: [{iddsiLevel, signs}], gugs, masa, eat10, fois, pas}`.
+  swallow Json @default("{}")
+  /// `{grbas, capeV, mpt, szRatio, acoustics: {f0, jitter, shimmer}, vhi}`.
+  voice Json @default("{}")
+  /// `{pctSS, ssi, oases}`.
+  fluency  Json @default("{}")
+  language Json @default("{}")
+  /// `{phonemeInventory, errorPatterns}`.
+  articulation Json @default("{}")
+
+  severity String?  @db.VarChar(24)
+  dxCodes  String[] @default([]) @map("dx_codes")
+
+  reportDocId    String?   @map("report_doc_id") @db.Uuid
+  formResponseId String?   @map("form_response_id") @db.Uuid
+  signedBy       String?   @map("signed_by") @db.Uuid
+  signedAt       DateTime? @map("signed_at") @db.Timestamptz(6)
+  version        Int       @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  swallowOrders SwallowOrder[]
+
+  @@index([hospitalId, episodeId, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, kind])
+  @@map("slp_assessments")
+  @@schema("specialty")
+}
+
+/// What this person may safely eat and drink, and who has been told.
+model SwallowOrder {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  episodeId    String  @map("episode_id") @db.Uuid
+  assessmentId String  @map("assessment_id") @db.Uuid
+  admissionId  String? @map("admission_id") @db.Uuid
+
+  /// Nil by mouth. Carries no levels, and a trigger enforces that both ways:
+  /// NPO with a level is a contradiction, and a level-less order that is not
+  /// NPO is a kitchen guessing.
+  npo Boolean @default(false)
+
+  /// IDDSI food, 3 (liquidised) to 7 (regular).
+  foodLevel Int? @map("food_level")
+  /// IDDSI drinks, 0 (thin) to 4 (extremely thick).
+  fluidLevel Int? @map("fluid_level")
+
+  /// `{posture, boluses, cueing, supervision, medicationRoute}`. The parts of a
+  /// swallow recommendation a level cannot express.
+  strategies Json @default("{}")
+
+  status SwallowOrderStatus @default(pending)
+
+  effectiveFrom DateTime  @default(now()) @map("effective_from") @db.Timestamptz(6)
+  endedAt       DateTime? @map("ended_at") @db.Timestamptz(6)
+
+  orderedBy String @map("ordered_by") @db.Uuid
+
+  /// The two acknowledgements that make the order real. A therapist's
+  /// recommendation the kitchen has not read changes nothing about the tray.
+  ackKitchenBy String?   @map("ack_kitchen_by") @db.Uuid
+  ackKitchenAt DateTime? @map("ack_kitchen_at") @db.Timestamptz(6)
+  ackWardBy    String?   @map("ack_ward_by") @db.Uuid
+  ackWardAt    DateTime? @map("ack_ward_at") @db.Timestamptz(6)
+
+  /// Why it was superseded or cancelled. A downgrade the ward cannot explain is
+  /// a downgrade the ward will quietly ignore next time.
+  changeReason String? @map("change_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assessment SlpAssessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, effectiveFrom(sort: Desc)])
+  @@index([hospitalId, branchId, status])
+  @@map("slp_swallow_orders")
+  @@schema("specialty")
+}

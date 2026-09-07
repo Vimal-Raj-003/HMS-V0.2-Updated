@@ -882,15 +882,92 @@ const DERM_DOCTOR = [
  * template and see different screens, because a hospital that has to mint a
  * role per specialty ends up with sixty roles and grants them by guesswork.
  */
+/**
+ * What a doctor holds across the therapy consoles.
+ *
+ * Read everything, refer into anything, and sign nothing a therapist signs. A
+ * consultant does not write a physiotherapy plan or an IDDSI order — those are
+ * the therapist's registered scope, and a doctor overruling one by having the
+ * key is how a swallow recommendation gets quietly downgraded.
+ */
+const THERAPY_REFERRER = [
+  'therapy.episode.read',
+  'therapy.episode.create',
+  'therapy.report.read',
+  'wound.read',
+  'wound.plan.write',
+  'wound.report.read',
+  'nutrition.assessment.read',
+  'nutrition.ip_order.write',
+  'slp.swallow_order.read',
+] as const;
+
 const SPECIALTY_CONSOLE_DOCTOR = [
   ...CARDIO_DOCTOR,
   ...PULMO_DOCTOR,
   ...ENT_DOCTOR,
   ...DENTAL_DOCTOR,
   ...DERM_DOCTOR,
+  ...THERAPY_REFERRER,
 ] as const;
 
 /** A resident records and plans; the signature and the override keys are not theirs. */
+/**
+ * OP-015, OP-017, OP-011, OP-035 — the therapy floor.
+ *
+ * The spine keys are held by every therapist regardless of discipline, because
+ * the *episode* carries the discipline and the department carries the
+ * therapist. Two keys for one act — `physio.session.record` and
+ * `slp.session.record` — would have been a grant matrix nobody could reason
+ * about the day somebody works across two clinics.
+ */
+const THERAPY_FLOOR = [
+  'therapy.episode.read',
+  'therapy.episode.create',
+  'therapy.assessment.record',
+  'therapy.goal.manage',
+  'therapy.session.record',
+] as const;
+
+/** A qualified therapist signs the assessment and writes the plan. */
+const THERAPY_QUALIFIED = [
+  ...THERAPY_FLOOR,
+  'therapy.assessment.sign',
+  'therapy.plan.write',
+  'therapy.episode.discharge',
+  'therapy.report.read',
+] as const;
+
+/** The wound clinic. Dressing changes are nursing's; the regime is not. */
+const WOUND_BEDSIDE = ['wound.read', 'wound.record', 'wound.photo.capture', 'wound.dressing.record'] as const;
+const WOUND_CLINIC = [...WOUND_BEDSIDE, 'wound.plan.write', 'wound.report.read'] as const;
+
+const NUTRITION_CLINIC = [
+  'nutrition.assessment.read',
+  'nutrition.assessment.record',
+  'nutrition.plan.write',
+  'nutrition.food.manage',
+  'nutrition.ip_order.write',
+  'nutrition.report.read',
+] as const;
+
+/**
+ * The swallow order splits three ways, and the split is the safety rule.
+ *
+ * The speech therapist writes it and cannot acknowledge it. The kitchen and the
+ * ward acknowledge it and cannot write it. Everybody else reads it — a nurse
+ * who cannot see what a patient may safely eat is a nurse who will offer them
+ * a glass of water.
+ */
+const SLP_CLINICAL = [
+  'slp.assessment.record',
+  'slp.assessment.sign',
+  'slp.swallow_order.write',
+  'slp.swallow_order.read',
+  'slp.report.read',
+] as const;
+const SWALLOW_ACKNOWLEDGER = ['slp.swallow_order.read', 'slp.swallow_order.acknowledge'] as const;
+
 const SPECIALTY_CONSOLE_RESIDENT = [
   ...CARDIO_TECHNICIAN,
   'cardio.consult.read',
@@ -3136,6 +3213,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      ...WOUND_BEDSIDE,
+      'slp.swallow_order.read',
       ...OPD_NURSING_FLOOR,
       ...OPHTHA_OPTOMETRY,
       // The phototherapy cabin is an OPD treatment room, and the person under
@@ -3189,6 +3268,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...WOUND_BEDSIDE,
+      // The ward half of the swallow acknowledgement. A ward that has not read
+      // the order is a ward still working from the last one.
+      ...SWALLOW_ACKNOWLEDGER,
       ...OPD_NURSING_FLOOR,
       ...CONSOLE_TECHNICIAN,
       ...DISCHARGE_WARD,
@@ -3238,6 +3321,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'icu-flowsheet',
     permissions: [
+      ...WOUND_BEDSIDE,
+      ...SWALLOW_ACKNOWLEDGER,
       ...CONSOLE_TECHNICIAN,
       ...DISCHARGE_WARD,
       'mortuary.case.read',
@@ -3393,6 +3478,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-command-centre',
     permissions: [
+      ...WOUND_CLINIC,
       ...OPD_NURSING_FLOOR,
       'procedure.room.configure',
       ...DISCHARGE_WARD,
@@ -3628,6 +3714,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'finance',
     homeWorkspace: 'insurance-queue',
     permissions: [
+      // The eleventh session of a package of ten. The therapist asks; the desk
+      // that owns the authorisation is the one that can extend it.
+      'therapy.authorisation.extend',
+      'therapy.episode.read',
       ...IP_BILL_READER,
       ...BED_BOARD_READER,
       'transfer.read',
@@ -3934,6 +4024,12 @@ const templates: readonly RoleTemplate[] = [
     homeWorkspace: 'diet-worklist',
     permissions: [
       ...CONSOLE_TECHNICIAN,
+      ...THERAPY_FLOOR,
+      ...NUTRITION_CLINIC,
+      // The dietician reads the swallow order and never writes one: the texture
+      // a patient can manage is the speech therapist's finding, and a diet plan
+      // that contradicts it is the aspiration.
+      'slp.swallow_order.read',
       'nursing.ward.read',
       'nursing.assessment.record',
       'nursing.note.write',
@@ -3955,6 +4051,12 @@ const templates: readonly RoleTemplate[] = [
     homeWorkspace: 'therapy-schedule',
     permissions: [
       ...CONSOLE_TECHNICIAN,
+      ...THERAPY_QUALIFIED,
+      // A physiotherapist manages wounds in a rehabilitation setting and a
+      // speech therapist writes swallow orders; both are this template in most
+      // hospitals, and the department scopes which console they actually open.
+      ...WOUND_BEDSIDE,
+      ...SLP_CLINICAL,
       'nursing.ward.read',
       'nursing.note.write',
       'nursing.assessment.record',
@@ -4480,6 +4582,10 @@ const templates: readonly RoleTemplate[] = [
     category: 'facilities',
     homeWorkspace: 'kitchen-board',
     permissions: [
+      // The kitchen half of the swallow acknowledgement. Not a clinical grant:
+      // it is the only way the tray changes, and it is the only clinical key
+      // this role holds.
+      ...SWALLOW_ACKNOWLEDGER,
       'org.read',
       'mdm.read',
       'tpl.form.read',

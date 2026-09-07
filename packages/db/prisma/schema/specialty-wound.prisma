@@ -1,0 +1,264 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-017 — the wound care clinic
+//
+// A wound is measured every week for months, and the only question anybody asks
+// of the measurements is whether it is getting smaller. That question has a
+// published answer: a wound that has not reduced its area by about 40 % in four
+// weeks will not heal on the current plan, and needs escalating. Every part of
+// that sentence is arithmetic on two numbers a nurse writes down with a ruler.
+//
+// ── Area is derived, and so is the reduction ───────────────────────────────
+//
+// Area from length and width by the standard elliptical approximation
+// (π/4 × L × W), and the reduction against the episode's first assessment. Both
+// in a trigger, because a wound clinic's entire referral logic is a threshold
+// on the second one — and a percentage somebody typed is a percentage that
+// agrees with whatever the clinic hoped.
+//
+// ── A wound is healed when it has closed, not when somebody says so ────────
+//
+// `healed` needs a final assessment with no area left. A wound closed on the
+// record while the last measurement says 4 cm² is a district nurse arriving to
+// a discharged patient with an open ulcer, and it is how pressure-ulcer
+// statistics come to be wrong in the direction nobody checks.
+//
+// ── A photograph without a scale marker is not a measurement ───────────────
+//
+// It is still worth having — the colour and the tissue are the point — but it
+// cannot be the source of a size, and the record says which kind it is rather
+// than leaving somebody to guess from the image.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum WoundAetiology {
+  pressure
+  diabetic_foot
+  venous
+  arterial
+  mixed_ulcer
+  traumatic
+  surgical
+  /// Surgical site infection. A different fact from a surgical wound.
+  ssi
+  burn
+  malignant
+  other
+
+  @@schema("specialty")
+}
+
+enum WoundStatus {
+  open
+  healing
+  /// Measured, and not moving. The state the four-week rule exists to name.
+  stalled
+  deteriorating
+  healed
+  amputated
+  deceased
+  lost_to_followup
+
+  @@schema("specialty")
+}
+
+enum WoundTrajectory {
+  on_track
+  stalled
+  deteriorating
+
+  @@schema("specialty")
+}
+
+/// A wound, followed from the day it opened.
+model Wound {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  /// The therapy episode this wound is managed under, when there is one. A
+  /// wound seen once in a clinic and never again does not need a course.
+  episodeId String? @map("episode_id") @db.Uuid
+
+  /// Numbered within the patient, so "the heel wound" and "wound 2" are the
+  /// same wound in a note, a photograph and a dressing order.
+  woundNo Int @map("wound_no")
+
+  locationSnomed String?    @map("location_snomed") @db.VarChar(40)
+  locationText   String     @map("location_text") @db.VarChar(160)
+  side           Laterality @default(not_applicable)
+
+  aetiology WoundAetiology
+  onsetDate DateTime?      @map("onset_date") @db.Date
+  cause     String?        @db.VarChar(240)
+
+  /// `{npiapStage, wagner, ut, wifi, ceap, tbsa, depth, ssiType}` — one key per
+  /// classification system, because a diabetic foot and a pressure ulcer are
+  /// staged by instruments that share nothing.
+  classification Json @default("{}")
+
+  status WoundStatus @default(open)
+
+  /// Hospital-acquired. The flag a quality department reports on, and the one
+  /// nobody sets retrospectively if it is buried in a blob.
+  hospitalAcquired Boolean @default(false) @map("hospital_acquired")
+  incidentId       String? @map("incident_id") @db.Uuid
+
+  /// Derived: set when the closing assessment lands, along with the day count.
+  healedAt    DateTime? @map("healed_at") @db.Timestamptz(6)
+  healingDays Int?      @map("healing_days")
+
+  openedBy  String   @map("opened_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assessments WoundAssessment[]
+  dressings   DressingEvent[]
+
+  @@unique([hospitalId, patientId, woundNo], map: "uq_wound_no")
+  @@index([hospitalId, branchId, status])
+  @@index([hospitalId, aetiology, status])
+  @@index([hospitalId, hospitalAcquired, createdAt(sort: Desc)])
+  @@map("wounds")
+  @@schema("specialty")
+}
+
+/// What the wound measured on one day.
+model WoundAssessment {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  woundId    String @map("wound_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  assessedAt DateTime @default(now()) @map("assessed_at") @db.Timestamptz(6)
+  assessedBy String   @map("assessed_by") @db.Uuid
+  context    String   @default("opd") @db.VarChar(12)
+
+  /// The two numbers a ruler gives, in centimetres. Everything below follows
+  /// from them.
+  lengthCm Decimal? @map("length_cm") @db.Decimal(5, 2)
+  widthCm  Decimal? @map("width_cm") @db.Decimal(5, 2)
+  depthCm  Decimal? @map("depth_cm") @db.Decimal(5, 2)
+
+  /// π/4 × L × W, by trigger. Never typed: the whole referral logic of a wound
+  /// clinic is a threshold on the reduction computed from this.
+  areaCm2 Decimal? @map("area_cm2") @db.Decimal(8, 2)
+  /// Against the wound's first assessment. Derived with the area.
+  areaReductionPct Decimal? @map("area_reduction_pct") @db.Decimal(6, 2)
+  /// Derived from the reduction and the weeks elapsed: on track, stalled, or
+  /// getting worse. A stalled wound at four weeks is a referral, not a note.
+  trajectory WoundTrajectory?
+
+  undermining Json @default("{}")
+  tunnelling  Json @default("{}")
+
+  /// `{granulation, slough, necrotic, epithelial}` as percentages. A trigger
+  /// requires them to total 100 when any is given — a wound bed that is 60 %
+  /// granulation and 60 % slough is a description of two wounds.
+  tissuePct Json @default("{}") @map("tissue_pct")
+
+  exudate        Json     @default("{}")
+  infectionSigns Json     @default("{}") @map("infection_signs")
+  periwound      Json     @default("{}")
+  painNrs        Int?     @map("pain_nrs")
+  odour          Boolean  @default(false)
+  probeToBone    Boolean  @default(false) @map("probe_to_bone")
+  exposedStructures String[] @default([]) @map("exposed_structures")
+
+  /// BWAT and PUSH totals with their items, kept beside the measurements.
+  scores Json @default("{}")
+
+  cultureOrderId String? @map("culture_order_id") @db.Uuid
+  formResponseId String? @map("form_response_id") @db.Uuid
+  notes          String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  wound  Wound        @relation(fields: [woundId], references: [id], onDelete: Cascade)
+  photos WoundPhoto[]
+
+  @@index([hospitalId, woundId, assessedAt(sort: Desc)])
+  @@index([hospitalId, trajectory])
+  @@map("wound_assessments")
+  @@schema("specialty")
+}
+
+/// A photograph of the wound.
+model WoundPhoto {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  woundId      String  @map("wound_id") @db.Uuid
+  assessmentId String? @map("assessment_id") @db.Uuid
+  patientId    String  @map("patient_id") @db.Uuid
+
+  s3Key    String  @map("s3_key") @db.VarChar(500)
+  thumbKey String? @map("thumb_key") @db.VarChar(500)
+
+  takenAt DateTime @default(now()) @map("taken_at") @db.Timestamptz(6)
+  takenBy String   @map("taken_by") @db.Uuid
+  device  String?  @db.VarChar(80)
+
+  /// `pre_debridement`, `post_debridement`, `routine`, `home_upload`. A pair
+  /// before and after a debridement is the only honest way to show what was
+  /// removed.
+  stage String @default("routine") @db.VarChar(24)
+
+  /// Whether a ruler or a calibration sticker is in the frame. Without one the
+  /// photograph cannot be the source of a measurement, and the record says so
+  /// rather than leaving somebody to judge from the image.
+  hasScaleMarker Boolean @default(false) @map("has_scale_marker")
+  calibration    Json    @default("{}")
+  annotations    Json    @default("{}")
+
+  consentId String? @map("consent_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  assessment WoundAssessment? @relation(fields: [assessmentId], references: [id], onDelete: SetNull)
+
+  @@index([hospitalId, woundId, takenAt(sort: Desc)])
+  @@map("wound_photos")
+  @@schema("specialty")
+}
+
+/// One dressing change, and what it consumed.
+model DressingEvent {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  woundId    String @map("wound_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  /// The therapy session this happened in, when it happened in one. A dressing
+  /// changed on a ward round is not a clinic session and does not become one.
+  sessionId String? @map("session_id") @db.Uuid
+
+  performedAt DateTime @default(now()) @map("performed_at") @db.Timestamptz(6)
+  performedBy String   @map("performed_by") @db.Uuid
+  location    String   @default("dressing_room") @db.VarChar(24)
+
+  /// `[{itemId, batch, qty}]` — consumed from NC-006 stock. A dressing clinic
+  /// that does not record what it used is a dressing clinic with no idea what
+  /// it costs.
+  consumables   Json    @default("[]")
+  consumptionId String? @map("consumption_id") @db.Uuid
+
+  npwtCanisterChanged Boolean @default(false) @map("npwt_canister_changed")
+
+  painPre  Int? @map("pain_pre")
+  painPost Int? @map("pain_post")
+
+  notes     String?   @db.Text
+  nextDueAt DateTime? @map("next_due_at") @db.Timestamptz(6)
+
+  chargeIntentId String? @map("charge_intent_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  wound Wound @relation(fields: [woundId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, woundId, performedAt(sort: Desc)])
+  @@index([hospitalId, branchId, performedAt(sort: Desc)])
+  @@map("wound_dressing_events")
+  @@schema("specialty")
+}
