@@ -10817,6 +10817,91 @@ const painClinicEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — OP-012 and IP-022, dialysis.
+ *
+ * Five events, and every one of them is a fact somebody outside the unit has to
+ * act on: a machine that has gone down and taken a shift's bookings with it, a
+ * patient who crashed on the chair, an access that failed, an adequacy figure
+ * that says three sessions a week are not clearing anything, and a filter that
+ * has reached the end of its life.
+ */
+const dialysisEvents: readonly EventDefinition[] = [
+  ev(
+    'dialysis.session.completed',
+    'dialysis_session',
+    'OP-012',
+    'A session finished. Carries the fluid actually removed and the adequacy figures, which drive the monthly review, the billing package and the nephrologist’s worklist.',
+    z.object({
+      sessionId: uuid,
+      programId: uuid,
+      patientId: uuid,
+      machineCode: z.string().nullable(),
+      ufGoalL: z.string().nullable(),
+      actualUfL: z.string().nullable(),
+      urr: z.string().nullable(),
+      ktv: z.string().nullable(),
+      disconnectAt: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'dialysis.session.aborted',
+    'dialysis_session',
+    'OP-012',
+    'A session ended early. Leaves immediately: the patient is short of a treatment, the slot behind them has moved, and an abort rate is the first thing a mortality review looks at.',
+    z.object({
+      sessionId: uuid,
+      programId: uuid,
+      patientId: uuid,
+      minutesRun: z.number().int().nullable(),
+      reason: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'dialysis.machine.down',
+    'dialysis_machine',
+    'OP-012',
+    'A machine went to breakdown or maintenance. Leaves the console because every booking still on it has to be moved to another machine in the same isolation zone, and there may not be one.',
+    z.object({
+      machineId: uuid,
+      code: z.string(),
+      zone: z.string(),
+      status: z.string(),
+      affectedSessions: z.number().int(),
+    }),
+    { containsPhi: false, retentionDays: 1825 },
+  ),
+  ev(
+    'dialysis.access.failed',
+    'dialysis_vascular_access',
+    'OP-012',
+    'A fistula, graft or catheter failed. Leaves because the patient needs an interventional slot before their next session, and a failed access discovered on the morning of a treatment is a missed treatment.',
+    z.object({
+      accessId: uuid,
+      programId: uuid,
+      patientId: uuid,
+      type: z.string(),
+      site: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'dialysis.dialyser.condemned',
+    'dialyser_use',
+    'OP-012',
+    'A dialyser was discarded — reuse limit, a failed integrity test or a cell volume below the floor. Leaves so that the reprocessing room issues a replacement before the patient arrives rather than while they wait.',
+    z.object({
+      label: z.string(),
+      programId: uuid,
+      useNo: z.number().int(),
+      reason: z.string(),
+    }),
+    { containsPhi: false, retentionDays: 1825 },
+  ),
+];
+
+/**
  * Phase 8 — OP-013 and OP-014, the programme consoles.
  *
  * Four events, and each one leaves because somebody outside the room has to
@@ -11087,6 +11172,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...therapyEvents,
   ...painClinicEvents,
   ...programmeEvents,
+  ...dialysisEvents,
   ...procedureEvents,
 ]);
 

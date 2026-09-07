@@ -1,0 +1,446 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-012 · IP-022 — the dialysis unit
+//
+// The first console in this phase whose scheduling is a physical object. A
+// theatre list can run late; a dialysis machine cannot have two people on it,
+// and the chair the second one is waiting in is four hours of a life.
+//
+// ── Viral status decides the zone, and the database decides the zone ───────
+//
+// This is the rule the module exists for. Hepatitis B and C move through
+// dialysis units — through shared machines, shared surfaces, shared staff — and
+// when they do it is not one patient, it is a cohort. Every unit separates
+// positive patients onto dedicated machines in a dedicated area, every unit
+// knows this, and units still seroconvert people, because on a Tuesday with two
+// machines down somebody puts a patient on the nearest chair.
+//
+// So the zone is not a label on a wall. A session on a machine whose zone does
+// not match the patient's viral status is refused, and the message names both.
+//
+// ── One patient per machine, by exclusion ──────────────────────────────────
+//
+// A GiST exclusion over the machine and the time range. Double-booking a
+// machine is not a scheduling inconvenience: it is a patient who arrived for a
+// four-hour treatment finding somebody else on it.
+//
+// ── The ultrafiltration rate is derived, and it has a ceiling ──────────────
+//
+// The volume to remove divided by the hours to remove it, per kilogram. Above
+// about 13 ml/kg/hour the patient crashes on the machine, and repeated over
+// months it is myocardial stunning — the harm that makes dialysis patients die
+// of their hearts. It is arithmetic on three numbers a nurse writes down, and
+// it is not something anybody does in their head at seven in the morning.
+//
+// ── A dialyser is reused a counted number of times ─────────────────────────
+//
+// Reuse is legitimate, economically necessary in most of the world, and safe
+// within a limit and an integrity test. Past the limit or after a failed test
+// it is refused — because the count on the label is written by hand and the
+// label is what everybody trusts.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum DialysisModality {
+  hd
+  hdf
+  /// Slow low-efficiency dialysis, for the haemodynamically unstable.
+  sled
+  /// Peritoneal, continuous ambulatory.
+  pd_capd
+  /// Peritoneal, automated.
+  pd_apd
+
+  @@schema("specialty")
+}
+
+/// Which machines a patient may be treated on.
+///
+/// Not a preference and not a room name: the isolation zone is the control that
+/// stops hepatitis moving through a unit, and it is derived from the patient's
+/// serology rather than chosen.
+enum IsolationZone {
+  general
+  hbv
+  hcv
+  hiv
+
+  @@schema("specialty")
+}
+
+enum MachineStatus {
+  available
+  in_use
+  /// Between patients. A machine mid-cycle cannot take the next one.
+  disinfecting
+  maintenance
+  breakdown
+
+  @@schema("specialty")
+}
+
+enum DialysisSessionStatus {
+  scheduled
+  checked_in
+  on_machine
+  completed
+  /// Started and stopped early. A different fact from cancelled, and the one
+  /// that matters clinically.
+  aborted
+  no_show
+  cancelled
+
+  @@schema("specialty")
+}
+
+enum VascularAccessType {
+  /// Arteriovenous fistula. The one that lasts.
+  avf
+  avg
+  tunnelled_catheter
+  non_tunnelled_catheter
+  pd_catheter
+
+  @@schema("specialty")
+}
+
+/// A patient on a dialysis programme.
+model DialysisProgram {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  modality       DialysisModality
+  aetiologyIcd10 String?          @map("aetiology_icd10") @db.VarChar(16)
+  startDate      DateTime         @map("start_date") @db.Date
+
+  /// The weight the patient should leave at. Everything about fluid removal is
+  /// computed from it, and it drifts — so it carries the date it was last
+  /// reviewed, because a dry weight six months old is a patient being pulled
+  /// to a number that no longer describes them.
+  dryWeightKg        Decimal   @map("dry_weight_kg") @db.Decimal(5, 2)
+  dryWeightUpdatedAt DateTime  @map("dry_weight_updated_at") @db.Timestamptz(6)
+
+  /// `{hbsag, hcv, hiv, testedAt}`. The isolation zone is derived from it, and
+  /// a serology older than the unit's policy is a patient whose zone nobody
+  /// can vouch for.
+  viralStatus Json @map("viral_status")
+  /// Derived by trigger from `viral_status`. Never chosen.
+  isolationZone IsolationZone @map("isolation_zone")
+
+  bloodGroup     String? @map("blood_group") @db.VarChar(8)
+  nephrologistId String? @map("nephrologist_id") @db.Uuid
+  transportNeeded Boolean @default(false) @map("transport_needed")
+
+  status String  @default("active") @db.VarChar(16)
+  notes  String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  accesses      VascularAccess[]
+  prescriptions DialysisPrescription[]
+  sessions      DialysisSession[]
+
+  @@index([hospitalId, branchId, status])
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, isolationZone, status])
+  @@map("dialysis_programs")
+  @@schema("specialty")
+}
+
+/// How the blood gets out and back.
+model VascularAccess {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  programId  String @map("program_id") @db.Uuid
+
+  type VascularAccessType
+  site String     @db.VarChar(80)
+  side Laterality @default(not_applicable)
+
+  createdOn        DateTime? @map("created_on") @db.Date
+  createdBySurgeon String?   @map("created_by_surgeon") @db.Uuid
+
+  /// `maturing`, `active`, `failed`, `removed`. Only an `active` access can
+  /// carry a session, and a unit running on a catheter that should have been
+  /// replaced is the unit with the bacteraemia rate.
+  status String @default("maturing") @db.VarChar(16)
+
+  complications Json      @default("[]")
+  lastAssessed  DateTime? @map("last_assessed") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  program  DialysisProgram   @relation(fields: [programId], references: [id], onDelete: Cascade)
+  sessions DialysisSession[]
+
+  @@index([hospitalId, programId, status])
+  @@map("dialysis_vascular_accesses")
+  @@schema("specialty")
+}
+
+/// The prescription, versioned.
+model DialysisPrescription {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  programId  String @map("program_id") @db.Uuid
+
+  version Int @default(1)
+
+  frequencyPerWeek Int @map("frequency_per_week")
+  durationMin      Int @map("duration_min")
+
+  dialyserItemId String? @map("dialyser_item_id") @db.Uuid
+  /// How many times this dialyser may be used in total, reuses included. One
+  /// means single use. Counted as a total rather than as "reuses" because the
+  /// off-by-one in "six reuses" is a seventh treatment on a condemned filter.
+  dialyserMaxUses Int @default(1) @map("dialyser_max_uses")
+
+  /// Blood and dialysate flow, in millilitres a minute.
+  qb Int
+  qd Int
+
+  /// `{k, ca, na, hco3, tempC}` — the bath. A potassium chosen for the wrong
+  /// patient is an arrhythmia on the machine.
+  dialysate Json
+
+  /// Millilitres per kilogram per hour. The ceiling this unit works to; a
+  /// trigger refuses a session that would exceed it, and the default is the
+  /// published 13.
+  ufMaxRateMlKgH Decimal @default(13) @map("uf_max_rate_ml_kg_h") @db.Decimal(4, 1)
+
+  heparin      Json    @default("{}")
+  anticoagMode String  @default("heparin") @map("anticoag_mode") @db.VarChar(24)
+  epoPlan      Json    @default("{}") @map("epo_plan")
+  ironPlan     Json    @default("{}") @map("iron_plan")
+  targetKtv    Decimal? @map("target_ktv") @db.Decimal(4, 2)
+
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  prescribedBy  String   @map("prescribed_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  program  DialysisProgram   @relation(fields: [programId], references: [id], onDelete: Cascade)
+  sessions DialysisSession[]
+
+  @@unique([programId, version], map: "uq_dialysis_prescription_version")
+  @@index([hospitalId, programId, effectiveFrom(sort: Desc)])
+  @@map("dialysis_prescriptions")
+  @@schema("specialty")
+}
+
+/// A machine, in a zone.
+model DialysisMachine {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  assetId String? @map("asset_id") @db.Uuid
+  code    String  @db.VarChar(40)
+  model   String? @db.VarChar(120)
+  serial  String? @db.VarChar(80)
+
+  /// Which patients this machine may treat. The control that stops hepatitis
+  /// moving through a unit, and the thing a busy Tuesday overrides on a wall
+  /// chart but cannot override here.
+  zone IsolationZone
+
+  status MachineStatus @default(available)
+
+  hoursRun          Int       @default(0) @map("hours_run")
+  lastServiceAt     DateTime? @map("last_service_at") @db.Timestamptz(6)
+  nextServiceDueAt  DateTime? @map("next_service_due_at") @db.Timestamptz(6)
+  lastDisinfection  Json      @default("{}") @map("last_disinfection")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sessions DialysisSession[]
+
+  @@unique([hospitalId, branchId, code], map: "uq_dialysis_machine_code")
+  @@index([hospitalId, branchId, zone, status])
+  @@map("dialysis_machines")
+  @@schema("specialty")
+}
+
+/// One treatment.
+model DialysisSession {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  programId  String @map("program_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  /// Null for an inpatient session run at the bedside on a portable machine —
+  /// IP-022 — which has no chair and no slot but every other rule.
+  machineId String? @map("machine_id") @db.Uuid
+  chairNo   String? @map("chair_no") @db.VarChar(16)
+  admissionId String? @map("admission_id") @db.Uuid
+
+  /// Which access was cannulated. Needling a fistula that has not matured
+  /// destroys it permanently, and the patient goes back to a neck line — so
+  /// the access is recorded per session and a trigger refuses one that is not
+  /// active.
+  accessId String? @map("access_id") @db.Uuid
+
+  prescriptionId String @map("prescription_id") @db.Uuid
+
+  /// The booked window. The exclusion constraint is over this and the machine:
+  /// double-booking a machine is a patient arriving for four hours and finding
+  /// somebody on it.
+  scheduledAt DateTime @map("scheduled_at") @db.Timestamptz(6)
+  scheduledEnd DateTime @map("scheduled_end") @db.Timestamptz(6)
+  shift        String?  @db.VarChar(16)
+
+  status DialysisSessionStatus @default(scheduled)
+
+  /// Weight, blood pressure, pulse, temperature, the access check, symptoms.
+  preWeightKg Decimal? @map("pre_weight_kg") @db.Decimal(5, 2)
+  pre         Json     @default("{}")
+
+  /// Litres to remove. Derived from the pre-weight and the programme's dry
+  /// weight, and the rate it implies is checked against the prescription's
+  /// ceiling before the machine is started.
+  ufGoalL Decimal? @map("uf_goal_l") @db.Decimal(5, 2)
+  /// Derived: `uf_goal_l` × 1000 ÷ hours ÷ dry weight. The number that decides
+  /// whether the patient crashes.
+  ufRateMlKgH Decimal? @map("uf_rate_ml_kg_h") @db.Decimal(5, 2)
+
+  connectAt    DateTime? @map("connect_at") @db.Timestamptz(6)
+  disconnectAt DateTime? @map("disconnect_at") @db.Timestamptz(6)
+
+  postWeightKg Decimal? @map("post_weight_kg") @db.Decimal(5, 2)
+  post         Json     @default("{}")
+  actualUfL    Decimal? @map("actual_uf_l") @db.Decimal(5, 2)
+
+  /// The dialyser used, and which use of it this was.
+  dialyserLabel String? @map("dialyser_label") @db.VarChar(60)
+  dialyserUseNo Int?    @map("dialyser_use_no")
+
+  complications Json @default("[]")
+  medsGiven     Json @default("[]") @map("meds_given")
+
+  /// Adequacy. Urea reduction ratio and Kt/V, from the pre and post ureas.
+  urr           Decimal? @db.Decimal(5, 2)
+  ktv           Decimal? @db.Decimal(4, 2)
+  adequacyLabs  Json     @default("{}") @map("adequacy_labs")
+
+  abortReason String? @map("abort_reason") @db.Text
+
+  technicianId String? @map("technician_id") @db.Uuid
+  nurseId      String? @map("nurse_id") @db.Uuid
+  billId       String? @map("bill_id") @db.Uuid
+  packageId    String? @map("package_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  program      DialysisProgram      @relation(fields: [programId], references: [id], onDelete: Restrict)
+  prescription DialysisPrescription @relation(fields: [prescriptionId], references: [id], onDelete: Restrict)
+  machine      DialysisMachine?     @relation(fields: [machineId], references: [id], onDelete: Restrict)
+  access       VascularAccess?      @relation(fields: [accessId], references: [id], onDelete: Restrict)
+  observations DialysisObservation[]
+
+  @@index([hospitalId, branchId, scheduledAt])
+  @@index([hospitalId, programId, scheduledAt(sort: Desc)])
+  @@index([hospitalId, status, scheduledAt])
+  @@map("dialysis_sessions")
+  @@schema("specialty")
+}
+
+/// Every use of a dialyser, counted.
+///
+/// Reuse is legitimate and economically necessary in most of the world, and it
+/// is safe within a use limit and an integrity test. What makes it unsafe is
+/// that the count lives on a handwritten label, and the label is what everybody
+/// trusts. Here it lives in a table the trigger counts.
+model DialyserUse {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  programId  String @map("program_id") @db.Uuid
+
+  /// The physical dialyser, identified as the unit identifies it — a label on
+  /// the housing with the patient's name on it.
+  label  String  @db.VarChar(60)
+  itemId String? @map("item_id") @db.Uuid
+
+  useNo     Int      @map("use_no")
+  sessionId String?  @map("session_id") @db.Uuid
+
+  reprocessedAt DateTime? @map("reprocessed_at") @db.Timestamptz(6)
+  /// Total cell volume as a percentage of the original. Below 80 % the
+  /// dialyser has lost enough fibres to matter, and it is discarded.
+  tcvPct        Decimal?  @map("tcv_pct") @db.Decimal(5, 2)
+  /// The pressure-hold test. A failure condemns the dialyser, and a trigger
+  /// refuses a further use of one that failed.
+  integrityOk   Boolean?  @map("integrity_ok")
+  chemical      String?   @db.VarChar(60)
+  reprocessedBy String?   @map("reprocessed_by") @db.Uuid
+
+  discardedAt   DateTime? @map("discarded_at") @db.Timestamptz(6)
+  discardReason String?   @map("discard_reason") @db.VarChar(80)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, label, useNo], map: "uq_dialyser_use_no")
+  @@index([hospitalId, programId, label])
+  @@map("dialyser_uses")
+  @@schema("specialty")
+}
+
+/// The intradialytic chart: what the machine and the patient were doing every
+/// half hour.
+///
+/// Two rules live on it, and both catch the same class of error — a chart
+/// written onto the wrong session, which happens because two patients are three
+/// feet apart and the observations are identical in shape.
+///
+///  · The reading has to fall inside the session it is attached to.
+///  · The cumulative fluid removed only goes up. A machine total that falls is
+///    a transcription slip or a machine that was reset mid-treatment, and
+///    either way the fluid balance at the end is wrong.
+model DialysisObservation {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  sessionId  String @map("session_id") @db.Uuid
+
+  recordedAt DateTime @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String   @map("recorded_by") @db.Uuid
+
+  systolic  Int?
+  diastolic Int?
+  pulse     Int?
+  temperatureC Decimal? @map("temperature_c") @db.Decimal(4, 1)
+
+  /// Blood and dialysate flow as the machine is actually running them, which is
+  /// not always what was prescribed.
+  qb Int?
+  qd Int?
+  /// Arterial, venous and transmembrane pressure. A venous pressure climbing
+  /// through a session is a clotting circuit.
+  arterialMmhg Int? @map("arterial_mmhg")
+  venousMmhg   Int? @map("venous_mmhg")
+  tmpMmhg      Int? @map("tmp_mmhg")
+
+  /// The machine's cumulative total. Monotonic within a session.
+  ufRemovedL Decimal? @map("uf_removed_l") @db.Decimal(5, 2)
+  ufRateLh   Decimal? @map("uf_rate_lh") @db.Decimal(4, 2)
+  conductivity Decimal? @db.Decimal(4, 2)
+
+  /// Cramps, nausea, hypotension, chest pain — and what was done about it.
+  symptoms    Json @default("[]")
+  intervention String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  session DialysisSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, sessionId, recordedAt])
+  @@map("dialysis_observations")
+  @@schema("specialty")
+}

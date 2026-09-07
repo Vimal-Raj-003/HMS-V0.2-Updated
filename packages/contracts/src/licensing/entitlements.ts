@@ -384,6 +384,14 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'Health check-up packages are not included in your plan.',
     upgradeCta: 'Ask about Patient Engagement',
   }),
+  // Dialysis follows OP-013's shape for the same reason. A patient three days
+  // from their last session does not stop being uraemic because a hospital is
+  // in arrears, so the *session* is never gated — the configuration, the
+  // machine register and the reporting screens are.
+  ep('module.dialysis.enabled', 'feature', 'route', 'OP-012/IP-022 The dialysis unit.', {
+    message: 'The dialysis console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
   ep(
     'module.procedures.enabled',
     'feature',

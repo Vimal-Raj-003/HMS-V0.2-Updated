@@ -860,6 +860,39 @@ const DENTAL_DOCTOR = [
   'dental.report.read',
 ] as const;
 
+/**
+ * OP-012 and IP-022 — the dialysis floor.
+ *
+ * The split is not seniority, it is who may touch the *needle*, the *drug* and
+ * the *zone*. A technician runs the machines, logs the filters and records the
+ * session; a nurse additionally declares an access fit to cannulate and ends a
+ * session early; a nephrologist writes the prescription and, with it, the
+ * ultrafiltration ceiling every session is then checked against.
+ *
+ * Nobody on any of these lists can re-zone a machine. `dialysis.machine.rezone`
+ * ships unassigned, because the person who decides that a hepatitis machine is
+ * now a general machine should be somebody the hospital chose in advance, not
+ * whoever was on the afternoon shift when it got busy.
+ */
+const DIALYSIS_FLOOR = [
+  'dialysis.program.read',
+  'dialysis.session.schedule',
+  'dialysis.session.record',
+  'dialysis.machine.manage',
+  'dialysis.dialyser.log',
+  'dialysis.dialyser.reprocess',
+  'dialysis.dialyser.discard',
+] as const;
+
+const DIALYSIS_NURSE = [...DIALYSIS_FLOOR, 'dialysis.access.manage', 'dialysis.session.abort'] as const;
+
+const DIALYSIS_DOCTOR = [
+  ...DIALYSIS_NURSE,
+  'dialysis.program.manage',
+  'dialysis.prescription.write',
+  'dialysis.report.read',
+] as const;
+
 const DERM_DELIVERY = ['derm.lesion.read', 'derm.phototherapy.deliver'] as const;
 
 const DERM_DOCTOR = [
@@ -970,6 +1003,7 @@ const SPECIALTY_CONSOLE_DOCTOR = [
   ...IMMUNISATION_FLOOR,
   'immunisation.report.read',
   ...HEALTHCHECK_CLINICAL,
+  ...DIALYSIS_DOCTOR,
 ] as const;
 
 /** A resident records and plans; the signature and the override keys are not theirs. */
@@ -3334,6 +3368,7 @@ const templates: readonly RoleTemplate[] = [
     homeWorkspace: 'nursing-station',
     permissions: [
       ...IMMUNISATION_FLOOR,
+      ...DIALYSIS_NURSE,
       ...WOUND_BEDSIDE,
       // The ward half of the swallow acknowledgement. A ward that has not read
       // the order is a ward still working from the last one.
@@ -3387,6 +3422,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'icu-flowsheet',
     permissions: [
+      ...DIALYSIS_NURSE,
       ...WOUND_BEDSIDE,
       ...SWALLOW_ACKNOWLEDGER,
       ...CONSOLE_TECHNICIAN,
@@ -4147,10 +4183,12 @@ const templates: readonly RoleTemplate[] = [
     key: 'dialysis_technician',
     docsRow: 41,
     name: 'Dialysis Technician',
-    description: 'Dialysis board, sessions and machine assignment.',
+    description:
+      'Runs the floor: books the chair, sets the machine up, logs and reprocesses the filters, records the session. Cannot write a prescription, mark an access ready to cannulate, or move a machine between isolation zones.',
     category: 'therapy',
     homeWorkspace: 'dialysis-board',
     permissions: [
+      ...DIALYSIS_FLOOR,
       ...CONSOLE_TECHNICIAN,
       ...BASE_CLINICAL,
       ...LABEL_PRINTER,

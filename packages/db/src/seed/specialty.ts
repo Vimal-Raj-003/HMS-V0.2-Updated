@@ -214,4 +214,60 @@ export async function seedSpecialtyConsoles(ctx: SeedContext, tenancy: SeededTen
 
   await ctx.write({ table: 'mdm.specialty_consoles', conflict: ['id'] }, consoles);
   await ctx.write({ table: 'mdm.device_result_types', conflict: ['id'] }, deviceTypes);
+
+  await seedDialysisMachines(ctx, tenancy);
+}
+
+/**
+ * OP-012 — the machines a demo unit runs on.
+ *
+ * The distribution is the point. Six general machines and two hepatitis-B, with
+ * nothing for hepatitis C or HIV, because that is what a real unit looks like:
+ * the HBV corner is small, it is always the scarce resource, and the first
+ * thing a demo should make visible is that a hepatitis-B patient whose machine
+ * is in maintenance has exactly one alternative.
+ *
+ * A unit with a machine per zone would demonstrate the rule and hide the
+ * pressure that makes people break it.
+ */
+async function seedDialysisMachines(ctx: SeedContext, tenancy: SeededTenancy): Promise<void> {
+  const MACHINES: readonly (readonly [string, string, string])[] = [
+    ['HD-01', 'general', 'available'],
+    ['HD-02', 'general', 'available'],
+    ['HD-03', 'general', 'available'],
+    ['HD-04', 'general', 'available'],
+    ['HD-05', 'general', 'disinfecting'],
+    ['HD-06', 'general', 'maintenance'],
+    ['HD-B1', 'hbv', 'available'],
+    ['HD-B2', 'hbv', 'available'],
+  ];
+
+  const rows: SeedRow[] = [];
+  for (const h of tenancy.hospitals) {
+    // The unit lives on the main campus. A satellite clinic that ran dialysis
+    // would be its own register of machines, not a share of this one.
+    const branch = h.branches.find((b) => b.isMain) ?? h.branches[0];
+    if (branch === undefined) continue;
+    for (const [code, zone, status] of MACHINES) {
+      rows.push({
+        id: seedId('dialysis-machine', h.code, code),
+        hospital_id: h.id,
+        branch_id: branch.id,
+        asset_id: null,
+        code,
+        model: 'Fresenius 4008S',
+        serial: null,
+        zone,
+        status,
+        hours_run: 0,
+        last_service_at: null,
+        next_service_due_at: null,
+        last_disinfection: jsonb({}),
+        created_at: SEED_EPOCH,
+        updated_at: SEED_EPOCH,
+      });
+    }
+  }
+
+  await ctx.write({ table: 'specialty.dialysis_machines', conflict: ['id'] }, rows);
 }

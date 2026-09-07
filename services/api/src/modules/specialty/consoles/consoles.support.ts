@@ -493,6 +493,94 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
     detail: 'A conversion factor ends on or after the day it takes effect.',
   },
 
+  // ── OP-012 / IP-022 ───────────────────────────────────────────────────────
+  dry_weight_is_a_weight: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A dry weight runs from 10 to 400 kg. Below that it is usually a decimal point.',
+  },
+  a_programme_status_is_known: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A dialysis programme is active, transferred, transplanted, recovered, stopped or ended by death.',
+  },
+  a_prescription_is_deliverable: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'One of those figures is outside what a machine can run: 1–7 sessions a week, 30–720 minutes, a blood flow of 50–600 and a dialysate flow of 100–1000 ml/min, at most 30 uses of a dialyser, and an ultrafiltration ceiling between 1 and 20 ml/kg/hour.',
+  },
+  the_bath_is_fully_specified: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'The dialysate needs potassium, calcium, sodium and bicarbonate. A bath with a missing figure is one that gets defaulted somewhere downstream, and a potassium chosen for the wrong patient is an arrhythmia on the machine.',
+  },
+  a_session_ends_after_it_starts: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A session ends after it starts.',
+  },
+  a_session_disconnects_after_it_connects: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A patient is disconnected after they are connected, not before.',
+  },
+  one_patient_per_machine: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'That machine already has somebody on it for part of that window. Two patients on one machine is one of them arriving for four hours of treatment and finding a stranger in the chair.',
+    nextAction: 'Pick another machine in the same isolation zone, or move the session to a free window.',
+  },
+  uq_one_live_dialysis_session: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'This patient is already recorded as on a machine. Somebody is either on two at once, or a session from an earlier shift was never closed.',
+    nextAction: 'Complete or abort the open session first.',
+  },
+  an_aborted_session_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A session that ended early records why. It is a different clinical fact from a cancellation, and it is the one a mortality review reads.',
+  },
+  a_dialyser_is_named_with_its_use_number: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A dialyser is recorded with the number of the use this was — a label on its own counts nothing.',
+  },
+  a_use_number_starts_at_one: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'The first use of a dialyser is use 1.',
+  },
+  a_discarded_dialyser_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A condemned dialyser records why — the reuse limit, a failed pressure hold, or a cell volume below the floor.',
+  },
+  total_cell_volume_is_a_percentage: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Total cell volume is a percentage of the original, from 0 to 120.',
+  },
+  uq_dialyser_use_no: {
+    type: ProblemType.CONFLICT,
+    detail: 'That use of that dialyser has already been logged.',
+  },
+  uq_dialyser_use_session: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'That session already has a dialyser against it. One session uses one filter, and a second would mean the circuit was changed mid-treatment — which is a new session, not a second entry.',
+  },
+  uq_dialysis_machine_code: {
+    type: ProblemType.CONFLICT,
+    detail: 'A machine with that code is already registered at this branch.',
+  },
+  uq_dialysis_prescription_version: {
+    type: ProblemType.CONFLICT,
+    detail: 'Another prescription version was written for this patient at the same moment. Try again.',
+  },
+  an_access_status_is_known: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A vascular access is planned, maturing, active, failed or removed.',
+  },
+  a_blood_pressure_is_a_blood_pressure: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'Systolic runs 40–300, diastolic 20–200, and the systolic is the higher of the two. A pair the wrong way round is usually two fields swapped.',
+  },
   uq_one_live_swallow_order: {
     type: ProblemType.CONFLICT,
     detail:

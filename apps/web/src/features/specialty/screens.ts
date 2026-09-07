@@ -381,6 +381,53 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: 'module.health_checkup.enabled',
   },
+  {
+    key: 'dialysis-board',
+    label: 'Dialysis unit',
+    href: '/dialysis/board',
+    area: 'specialty',
+    permission: 'dialysis.program.read',
+    summary:
+      'Every machine, its isolation zone, who is on it and who is next \u2014 because when a machine goes down the only question is which other machine in the same zone is free.',
+    deniedExplanation:
+      'The board is held by the dialysis floor and the nephrology team. Moving a machine between isolation zones is a separate, named decision, because it is what stops hepatitis crossing a unit.',
+    keywords: [
+      'dialysis',
+      'haemodialysis',
+      'renal',
+      'machine',
+      'chair',
+      'isolation zone',
+      'hepatitis',
+      'shift',
+      'nephrology',
+    ],
+    entitlement: 'module.dialysis.enabled',
+  },
+  {
+    key: 'dialysis-sessions',
+    label: 'Dialysis sessions',
+    href: '/dialysis/sessions',
+    area: 'specialty',
+    permission: 'dialysis.program.read',
+    summary:
+      'The chair: the pre-weight, the fluid it implies, the rate that decides whether the patient crashes, and the filter the database says may be used.',
+    deniedExplanation:
+      'Running a session belongs to the dialysis floor. Ending one early is a nurse\u2019s, and it carries a reason, because an abort is a different clinical fact from a cancellation.',
+    keywords: [
+      'dialysis session',
+      'ultrafiltration',
+      'dry weight',
+      'kt/v',
+      'urr',
+      'dialyser',
+      'reuse',
+      'fistula',
+      'access',
+      'adequacy',
+    ],
+    entitlement: 'module.dialysis.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

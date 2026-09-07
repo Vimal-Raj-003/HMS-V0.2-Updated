@@ -11,6 +11,8 @@ import { PulmonologyService } from './consoles/pulmonology.service.js';
 import { PainController } from './pain/pain.controller.js';
 import { HealthCheckService } from './programme/healthcheck.service.js';
 import { ImmunisationService } from './programme/immunisation.service.js';
+import { DialysisController } from './dialysis/dialysis.controller.js';
+import { DialysisService } from './dialysis/dialysis.service.js';
 import { ProgrammeController } from './programme/programme.controller.js';
 import { PainService } from './pain/pain.service.js';
 import { NutritionService } from './therapy/nutrition.service.js';
@@ -40,6 +42,7 @@ export const SPECIALTY_CONTROLLERS: Type<unknown>[] = [
   TherapyController,
   PainController,
   ProgrammeController,
+  DialysisController,
 ];
 
 export const SPECIALTY_PROVIDERS: Provider[] = [
@@ -76,6 +79,7 @@ export const SPECIALTY_PROVIDERS: Provider[] = [
   // order — a dose three days early, a sugar drawn before the breakfast.
   ImmunisationService,
   HealthCheckService,
+  DialysisService,
 ];
 
 @Module({

@@ -10978,6 +10978,148 @@ const OP014 = group('OP-014', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-012 and IP-022, dialysis
+//
+// The first console in this phase whose scheduling is a physical object, and
+// the keys follow the objects: the patient's programme, the access in their
+// arm, the machine, the session, and the filter.
+//
+// ── One key is `high`, and it is the zone ──────────────────────────────────
+//
+// `dialysis.machine.rezone` moves a machine between isolation zones. Every
+// other rule in this module protects one patient; this one protects the next
+// four people who use that chair, and the harm it prevents — a unit
+// seroconverting a cohort — is discovered months later on a routine screen,
+// by which time nobody can say which Tuesday it was. So it is named, reasoned
+// and audited, and the database refuses it outright while the machine still
+// has a booking.
+//
+// ── There is no key that overrides the zone or the fluid ceiling ───────────
+//
+// Not unassigned — absent. A `dialysis.zone.override` would be the cohort
+// infection with a permission attached, and there is no clinical circumstance
+// in which a hepatitis-positive patient is correctly placed on a general
+// machine.
+//
+// The ultrafiltration ceiling has no override key either, and for a different
+// reason: it already has one, in the right place. The limit lives on the
+// *prescription*, so a nephrologist who genuinely needs a faster rate — an
+// isolated ultrafiltration for pulmonary oedema — writes a new prescription
+// version carrying the higher figure. The escape is a prescribing act with a
+// version number and an author, rather than a checkbox at the chair.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP012 = group('OP-012', 8, [
+  p(
+    'dialysis.program.read',
+    'dialysis_program',
+    'read',
+    'phi',
+    'low',
+    'Read a patient’s dialysis programme: modality, dry weight, serology, access and session history.',
+    { phiRead: true },
+  ),
+  p(
+    'dialysis.program.manage',
+    'dialysis_program',
+    'update',
+    'phi',
+    'medium',
+    'Enrol a patient, revise their dry weight and record their serology. The isolation zone is computed from the serology and cannot be typed.',
+  ),
+  p(
+    'dialysis.access.manage',
+    'dialysis_vascular_access',
+    'update',
+    'phi',
+    'medium',
+    'Record and assess a fistula, graft or catheter. Marking one active is what permits it to be cannulated.',
+  ),
+  p(
+    'dialysis.prescription.write',
+    'dialysis_prescription',
+    'create',
+    'phi',
+    'medium',
+    'Write or supersede the dialysis prescription — duration, flows, the bath, the reuse limit and the ultrafiltration ceiling every session is checked against.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'dialysis.machine.manage',
+    'dialysis_machine',
+    'update',
+    'operational',
+    'medium',
+    'Commission a machine, move it through disinfection, maintenance and breakdown, and record its service history.',
+  ),
+  p(
+    'dialysis.machine.rezone',
+    'dialysis_machine',
+    'override',
+    'operational',
+    'high',
+    'Move a machine between isolation zones. This is a decommission and re-commission, not a reassignment, and it is refused outright while the machine still holds a booking.',
+    { requiresReason: true },
+  ),
+  p(
+    'dialysis.session.schedule',
+    'dialysis_session',
+    'create',
+    'phi',
+    'medium',
+    'Book a patient onto a machine. The zone match and the machine’s availability are enforced at the booking, not at the chair.',
+  ),
+  p(
+    'dialysis.session.record',
+    'dialysis_session',
+    'record',
+    'phi',
+    'medium',
+    'Run the session: pre-weights, the access cannulated, connection, observations, disconnection and the post-weight.',
+  ),
+  p(
+    'dialysis.session.abort',
+    'dialysis_session',
+    'update',
+    'phi',
+    'medium',
+    'End a session early. A different clinical fact from a cancellation, and the one a mortality review reads, so it carries a reason.',
+    { requiresReason: true },
+  ),
+  p(
+    'dialysis.dialyser.log',
+    'dialyser_use',
+    'record',
+    'phi',
+    'medium',
+    'Log a use of a dialyser. This is where the reuse count, the integrity test and the cell volume are checked, and it is the only way a filter reaches a session.',
+  ),
+  p(
+    'dialysis.dialyser.reprocess',
+    'dialyser_use',
+    'update',
+    'phi',
+    'medium',
+    'Record the reprocessing after a use: the chemical, the total cell volume and the pressure-hold test that licenses the next use.',
+  ),
+  p(
+    'dialysis.dialyser.discard',
+    'dialyser_use',
+    'update',
+    'phi',
+    'low',
+    'Condemn a dialyser with a reason. Nothing further can be logged against it.',
+  ),
+  p(
+    'dialysis.report.read',
+    'dialysis_report',
+    'read',
+    'phi',
+    'low',
+    'Adequacy by patient, machine utilisation and downtime, the zone census, and reuse against limit.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -11085,6 +11227,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP016,
   ...OP013,
   ...OP014,
+  ...OP012,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

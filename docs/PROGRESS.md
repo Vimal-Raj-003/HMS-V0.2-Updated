@@ -401,6 +401,114 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-15 · Phase 8 · OP-012, IP-022 — the dialysis unit
+
+**Built — dialysis, complete.** 7 tables, 13 permission keys, 5 events, 1
+entitlement, 2 screens, 28 integration tests, 46 database rules proven live in
+both directions.
+
+The first console in this phase whose scheduling is a physical object. Every one
+before it scheduled a queue; this one schedules machines, and a machine is a
+thing. It cannot have two people on it, it cannot treat a hepatitis-positive
+patient and then a negative one, and it cannot be started while it is still
+rinsing out the last patient's disinfectant.
+
+**The zone is the module.** Hepatitis B and C move through dialysis units —
+through shared machines, shared surfaces, shared staff — and when they do it is
+never one patient, it is a cohort, discovered months later on a routine screen
+by which time nobody can say which Tuesday it was. Every unit in the world knows
+to cohort positive patients onto dedicated machines, and units still
+seroconvert people, because on a Tuesday with two machines down somebody puts
+the next patient on the nearest chair.
+
+So the zone is **computed from the serology and cannot be typed** — there is no
+`isolationZone` field in any request, and the trigger discards anything sent
+alongside it. A session on a machine whose zone does not match is refused, and
+the refusal names both. A machine cannot change zone while it still holds a
+booking. And when a patient's serology turns positive, every booking they hold
+is released, because those machines are now the wrong machines — which is four
+refusals discovered one at a time on the morning of a treatment, avoided.
+
+**The fluid is arithmetic nobody does at seven in the morning.** Litres to
+remove, over hours, per kilogram of dry weight. Above about 13 ml/kg/hour the
+patient crashes on the machine; sustained over months it is myocardial stunning,
+which is the mechanism by which dialysis patients die of their hearts rather
+than their kidneys. The rate is derived and it has no request field. The
+refusal names **the duration that would make the same fluid safe** — "run the
+session for 339 minutes instead" — and a session run for exactly that is
+accepted.
+
+The goal is the interesting half. It is _suggested_ from the pre-weight and the
+dry weight, and freely settable **lower**, because a patient who is already
+hypotensive is pulled less than dry weight on purpose and a console that could
+not express that would be forcing the harm it exists to prevent. What is refused
+is the other direction: a goal that takes the patient below the weight they are
+meant to leave at.
+
+**The dialyser is counted by the database, not by the label.** Reuse is
+legitimate and, in most of the world, is what makes three sessions a week
+affordable. It is safe within a use limit, a total-cell-volume floor and a
+pressure-hold test. What makes it unsafe is that the count lives on a strip of
+tape on the housing, in biro, in a room where forty of them look identical. So
+the use number is not in any request — it is one more than the last one logged —
+and a use is refused past the limit, before reprocessing, after a failed
+integrity test, below 80 % cell volume, once discarded, or against a second
+patient. A session cannot name a filter that was not logged, which makes the log
+the only door.
+
+**And the needle.** Cannulating a fistula that has not matured destroys it
+permanently and the patient goes back to a neck line for months. It is one of
+the few irreversible harms in the module, so the access used is recorded per
+session, one that is not `active` is refused, and connecting to a machine
+without recording an access is refused.
+
+**One `high` key, and two deliberate absences.** `dialysis.machine.rezone` is a
+decommission and a re-commission, reasoned and audited, shipping unassigned.
+There is no `dialysis.zone.override` — not unassigned, absent — because there is
+no clinical circumstance in which a hepatitis-positive patient is correctly
+placed on a general machine. And no override for the fluid ceiling either, for a
+different reason: it already has one, in the right place. The ceiling lives on
+the **prescription**, so a nephrologist who genuinely needs a faster rate writes
+a new version carrying it. The escape is a prescribing act with an author and a
+version number rather than a checkbox at the chair.
+
+**Three defects the proofs and the tests found, all real.** A data-modifying CTE
+is not visible to its own statement's outer query, so every `WITH ins AS
+(INSERT …) SELECT` returned 404 and every `WITH upd AS (UPDATE …) SELECT`
+would have returned stale rows; the read has to follow the write, not ride
+alongside it. A parameter used both as an inserted `varchar` and as a lookup key
+made Postgres deduce two types for it and refuse the statement. And the
+`session_dialyser_was_logged` trigger fired ahead of the CHECK that had the
+clearer sentence, so a label with no use number was refused with "use &lt;NULL&gt;
+was never logged"; a BEFORE trigger has to stand aside when a CHECK says it
+better.
+
+**One thing that was not a defect but was worth fixing.** The demo seed could
+not write the machine register — `prisma migrate deploy` runs as `hms_migrator`,
+which owns the tables it creates and so bypasses RLS, but these files had been
+applied locally as a superuser and the ownership diverged. The local database
+was repaired to match what a real deployment produces; the migration was not
+changed, because it was never wrong.
+
+**Deferred, recorded.** Peritoneal dialysis exchange logging beyond the modality
+flag (OP-012 §5, which is a home-therapy diary rather than a unit console), the
+water-treatment plant's AAMI conductivity and endotoxin log (OP-012 §7, which
+belongs with NC-014 biomedical), and machine-side HL7 ingestion of the
+intradialytic chart (Phase 11's integration hub owns the listener).
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module. Tracked, unchanged.
+
+**Gates** — 13/13 packages typecheck, lint and test (3,018 unit tests); 656 API
+integration tests across 26 files; 53 migrations; 842 non-partition tables;
+1,302 permission keys; 812 events; 59 entitlements; 68 role templates; 99
+screens.
+
+**Next:** the regulated group — OP-040/IP-011 obstetrics and the labour room,
+then OP-031/IP-023 oncology and chemotherapy. A fifth shape again: a console
+whose central object is two patients at once, and one whose central object is a
+dose that is lethal if the protocol day is wrong.
+
 ### 2026-09-14 · Phase 8 · OP-013, OP-014 — the programme consoles
 
 **Built — vaccination and health check-ups, complete.** 14 tables, 20 permission

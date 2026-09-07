@@ -705,4 +705,63 @@ describe('OP-010 — the procedure floor', () => {
     expect(nurse?.permissions).toContain('opdnursing.administer');
     expect(nurse?.permissions).toContain('opdnursing.administer.verify');
   });
+  it('offers no key that overrides the isolation zone', () => {
+    // Every other rule in the module protects one patient. The zone protects
+    // the next four people on that chair, and there is no clinical
+    // circumstance in which a hepatitis-positive patient is correctly placed on
+    // a general machine — so there is nothing to override, and no key for it.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    for (const absent of [
+      'dialysis.zone.override',
+      'dialysis.session.force',
+      'dialysis.uf.override',
+      'dialysis.dialyser.override',
+    ]) {
+      expect(keys, absent).not.toContain(absent);
+    }
+    // The ultrafiltration ceiling has no override key either, because it
+    // already has one in the right place: the ceiling lives on the
+    // prescription, so raising it is a versioned prescribing act with an
+    // author rather than a checkbox at the chair.
+    expect(keys).toContain('dialysis.prescription.write');
+  });
+
+  it('ships the one key that moves a machine between zones unassigned and reasoned', () => {
+    const rezone = permission('dialysis.machine.rezone');
+    expect(rezone.risk).toBe('high');
+    expect(rezone.requiresReason).toBe(true);
+    expect(holdersOf('dialysis.machine.rezone').filter((h) => h !== 'super_admin')).toEqual([]);
+    // While running a machine day to day is the floor's, and the two are
+    // deliberately different keys.
+    expect(permission('dialysis.machine.manage').risk).toBe('medium');
+    expect(getRoleTemplate('dialysis_technician')?.permissions).toContain('dialysis.machine.manage');
+  });
+
+  it('separates running a machine from declaring an access fit to cannulate', () => {
+    // Needling a fistula that has not matured destroys it permanently, and the
+    // technician setting up the machine is not the person who judges that.
+    const tech = getRoleTemplate('dialysis_technician')?.permissions ?? [];
+    expect(tech).toContain('dialysis.session.record');
+    expect(tech).toContain('dialysis.dialyser.log');
+    expect(tech).not.toContain('dialysis.access.manage');
+    expect(tech).not.toContain('dialysis.prescription.write');
+
+    for (const who of ['nurse_ward', 'nurse_icu']) {
+      expect(getRoleTemplate(who)?.permissions.includes('dialysis.access.manage'), who).toBe(true);
+    }
+    // And the prescription — with the ultrafiltration ceiling in it — is a
+    // prescriber's alone.
+    expect(getRoleTemplate('nurse_ward')?.permissions).not.toContain('dialysis.prescription.write');
+    expect(getRoleTemplate('doctor_consultant_opd')?.permissions).toContain('dialysis.prescription.write');
+  });
+
+  it('makes ending a session early a reasoned act and never a deletion', () => {
+    const abort = permission('dialysis.session.abort');
+    expect(abort.requiresReason).toBe(true);
+    // A session that happened, happened. Nothing removes one.
+    expect(PERMISSION_CATALOGUE.map((p) => p.key)).not.toContain('dialysis.session.delete');
+    expect(
+      PERMISSION_CATALOGUE.filter((p) => p.key.startsWith('dialysis.') && p.action === 'delete'),
+    ).toEqual([]);
+  });
 });
