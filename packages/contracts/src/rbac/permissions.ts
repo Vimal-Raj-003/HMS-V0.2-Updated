@@ -11512,6 +11512,132 @@ const OP031 = group('OP-031', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-032, psychiatry and mental health
+//
+// The Mental Healthcare Act 2017 rewrote Indian mental health law around one
+// idea: the person decides. These keys follow the Act's own divisions rather
+// than a hospital's org chart.
+//
+// ── Two absences, and both are §95 ─────────────────────────────────────────
+//
+// There is no key that permits unmodified electroconvulsive therapy, and none
+// that permits it on a minor without the Review Board. Both are prohibited
+// outright in Indian law; a permission would imply a circumstance, and there
+// is none.
+//
+// ── And `psy.capacity.assess` is not an administrative key ─────────────────
+//
+// A finding that a person lacks capacity is what makes a supported admission
+// lawful and their advance directive overridable. It is the single most
+// consequential judgement in the module, so it is `high`, it carries a reason,
+// and it expires.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP032 = group('OP-032', 8, [
+  p(
+    'psy.episode.read',
+    'psy_episode',
+    'read',
+    'phi',
+    'medium',
+    'Read a mental health episode. Higher-risk than an ordinary clinical read because these records are excluded from summaries, exports and outbound sharing by default.',
+    { phiRead: true },
+  ),
+  p(
+    'psy.episode.manage',
+    'psy_episode',
+    'update',
+    'phi',
+    'medium',
+    'Open and maintain an episode: diagnosis, risk level, care team and sensitivity.',
+  ),
+  p(
+    'psy.scale.record',
+    'psy_scale',
+    'record',
+    'phi',
+    'medium',
+    'Record a scored instrument. The total, the band and the suicidality flag are computed from the answers.',
+  ),
+  p(
+    'psy.capacity.assess',
+    'psy_capacity_assessment',
+    'sign',
+    'phi',
+    'high',
+    'Assess capacity. This is what makes a supported admission lawful and an advance directive overridable, and it is decision-specific and expires. Capacity is presumed until this says otherwise.',
+    { requiresReason: true },
+  ),
+  p(
+    'psy.instrument.manage',
+    'mhca_instrument',
+    'update',
+    'phi',
+    'high',
+    'Record or revoke an advance directive or a nominated representative. Both are the person’s own instruments, and only the Review Board can set either aside.',
+    { requiresReason: true },
+  ),
+  p(
+    'psy.admission.manage',
+    'mhca_admission',
+    'create',
+    'phi',
+    'high',
+    'Admit under the Act. Each section carries its own clock, computed from it, and holding somebody past it is unlawful detention rather than a late task.',
+    { requiresReason: true, clinicalSafetyExempt: true },
+  ),
+  p(
+    'psy.admission.record',
+    'mhca_admission',
+    'record',
+    'phi',
+    'medium',
+    'Record the Review Board intimation against an admission, and its discharge. These state facts about an authority that already exists; creating one is a different key.',
+  ),
+  p(
+    'psy.ect.session.record',
+    'psy_ect_session',
+    'record',
+    'phi',
+    'medium',
+    'Record a session of an existing course. The two prohibitions — unmodified therapy, and a minor without the Board — are the database’s and are not reachable from any key.',
+  ),
+  p(
+    'psy.restraint.order',
+    'psy_restraint_event',
+    'override',
+    'phi',
+    'high',
+    'Order restraint or seclusion. §97 permits one ground — preventing imminent harm — and the order, the quarter-hourly observations, the nominated representative and the monthly Board return all follow from it.',
+    { requiresReason: true },
+  ),
+  p(
+    'psy.restraint.record',
+    'psy_restraint_event',
+    'record',
+    'phi',
+    'medium',
+    'Record the observations during a restraint and close it. A restraint with no observations is a person left in a room.',
+  ),
+  p(
+    'psy.ect.manage',
+    'psy_ect_course',
+    'create',
+    'phi',
+    'high',
+    'Open a course of electroconvulsive therapy and record its sessions. Unmodified ECT and ECT on a minor without the Review Board are prohibited outright, and no key reaches either.',
+    { requiresReason: true },
+  ),
+  p(
+    'psy.report.read',
+    'psy_report',
+    'read',
+    'phi',
+    'low',
+    'The admissions register, authorities about to expire, the monthly restraint return and outcome-scale trends.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -11623,6 +11749,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP040,
   ...IP011,
   ...OP031,
+  ...OP032,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

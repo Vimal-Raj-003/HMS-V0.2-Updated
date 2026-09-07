@@ -493,6 +493,33 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
     detail: 'A conversion factor ends on or after the day it takes effect.',
   },
 
+  // ── OP-032 ────────────────────────────────────────────────────────────────
+  a_discharge_follows_an_admission: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A discharge comes after the admission it ends.',
+  },
+  an_ect_session_is_numbered_from_one: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Sessions in a course are numbered from one.',
+  },
+  an_ect_course_has_a_plausible_length: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A course runs from 1 to 30 sessions. Extending one is a new consent and a new course.',
+  },
+  an_instrument_is_one_of_two: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'The Act names two instruments: an advance directive and a nominated representative.',
+  },
+  a_revocation_says_who_revoked_it: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'Revoking an advance directive or a nominated representative names either the person’s own decision or the Review Board’s reference. Only the Board can set one aside over the person’s wishes.',
+  },
+  uq_ect_session_seq: {
+    type: ProblemType.CONFLICT,
+    detail: 'Two sessions took the same number at the same moment. Try again.',
+  },
+
   // ── OP-031 / IP-023 ───────────────────────────────────────────────────────
   a_person_has_a_plausible_size: {
     type: ProblemType.VALIDATION_FAILED,

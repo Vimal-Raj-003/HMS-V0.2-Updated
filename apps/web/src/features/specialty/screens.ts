@@ -507,6 +507,32 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: 'module.oncology.enabled',
   },
+  {
+    key: 'psychiatry-ward',
+    label: 'Mental health ward',
+    href: '/psychiatry/ward',
+    area: 'specialty',
+    permission: 'psy.episode.read',
+    summary:
+      'Whose authority to detain is running out, which restraints are still open, and what each of them still needs before it can be closed.',
+    deniedExplanation:
+      'Mental health records are excluded from summaries, exports and outbound sharing by default, so reading one is itself a named permission. Assessing capacity and ordering restraint are separate again.',
+    keywords: [
+      'psychiatry',
+      'mental health',
+      'mhca',
+      'capacity',
+      'advance directive',
+      'nominated representative',
+      'restraint',
+      'seclusion',
+      'ect',
+      'phq-9',
+      'review board',
+      'section 89',
+    ],
+    entitlement: 'module.psychiatry.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

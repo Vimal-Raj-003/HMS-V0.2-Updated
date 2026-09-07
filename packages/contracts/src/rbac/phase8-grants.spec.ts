@@ -913,4 +913,49 @@ describe('OP-010 — the procedure floor', () => {
       expect(permission(key).clinicalSafetyExempt, key).toBe(true);
     }
   });
+  it('offers no key that permits unmodified electroconvulsive therapy', () => {
+    // §95 prohibits it outright in India, and prohibits it on a minor without
+    // the Review Board. A permission would imply a circumstance, and there is
+    // none.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    for (const absent of [
+      'psy.ect.unmodified',
+      'psy.ect.override',
+      'psy.ect.minor_override',
+      'psy.admission.extend',
+      'psy.restraint.override',
+    ]) {
+      expect(keys, absent).not.toContain(absent);
+    }
+  });
+
+  it('makes the capacity assessment the high-risk judgement it is', () => {
+    // A finding that a person lacks capacity is what makes a supported
+    // admission lawful and their advance directive overridable.
+    const assess = permission('psy.capacity.assess');
+    expect(assess.risk).toBe('high');
+    expect(assess.requiresReason).toBe(true);
+    expect(getRoleTemplate('counsellor')?.permissions).not.toContain('psy.capacity.assess');
+    expect(getRoleTemplate('doctor_consultant_opd')?.permissions).toContain('psy.capacity.assess');
+  });
+
+  it('separates ordering a restraint from recording one', () => {
+    // §97 names which is which: a psychiatrist orders, and nursing observes.
+    const nurse = getRoleTemplate('nurse_ward')?.permissions ?? [];
+    expect(nurse).toContain('psy.restraint.record');
+    expect(nurse).not.toContain('psy.restraint.order');
+    expect(permission('psy.restraint.order').risk).toBe('high');
+    expect(permission('psy.restraint.order').requiresReason).toBe(true);
+  });
+
+  it('treats reading a mental health episode as more than an ordinary clinical read', () => {
+    // These records are excluded from summaries, exports and outbound sharing
+    // by default, so the read itself is not a `low` key.
+    const read = permission('psy.episode.read');
+    expect(read.risk).toBe('medium');
+    expect(read.phiRead).toBe(true);
+    // And admission under the Act is never licence-gated: a hospital in arrears
+    // that cannot record a §89 is one detaining somebody with no paperwork.
+    expect(permission('psy.admission.manage').clinicalSafetyExempt).toBe(true);
+  });
 });

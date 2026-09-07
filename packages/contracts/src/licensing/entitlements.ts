@@ -417,6 +417,13 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'The oncology console is not included in your plan.',
     upgradeCta: 'Ask about Specialty Consoles',
   }),
+  // The console is gated; admission under the Act is not. A hospital in arrears
+  // that cannot record a §89 admission is a hospital detaining somebody with no
+  // paperwork, which is worse for the patient than no record at all.
+  ep('module.psychiatry.enabled', 'feature', 'route', 'OP-032 Psychiatry and mental health.', {
+    message: 'The psychiatry console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
   ep(
     'module.procedures.enabled',
     'feature',

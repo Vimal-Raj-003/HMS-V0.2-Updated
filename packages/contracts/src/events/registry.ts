@@ -10817,6 +10817,74 @@ const painClinicEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — OP-032, psychiatry and mental health.
+ *
+ * Four events, and every one of them is a clock somebody outside the ward has
+ * to answer: a suicidality flag, an authority about to run out, a restraint the
+ * Board has to be told about, and a Review Board intimation with a date on it.
+ */
+const psychiatryEvents: readonly EventDefinition[] = [
+  ev(
+    'psy.risk.flagged',
+    'psy_scale',
+    'OP-032',
+    'A scored instrument flagged suicidality — the ninth question of PHQ-9, or a C-SSRS with plan or intent. Leaves at once and needs acknowledging: the person who filled the form in is often alone in a waiting room.',
+    z.object({
+      scaleId: uuid,
+      patientId: uuid,
+      episodeId: uuid.nullable(),
+      scale: z.string(),
+      total: z.string().nullable(),
+      severityBand: z.string().nullable(),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'psy.admission.authority_expiring',
+    'mhca_admission',
+    'OP-032',
+    'An admission’s statutory authority is running out. Leaves early because the alternatives — discharge, conversion to §90 on the Board’s authority, or an independent admission — all take a decision somebody has to be given time to make.',
+    z.object({
+      admissionId: uuid,
+      patientId: uuid,
+      admissionType: z.string(),
+      admittedAt: z.string(),
+      authorityExpiresAt: z.string(),
+      hoursLeft: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'psy.restraint.recorded',
+    'psy_restraint_event',
+    'OP-032',
+    'A person was restrained or secluded. Feeds the monthly return to the Mental Health Review Board, which is a statutory obligation rather than an audit convenience.',
+    z.object({
+      restraintId: uuid,
+      admissionId: uuid,
+      kind: z.string(),
+      startedAt: z.string(),
+      durationMin: z.number().int().nullable(),
+      reason: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'psy.mhrb.intimation_due',
+    'mhca_admission',
+    'OP-032',
+    'The Review Board has to be told about a supported admission within seven days. Leaves the ward because the person who files it is medical records, not the psychiatrist who admitted.',
+    z.object({
+      admissionId: uuid,
+      patientId: uuid,
+      admissionType: z.string(),
+      dueAt: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+];
+
+/**
  * Phase 8 — OP-031 and IP-023, oncology and chemotherapy.
  *
  * Five events. Two of them are somebody else's emergency — a febrile
@@ -11452,6 +11520,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...antenatalEvents,
   ...labourRoomEvents,
   ...oncologyEvents,
+  ...psychiatryEvents,
   ...procedureEvents,
 ]);
 

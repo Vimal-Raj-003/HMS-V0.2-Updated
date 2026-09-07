@@ -401,6 +401,82 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-19 · Phase 8 · OP-032 — psychiatry and mental health
+
+**Built — psychiatry, complete.** 8 tables, 12 permission keys, 4 events, 1
+entitlement, 1 screen, 15 integration tests, 28 database rules proven live in
+both directions.
+
+The third statute-heavy console in this phase, and the one where the statute
+exists because the patient's own account of what they want has historically been
+the first thing a hospital discarded.
+
+The Mental Healthcare Act 2017 rewrote that around one idea: the person decides.
+It presumes capacity, gives them a binding advance directive and a nominated
+representative of their own choosing, puts a clock on every involuntary
+admission with a Review Board at the end of it, and makes restraint a reportable
+act rather than a nursing decision. Every one of those is a shape a database can
+hold, and a system that holds them badly is one that detains people lawfully on
+paper.
+
+**Capacity is presumed, and the verdict is derived from four limbs.**
+Understand, retain, weigh, communicate — all four recorded, because "lacks
+capacity" without them is an opinion, and an opinion is what the Act made
+insufficient. There is no `hasCapacity` request field. The finding is
+decision-specific (a person may lack capacity for a treatment choice and keep it
+for where they live) and it **expires**, because capacity fluctuates and a
+six-week-old assessment is not evidence of anything. The console shows
+"presumed" and "assessment expired" as different states from "has capacity",
+which is the Act's first principle rendered as a chip.
+
+**Every admission carries its own clock, derived from its section.**
+Seventy-two hours under §94, thirty days under §89 with the Board told inside
+seven, ninety under §90 on the Board's own authority. A supported admission is
+refused without a _current_ assessment finding the person lacks capacity — and
+refused on one that found capacity intact, with a message pointing at §86 and
+the fact that they may leave. There is deliberately **no route that extends a
+§89**: past thirty days the choices are discharge, an independent admission the
+person consents to, or the Board's authority, and the third is a different
+admission with a Board reference rather than a longer version of this one.
+
+**Restraint is ordered, watched and reported.** §97 permits exactly one ground,
+so a two-word reason is refused; an order arriving more than an hour late is
+refused as the ratification it is; and a restraint cannot be closed without
+observations and without the nominated representative having been told. The
+`RestraintType` enum has no value naming convenience, punishment or staffing,
+and a migration-time assertion keeps it that way — the same technique as the
+PC-PNDT foetal-sex check.
+
+**And two absolutes, both §95.** Unmodified electroconvulsive therapy cannot be
+recorded at all: every session requires a named anaesthetic agent and a named
+muscle relaxant, in the schema and again in the database, with no flag and no
+omission path. ECT on a minor without a Review Board reference is refused. As
+with intrathecal vincristine, the strongest thing the system can say is that
+nothing in it can express the prohibited act.
+
+**One defect, and it was a design one.** Three routes reused a reasoned `high`
+key for acts that are not the reasoned act — filing a Board intimation,
+discharging, recording a session — which made routine follow-ups impossible for
+the people who do them. Split: the reason belongs to the decision that creates
+an authority, not to every subsequent fact about it.
+
+**Deferred, recorded.** Session notes with their per-author visibility and
+break-glass (EN-041 owns the ABAC), the clozapine and lithium monitoring gates
+(EN-029's prescribing rules, where the rest of the drug safety lives),
+de-addiction and opioid substitution registers, and the group-therapy attendance
+link table.
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module. Tracked, unchanged.
+
+**Gates** — 13/13 packages typecheck, lint and test (3,018 unit tests); 726 API
+integration tests across 30 files; 57 migrations; 876 non-partition tables;
+1,350 permission keys; 832 events; 63 entitlements; 68 role templates; 103
+screens.
+
+**Next:** paediatrics with the NICU, and geriatrics — the two ends of life, and
+the doses that do not scale from a standard adult.
+
 ### 2026-09-18 · Phase 8 · OP-031, IP-023 — oncology and chemotherapy
 
 **Built — oncology and the chemotherapy day care, complete.** 9 tables, 11

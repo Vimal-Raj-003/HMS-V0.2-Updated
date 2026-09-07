@@ -982,6 +982,35 @@ const ONCO_DOCTOR = [
 
 const ONCO_PHARMACY = ['onco.case.read', 'onco.pharmacy.verify'] as const;
 
+/**
+ * OP-032 — psychiatry.
+ *
+ * The Act's own divisions, not a hospital's. A counsellor records scales and
+ * reads the episode; a psychiatrist assesses capacity, admits under the Act,
+ * orders restraint and runs a course of electroconvulsive therapy. Nursing
+ * records the observations during a restraint but does not order one — the two
+ * are different acts and §97 names which is which.
+ */
+const PSY_THERAPY = ['psy.episode.read', 'psy.scale.record'] as const;
+
+const PSY_NURSING = [
+  ...PSY_THERAPY,
+  'psy.restraint.record',
+  'psy.admission.record',
+  'psy.ect.session.record',
+] as const;
+
+const PSY_PSYCHIATRIST = [
+  ...PSY_NURSING,
+  'psy.episode.manage',
+  'psy.capacity.assess',
+  'psy.instrument.manage',
+  'psy.admission.manage',
+  'psy.restraint.order',
+  'psy.ect.manage',
+  'psy.report.read',
+] as const;
+
 const DERM_DELIVERY = ['derm.lesion.read', 'derm.phototherapy.deliver'] as const;
 
 const DERM_DOCTOR = [
@@ -1096,6 +1125,7 @@ const SPECIALTY_CONSOLE_DOCTOR = [
   ...ANC_CLINICIAN,
   ...LABOUR_DOCTOR,
   ...ONCO_DOCTOR,
+  ...PSY_PSYCHIATRIST,
 ] as const;
 
 /** A resident records and plans; the signature and the override keys are not theirs. */
@@ -3406,6 +3436,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      ...PSY_NURSING,
       ...ONCO_CHAIR,
       ...IMMUNISATION_FLOOR,
       ...HEALTHCHECK_FLOOR,
@@ -3465,6 +3496,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...PSY_NURSING,
       ...ONCO_CHAIR,
       ...LABOUR_FLOOR,
       ...IMMUNISATION_FLOOR,
@@ -4314,6 +4346,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'therapy',
     homeWorkspace: 'counselling-sessions',
     permissions: [
+      ...PSY_THERAPY,
       ...CONSOLE_FLOOR,
       'polytrauma.case.list',
       'polytrauma.case.read',

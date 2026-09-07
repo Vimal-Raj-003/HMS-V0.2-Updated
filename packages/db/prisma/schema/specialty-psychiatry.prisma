@@ -1,0 +1,360 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-032 — psychiatry and mental health
+//
+// The third statute-heavy console in this phase, and the one where the statute
+// exists because the patient's own account of what they want has historically
+// been the first thing a hospital discarded.
+//
+// The Mental Healthcare Act 2017 rewrote that. It presumes capacity, gives a
+// person a binding advance directive and a nominated representative of their
+// own choosing, puts a clock on every involuntary admission with a Review Board
+// at the end of it, and makes restraint a reportable act rather than a nursing
+// decision. Every one of those is a shape a database can hold, and a system
+// that holds them badly is a system that detains people lawfully on paper.
+//
+// ── Capacity is presumed ────────────────────────────────────────────────────
+//
+// Not assumed absent until proved. The default in this build is that a person
+// decides for themselves, and an assessment saying otherwise is a dated
+// document with an author, a stated test, and an expiry — because capacity
+// fluctuates and a six-month-old assessment is not evidence of anything.
+//
+// ── Two absolutes ───────────────────────────────────────────────────────────
+//
+// Electroconvulsive therapy is never given unmodified — without anaesthesia and
+// a muscle relaxant — and never to a minor without the Review Board's
+// permission. Both are §95 of the Act, both are criminal to breach, and neither
+// has an override here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PsyRiskLevel {
+  low
+  moderate
+  high
+
+  @@schema("specialty")
+}
+
+/// The admission categories the Act names, each with its own clock.
+enum MhcaAdmissionType {
+  /// §86: independent admission. The person asked to come in and can leave.
+  independent_86
+  /// §89: supported admission up to thirty days. The Board is told within
+  /// seven, and thirty days is the end of it.
+  supported_89
+  /// §90: supported admission beyond thirty days, on the Board's authority.
+  supported_90
+  /// §87: a minor, admitted on the nominated representative's application.
+  minor_87
+  /// §94: emergency treatment, seventy-two hours.
+  emergency_94
+
+  @@schema("specialty")
+}
+
+enum RestraintType {
+  physical
+  chemical
+  seclusion
+
+  @@schema("specialty")
+}
+
+/// An episode of mental healthcare.
+model PsyEpisode {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  openedAt      DateTime @map("opened_at") @db.Timestamptz(6)
+  primaryDxIcd10 String? @map("primary_dx_icd10") @db.VarChar(16)
+  dxHistory     Json     @default("[]") @map("dx_history")
+
+  riskLevel      PsyRiskLevel @default(low) @map("risk_level")
+  leadClinicianId String      @map("lead_clinician_id") @db.Uuid
+  careTeam       String[]     @default([]) @map("care_team") @db.Uuid
+
+  status      String @default("active") @db.VarChar(16)
+  /// `standard` or `high`. High excludes the episode from summaries, exports
+  /// and outbound sharing without an explicit consent flag.
+  sensitivity String @default("high") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  scales      PsyScale[]
+  capacities  CapacityAssessment[]
+  admissions  MhcaAdmission[]
+  ectCourses  EctCourse[]
+
+  @@index([hospitalId, patientId, status])
+  @@map("psy_episodes")
+  @@schema("specialty")
+}
+
+/// A scored instrument.
+model PsyScale {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  episodeId  String? @map("episode_id") @db.Uuid
+  patientId  String  @map("patient_id") @db.Uuid
+
+  scale String @db.VarChar(24)
+  /// The answers. The total and the band are computed from them, because a
+  /// total somebody adds up at the end of a clinic is a total that gets
+  /// rounded towards the answer they expected.
+  items Json
+
+  total        Decimal? @db.Decimal(6, 2)
+  severityBand String?  @map("severity_band") @db.VarChar(24)
+  /// PHQ-9's ninth question is about wanting to be dead. A total of eight with
+  /// a positive ninth is a different afternoon from a total of eight without,
+  /// and it is scored apart from the total for that reason.
+  item9Flag    Boolean  @default(false) @map("item9_flag")
+
+  completedBy String   @default("patient") @map("completed_by") @db.VarChar(16)
+  recordedAt  DateTime @map("recorded_at") @db.Timestamptz(6)
+  recordedBy  String   @map("recorded_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode PsyEpisode? @relation(fields: [episodeId], references: [id], onDelete: SetNull)
+
+  @@index([hospitalId, patientId, scale, recordedAt(sort: Desc)])
+  @@map("psy_scales")
+  @@schema("specialty")
+}
+
+/// A person's advance directive, or their nominated representative.
+///
+/// Both are the Act's central instruments and both are the person's own: a
+/// directive says how they wish to be treated if they later cannot say, and a
+/// nominated representative is whom they choose to speak for them. Only the
+/// Mental Health Review Board can set either aside.
+model MhcaInstrument {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  /// `advance_directive` or `nominated_representative`.
+  kind String @db.VarChar(32)
+
+  /// For a directive: the wishes, as written. For a representative: who, and
+  /// their relationship and contact.
+  content Json
+
+  madeAt    DateTime  @map("made_at") @db.Timestamptz(6)
+  validFrom DateTime  @map("valid_from") @db.Date
+  /// Revoked, superseded, or set aside by the Board — never deleted.
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedReason String? @map("revoked_reason") @db.Text
+  /// The Board's reference, when the Board is what set it aside.
+  mhrbRef   String?   @map("mhrb_ref") @db.VarChar(80)
+
+  witnessedBy Json   @default("[]") @map("witnessed_by")
+  documentId  String? @map("document_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, patientId, kind])
+  @@map("mhca_instruments")
+  @@schema("specialty")
+}
+
+/// A capacity assessment.
+///
+/// Capacity is presumed. This row is what says otherwise, and it is dated,
+/// authored, states the test applied, and expires — because capacity fluctuates
+/// and a six-month-old assessment is not evidence of anything.
+model CapacityAssessment {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  assessedAt DateTime @map("assessed_at") @db.Timestamptz(6)
+  assessedBy String   @map("assessed_by") @db.Uuid
+
+  /// The Act's four limbs: understand, retain, weigh, communicate. All four
+  /// are recorded, because "lacks capacity" without them is an opinion.
+  understands  Boolean
+  retains      Boolean
+  weighs       Boolean
+  communicates Boolean
+
+  /// Derived from the four. A person has capacity unless one of them fails.
+  hasCapacity Boolean @map("has_capacity")
+
+  /// What the decision was about. Capacity is decision-specific: a person may
+  /// lack it for a treatment choice and keep it for where they live.
+  decisionScope String @map("decision_scope") @db.VarChar(120)
+  rationale     String @db.Text
+
+  /// Derived: the day this assessment stops being evidence.
+  validUntil DateTime @map("valid_until") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode PsyEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, patientId, assessedAt(sort: Desc)])
+  @@map("psy_capacity_assessments")
+  @@schema("specialty")
+}
+
+/// An admission under the Act, with its clock.
+model MhcaAdmission {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  admissionId String? @map("admission_id") @db.Uuid
+
+  admissionType MhcaAdmissionType @map("admission_type")
+  admittedAt    DateTime          @map("admitted_at") @db.Timestamptz(6)
+
+  /// The capacity assessment a supported admission rests on.
+  capacityAssessmentId String? @map("capacity_assessment_id") @db.Uuid
+  /// The nominated representative who applied, where the Act requires one.
+  nrInstrumentId       String? @map("nr_instrument_id") @db.Uuid
+
+  /// Derived from the type: the day this authority runs out. Seventy-two hours
+  /// for an emergency, thirty days for a supported admission, ninety for one
+  /// the Board has authorised.
+  authorityExpiresAt DateTime? @map("authority_expires_at") @db.Timestamptz(6)
+  /// Derived: the day the Board has to have been told by. Seven days on a §89.
+  mhrbIntimationDueAt DateTime? @map("mhrb_intimation_due_at") @db.Timestamptz(6)
+  mhrbIntimatedAt     DateTime? @map("mhrb_intimated_at") @db.Timestamptz(6)
+  mhrbRef             String?   @map("mhrb_ref") @db.VarChar(80)
+
+  dischargedAt DateTime? @map("discharged_at") @db.Timestamptz(6)
+  outcome      String?   @db.VarChar(40)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode   PsyEpisode       @relation(fields: [episodeId], references: [id], onDelete: Restrict)
+  restraints RestraintEvent[]
+
+  @@index([hospitalId, patientId, admittedAt(sort: Desc)])
+  @@index([hospitalId, authorityExpiresAt])
+  @@map("mhca_admissions")
+  @@schema("specialty")
+}
+
+/// Restraint or seclusion.
+///
+/// §97 of the Act: only to prevent imminent harm, never as punishment or for
+/// staff convenience, ordered by a psychiatrist, monitored, the nominated
+/// representative told, and reported to the Board.
+model RestraintEvent {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  admissionId String @map("admission_id") @db.Uuid
+
+  kind      RestraintType
+  startedAt DateTime  @map("started_at") @db.Timestamptz(6)
+  endedAt   DateTime? @map("ended_at") @db.Timestamptz(6)
+  /// Derived. The figure a monthly return to the Board is made of.
+  durationMin Int?    @map("duration_min")
+
+  /// The Act permits one ground: preventing imminent harm. There is no
+  /// enum value for convenience, and that absence is the rule.
+  reason String @db.Text
+
+  /// A psychiatrist's order, within an hour. A restraint nobody ordered is one
+  /// somebody decided at a nursing station.
+  orderedBy String?   @map("ordered_by") @db.Uuid
+  orderedAt DateTime? @map("ordered_at") @db.Timestamptz(6)
+
+  /// Quarter-hourly. A restraint with no observations is a person left in a
+  /// room.
+  monitoring Json @default("[]")
+
+  nrInformedAt DateTime? @map("nr_informed_at") @db.Timestamptz(6)
+  reportedAt   DateTime? @map("reported_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  admission MhcaAdmission @relation(fields: [admissionId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, startedAt(sort: Desc)])
+  @@map("psy_restraint_events")
+  @@schema("specialty")
+}
+
+/// A course of electroconvulsive therapy.
+model EctCourse {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  indication String @db.Text
+  consentId  String? @map("consent_id") @db.Uuid
+  nrConsentId String? @map("nr_consent_id") @db.Uuid
+  capacityAssessmentId String? @map("capacity_assessment_id") @db.Uuid
+  /// Required before the first session on a minor. §95 permits it no other way.
+  mhrbPermissionRef String? @map("mhrb_permission_ref") @db.VarChar(80)
+  /// Whether the patient was under eighteen at the start of the course.
+  minor Boolean @default(false)
+
+  maxSessions Int      @default(12) @map("max_sessions")
+  startedAt   DateTime @map("started_at") @db.Timestamptz(6)
+  endedAt     DateTime? @map("ended_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode  PsyEpisode   @relation(fields: [episodeId], references: [id], onDelete: Restrict)
+  sessions EctSession[]
+
+  @@index([hospitalId, patientId, startedAt(sort: Desc)])
+  @@map("psy_ect_courses")
+  @@schema("specialty")
+}
+
+/// One treatment.
+model EctSession {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  courseId   String @map("course_id") @db.Uuid
+
+  seq       Int
+  givenAt   DateTime @map("given_at") @db.Timestamptz(6)
+  placement String   @db.VarChar(24)
+  chargeMc  Decimal? @map("charge_mc") @db.Decimal(6, 2)
+  seizureSec Int?    @map("seizure_sec")
+
+  /// Modified ECT means anaesthesia and a muscle relaxant. Unmodified ECT is
+  /// prohibited, and there is no field that records it having been given.
+  anaesthesia Json
+
+  complications Json @default("[]")
+  aldrete       Int?
+  cognitionPre  Json? @map("cognition_pre")
+  cognitionPost Json? @map("cognition_post")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  course EctCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, seq], map: "uq_ect_session_seq")
+  @@index([hospitalId, givenAt(sort: Desc)])
+  @@map("psy_ect_sessions")
+  @@schema("specialty")
+}
