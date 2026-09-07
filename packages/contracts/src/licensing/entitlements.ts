@@ -372,6 +372,18 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'The pain management console is not included in your plan.',
     upgradeCta: 'Ask about Specialty Consoles',
   }),
+  // OP-013 is never licence-gated at the *dose*: EN-040 §5 exempts clinical
+  // safety, and a hospital in arrears whose immunisation room cannot record a
+  // dose is a child whose record has a hole in it. The console's configuration
+  // and reporting screens are gated; giving and recording a vaccine is not.
+  ep('module.immunisation.enabled', 'feature', 'route', 'OP-013 Vaccination and immunisation.', {
+    message: 'The immunisation console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
+  ep('module.health_checkup.enabled', 'feature', 'route', 'OP-014 Health check-ups and corporate wellness.', {
+    message: 'Health check-up packages are not included in your plan.',
+    upgradeCta: 'Ask about Patient Engagement',
+  }),
   ep(
     'module.procedures.enabled',
     'feature',

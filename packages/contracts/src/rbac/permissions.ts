@@ -10781,6 +10781,203 @@ const OP016 = group('OP-016', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-013 and OP-014, the programme consoles
+//
+// Both run people through a plan rather than a consultation, and their keys
+// split along the same line: the person who *performs* the step and the person
+// who *signs off* the programme's judgement about it.
+//
+// ── Two keys are `high`, and both are cold chain ───────────────────────────
+//
+//   · `immunisation.breach.decide` — releasing or discarding the vaccine in a
+//     refrigerator that breached. Releasing it puts every dose from those
+//     batches back into arms, and the person deciding needs to be somebody the
+//     hospital can name afterwards.
+//   · `immunisation.record.void`  — striking a dose from a child's record.
+//     The record is what a school, an outbreak investigation and a national
+//     registry read, and a dose that quietly disappears from it is worse than
+//     one wrongly recorded.
+//
+// ── And no key voids a health check station ────────────────────────────────
+//
+// A station is done or it is skipped with a reason that goes on the report.
+// There is no third state and no key for one, because the whole failure this
+// console is built around is a report that reads as complete over a scan
+// nobody did.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP013 = group('OP-013', 8, [
+  p(
+    'immunisation.record.read',
+    'vaccination_record',
+    'read',
+    'phi',
+    'low',
+    'Read a patient’s immunisation record and what they are still due.',
+    { phiRead: true },
+  ),
+  p(
+    'immunisation.dose.administer',
+    'vaccination_record',
+    'record',
+    'phi',
+    'medium',
+    'Give a dose and record it. The minimum age, the interval, the vial’s clock and any cold chain hold are all enforced rather than warned about.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'immunisation.plan.manage',
+    'immunisation_plan_dose',
+    'update',
+    'phi',
+    'low',
+    'Generate a patient’s schedule, and mark a dose skipped, refused or contraindicated with a reason.',
+  ),
+  p(
+    'immunisation.vial.open',
+    'open_vial',
+    'create',
+    'operational',
+    'low',
+    'Open a multi-dose vial. Its discard time is set from the vaccine’s own policy at the puncture.',
+  ),
+  p(
+    'immunisation.vial.discard',
+    'open_vial',
+    'update',
+    'operational',
+    'low',
+    'Discard a vial and record why, with the wastage.',
+  ),
+  p(
+    'immunisation.coldchain.record',
+    'cold_chain_unit',
+    'record',
+    'operational',
+    'low',
+    'Record a cold chain breach: the unit, the peak temperature and the batches inside it.',
+  ),
+  p(
+    'immunisation.breach.decide',
+    'cold_chain_breach',
+    'approve',
+    'operational',
+    'high',
+    'Release or discard the vaccine held after a cold chain breach. Releasing it puts every dose from those batches back into arms, so it is a named decision rather than a queue somebody clears.',
+    { requiresReason: true },
+  ),
+  p(
+    'immunisation.record.void',
+    'vaccination_record',
+    'override',
+    'phi',
+    'high',
+    'Void a recorded dose. The immunisation record is what a school, an outbreak investigation and the national registry read, and a dose that quietly disappears from it is worse than one wrongly recorded.',
+    { requiresReason: true },
+  ),
+  p(
+    'immunisation.aefi.report',
+    'aefi_report',
+    'record',
+    'phi',
+    'medium',
+    'Report an adverse event following immunisation, and carry it through the statutory reporting clock.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'immunisation.certificate.issue',
+    'vaccination_certificate',
+    'issue',
+    'phi',
+    'low',
+    'Issue or reissue an immunisation certificate.',
+  ),
+  p(
+    'immunisation.report.read',
+    'immunisation_report',
+    'list',
+    'phi',
+    'low',
+    'Coverage by antigen and age cohort, dropout rates, open-vial wastage and cold chain uptime.',
+  ),
+]);
+
+const OP014 = group('OP-014', 8, [
+  p(
+    'healthcheck.booking.create',
+    'hc_booking',
+    'create',
+    'operational',
+    'low',
+    'Book a health check from any channel, and send the preparation instructions.',
+  ),
+  p(
+    'healthcheck.episode.read',
+    'hc_episode',
+    'read',
+    'phi',
+    'low',
+    'Read a check in progress: the routing slip, where the patient is, and what is still outstanding.',
+    { phiRead: true },
+  ),
+  p(
+    'healthcheck.episode.checkin',
+    'hc_episode',
+    'create',
+    'phi',
+    'low',
+    'Check a patient in and raise the routing slip from the package’s station sequence.',
+  ),
+  p(
+    'healthcheck.station.record',
+    'hc_station_task',
+    'record',
+    'phi',
+    'low',
+    'Call, start and complete a station. A station cannot start before what it depends on, and one that is skipped records why.',
+  ),
+  p(
+    'healthcheck.report.write',
+    'hc_report',
+    'record',
+    'phi',
+    'medium',
+    'Assemble the report: the domain scores, the risk calculations and the recommendations. The health score is computed from the scores.',
+  ),
+  p(
+    'healthcheck.report.sign',
+    'hc_report',
+    'sign',
+    'phi',
+    'medium',
+    'Sign the report. It cannot be signed while any station is outstanding — a report that reads as complete over a scan nobody did is the failure this console exists to prevent.',
+  ),
+  p(
+    'healthcheck.package.configure',
+    'hc_package',
+    'configure',
+    'commercial',
+    'medium',
+    'Compose a package: its stations, their dependencies, the fasting requirement and the scoring model.',
+  ),
+  p(
+    'healthcheck.corporate.manage',
+    'hc_corporate',
+    'manage',
+    'commercial',
+    'medium',
+    'Manage a corporate contract, its eligible packages and its employee batches.',
+  ),
+  p(
+    'healthcheck.report.read',
+    'hc_report_list',
+    'list',
+    'phi',
+    'low',
+    'Throughput per station, wait times, package conversion and abnormality yield.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -10886,6 +11083,8 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP011,
   ...OP035,
   ...OP016,
+  ...OP013,
+  ...OP014,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

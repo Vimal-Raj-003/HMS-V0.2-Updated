@@ -1,0 +1,406 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-013 — vaccination and immunisation
+//
+// The console where a mistake is invisible for a decade. A dose given three
+// days too early does not count, the child is recorded as protected, and
+// nobody finds out until an outbreak — or until a school asks for a certificate
+// and a careful clinician recounts the intervals.
+//
+// ── The intervals and the minimum ages are the whole module ────────────────
+//
+// Every national schedule states, for every antigen and dose number, the
+// earliest age it may be given and the shortest gap from the previous dose.
+// Both exist because a dose given inside them produces a weaker response, and
+// both are routinely broken by a busy camp working from a chart on a wall. They
+// are refused here, with the date the dose *becomes* valid in the message,
+// because "come back on the 14th" is the only useful form of that refusal.
+//
+// ── A multi-dose vial has a clock ──────────────────────────────────────────
+//
+// An opened vial of a live vaccine is discarded after six hours; a killed one
+// after twenty-eight days. The clock starts at the puncture, and a dose drawn
+// after it is refused — because the alternative is a cold chain that looks
+// intact in every record and a vial that has been sitting on a bench since
+// morning.
+//
+// ── A batch under a cold chain hold does not move ──────────────────────────
+//
+// When a refrigerator breaches, its batches are held while somebody decides
+// whether the vaccine is still viable. Until that decision, every dose from
+// those batches is refused — which is the only moment the hold means anything,
+// because a held batch that can still be administered is a note in a book.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum VaccineStorage {
+  /// Ice-lined refrigerator, +2 to +8 °C.
+  ilr
+  /// Deep freezer, −15 to −25 °C.
+  deep_freezer
+  /// Ultra-cold, −70 °C.
+  ultra_cold
+
+  @@schema("mdm")
+}
+
+enum PlanDoseStatus {
+  due
+  given
+  overdue
+  /// Deliberately not given, with a reason. Different from missed.
+  skipped
+  contraindicated
+  refused
+  /// Given at another facility and recorded from a card or a national registry.
+  given_elsewhere
+
+  @@schema("specialty")
+}
+
+enum VialDiscardReason {
+  time_expired
+  /// The vaccine vial monitor changed stage.
+  vvm
+  cold_chain_breach
+  contaminated
+  empty
+
+  @@schema("specialty")
+}
+
+enum BreachAction {
+  /// Held pending a decision. Nothing from these batches may be given.
+  hold
+  released
+  discarded
+
+  @@schema("specialty")
+}
+
+enum AefiSeverity {
+  minor
+  severe
+  serious
+
+  @@schema("specialty")
+}
+
+/// A vaccine, as the programme defines it.
+model Vaccine {
+  id         String  @id @db.Uuid
+  hospitalId String? @map("hospital_id") @db.Uuid
+
+  /// The antigen, not the brand: `BCG`, `OPV`, `PENTA`, `MR`, `HPV`. Schedules
+  /// are written against this, so two brands of the same antigen count as the
+  /// same dose — which is what a child's record has to say.
+  antigenCode String @map("antigen_code") @db.VarChar(24)
+  name        String @db.VarChar(160)
+  brand       String? @db.VarChar(120)
+  manufacturer String? @db.VarChar(160)
+
+  dosesPerVial Int     @map("doses_per_vial")
+  doseVolumeMl Decimal @map("dose_volume_ml") @db.Decimal(5, 2)
+  route        String  @db.VarChar(24)
+
+  /// `{ "0": "left_thigh", "365": "left_upper_arm" }` — where it goes changes
+  /// with age, and a BCG in the wrong place scars wrongly and reads as
+  /// unvaccinated.
+  defaultSiteByAge Json @default("{}") @map("default_site_by_age")
+
+  storage VaccineStorage
+  vvmType String? @map("vvm_type") @db.VarChar(12)
+
+  /// How long an opened vial may be used. Six hours for most live vaccines,
+  /// twenty-eight days for many killed ones — the difference is why this is a
+  /// column rather than a policy constant.
+  openVialHours Int @map("open_vial_hours")
+
+  /// A live vaccine cannot be given to the immunosuppressed or in pregnancy,
+  /// which the screening questions turn on.
+  live Boolean @default(false)
+
+  requiresDiluent Boolean @default(false) @map("requires_diluent")
+  diluentItemId   String? @map("diluent_item_id") @db.Uuid
+  itemId          String? @map("item_id") @db.Uuid
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, antigenCode, brand], map: "uq_vaccine_brand")
+  @@index([hospitalId, antigenCode, isActive])
+  @@map("vaccines")
+  @@schema("mdm")
+}
+
+/// A national or professional schedule, as rules rather than as a picture.
+///
+/// The wall chart in every immunisation room is a picture, and it is what a
+/// nurse works from at nine on a busy Monday. What is here is the same thing in
+/// a form the database can refuse against — which is the only difference that
+/// matters when the interval is three days short.
+model ImmunisationSchedule {
+  id         String  @id @db.Uuid
+  hospitalId String? @map("hospital_id") @db.Uuid
+
+  /// `NIS` (India's national schedule), `IAP`, `ADULT`, `TRAVEL`.
+  name    String @db.VarChar(60)
+  version Int    @default(1)
+
+  /// `[{antigen, doseNo, dueAgeDays, minAgeDays, maxAgeDays, minIntervalDays,
+  /// optional}]`. The two that are enforced are `minAgeDays` and
+  /// `minIntervalDays`; the rest drive the due dates on a plan.
+  rules Json
+
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  isActive      Boolean   @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, name, version], map: "uq_immunisation_schedule_version")
+  @@map("immunisation_schedules")
+  @@schema("mdm")
+}
+
+/// What this patient is due, and when.
+model PlanDose {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  scheduleId String @map("schedule_id") @db.Uuid
+
+  antigenCode String @map("antigen_code") @db.VarChar(24)
+  doseNo      Int    @map("dose_no")
+
+  dueDate    DateTime  @map("due_date") @db.Date
+  windowFrom DateTime? @map("window_from") @db.Date
+  windowTo   DateTime? @map("window_to") @db.Date
+
+  status PlanDoseStatus @default(due)
+
+  /// The administration this dose was satisfied by, when it was.
+  givenRecordId String? @map("given_record_id") @db.Uuid
+  /// Why it was skipped, refused or judged contraindicated. Required for all
+  /// three, because "not given" with no reason is indistinguishable from a
+  /// child nobody followed up.
+  reason String? @db.Text
+
+  nextReminderAt DateTime? @map("next_reminder_at") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, patientId, antigenCode, doseNo], map: "uq_plan_dose")
+  @@index([hospitalId, dueDate, status])
+  @@index([hospitalId, patientId, status])
+  @@map("immunisation_plan_doses")
+  @@schema("specialty")
+}
+
+/// An opened multi-dose vial, and its clock.
+model OpenVial {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  vaccineId String @map("vaccine_id") @db.Uuid
+  itemId    String? @map("item_id") @db.Uuid
+  batchNo   String  @map("batch_no") @db.VarChar(60)
+  expiryDate DateTime @map("expiry_date") @db.Date
+
+  openedAt DateTime @default(now()) @map("opened_at") @db.Timestamptz(6)
+  openedBy String   @map("opened_by") @db.Uuid
+
+  dosesTotal Int @map("doses_total")
+  /// Counted by trigger from the administrations against this vial. A vial that
+  /// yields more doses than it holds is either wastage being hidden or a
+  /// dilution error, and both matter.
+  dosesUsed Int @default(0) @map("doses_used")
+
+  /// Derived on opening from the vaccine's own open-vial policy.
+  discardDueAt DateTime @map("discard_due_at") @db.Timestamptz(6)
+
+  discardedAt   DateTime?          @map("discarded_at") @db.Timestamptz(6)
+  discardReason VialDiscardReason? @map("discard_reason")
+  wastageDoses  Int?               @map("wastage_doses")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  records VaccinationRecord[]
+
+  @@index([hospitalId, branchId, discardDueAt])
+  @@index([hospitalId, batchNo])
+  @@map("open_vials")
+  @@schema("specialty")
+}
+
+/// A refrigerator, a freezer, or a cold box.
+model ColdChainUnit {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  assetId  String? @map("asset_id") @db.Uuid
+  code     String  @db.VarChar(40)
+  kind     String  @db.VarChar(24)
+  location String  @db.VarChar(160)
+
+  minC Decimal @map("min_c") @db.Decimal(5, 2)
+  maxC Decimal @map("max_c") @db.Decimal(5, 2)
+
+  sensorId String? @map("sensor_id") @db.VarChar(60)
+  status   String  @default("active") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  breaches ColdChainBreach[]
+
+  @@unique([hospitalId, branchId, code], map: "uq_cold_chain_unit_code")
+  @@index([hospitalId, branchId, status])
+  @@map("cold_chain_units")
+  @@schema("specialty")
+}
+
+/// A temperature excursion, and what was decided about the vaccine in it.
+model ColdChainBreach {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  unitId     String @map("unit_id") @db.Uuid
+
+  startedAt   DateTime  @map("started_at") @db.Timestamptz(6)
+  endedAt     DateTime? @map("ended_at") @db.Timestamptz(6)
+  peakC       Decimal   @map("peak_c") @db.Decimal(5, 2)
+  durationMin Int?      @map("duration_min")
+
+  /// The batch numbers that were inside. Every dose from them is refused while
+  /// the action is `hold` — which is the only moment a hold means anything.
+  batchesAffected String[] @default([]) @map("batches_affected")
+
+  action     BreachAction @default(hold)
+  decidedBy  String?      @map("decided_by") @db.Uuid
+  decidedAt  DateTime?    @map("decided_at") @db.Timestamptz(6)
+  note       String?      @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  unit ColdChainUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, action, startedAt(sort: Desc)])
+  @@map("cold_chain_breaches")
+  @@schema("specialty")
+}
+
+/// One dose, given.
+model VaccinationRecord {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  visitId    String? @map("visit_id") @db.Uuid
+  planDoseId String? @map("plan_dose_id") @db.Uuid
+
+  vaccineId   String @map("vaccine_id") @db.Uuid
+  antigenCode String @map("antigen_code") @db.VarChar(24)
+  doseNo      Int    @map("dose_no")
+
+  batchNo      String   @map("batch_no") @db.VarChar(60)
+  expiryDate   DateTime @map("expiry_date") @db.Date
+  vvmStage     Int?     @map("vvm_stage")
+  vialId       String?  @map("vial_id") @db.Uuid
+  diluentBatch String?  @map("diluent_batch") @db.VarChar(60)
+
+  site   String  @db.VarChar(40)
+  route  String  @db.VarChar(24)
+  doseMl Decimal @map("dose_ml") @db.Decimal(5, 2)
+
+  administeredAt DateTime @map("administered_at") @db.Timestamptz(6)
+  administeredBy String   @map("administered_by") @db.Uuid
+  orderedBy      String?  @map("ordered_by") @db.Uuid
+  consentId      String?  @map("consent_id") @db.Uuid
+
+  /// Temperature, and the contraindication questions. A live vaccine into an
+  /// immunosuppressed child is the programme error this catches.
+  screening Json @default("{}")
+  /// How long the patient waited afterwards. Anaphylaxis is minutes.
+  observationUntil DateTime? @map("observation_until") @db.Timestamptz(6)
+
+  campId String? @map("camp_id") @db.Uuid
+  /// `in_house`, `camp`, `external_history`, `registry_sync`. A dose recorded
+  /// from a card the mother brought is not a dose this clinic gave, and the
+  /// interval rules still apply to it.
+  source           String  @default("in_house") @db.VarChar(24)
+  externalFacility String? @map("external_facility") @db.VarChar(160)
+
+  certificateId String? @map("certificate_id") @db.Uuid
+  registryStatus String @default("na") @map("registry_status") @db.VarChar(16)
+
+  /// A dose recorded in error is voided, never deleted: the child's record has
+  /// to show that somebody thought it had been given.
+  voided     Boolean  @default(false)
+  voidReason String?  @map("void_reason") @db.Text
+  voidedBy   String?  @map("voided_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vial OpenVial? @relation(fields: [vialId], references: [id], onDelete: SetNull)
+
+  @@index([hospitalId, patientId, administeredAt(sort: Desc)])
+  @@index([hospitalId, batchNo])
+  @@index([hospitalId, branchId, administeredAt(sort: Desc)])
+  @@map("vaccination_records")
+  @@schema("specialty")
+}
+
+/// An adverse event following immunisation.
+model AefiReport {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  vaccinationRecordIds String[] @map("vaccination_record_ids") @db.Uuid
+
+  onsetAt    DateTime @map("onset_at") @db.Timestamptz(6)
+  reportedAt DateTime @default(now()) @map("reported_at") @db.Timestamptz(6)
+  reporterId String   @map("reporter_id") @db.Uuid
+
+  symptoms  Json         @default("{}")
+  severity  AefiSeverity
+  /// `vaccine_reaction`, `programme_error`, `immunisation_anxiety`,
+  /// `coincidental`, `unknown`. Programme error is the one a hospital can act
+  /// on, and the one nobody codes.
+  category  String?      @db.VarChar(32)
+  treatment String?      @db.Text
+  outcome   String?      @db.VarChar(24)
+
+  /// The statutory reporting clock. A serious event needs a first information
+  /// report within twenty-four hours, and a trigger will not let one be closed
+  /// without it.
+  firSentAt DateTime? @map("fir_sent_at") @db.Timestamptz(6)
+  pirDueAt  DateTime? @map("pir_due_at") @db.Date
+  pirSentAt DateTime? @map("pir_sent_at") @db.Timestamptz(6)
+  cifDueAt  DateTime? @map("cif_due_at") @db.Date
+  cifSentAt DateTime? @map("cif_sent_at") @db.Timestamptz(6)
+
+  causality      String? @db.VarChar(40)
+  districtCaseId String? @map("district_case_id") @db.VarChar(60)
+  incidentId     String? @map("incident_id") @db.Uuid
+
+  status String @default("open") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, severity, status])
+  @@index([hospitalId, patientId, onsetAt(sort: Desc)])
+  @@map("aefi_reports")
+  @@schema("specialty")
+}

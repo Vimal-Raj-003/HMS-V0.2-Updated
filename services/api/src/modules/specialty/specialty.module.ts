@@ -9,6 +9,9 @@ import { DermatologyService } from './consoles/dermatology.service.js';
 import { EntService } from './consoles/ent.service.js';
 import { PulmonologyService } from './consoles/pulmonology.service.js';
 import { PainController } from './pain/pain.controller.js';
+import { HealthCheckService } from './programme/healthcheck.service.js';
+import { ImmunisationService } from './programme/immunisation.service.js';
+import { ProgrammeController } from './programme/programme.controller.js';
 import { PainService } from './pain/pain.service.js';
 import { NutritionService } from './therapy/nutrition.service.js';
 import { SpeechService } from './therapy/speech.service.js';
@@ -36,6 +39,7 @@ export const SPECIALTY_CONTROLLERS: Type<unknown>[] = [
   ConsolesController,
   TherapyController,
   PainController,
+  ProgrammeController,
 ];
 
 export const SPECIALTY_PROVIDERS: Provider[] = [
@@ -66,6 +70,12 @@ export const SPECIALTY_PROVIDERS: Provider[] = [
   // arithmetic: the morphine equivalent, the second reviewer, the treatment
   // agreement and the annual steroid ceiling.
   PainService,
+
+  // OP-013, OP-014. Both run people through a plan rather than a consultation,
+  // and in both the characteristic mistake is the right thing in the wrong
+  // order — a dose three days early, a sugar drawn before the breakfast.
+  ImmunisationService,
+  HealthCheckService,
 ];
 
 @Module({
@@ -85,6 +95,8 @@ export const SPECIALTY_PROVIDERS: Provider[] = [
     NutritionService,
     SpeechService,
     PainService,
+    ImmunisationService,
+    HealthCheckService,
   ],
 })
 export class SpecialtyModule {}

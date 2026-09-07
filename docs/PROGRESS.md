@@ -401,6 +401,85 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-14 · Phase 8 · OP-013, OP-014 — the programme consoles
+
+**Built — vaccination and health check-ups, complete.** 14 tables, 20 permission
+keys, 4 events, 2 entitlements, 2 screens, 13 integration tests, 31 database
+rules proven live in both directions.
+
+Both run people through a plan rather than through a consultation, and in both
+the characteristic failure is doing the right thing in the wrong order — a dose
+three days early, a sugar drawn before the breakfast, a report signed over a
+scan nobody did. None of those looks like a mistake afterwards, which is what
+makes them worth a database rule rather than a warning.
+
+**OP-013 · the interval is the module.** Every national schedule states, for
+every antigen and dose number, the earliest age it may be given and the shortest
+gap from the previous dose. Both exist because a dose inside them produces a
+weaker response; both are routinely broken by a busy camp working from a chart
+on a wall; and a dose given early does not count, the child is recorded as
+protected, and nobody finds out for a decade. The refusal names **the date the
+dose becomes valid**, because a nurse holding a syringe needs "come back on the
+14th" rather than a constraint name.
+
+Around it, three more that a session actually runs into:
+
+- **an opened vial has a clock** — six hours for most live vaccines, twenty-eight
+  days for many killed ones, from the puncture — and the doses drawn from it are
+  counted by the database, so twelve out of a ten-dose vial is not recordable;
+- **a batch under a cold chain hold does not move** until somebody decides,
+  which is the only moment a hold means anything;
+- **a serious adverse event is not closed without its first information report**,
+  and the seven- and ninety-day clocks are set from the report date rather than
+  by a clerk's arithmetic.
+
+**OP-014 · the sequence is the module.** A station cannot start before what it
+depends on, and a report cannot be signed while any station is outstanding. The
+second is the one that matters: the characteristic health-check failure is a
+"normal" report covering an ultrasound the patient skipped because the queue was
+long. It reads as reassurance, it is filed, and the finding nobody looked for
+surfaces two years later. So each station is done, or **explicitly skipped with a
+reason that goes on the report** — and the refusal names the outstanding ones.
+
+**Two documented overrides, both cold-chain-shaped, both shipping unassigned.**
+Releasing a breached batch puts every dose from a refrigerator that reached
+14 °C back into arms; voiding a dose strikes it from what a school, an outbreak
+investigation and the national registry read. Voiding also puts the dose back on
+the recall list, because a record struck in error means the child is owed it
+again. And there is deliberately **no** key, route or flag that forces a health
+check report — that would be the failure the console exists to prevent, with a
+permission attached.
+
+**Four defects the proofs and the tests found, three of them real.**
+`array_length` of an empty array is NULL, not 0, so the CHECK requiring an
+adverse event to name a dose was passing on nothing. A column-level `REVOKE`
+does **not** carve an exception out of a table-level `GRANT` — Postgres treats
+the table grant as covering every column and the narrower revoke is silently a
+no-op, so "doses used" was writable after all; the fix is to revoke the table
+grant and hand back the columns a discard legitimately needs. And the service
+passed `0` as a placeholder for a trigger-filled dose count, which survived the
+trigger's own coalesce and became the value. The fourth was my proof, not the
+rule: finishing two dependent stations in one statement is refused, correctly.
+
+**Deferred, recorded.** Cold chain telemetry readings (a partitioned table fed by
+EN-042 rather than by this console), the U-WIN/CoWIN registry sync and the
+certificate QR chain (OP-013 §4, both integrations Phase 11 owns), and the
+corporate batch upload and aggregate reporting (OP-014 §4, which needs NC-012's
+customer records).
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module. Tracked, unchanged.
+
+**Gates** — 13/13 packages typecheck, lint and test (3,014 unit tests); 628 API
+integration tests across 25 files; 52 migrations; 794 non-partition tables; 1,289
+permission keys; 807 events; 58 entitlements; 68 role templates; 97 screens.
+
+**Next:** OP-012 and IP-022, dialysis. A fourth shape: the unit is a _machine_
+with an exclusion constraint on it, a patient with a viral status that decides
+which zone they can be treated in, and a dialyser that is reused a counted
+number of times. The first Phase-8 console whose scheduling is a physical
+resource rather than a queue.
+
 ### 2026-09-13 · Phase 8 · OP-016 — the console where the rules are governance
 
 **Built — the pain management clinic, complete.** 7 tables, 11 permission keys,

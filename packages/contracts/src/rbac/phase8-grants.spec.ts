@@ -28,6 +28,8 @@ const PHASE_8_PREFIXES = [
   'nutrition',
   'slp',
   'pain',
+  'immunisation',
+  'healthcheck',
 ] as const;
 
 function permission(key: string): PermissionDefinition {
@@ -218,6 +220,26 @@ describe('Phase 8 framework permission catalogue', () => {
       // Writing a swallow order and acknowledging one are held by different
       // people on purpose; the allow-list is the union, and the tests below
       // check the split itself.
+      // Giving a vaccine is nursing work, held right across the floor: an
+      // immunisation session is run by whoever is in the room.
+      immunisation: [
+        'medical_superintendent',
+        'hod',
+        'doctor_consultant_opd',
+        'surgeon',
+        'resident_doctor',
+        'nurse_opd',
+        'nurse_ward',
+      ],
+      healthcheck: [
+        'medical_superintendent',
+        'hod',
+        'doctor_consultant_opd',
+        'surgeon',
+        'resident_doctor',
+        'nurse_opd',
+        'receptionist',
+      ],
       // The pain clinic. Prescribing and countersigning ship unassigned, so the
       // allow-list here covers only the ordinary clinic keys.
       pain: ['medical_superintendent', 'hod', 'doctor_consultant_opd', 'surgeon', 'resident_doctor'],
@@ -636,6 +658,43 @@ describe('OP-010 — the procedure floor', () => {
     // Signing one is ordinary; ending one is not.
     expect(permission('pain.agreement.sign').risk).toBe('medium');
     expect(holdersOf('pain.agreement.sign')).toContain('doctor_consultant_opd');
+  });
+
+  it('holds giving a vaccine as widely as the room, and the two cold chain keys narrowly', () => {
+    // An immunisation session is run by whoever is in the room, and a nurse who
+    // cannot record a dose is a child with a hole in their record. So the
+    // giving key is wide and never licence-gated.
+    for (const who of ['nurse_opd', 'nurse_ward', 'doctor_consultant_opd']) {
+      expect(getRoleTemplate(who)?.permissions.includes('immunisation.dose.administer'), who).toBe(true);
+    }
+    expect(permission('immunisation.dose.administer').clinicalSafetyExempt).toBe(true);
+    expect(permission('immunisation.aefi.report').clinicalSafetyExempt).toBe(true);
+
+    // The two that change what everybody else can do ship unassigned: releasing
+    // a breached batch puts every dose from it back into arms, and voiding a
+    // dose strikes it from what a school and a registry read.
+    for (const key of ['immunisation.breach.decide', 'immunisation.record.void']) {
+      const def = permission(key);
+      expect(def.risk, key).toBe('high');
+      expect(def.requiresReason, key).toBe(true);
+      expect(
+        holdersOf(key).filter((h) => h !== 'super_admin'),
+        key,
+      ).toEqual([]);
+    }
+  });
+
+  it('offers no key that voids a health check station', () => {
+    // A station is done, or skipped with a reason that goes on the report.
+    // There is no third state, because the failure this console exists to
+    // prevent is a report that reads as complete over a scan nobody did.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    expect(keys).not.toContain('healthcheck.station.void');
+    expect(keys).not.toContain('healthcheck.report.force_sign');
+    expect(keys).toContain('healthcheck.station.record');
+    // And signing is a clinician's, while running the slip is the floor's.
+    expect(getRoleTemplate('receptionist')?.permissions).toContain('healthcheck.station.record');
+    expect(getRoleTemplate('receptionist')?.permissions).not.toContain('healthcheck.report.sign');
   });
 
   it('gives the OPD nursing floor the second-person key and the giving key alike', () => {

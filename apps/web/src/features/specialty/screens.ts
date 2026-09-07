@@ -332,6 +332,55 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: 'module.pain_clinic.enabled',
   },
+  {
+    key: 'immunisation',
+    label: 'Immunisation',
+    href: '/immunisation/session',
+    area: 'specialty',
+    permission: 'immunisation.record.read',
+    summary:
+      'What the session can draw from, which batches are held after a cold chain breach, and who is overdue \u2014 with the minimum age and the interval enforced rather than warned about.',
+    deniedExplanation:
+      'Giving a vaccine is held right across the nursing floor, because an immunisation session is run by whoever is in the room, and it is never blocked by a licence. Deciding the fate of a breached batch and striking a dose from a child\u2019s record are separate keys with reasons \u2014 both change what everybody else can do.',
+    keywords: [
+      'immunisation',
+      'vaccination',
+      'vaccine',
+      'dose',
+      'schedule',
+      'cold chain',
+      'vial',
+      'aefi',
+      'booster',
+      'catch-up',
+      'certificate',
+    ],
+    entitlement: 'module.immunisation.enabled',
+  },
+  {
+    key: 'health-checkup',
+    label: 'Health check-ups',
+    href: '/healthcheck/floor',
+    area: 'specialty',
+    permission: 'healthcheck.episode.read',
+    summary:
+      'Who is in the building, which station each of them can go to next, and what still stands between a check and its report \u2014 because a station out of order is a wasted morning.',
+    deniedExplanation:
+      'Running the routing slip is held by the front office and the nursing floor alike, since the person who calls a patient is whoever is free. Signing the report is a clinician\u2019s, and it cannot be signed while any station is outstanding.',
+    keywords: [
+      'health check',
+      'checkup',
+      'master health',
+      'executive health',
+      'corporate wellness',
+      'routing slip',
+      'station',
+      'package',
+      'health score',
+      'annual check',
+    ],
+    entitlement: 'module.health_checkup.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

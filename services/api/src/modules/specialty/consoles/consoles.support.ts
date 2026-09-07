@@ -368,6 +368,69 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
     type: ProblemType.VALIDATION_FAILED,
     detail: 'IDDSI numbers food 3 to 7 and drinks 0 to 4.',
   },
+  // ── OP-013, OP-014 ────────────────────────────────────────────────────────
+  a_vial_holds_doses: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A vial holds a positive number of doses.',
+  },
+  a_discarded_vial_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Discarding a vial records why — the clock, the vial monitor, a breach, contamination, or empty.',
+  },
+  a_voided_dose_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'Voiding a dose records who struck it and why. The immunisation record is what a school, an outbreak investigation and the national registry read.',
+  },
+  uq_one_live_dose_per_antigen: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'That antigen and dose number is already recorded for this patient. In an immunisation record a double entry reads as a double dose.',
+    nextAction: 'Void the existing record with a reason if it was entered in error.',
+  },
+  a_dose_not_given_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A scheduled dose that was skipped, refused or judged contraindicated records why. "Not given" with no reason is indistinguishable from a child nobody followed up.',
+  },
+  an_aefi_follows_a_dose: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'An adverse event following immunisation names at least one dose it followed.',
+  },
+  a_skipped_station_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A station that was not done records why, and the reason goes on the report. A silent skip is how a report comes to read as complete over a scan nobody did.',
+  },
+  a_done_station_names_who: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A completed station names who completed it.',
+  },
+  a_package_has_a_sequence: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A health check package needs at least one station in its sequence.',
+  },
+  a_package_age_range_runs_forwards: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A package\u2019s minimum age is at or below its maximum.',
+  },
+  a_cancelled_booking_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A cancelled booking records why.',
+  },
+  uq_hc_task_station: {
+    type: ProblemType.CONFLICT,
+    detail: 'That station is already on this routing slip.',
+  },
+  uq_hc_routing_slip: {
+    type: ProblemType.CONFLICT,
+    detail: 'That routing slip number is already in use today.',
+  },
+  uq_hc_report_version: {
+    type: ProblemType.CONFLICT,
+    detail: 'That report version already exists for this check.',
+  },
+
   // ── OP-016 ────────────────────────────────────────────────────────────────
   a_second_reviewer_is_a_second_person: {
     type: ProblemType.VALIDATION_FAILED,

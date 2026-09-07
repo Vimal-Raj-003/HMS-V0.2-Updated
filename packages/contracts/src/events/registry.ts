@@ -10817,6 +10817,76 @@ const painClinicEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — OP-013 and OP-014, the programme consoles.
+ *
+ * Four events, and each one leaves because somebody outside the room has to
+ * act: a district programme officer on an adverse event, a store on a batch
+ * that has to come off the shelf, a recall list on a child who missed a dose,
+ * and a corporate client on a report that is ready.
+ */
+const programmeEvents: readonly EventDefinition[] = [
+  ev(
+    'immunisation.dose.given',
+    'vaccination_record',
+    'OP-013',
+    'A dose was given. Drives the certificate, the national registry push and the next due date on the child’s schedule.',
+    z.object({
+      recordId: uuid,
+      patientId: uuid,
+      antigenCode: z.string(),
+      doseNo: z.number().int(),
+      batchNo: z.string(),
+      administeredAt: z.string(),
+      source: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'immunisation.coldchain.breached',
+    'cold_chain_breach',
+    'OP-013',
+    'A cold chain unit breached and its batches are held. Leaves the console because every dose from those batches is now refused, and the store has to pull them off the shelf before the next session opens.',
+    z.object({
+      breachId: uuid,
+      unitCode: z.string(),
+      peakC: z.string(),
+      startedAt: z.string(),
+      batchesAffected: z.array(z.string()),
+    }),
+    { containsPhi: false, retentionDays: 3650 },
+  ),
+  ev(
+    'immunisation.aefi.serious',
+    'aefi_report',
+    'OP-013',
+    'A serious adverse event following immunisation. Leaves immediately because the statutory first information report is due within twenty-four hours and the district programme officer is not on this system.',
+    z.object({
+      reportId: uuid,
+      patientId: uuid,
+      severity: z.string(),
+      onsetAt: z.string(),
+      vaccinationRecordIds: z.array(uuid),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'healthcheck.report.ready',
+    'hc_report',
+    'OP-014',
+    'A health check report was signed. Drives delivery to the patient and, where the check was corporate, the aggregate that goes back to the employer — never the individual result.',
+    z.object({
+      reportId: uuid,
+      episodeId: uuid,
+      patientId: uuid,
+      healthScore: z.string().nullable(),
+      corporateId: uuid.nullable(),
+      abnormalDomains: z.array(z.string()),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+];
+
+/**
  * Phase 8 — OP-010 and OP-039, the procedure spine.
  *
  * `procedure.started` carries what was checked before it began, because the
@@ -11016,6 +11086,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...deviceConsoleEvents,
   ...therapyEvents,
   ...painClinicEvents,
+  ...programmeEvents,
   ...procedureEvents,
 ]);
 

@@ -905,6 +905,39 @@ const PAIN_CLINIC = [
 const PAIN_READER = ['pain.episode.read', 'pain.opioid.read'] as const;
 
 /**
+ * OP-013 and OP-014 — the programme consoles.
+ *
+ * Giving a vaccine is nursing work and is held right across the floor, because
+ * an immunisation session is run by whoever is in the room. The two keys that
+ * are not are the two that change what other people can do: deciding the fate
+ * of a breached batch, and striking a dose from a child's record.
+ */
+const IMMUNISATION_FLOOR = [
+  'immunisation.record.read',
+  'immunisation.dose.administer',
+  'immunisation.plan.manage',
+  'immunisation.vial.open',
+  'immunisation.vial.discard',
+  'immunisation.coldchain.record',
+  'immunisation.aefi.report',
+  'immunisation.certificate.issue',
+] as const;
+
+/** The health check floor: the routing slip, and the stations on it. */
+const HEALTHCHECK_FLOOR = [
+  'healthcheck.episode.read',
+  'healthcheck.episode.checkin',
+  'healthcheck.station.record',
+] as const;
+
+const HEALTHCHECK_CLINICAL = [
+  ...HEALTHCHECK_FLOOR,
+  'healthcheck.report.write',
+  'healthcheck.report.sign',
+  'healthcheck.report.read',
+] as const;
+
+/**
  * What a doctor holds across the therapy consoles.
  *
  * Read everything, refer into anything, and sign nothing a therapist signs. A
@@ -932,6 +965,11 @@ const SPECIALTY_CONSOLE_DOCTOR = [
   ...DERM_DOCTOR,
   ...THERAPY_REFERRER,
   ...PAIN_CLINIC,
+  // A paediatrician gives vaccines. Withholding the key from doctors while
+  // giving it to every nurse would be an org chart nobody has.
+  ...IMMUNISATION_FLOOR,
+  'immunisation.report.read',
+  ...HEALTHCHECK_CLINICAL,
 ] as const;
 
 /** A resident records and plans; the signature and the override keys are not theirs. */
@@ -3238,6 +3276,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      ...IMMUNISATION_FLOOR,
+      ...HEALTHCHECK_FLOOR,
       ...WOUND_BEDSIDE,
       'slp.swallow_order.read',
       ...OPD_NURSING_FLOOR,
@@ -3293,6 +3333,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...IMMUNISATION_FLOOR,
       ...WOUND_BEDSIDE,
       // The ward half of the swallow acknowledgement. A ward that has not read
       // the order is a ward still working from the last one.
@@ -3607,6 +3648,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'admin',
     homeWorkspace: 'registration',
     permissions: [
+      'healthcheck.booking.create',
+      ...HEALTHCHECK_FLOOR,
       ...CONSOLE_FLOOR,
       ...BED_MANAGEMENT,
       'admission.cancel',

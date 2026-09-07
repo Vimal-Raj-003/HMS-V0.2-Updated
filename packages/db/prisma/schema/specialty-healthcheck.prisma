@@ -1,0 +1,301 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-014 — health check-ups and corporate wellness
+//
+// A health check is a factory: forty people walk a routing slip through eight
+// stations in a morning, and the whole product is a report at the end. The two
+// ways it fails are both about sequence.
+//
+// ── A station does not start before what it depends on ─────────────────────
+//
+// The post-prandial sugar before the breakfast is a wasted morning and a
+// repeat visit. The mammogram before the consent is worse. The dependencies
+// are on the package as data, and the database refuses a task that starts out
+// of order — which is the only version of this rule that survives a busy day,
+// because the version on a laminated card does not.
+//
+// ── A report is not signed over a station nobody did ───────────────────────
+//
+// The characteristic health-check failure is a "normal" report covering an
+// ultrasound the patient skipped because the queue was long. It reads as
+// reassurance, it is filed, and the finding that was never looked for surfaces
+// two years later. So a report cannot be signed while any station is still
+// pending: each one is done, or explicitly skipped with a reason that appears
+// on the report.
+//
+// ── The health score is derived ────────────────────────────────────────────
+//
+// From the domain scores, by the model the package names. It is the number the
+// patient reads and the corporate client is invoiced against, and a typed one
+// is a number nobody can reproduce from the results underneath it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum HcBookingStatus {
+  booked
+  confirmed
+  checked_in
+  in_progress
+  completed
+  report_ready
+  delivered
+  cancelled
+  no_show
+
+  @@schema("specialty")
+}
+
+enum HcTaskStatus {
+  pending
+  called
+  in_progress
+  done
+  /// Deliberately not done, with a reason that appears on the report.
+  skipped
+  /// Not applicable to this patient — a mammogram for a man, a PSA for a woman.
+  not_applicable
+
+  @@schema("specialty")
+}
+
+enum HcReportStatus {
+  draft
+  final
+  addendum
+
+  @@schema("specialty")
+}
+
+/// A health check package, over an OP-023 package.
+model HcPackage {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  packageId String @map("package_id") @db.Uuid
+  code      String @db.VarChar(40)
+  name      String @db.VarChar(160)
+  tier      String? @db.VarChar(40)
+
+  gender String @default("any") @db.VarChar(10)
+  ageMin Int?   @map("age_min")
+  ageMax Int?   @map("age_max")
+
+  fastingHours Int? @map("fasting_hours")
+
+  /// `[{station, dependsOn: [station], estMin}]` — the routing slip, as data.
+  /// This is what the sequence rule is enforced against, so a package that
+  /// puts the post-prandial sugar before breakfast is a configuration error
+  /// caught once rather than a wasted morning repeated weekly.
+  stationSequence Json @map("station_sequence")
+
+  reportTemplateId String? @map("report_template_id") @db.Uuid
+  /// Which scoring model turns the results into a number.
+  healthScoreModelId String? @map("health_score_model_id") @db.Uuid
+
+  addOns    Json    @default("[]") @map("add_ons")
+  validDays Int?    @map("valid_days")
+  isPublic  Boolean @default(true) @map("is_public")
+  corporateOnly Boolean @default(false) @map("corporate_only")
+  version   Int     @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  bookings HcBooking[]
+
+  @@unique([hospitalId, code, version], map: "uq_hc_package_version")
+  @@index([hospitalId, isPublic, corporateOnly])
+  @@map("hc_packages")
+  @@schema("specialty")
+}
+
+/// A booking, from whichever channel it came through.
+model HcBooking {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId   String? @map("patient_id") @db.Uuid
+  corporateId String? @map("corporate_id") @db.Uuid
+  employeeRef String? @map("employee_ref") @db.VarChar(60)
+
+  packageId      String @map("package_id") @db.Uuid
+  packageVersion Int    @map("package_version")
+  addOns         Json   @default("[]") @map("add_ons")
+
+  scheduledAt DateTime @map("scheduled_at") @db.Timestamptz(6)
+  channel     String   @db.VarChar(24)
+
+  advanceBillId String? @map("advance_bill_id") @db.Uuid
+  paymentStatus String  @default("unpaid") @map("payment_status") @db.VarChar(20)
+
+  status HcBookingStatus @default(booked)
+
+  instructionsSentAt DateTime? @map("instructions_sent_at") @db.Timestamptz(6)
+  reminders          Json      @default("[]")
+  cancelReason       String?   @map("cancel_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  package  HcPackage   @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  episodes HcEpisode[]
+
+  @@index([hospitalId, branchId, scheduledAt, status])
+  @@index([hospitalId, corporateId, status])
+  @@map("hc_bookings")
+  @@schema("specialty")
+}
+
+/// The morning itself.
+model HcEpisode {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  bookingId String @unique @map("booking_id") @db.Uuid
+  patientId String @map("patient_id") @db.Uuid
+  visitId   String? @map("visit_id") @db.Uuid
+
+  checkedInAt   DateTime @default(now()) @map("checked_in_at") @db.Timestamptz(6)
+  routingSlipNo String   @map("routing_slip_no") @db.VarChar(32)
+  consentId     String?  @map("consent_id") @db.Uuid
+
+  /// `{labOrderIds, radOrderIds, ecgOrderId, consults}` — what was raised, so
+  /// the report can be assembled from results rather than from memory.
+  orders Json @default("{}")
+
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  physicianId String?   @map("physician_id") @db.Uuid
+  notes       String?   @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  booking HcBooking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  tasks   HcStationTask[]
+  reports HcReport[]
+
+  @@unique([hospitalId, routingSlipNo], map: "uq_hc_routing_slip")
+  @@index([hospitalId, branchId, checkedInAt(sort: Desc)])
+  @@index([hospitalId, patientId, checkedInAt(sort: Desc)])
+  @@map("hc_episodes")
+  @@schema("specialty")
+}
+
+/// One station on the routing slip.
+model HcStationTask {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+
+  /// `registration`, `vitals`, `phlebotomy`, `breakfast`, `ppbs`, `xray`,
+  /// `usg`, `mammo`, `ecg`, `tmt`, `echo`, `pft`, `audiometry`, `eye`,
+  /// `dental`, `gynae`, `physician`, `dietician`.
+  station String @db.VarChar(32)
+  seq     Int
+
+  /// The stations that must be `done`, `skipped` or `not_applicable` before
+  /// this one may start. Copied from the package at check-in, so a package
+  /// revised mid-morning does not change a slip already in progress.
+  dependsOn String[] @default([]) @map("depends_on")
+
+  status HcTaskStatus @default(pending)
+
+  tokenId   String?   @map("token_id") @db.Uuid
+  calledAt  DateTime? @map("called_at") @db.Timestamptz(6)
+  startedAt DateTime? @map("started_at") @db.Timestamptz(6)
+  doneAt    DateTime? @map("done_at") @db.Timestamptz(6)
+  doneBy    String?   @map("done_by") @db.Uuid
+
+  /// Why it was skipped or judged not applicable. Required for both, and it
+  /// appears on the report — a "normal" report over a station nobody did is
+  /// the failure this whole module is built around.
+  skipReason String? @map("skip_reason") @db.Text
+
+  /// The vitals row, the order, the result this station produced.
+  sourceRef String? @map("source_ref") @db.Uuid
+  /// Minutes between being called and starting. The number a health check
+  /// factory is actually managed on.
+  waitMin Int? @map("wait_min")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode HcEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@unique([episodeId, station], map: "uq_hc_task_station")
+  @@index([hospitalId, status, startedAt])
+  @@index([hospitalId, episodeId, seq])
+  @@map("hc_station_tasks")
+  @@schema("specialty")
+}
+
+/// The report, and the number on the front of it.
+model HcReport {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  version Int @default(1)
+
+  /// `{cardiac: 72, metabolic: 55, …}` — the scores each domain produced.
+  domainScores Json @default("{}") @map("domain_scores")
+  /// Derived from the domain scores by a trigger. The number the patient reads
+  /// and the corporate client is invoiced against, so it is not typed.
+  healthScore Decimal? @map("health_score") @db.Decimal(5, 2)
+
+  /// ASCVD, Framingham, the Indian Diabetes Risk Score, eGFR, FIB-4. Computed
+  /// elsewhere and carried here with their inputs.
+  riskCalcs Json @default("{}") @map("risk_calcs")
+  /// Against this patient's last check, where there was one. The reason people
+  /// come back.
+  comparison Json @default("{}")
+
+  summary         String? @db.Text
+  recommendations Json    @default("[]")
+  referrals       Json    @default("[]")
+
+  status HcReportStatus @default(draft)
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+  pdfKey   String?   @map("pdf_key") @db.VarChar(500)
+  documentId String? @map("document_id") @db.Uuid
+
+  /// `[{channel, at}]`.
+  delivered Json @default("[]")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode HcEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@unique([episodeId, version], map: "uq_hc_report_version")
+  @@index([hospitalId, status, createdAt(sort: Desc)])
+  @@map("hc_reports")
+  @@schema("specialty")
+}
+
+/// How a package's results become a number.
+model HcHealthScoreModel {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  name    String @db.VarChar(120)
+  version Int    @default(1)
+
+  /// `[{name, weight, params: [{code, weight, bands}]}]`. The weights are what
+  /// the derived score is computed from, and they sum to one — a model whose
+  /// weights do not is a score nobody can compare across two years.
+  domains Json
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, name, version], map: "uq_hc_score_model_version")
+  @@map("hc_health_score_models")
+  @@schema("specialty")
+}
