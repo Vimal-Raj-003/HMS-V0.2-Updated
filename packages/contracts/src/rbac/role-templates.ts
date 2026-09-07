@@ -883,6 +883,28 @@ const DERM_DOCTOR = [
  * role per specialty ends up with sixty roles and grants them by guesswork.
  */
 /**
+ * OP-016 — the pain clinic.
+ *
+ * The one console where the split is not clinician-versus-technician but
+ * prescriber-versus-reviewer, and it is held apart on purpose: a doctor who can
+ * both prescribe at 120 MME and countersign their own prescription has the
+ * threshold and none of the control.
+ */
+const PAIN_CLINIC = [
+  'pain.episode.read',
+  'pain.episode.create',
+  'pain.assessment.record',
+  'pain.plan.write',
+  'pain.opioid.read',
+  'pain.agreement.sign',
+  'pain.intervention.perform',
+  'pain.report.read',
+] as const;
+
+/** Reading a pain episode without prescribing on it. For the wider floor. */
+const PAIN_READER = ['pain.episode.read', 'pain.opioid.read'] as const;
+
+/**
  * What a doctor holds across the therapy consoles.
  *
  * Read everything, refer into anything, and sign nothing a therapist signs. A
@@ -909,6 +931,7 @@ const SPECIALTY_CONSOLE_DOCTOR = [
   ...DENTAL_DOCTOR,
   ...DERM_DOCTOR,
   ...THERAPY_REFERRER,
+  ...PAIN_CLINIC,
 ] as const;
 
 /** A resident records and plans; the signature and the override keys are not theirs. */
@@ -983,6 +1006,8 @@ const SPECIALTY_CONSOLE_RESIDENT = [
   'derm.lesion.read',
   'derm.lesion.record',
   'derm.score.record',
+  ...PAIN_READER,
+  'pain.assessment.record',
 ] as const;
 
 /**

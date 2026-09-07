@@ -10655,6 +10655,132 @@ const OP035 = group('OP-035', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-016, the pain management clinic
+//
+// The only console in the phase whose rules are governance rather than
+// arithmetic, and the grants show it: three of eleven keys are `high`, and none
+// of the three is a clinical act.
+//
+//   · `pain.opioid.prescribe`  — writing the prescription at all
+//   · `pain.opioid.second_review` — the person who signs off above 90 MME, and
+//     who is never the prescriber
+//   · `pain.agreement.revoke`  — ending the treatment agreement, which stops
+//     every future opioid on the episode
+//
+// ── There is no key for raising the steroid ceiling ────────────────────────
+//
+// Deliberately. Every other console in this phase has a documented way past its
+// rule, because every other rule has a legitimate exception. The annual
+// triamcinolone ceiling does not: it is already set at the permissive end of
+// the published range, the harm is cumulative and silent, and a clinic that
+// needs to exceed it needs a different treatment rather than a different
+// permission. Adding the key later would be a decision somebody has to argue
+// for, which is the point.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP016 = group('OP-016', 8, [
+  p(
+    'pain.episode.read',
+    'pain_episode',
+    'read',
+    'phi',
+    'low',
+    'Read a pain episode: the mechanism, the scores, the interventions and every opioid on it.',
+    { phiRead: true },
+  ),
+  p(
+    'pain.episode.create',
+    'pain_episode',
+    'create',
+    'phi',
+    'low',
+    'Open a pain episode and record its mechanism, sites and risk instruments.',
+  ),
+  p(
+    'pain.assessment.record',
+    'pain_assessment',
+    'record',
+    'phi',
+    'low',
+    'Record a pain assessment: the numeric scores, the neuropathic screeners and the questionnaires.',
+  ),
+  p(
+    'pain.plan.write',
+    'pain_episode',
+    'update',
+    'phi',
+    'medium',
+    'Write the multimodal plan, its titration schedule and any taper.',
+  ),
+  p(
+    'pain.opioid.prescribe',
+    'opioid_prescription',
+    'create',
+    'phi',
+    'high',
+    'Prescribe an opioid on a pain episode. The morphine equivalent is computed from the dose, and the thresholds on it are enforced rather than warned about.',
+    { requiresStepUp: true },
+  ),
+  // Deliberately *not* `requiresSecondPerson`. That flag means "this act needs a
+  // co-signer attached", and `PolicyGuard` evaluates it without one — so a route
+  // carrying it would deny everybody. This key is the opposite: it *is* the
+  // second person's act, performed alone in their own session. What makes it two
+  // people is the grant split (no template holds this and `prescribe`) and a
+  // CHECK that refuses a reviewer who is the prescriber. A flag would have been
+  // decoration over both.
+  p(
+    'pain.opioid.second_review',
+    'opioid_prescription',
+    'approve',
+    'phi',
+    'high',
+    'Countersign an opioid at or above the review threshold, as a second prescriber in your own session. Never held together with prescribing: a review carrying the prescriber’s own name is the audit finding rather than the control.',
+    { requiresReason: true },
+  ),
+  p(
+    'pain.opioid.read',
+    'opioid_prescription',
+    'list',
+    'phi',
+    'low',
+    'See a patient’s opioid history and their current daily morphine equivalent across every prescriber.',
+    { phiRead: true },
+  ),
+  p(
+    'pain.agreement.sign',
+    'opioid_agreement',
+    'sign',
+    'phi',
+    'medium',
+    'Record an opioid treatment agreement: the terms version, the date and when it expires.',
+  ),
+  p(
+    'pain.agreement.revoke',
+    'opioid_agreement',
+    'revoke',
+    'phi',
+    'high',
+    'Revoke a treatment agreement with a reason. Every future opioid on the episode is refused from that moment, so it is an act with consequences a clinic has to be prepared to explain to the patient.',
+    { requiresReason: true },
+  ),
+  p(
+    'pain.intervention.perform',
+    'pain_intervention',
+    'record',
+    'phi',
+    'medium',
+    'Perform and record a block, an ablation or an injection, with its before-and-after scores and its steroid dose.',
+  ),
+  p(
+    'pain.report.read',
+    'pain_report',
+    'list',
+    'phi',
+    'low',
+    'Morphine equivalents by prescriber, agreements due to expire, cumulative steroid exposure and intervention outcomes at six weeks.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -10759,6 +10885,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP017,
   ...OP011,
   ...OP035,
+  ...OP016,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

@@ -307,6 +307,31 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: 'module.speech_therapy.enabled',
   },
+  {
+    key: 'pain-clinic',
+    label: 'Pain management',
+    href: '/pain/board',
+    area: 'specialty',
+    permission: 'pain.episode.read',
+    summary:
+      'The three facts about a year no consultation can see: who is above the opioid review threshold across every prescription, whose treatment agreement lapses next, and who is close to the annual steroid ceiling.',
+    deniedExplanation:
+      'Reading a pain episode is held across the clinic. Prescribing an opioid and countersigning one above the threshold are never on one person, and revoking a treatment agreement stops every further prescription on that episode \u2014 so it carries a reason.',
+    keywords: [
+      'pain',
+      'opioid',
+      'morphine equivalent',
+      'mme',
+      'naloxone',
+      'treatment agreement',
+      'nerve block',
+      'epidural',
+      'steroid',
+      'neuropathic',
+      'chronic pain',
+    ],
+    entitlement: 'module.pain_clinic.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

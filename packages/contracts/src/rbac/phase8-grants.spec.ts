@@ -27,6 +27,7 @@ const PHASE_8_PREFIXES = [
   'wound',
   'nutrition',
   'slp',
+  'pain',
 ] as const;
 
 function permission(key: string): PermissionDefinition {
@@ -217,6 +218,9 @@ describe('Phase 8 framework permission catalogue', () => {
       // Writing a swallow order and acknowledging one are held by different
       // people on purpose; the allow-list is the union, and the tests below
       // check the split itself.
+      // The pain clinic. Prescribing and countersigning ship unassigned, so the
+      // allow-list here covers only the ordinary clinic keys.
+      pain: ['medical_superintendent', 'hod', 'doctor_consultant_opd', 'surgeon', 'resident_doctor'],
       slp: [
         'medical_superintendent',
         'hod',
@@ -581,6 +585,57 @@ describe('OP-010 — the procedure floor', () => {
     expect(keys).not.toContain('nutrition.totals.set');
     expect(keys).toContain('wound.record');
     expect(keys).toContain('nutrition.plan.write');
+  });
+
+  it('never lets one person prescribe an opioid and countersign it', () => {
+    // Above the review threshold the prescription needs a second prescriber,
+    // and a "reviewed by" carrying the prescriber's own name is the audit
+    // finding rather than the control — so the two keys are never on one
+    // template, and both ship unassigned for the hospital to place.
+    const prescribers = holdersOf('pain.opioid.prescribe').filter((h) => h !== 'super_admin');
+    const reviewers = holdersOf('pain.opioid.second_review').filter((h) => h !== 'super_admin');
+    expect(prescribers).toEqual([]);
+    expect(reviewers).toEqual([]);
+    for (const role of ROLE_TEMPLATES) {
+      const both =
+        role.permissions.includes('pain.opioid.prescribe') &&
+        role.permissions.includes('pain.opioid.second_review');
+      expect(both, `${role.key} should not hold both halves of the opioid control`).toBe(false);
+    }
+
+    const prescribe = permission('pain.opioid.prescribe');
+    expect(prescribe.risk).toBe('high');
+    expect(prescribe.requiresStepUp).toBe(true);
+    // The review key is *not* `requiresSecondPerson`: that flag means an act
+    // needing a co-signer attached, and `PolicyGuard` would deny every user on
+    // a route carrying it. This key is the second person's own act. What makes
+    // it two people is the split above plus a database CHECK on the reviewer.
+    const review = permission('pain.opioid.second_review');
+    expect(review.risk).toBe('high');
+    expect(review.requiresSecondPerson).toBeUndefined();
+    expect(review.requiresReason).toBe(true);
+  });
+
+  it('offers no key at all for exceeding the annual steroid ceiling', () => {
+    // Every other console in the phase has a documented way past its rule,
+    // because every other rule has a legitimate exception. This one does not:
+    // the ceiling sits at the permissive end of the published range, the harm
+    // is cumulative and silent, and a clinic that needs to exceed it needs a
+    // different treatment rather than a different permission.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    expect(keys.filter((k) => k.startsWith('pain.') && k.includes('steroid'))).toEqual([]);
+    expect(keys).not.toContain('pain.intervention.override');
+    // While recording the injection itself is an ordinary clinical key.
+    expect(permission('pain.intervention.perform').risk).toBe('medium');
+  });
+
+  it('makes revoking a treatment agreement reasoned, because it stops every future opioid', () => {
+    const revoke = permission('pain.agreement.revoke');
+    expect(revoke.risk).toBe('high');
+    expect(revoke.requiresReason).toBe(true);
+    // Signing one is ordinary; ending one is not.
+    expect(permission('pain.agreement.sign').risk).toBe('medium');
+    expect(holdersOf('pain.agreement.sign')).toContain('doctor_consultant_opd');
   });
 
   it('gives the OPD nursing floor the second-person key and the giving key alike', () => {

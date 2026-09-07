@@ -1,0 +1,408 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-016 — the pain management clinic
+//
+// Every other Phase-8 console enforces clinical arithmetic. This one enforces
+// governance, and the difference matters: a wrong QTc harms one patient, and a
+// pain clinic with no opioid controls harms a district.
+//
+// ── The morphine equivalent is derived ─────────────────────────────────────
+//
+// MME is the daily dose multiplied by a published conversion factor per drug,
+// and every threshold in opioid prescribing is a line on it — 50 for a naloxone
+// co-prescription, 90 for a second reviewer. A clinic that types its own MME
+// types the number that keeps the prescription under the line, and nobody
+// re-derives it. The factors live in a table so a guideline revision is a data
+// change; the multiplication lives in a trigger so it is not a choice.
+//
+// ── Above 90 MME a second person signs, and says why ───────────────────────
+//
+// Not an alert, not a banner. A prescription at 120 MME with no second reviewer
+// and no justification does not exist as a row. The second reviewer is a
+// different person from the prescriber, by CHECK, because "reviewed by" that is
+// the prescriber's own name is the audit finding rather than the control.
+//
+// ── An opioid needs a live agreement behind it ─────────────────────────────
+//
+// The treatment agreement is the conversation about risks, urine screening,
+// single prescriber and single pharmacy, and it expires. A chronic opioid
+// prescription with no agreement, or one that lapsed, is refused — because the
+// agreement is what makes the rest of the governance enforceable, and a clinic
+// that lets it lapse quietly is a clinic with none.
+//
+// ── Steroid has an annual ceiling, and it is cumulative ────────────────────
+//
+// The injections a pain clinic gives are triamcinolone-equivalent milligrams
+// that accumulate across the year, across sites, across doctors. Nobody adds
+// them up, and the harm — adrenal suppression, avascular necrosis — arrives
+// years later attached to no single injection. It is summed here, and the one
+// that would cross the ceiling is refused.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PainType {
+  acute
+  subacute
+  chronic
+  cancer
+  /// Acute pain service, inpatient. A different governance world: the ward
+  /// holds the drug and the clinic holds the plan.
+  aps_inpatient
+
+  @@schema("specialty")
+}
+
+enum PainMechanism {
+  nociceptive
+  neuropathic
+  /// Central sensitisation. The mechanism most often treated as if it were the
+  /// first, with opioids that do not work on it.
+  nociplastic
+  mixed
+
+  @@schema("specialty")
+}
+
+enum PainEpisodeStatus {
+  active
+  discharged
+  lost_to_followup
+  transferred
+
+  @@schema("specialty")
+}
+
+enum OpioidAgreementStatus {
+  active
+  expired
+  revoked
+
+  @@schema("specialty")
+}
+
+enum InterventionOutcome {
+  good
+  partial
+  none
+
+  @@schema("specialty")
+}
+
+/// The published conversion factors, as data rather than as a constant.
+///
+/// Guidelines revise these — the CDC's fentanyl and methadone factors have
+/// changed more than once — and a revision has to be a dated row rather than a
+/// deploy, because a prescription written last year was written against last
+/// year's factor and the audit will ask.
+model OpioidConversionFactor {
+  id String @id @db.Uuid
+
+  /// `morphine`, `tramadol`, `fentanyl_patch`, `buprenorphine_patch`.
+  drugKey String @map("drug_key") @db.VarChar(60)
+  /// `oral`, `transdermal`, `iv`, `sc`. The same drug converts differently.
+  route String @db.VarChar(20)
+
+  /// Milligrams of oral morphine per milligram (or per microgram/hour) of this.
+  /// Methadone is dose-dependent in reality; `notes` carries that, and a
+  /// hospital that prescribes it configures a conservative single factor.
+  factor Decimal @db.Decimal(8, 4)
+  /// `mg` or `mcg_per_hour`, so a patch is not multiplied as if it were a
+  /// tablet.
+  unit String @db.VarChar(20)
+
+  source    String   @db.VarChar(120)
+  notes     String?  @db.Text
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([drugKey, route, effectiveFrom])
+  @@map("opioid_conversion_factors")
+  @@schema("mdm")
+}
+
+/// A pain problem, followed for as long as it lasts.
+model PainEpisode {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  referralId String? @map("referral_id") @db.Uuid
+
+  type          PainType
+  mechanism     PainMechanism?
+  primaryDxIcd10 String?       @map("primary_dx_icd10") @db.VarChar(16)
+  onsetDate     DateTime?      @map("onset_date") @db.Date
+
+  /// `[{region, side, severity}]` on the standard body map.
+  sites Json @default("[]")
+
+  leadPhysicianId String @map("lead_physician_id") @db.Uuid
+
+  /// Whether this episode involves opioids at all. Turning it on is what makes
+  /// the agreement and the MME governance apply, so it is a column rather than
+  /// something inferred from a prescription that has not been written yet.
+  opioidTherapy Boolean @default(false) @map("opioid_therapy")
+
+  /// Opioid Risk Tool and SOAPP, with their components. The instruments a
+  /// clinic is expected to have run before starting chronic opioids.
+  riskScores Json @default("{}") @map("risk_scores")
+
+  status PainEpisodeStatus @default(active)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assessments   PainAssessment[]
+  agreements    OpioidAgreement[]
+  prescriptions OpioidPrescriptionLog[]
+  interventions PainIntervention[]
+
+  @@index([hospitalId, patientId, status])
+  @@index([hospitalId, branchId, status, createdAt(sort: Desc)])
+  @@index([hospitalId, opioidTherapy, status])
+  @@map("pain_episodes")
+  @@schema("specialty")
+}
+
+/// What the pain was, on one day, on the instruments.
+model PainAssessment {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  episodeId   String  @map("episode_id") @db.Uuid
+  encounterId String? @map("encounter_id") @db.Uuid
+
+  /// `initial`, `followup`, `pre_procedure`, `post_procedure`, `tele`,
+  /// `diary_summary`.
+  kind String @db.VarChar(24)
+
+  /// The numbers a pain clinic actually tracks: now, average, worst, least.
+  nrsNow   Int? @map("nrs_now")
+  nrsAvg   Int? @map("nrs_avg")
+  nrsWorst Int? @map("nrs_worst")
+  nrsLeast Int? @map("nrs_least")
+  /// Which scale was used. A four-year-old is scored on faces and an intubated
+  /// patient on behaviour, and comparing the three as if they were one number
+  /// is how a trend lies.
+  scale String @default("nrs") @db.VarChar(16)
+
+  /// `{bpi, dn4, lanss, paindetect, phq9, gad7, pcs, tsk, odi, ndi}` with
+  /// components. The neuropathic screeners matter most: they are what says an
+  /// opioid will not work.
+  instruments Json @default("{}")
+
+  sleep       String? @db.VarChar(40)
+  /// Patient Global Impression of Change. The one outcome that asks the patient.
+  pgic        Int?
+  workStatus  String? @map("work_status") @db.VarChar(40)
+  sideEffects Json    @default("{}") @map("side_effects")
+
+  formResponseId String? @map("form_response_id") @db.Uuid
+
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy String   @map("recorded_by") @db.Uuid
+
+  episode PainEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, episodeId, recordedAt(sort: Desc)])
+  @@map("pain_assessments")
+  @@schema("specialty")
+}
+
+/// The conversation, signed and dated.
+model OpioidAgreement {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+
+  consentId String? @map("consent_id") @db.Uuid
+  /// Which version of the terms the patient signed. A clinic that revises its
+  /// agreement and cannot say who signed which version has not revised it.
+  termsVersion String @map("terms_version") @db.VarChar(24)
+
+  signedAt DateTime  @map("signed_at") @db.Timestamptz(6)
+  validTo  DateTime  @map("valid_to") @db.Date
+
+  status OpioidAgreementStatus @default(active)
+
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedReason String?   @map("revoked_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode PainEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, patientId, status, validTo])
+  @@map("opioid_agreements")
+  @@schema("specialty")
+}
+
+/// Every opioid this clinic has prescribed, with what it converts to.
+///
+/// A log rather than the prescription itself: OP-002 owns the prescription and
+/// OP-003's narcotic register owns the dispensing. What lives here is the
+/// governance view — the morphine equivalent, the agreement it was written
+/// under, the second reviewer above the threshold — because that view has to be
+/// queryable across prescribers and across months, which neither of the others
+/// is built for.
+model OpioidPrescriptionLog {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+
+  /// The OP-002 prescription this records.
+  rxId String? @map("rx_id") @db.Uuid
+
+  drugKey  String @map("drug_key") @db.VarChar(60)
+  drugName String @map("drug_name") @db.VarChar(160)
+  route    String @db.VarChar(20)
+  strength String @db.VarChar(60)
+
+  /// Milligrams a day, or micrograms an hour for a patch. The one number the
+  /// conversion is applied to.
+  dailyDose Decimal @map("daily_dose") @db.Decimal(10, 3)
+  doseUnit  String  @map("dose_unit") @db.VarChar(20)
+
+  /// Derived by a trigger from `daily_dose` and the effective conversion
+  /// factor. Never typed: every threshold in opioid prescribing is a line on
+  /// this, and a typed MME is the number that keeps a prescription under one.
+  mme Decimal? @db.Decimal(10, 2)
+  /// Which factor row was used, so a prescription written under last year's
+  /// guideline can still be explained.
+  conversionFactorId String? @map("conversion_factor_id") @db.Uuid
+
+  daysSupply Int     @map("days_supply")
+  quantity   Decimal @db.Decimal(10, 2)
+
+  startDate DateTime  @map("start_date") @db.Date
+  /// Derived: `start_date` + `days_supply`. What an overlap is computed against.
+  endDate   DateTime? @map("end_date") @db.Date
+
+  /// The agreement live at the time. A trigger requires one for chronic
+  /// therapy, and records which.
+  agreementId String? @map("agreement_id") @db.Uuid
+
+  /// Above the review threshold both of these are required, and the reviewer
+  /// is a different person from the prescriber.
+  justification    String? @db.Text
+  secondReviewerId String? @map("second_reviewer_id") @db.Uuid
+  secondReviewedAt DateTime? @map("second_reviewed_at") @db.Timestamptz(6)
+
+  /// Above the co-prescription threshold, naloxone is supplied or the record
+  /// says why not.
+  naloxonePrescribed Boolean @default(false) @map("naloxone_prescribed")
+  naloxoneDeclined   String? @map("naloxone_declined") @db.Text
+
+  /// When the last urine drug screen was, at the time of prescribing.
+  udsLastAt DateTime? @map("uds_last_at") @db.Date
+
+  prescriberId String @map("prescriber_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode PainEpisode @relation(fields: [episodeId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, patientId, startDate(sort: Desc)])
+  @@index([hospitalId, branchId, createdAt(sort: Desc)])
+  @@index([hospitalId, patientId, drugKey, startDate])
+  @@map("opioid_prescription_log")
+  @@schema("specialty")
+}
+
+/// A block, an ablation or an injection.
+model PainIntervention {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+
+  /// The OP-010 procedure record, which carries the consent, the time-out and
+  /// the recovery. This carries only what a pain intervention adds.
+  procedureId String? @map("procedure_id") @db.Uuid
+
+  interventionCode String     @map("intervention_code") @db.VarChar(40)
+  name             String     @db.VarChar(160)
+  /// `["L4-L5", "L5-S1"]`.
+  levels           Json       @default("[]")
+  side             Laterality @default(not_applicable)
+  /// Fluoroscopy, ultrasound, CT or landmark. A landmark technique for a block
+  /// that guidelines say needs imaging is a finding.
+  guidance String @db.VarChar(20)
+
+  /// `[{drug, doseMg, volumeMl}]`.
+  drugs Json @default("[]")
+
+  /// Triamcinolone-equivalent milligrams. Summed into the annual exposure, and
+  /// the injection that would cross the ceiling is refused.
+  steroidMgEquiv Decimal? @map("steroid_mg_equiv") @db.Decimal(8, 2)
+
+  /// Radiofrequency parameters, contrast pattern, screening time and dose.
+  rfParams        Json    @default("{}") @map("rf_params")
+  contrastPattern String? @map("contrast_pattern") @db.VarChar(80)
+  fluoroSec       Int?    @map("fluoro_sec")
+  doseMgy         Decimal? @map("dose_mgy") @db.Decimal(10, 2)
+
+  /// Before, and thirty minutes after. An intervention with no post score is
+  /// an intervention nobody can say worked, and a clinic full of them cannot
+  /// tell a block that helps from one that does not.
+  nrsPre       Int? @map("nrs_pre")
+  nrsPost30min Int? @map("nrs_post_30min")
+  sensoryBlock String? @map("sensory_block") @db.VarChar(80)
+
+  complications Json @default("{}")
+  outcome       InterventionOutcome?
+
+  /// `{nrs, reliefPct, durationDays, function}` at two and six weeks.
+  followup2w Json @default("{}") @map("followup_2w")
+  followup6w Json @default("{}") @map("followup_6w")
+
+  performedBy String   @map("performed_by") @db.Uuid
+  performedAt DateTime @default(now()) @map("performed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode PainEpisode @relation(fields: [episodeId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, episodeId, performedAt(sort: Desc)])
+  @@index([hospitalId, branchId, interventionCode, performedAt])
+  @@map("pain_interventions")
+  @@schema("specialty")
+}
+
+/// How much steroid this patient has had this year, kept by the database.
+///
+/// A rolled-up row rather than a query, because the ceiling has to be checked
+/// on every injection and a sum over a year of interventions is not something
+/// to compute inside a trigger on a busy list. Maintained by that trigger, and
+/// the application cannot write it.
+model SteroidExposure {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  /// Calendar year. The ceiling is an annual one in every guideline that states
+  /// one, so a rolling window would be a different rule than the one clinicians
+  /// think they are following.
+  year Int
+
+  cumulativeMg Decimal  @default(0) @map("cumulative_mg") @db.Decimal(10, 2)
+  injections   Int      @default(0)
+  lastAt       DateTime? @map("last_at") @db.Timestamptz(6)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, patientId, year], map: "uq_steroid_exposure_year")
+  @@index([hospitalId, year, cumulativeMg(sort: Desc)])
+  @@map("pain_steroid_exposure")
+  @@schema("specialty")
+}

@@ -8,6 +8,8 @@ import { DentalService } from './consoles/dental.service.js';
 import { DermatologyService } from './consoles/dermatology.service.js';
 import { EntService } from './consoles/ent.service.js';
 import { PulmonologyService } from './consoles/pulmonology.service.js';
+import { PainController } from './pain/pain.controller.js';
+import { PainService } from './pain/pain.service.js';
 import { NutritionService } from './therapy/nutrition.service.js';
 import { SpeechService } from './therapy/speech.service.js';
 import { TherapyController } from './therapy/therapy.controller.js';
@@ -33,6 +35,7 @@ export const SPECIALTY_CONTROLLERS: Type<unknown>[] = [
   OphthalmologyController,
   ConsolesController,
   TherapyController,
+  PainController,
 ];
 
 export const SPECIALTY_PROVIDERS: Provider[] = [
@@ -58,6 +61,11 @@ export const SPECIALTY_PROVIDERS: Provider[] = [
   WoundService,
   NutritionService,
   SpeechService,
+
+  // OP-016. On its own, because its rules are governance rather than clinical
+  // arithmetic: the morphine equivalent, the second reviewer, the treatment
+  // agreement and the annual steroid ceiling.
+  PainService,
 ];
 
 @Module({
@@ -76,6 +84,7 @@ export const SPECIALTY_PROVIDERS: Provider[] = [
     WoundService,
     NutritionService,
     SpeechService,
+    PainService,
   ],
 })
 export class SpecialtyModule {}

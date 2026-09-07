@@ -368,6 +368,10 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'The speech therapy console is not included in your plan.',
     upgradeCta: 'Ask about Specialty Consoles',
   }),
+  ep('module.pain_clinic.enabled', 'feature', 'route', 'OP-016 The pain management clinic.', {
+    message: 'The pain management console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
   ep(
     'module.procedures.enabled',
     'feature',

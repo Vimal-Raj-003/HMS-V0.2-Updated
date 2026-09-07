@@ -368,6 +368,68 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
     type: ProblemType.VALIDATION_FAILED,
     detail: 'IDDSI numbers food 3 to 7 and drinks 0 to 4.',
   },
+  // ── OP-016 ────────────────────────────────────────────────────────────────
+  a_second_reviewer_is_a_second_person: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A prescription cannot be countersigned by the person who wrote it. A review carrying the prescriber\u2019s own name is the audit finding rather than the control.',
+  },
+  a_review_is_a_person_and_a_time: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A countersignature records who reviewed it and when.',
+  },
+  a_prescription_supplies_something: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A prescription has a positive daily dose, a positive days supply and a quantity.',
+  },
+  an_agreement_expires: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'An opioid treatment agreement runs to a date after it was signed. One that never expires is one nobody revisits.',
+  },
+  a_revoked_agreement_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'Revoking an agreement records why. Every further opioid on the episode is refused from that moment, and the patient will be at the counter when it happens.',
+  },
+  uq_one_live_opioid_agreement: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'This episode already has an agreement in force. Two is a patient who signed two sets of terms and a clinic that will quote whichever suits.',
+    nextAction: 'Revoke the existing agreement with a reason before signing a new one.',
+  },
+  an_outcome_rests_on_a_measurement: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'An intervention with an outcome records the pain score before and thirty minutes after. \u201cGood\u201d with no numbers is a clinic that cannot tell an injection that works from one that does not.',
+  },
+  intervention_scores_are_zero_to_ten: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Pain scores run from 0 to 10.',
+  },
+  guidance_is_recorded: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'Record how the needle was guided: fluoroscopy, ultrasound, CT, landmark or endoscopic. A landmark technique where guidelines expect imaging is a finding, and an unrecorded one is invisible.',
+  },
+  pain_scores_are_zero_to_ten: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Pain scores run from 0 to 10, and the global impression of change from 1 to 7.',
+  },
+  worst_is_not_below_least: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'The worst pain cannot be below the least. That is a form filled in the wrong order, and every trend built on it is wrong.',
+  },
+  a_conversion_factor_converts: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A conversion factor is positive, and is per milligram or per microgram an hour.',
+  },
+  a_factor_period_runs_forwards: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A conversion factor ends on or after the day it takes effect.',
+  },
+
   uq_one_live_swallow_order: {
     type: ProblemType.CONFLICT,
     detail:

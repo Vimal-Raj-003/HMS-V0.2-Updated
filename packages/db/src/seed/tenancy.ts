@@ -299,6 +299,7 @@ const DEPARTMENTS: readonly (readonly [string, string, string])[] = [
   ['ENT', 'ENT & Audiology', 'clinical'],
   ['DENTAL', 'Dentistry', 'clinical'],
   ['DERM', 'Dermatology', 'clinical'],
+  ['PAIN', 'Pain Management', 'clinical'],
   ['LAB', 'Laboratory Medicine', 'diagnostic'],
   ['RAD', 'Radiology & Imaging', 'diagnostic'],
   ['PHARM', 'Pharmacy', 'support'],

@@ -401,6 +401,86 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-13 · Phase 8 · OP-016 — the console where the rules are governance
+
+**Built — the pain management clinic, complete.** 7 tables, 11 permission keys,
+3 events, 1 entitlement, 1 screen, 13 integration tests, 35 database rules
+proven live in both directions.
+
+Deliberately on its own, and built last of the group, because it is the only
+console in Phase 8 whose rules are not clinical arithmetic. Everywhere else a
+wrong number harms one patient; here a clinic with no controls harms a district.
+
+**The morphine equivalent is derived, like everything else in this phase — but
+the reason is different.** MME is the daily dose times a published conversion
+factor, and every threshold in opioid prescribing is a line on it: 50 for a
+naloxone co-prescription, 90 for a second reviewer. A clinic that can type its
+own MME types the number that keeps the prescription under the line, and nobody
+re-derives it. The factors live in a **dated** table, so a guideline revision is
+a data change and a prescription written last year can still be explained by the
+factor it was actually written against.
+
+**Two of the seeded factors are deliberately conservative, and say so in their
+own rows.** Methadone's real factor rises steeply above 60 mg a day and no
+single number is safe across the range, so the seeded one is the _highest_
+published band — a clinic prescribing it over-estimates the equivalent rather
+than under, erring toward the second reviewer rather than away. Buprenorphine's
+ceiling effect makes a linear equivalent misleading in both directions; it is
+included anyway, because omitting it would refuse the prescription outright and
+a refusal a clinic cannot resolve is a rule they find a way around.
+
+**The thresholds bite rather than warn:**
+
+- at 50 MME, take-home naloxone is supplied or the record says why not — the
+  co-prescription with the best evidence behind it in opioid safety, skipped
+  because nobody was asked;
+- at 90 MME a second prescriber signs and says why, and **the reviewer is never
+  the prescriber** — by CHECK, by a grant split no template crosses, and by a
+  service that refuses it before the database does;
+- chronic and cancer episodes need a **live treatment agreement**, acute ones do
+  not, and revoking one stops every further opioid from that moment;
+- steroid accumulates **across sites, doctors and the whole year**, and the
+  injection that would cross the annual ceiling is refused.
+
+**And there is no way past the steroid ceiling.** Every other console in this
+phase has exactly one documented override, because every other rule has a
+legitimate exception. This one does not: the ceiling already sits at the
+permissive end of the published range, the harm — adrenal suppression, avascular
+necrosis — arrives years later attached to no single injection, and a clinic
+that needs to exceed it needs a different treatment rather than a different
+permission. There is no key, no route and no flag, and a test asserts all three
+absences so adding one later is a decision somebody has to argue for.
+
+**Three defects the tests found.** The platform's own permission decorator
+refused `requiresSecondPerson` on the review route, and it was right: that flag
+means "this act needs a co-signer attached" and `PolicyGuard` evaluates it
+without one, so the route would have denied everybody. The flag was decoration
+over two mechanisms that already work — the grant split and the CHECK — and it
+is gone. Second, my own §C revoke of `UPDATE` on the opioid log made the
+countersignature impossible; it is now a **column-level** grant covering exactly
+the four fields a review writes, which is a better rule than the blanket one.
+Third, a CHECK on submitted data is a 400 rather than a 409, and the test
+expectation was what was wrong.
+
+**Deferred, recorded.** The titration and taper schedules on `pain_plans`
+(OP-016 §4), the cross-prescriber duplicate check against a state PDMP feed —
+which needs an integration India does not yet have a national equivalent of —
+and the neuromodulation device registry.
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module. Tracked, unchanged.
+
+**Gates** — 13/13 packages typecheck, lint and test (3,012 unit tests); 615 API
+integration tests across 24 files; 51 migrations; 780 non-partition tables;
+1,269 permission keys; 803 events; 56 entitlements; 68 role templates; 14 seeded
+consoles with 70 device result types; 95 screens.
+
+**Next:** the programme consoles — OP-013 vaccination, OP-014 the health
+check-up factory, and OP-012/IP-022 dialysis. A third shape again: the unit is a
+_schedule_ a patient is enrolled on and defaults from, and the rule that matters
+is that a dose given out of sequence, or a package sold and not delivered, is
+visible rather than absorbed.
+
 ### 2026-09-12 · Phase 8 · OP-015, OP-017, OP-011, OP-035 — one spine, four disciplines
 
 **Built — the therapy consoles, complete.** 14 tables, 29 permission keys, 4

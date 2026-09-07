@@ -10761,6 +10761,62 @@ const therapyEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — OP-016, the pain management clinic.
+ *
+ * Three events, and all three exist because opioid governance is a thing a
+ * *clinic* has to see rather than a prescriber: a dose crossing the review
+ * threshold, an agreement about to lapse, and a patient approaching the annual
+ * steroid ceiling. Each of them is invisible to the person in the consultation,
+ * because each is a fact about the year rather than about today.
+ */
+const painClinicEvents: readonly EventDefinition[] = [
+  ev(
+    'pain.opioid.high_dose',
+    'opioid_prescription',
+    'OP-016',
+    'An opioid was prescribed at or above the review threshold, with its countersignature. Leaves the console because a clinic’s controlled-drug governance is a view across prescribers and months, which no single consultation can see.',
+    z.object({
+      logId: uuid,
+      patientId: uuid,
+      episodeId: uuid,
+      drugKey: z.string(),
+      mme: z.string(),
+      prescriberId: uuid,
+      secondReviewerId: uuid,
+    }),
+    { containsPhi: true, retentionDays: 5475 },
+  ),
+  ev(
+    'pain.agreement.expiring',
+    'opioid_agreement',
+    'OP-016',
+    'An opioid treatment agreement is close to expiry. Leaves the console because the day it lapses every further prescription on the episode is refused, and the patient finds out at the counter.',
+    z.object({
+      agreementId: uuid,
+      patientId: uuid,
+      episodeId: uuid,
+      validTo: z.string(),
+      daysRemaining: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 2555 },
+  ),
+  ev(
+    'pain.steroid.ceiling_near',
+    'pain_intervention',
+    'OP-016',
+    'A patient is approaching the annual triamcinolone-equivalent ceiling. Leaves the console because the next injection will be refused and the clinic books weeks ahead — and because the harm accumulates across doctors who each gave a reasonable dose.',
+    z.object({
+      patientId: uuid,
+      year: z.number().int(),
+      cumulativeMg: z.string(),
+      ceilingMg: z.string(),
+      injections: z.number().int(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+];
+
+/**
  * Phase 8 — OP-010 and OP-039, the procedure spine.
  *
  * `procedure.started` carries what was checked before it began, because the
@@ -10959,6 +11015,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...ophthalmologyEvents,
   ...deviceConsoleEvents,
   ...therapyEvents,
+  ...painClinicEvents,
   ...procedureEvents,
 ]);
 

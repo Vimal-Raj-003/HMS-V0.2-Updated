@@ -133,6 +133,24 @@ export async function seedSpecialtyConsoles(ctx: SeedContext, tenancy: SeededTen
       ],
     },
     {
+      code: 'PAIN',
+      name: 'Pain Management',
+      moduleKey: 'module.pain_clinic.enabled',
+      department: 'PAIN',
+      sortOrder: 70,
+      worklist: { lanes: ['triage', 'doctor', 'intervention', 'review', 'counselling'] },
+      billing: { consultation: 'PAI-CONS' },
+      devices: [
+        // Everything a pain clinic images is guidance for a needle, and every
+        // one of them names a side.
+        ['FLUORO_SPINE', 'Fluoroscopic spinal imaging', 'dicom', true, 'PAI-FLUORO'],
+        ['USG_BLOCK', 'Ultrasound-guided block imaging', 'file', true, 'PAI-USG'],
+        ['MRI_SPINE_REVIEW', 'MRI spine, review copy', 'dicom', false, 'PAI-MRI'],
+        ['EMG_NCS', 'Electromyography and nerve conduction', 'file', true, 'PAI-EMG'],
+        ['THERMOGRAPHY', 'Infrared thermography', 'file', true, 'PAI-THERMO'],
+      ],
+    },
+    {
       code: 'DERM',
       name: 'Dermatology',
       moduleKey: 'module.dermatology.enabled',

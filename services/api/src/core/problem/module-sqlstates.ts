@@ -50,6 +50,7 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'OP017', // wound care: the derived area and trajectory, the wound that heals by closing
   'OP011', // dietetics: totals summed from the meals, and a plan that keeps its own restriction
   'OP035', // speech and swallow: the complete IDDSI order, and the kitchen that has read it
+  'OP016', // pain: the derived morphine equivalent, the second reviewer, the agreement, the steroid ceiling
 ]);
 
 /**
