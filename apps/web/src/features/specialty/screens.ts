@@ -455,6 +455,32 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: 'module.antenatal.enabled',
   },
+  {
+    key: 'labour-board',
+    label: 'Labour room',
+    href: '/labour/board',
+    area: 'specialty',
+    permission: 'obs.labour.read',
+    summary:
+      'Who is in labour, where they are against the line, and the three things that need somebody now \u2014 a stopped chart, a haemorrhage, and a wristband that did not match.',
+    deniedExplanation:
+      'The chart and the birth belong to the midwifery floor. The decision at the action line is a doctor\u2019s, and Form 1 is medical records\u2019, because a statutory return to a Registrar is not a clinical note.',
+    keywords: [
+      'labour',
+      'delivery',
+      'partograph',
+      'action line',
+      'newborn',
+      'apgar',
+      'pph',
+      'haemorrhage',
+      'wristband',
+      'birth certificate',
+      'form 1',
+      'obstetrics',
+    ],
+    entitlement: 'module.labour_room.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

@@ -400,6 +400,15 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'The antenatal console is not included in your plan.',
     upgradeCta: 'Ask about Specialty Consoles',
   }),
+  // The labour room's *console* is gated; every clinical act inside it carries
+  // `clinicalSafetyExempt` or is a statutory return, so a hospital in arrears
+  // can still chart a labour, record a birth and file Form 1. A woman in labour
+  // does not wait for a subscription, and a birth that cannot be recorded is a
+  // child without a registration.
+  ep('module.labour_room.enabled', 'feature', 'route', 'IP-011 The labour room and the newborn.', {
+    message: 'The labour room console is not included in your plan.',
+    upgradeCta: 'Ask about Hospital Clinical',
+  }),
   ep(
     'module.procedures.enabled',
     'feature',

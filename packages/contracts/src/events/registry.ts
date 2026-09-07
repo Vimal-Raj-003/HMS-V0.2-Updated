@@ -10817,6 +10817,109 @@ const painClinicEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — IP-011, the labour room and the newborn.
+ *
+ * Six events. Four of them leave because somebody outside the room has to move
+ * within minutes — a registrar to the action line, a paediatrician to a
+ * resuscitation, a blood bank to a haemorrhage, security to a wristband
+ * mismatch. The other two are the two things a birth produces: a new patient,
+ * and a statutory return with a twenty-one-day clock on it.
+ */
+const labourRoomEvents: readonly EventDefinition[] = [
+  ev(
+    'lr.partograph.action_line',
+    'partograph_alert',
+    'IP-011',
+    'A labour crossed the action line and the chart has stopped. Leaves immediately: the point of the line is that a decision now happens, and the person who makes it is usually not in the room.',
+    z.object({
+      alertId: uuid,
+      episodeId: uuid,
+      patientId: uuid,
+      dilatationCm: z.number().int(),
+      expectedCm: z.string(),
+      hoursBehind: z.string(),
+      raisedAt: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'lr.fhr.abnormal',
+    'partograph_alert',
+    'IP-011',
+    'A fetal heart rate outside 110–160. Leaves in the same breath it is recorded, because a bradycardia needs somebody at the bedside in seconds and the chart is not where anybody is looking.',
+    z.object({
+      alertId: uuid,
+      episodeId: uuid,
+      patientId: uuid,
+      fhr: z.number().int(),
+      raisedAt: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'lr.newborn.registered',
+    'newborn',
+    'IP-011',
+    'A baby was born and now has their own hospital number. Drives the birth-dose vaccines, the metabolic screen, the paediatric review and every downstream record this person will ever have.',
+    z.object({
+      newbornId: uuid,
+      patientId: uuid,
+      motherPatientId: uuid,
+      deliveryId: uuid,
+      birthAt: z.string(),
+      sex: z.string(),
+      status: z.string(),
+      birthWeightG: z.number().int().nullable(),
+      wristbandPairCode: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 36500 },
+  ),
+  ev(
+    'lr.pph.activated',
+    'pph_activation',
+    'IP-011',
+    'The postpartum haemorrhage protocol is running. Leaves at once: it is the leading cause of maternal death in India, the response is a team rather than a person, and the blood bank has to be moving before anybody rings them.',
+    z.object({
+      activationId: uuid,
+      deliveryId: uuid,
+      patientId: uuid,
+      trigger: z.string(),
+      eblMl: z.number().int().nullable(),
+      activatedAt: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'lr.identity.mismatch',
+    'newborn_identity_check',
+    'IP-011',
+    'A wristband pair did not match at a handover. Leaves to security and to the nurse in charge, because the alternative explanation for two bands that disagree is that two babies have been exchanged.',
+    z.object({
+      checkId: uuid,
+      newbornId: uuid,
+      motherBandScan: z.string(),
+      babyBandScan: z.string(),
+      context: z.string(),
+      checkedAt: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 36500 },
+  ),
+  ev(
+    'lr.birth.reportable',
+    'birth_report',
+    'IP-011',
+    'A birth is due for registration. Twenty-one days from the birth, after which the family needs a magistrate — and finds out when the child is five and needs a school place.',
+    z.object({
+      reportId: uuid,
+      newbornId: uuid,
+      birthAt: z.string(),
+      dueBy: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 36500 },
+  ),
+];
+
+/**
  * Phase 8 — OP-040, the antenatal clinic.
  *
  * Five events, and three of them exist because somebody outside the clinic has
@@ -11261,6 +11364,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...programmeEvents,
   ...dialysisEvents,
   ...antenatalEvents,
+  ...labourRoomEvents,
   ...procedureEvents,
 ]);
 

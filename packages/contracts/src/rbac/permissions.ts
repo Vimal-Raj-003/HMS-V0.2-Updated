@@ -11276,6 +11276,115 @@ const OP040 = group('OP-040', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — IP-011, the labour room and the newborn
+//
+// The keys divide by who is in the room. A midwife runs the labour and the
+// chart; the decision at the action line is a doctor's; the baby's own record
+// is nursing's and paediatrics'; and the birth report belongs to medical
+// records, because it is a statutory return rather than a clinical note.
+//
+// ── There is no key that plots past the action line ────────────────────────
+//
+// Not unassigned — absent. The line's whole function is that crossing it forces
+// a decision, and a permission to continue without one would be the failure the
+// line exists to prevent, with a name attached. What *is* a decision is
+// `continue_expectantly`, which is a real and sometimes correct choice — it
+// simply has to be written down beside the other four.
+//
+// ── And none that resolves a wristband mismatch ────────────────────────────
+//
+// A mismatch is resolved by scanning again, not by overriding. Babies are
+// swapped in busy units and there is no remedy afterwards, so the only way past
+// an unmatched pair is a matched one.
+// ═════════════════════════════════════════════════════════════════════════════
+const IP011 = group('IP-011', 8, [
+  p(
+    'obs.labour.read',
+    'labour_episode',
+    'read',
+    'phi',
+    'low',
+    'Read the labour board, the partograph and its alerts.',
+    { phiRead: true },
+  ),
+  p(
+    'obs.labour.admit',
+    'labour_episode',
+    'create',
+    'phi',
+    'medium',
+    'Admit a woman in labour and open the chart, with her antenatal record and risk flags carried across.',
+  ),
+  p(
+    'obs.partograph.write',
+    'partograph_entry',
+    'record',
+    'phi',
+    'medium',
+    'Plot the chart. The alert and action lines are computed, and crossing the action line stops the chart until a decision is recorded.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'obs.partograph.decide',
+    'partograph_alert',
+    'approve',
+    'phi',
+    'medium',
+    'Record the decision at the alert or action line — augment, assist, caesarean, refer, or continue expectantly with a reason. This is what releases the chart.',
+    { requiresReason: true },
+  ),
+  p(
+    'obs.delivery.write',
+    'delivery',
+    'create',
+    'phi',
+    'medium',
+    'Record the birth: the mode, the third stage with its one-minute uterotonic window, the blood loss and how it was measured. Creates the baby’s own patient record.',
+  ),
+  p(
+    'obs.pph.manage',
+    'pph_activation',
+    'record',
+    'phi',
+    'medium',
+    'Run the postpartum haemorrhage protocol. Blood loss over the threshold activates it by itself; this key records the steps and closes it.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'obs.newborn.write',
+    'newborn',
+    'record',
+    'phi',
+    'medium',
+    'The baby’s record: APGAR, resuscitation, weights, vitamin K, feeding, and the newborn examination.',
+  ),
+  p(
+    'obs.identity.verify',
+    'newborn_identity_check',
+    'record',
+    'phi',
+    'medium',
+    'Scan both wristbands at a handover. The database decides whether they match, and a baby does not move on a pair that does not.',
+  ),
+  p(
+    'obs.birth.report',
+    'birth_report',
+    'record',
+    'phi',
+    'medium',
+    'Draft, verify and submit Form 1 to the Registrar. Twenty-one days from the birth, after which registration needs a magistrate.',
+  ),
+  p(
+    'obs.report.read',
+    'obs_report',
+    'read',
+    'phi',
+    'low',
+    'Caesarean rate by Robson group, third-stage compliance, haemorrhage activations, APGAR distribution and birth registrations outstanding.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -11385,6 +11494,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP014,
   ...OP012,
   ...OP040,
+  ...IP011,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

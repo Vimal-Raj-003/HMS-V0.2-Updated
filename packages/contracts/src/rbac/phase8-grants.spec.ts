@@ -822,4 +822,45 @@ describe('OP-010 — the procedure floor', () => {
     expect(getRoleTemplate('nurse_opd')?.permissions).not.toContain('obg.edd.override');
     expect(getRoleTemplate('doctor_consultant_opd')?.permissions).toContain('obg.edd.override');
   });
+  it('offers no key that plots past the action line or overrides a wristband', () => {
+    // The line's whole function is that crossing it forces a decision. A
+    // permission to continue without one would be the failure it exists to
+    // prevent, with a name attached. And a wristband mismatch is resolved by
+    // scanning again — there is no remedy for a baby swapped years ago.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    for (const absent of [
+      'obs.partograph.override',
+      'obs.partograph.force',
+      'obs.identity.override',
+      'obs.identity.force',
+      'obs.newborn.unlink',
+    ]) {
+      expect(keys, absent).not.toContain(absent);
+    }
+    // What exists is the decision itself, which includes continuing — with a
+    // reason beside it.
+    expect(permission('obs.partograph.decide').requiresReason).toBe(true);
+  });
+
+  it('gives the midwife the chart and the obstetrician the decision', () => {
+    const nurse = getRoleTemplate('nurse_ward')?.permissions ?? [];
+    expect(nurse).toContain('obs.partograph.write');
+    expect(nurse).toContain('obs.delivery.write');
+    expect(nurse).toContain('obs.identity.verify');
+    // The five things the action line names are a doctor's to choose.
+    expect(nurse).not.toContain('obs.partograph.decide');
+    expect(getRoleTemplate('doctor_ip')?.permissions).toContain('obs.partograph.decide');
+  });
+
+  it('never lets a licence stop a labour being charted', () => {
+    // A hospital in arrears can still plot a partograph and run a haemorrhage
+    // protocol. The console is gated; the clinical acts inside it are not.
+    for (const key of ['obs.partograph.write', 'obs.pph.manage']) {
+      expect(permission(key).clinicalSafetyExempt, key).toBe(true);
+    }
+    // And the birth report belongs to medical records, because a return to a
+    // Registrar is not a clinical note.
+    expect(getRoleTemplate('mrd_officer')?.permissions).toContain('obs.birth.report');
+    expect(getRoleTemplate('nurse_ward')?.permissions).not.toContain('obs.birth.report');
+  });
 });

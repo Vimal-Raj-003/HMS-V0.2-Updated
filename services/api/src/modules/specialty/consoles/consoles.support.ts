@@ -493,6 +493,87 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
     detail: 'A conversion factor ends on or after the day it takes effect.',
   },
 
+  // ── IP-011 ────────────────────────────────────────────────────────────────
+  a_decision_is_one_of_the_five: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A decision at the line is to augment, assist, deliver by caesarean, refer, or continue expectantly. The point of the line is that one of a small number of things now happens.',
+  },
+  a_decision_has_a_decider: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A decision has a name and a time against it.',
+  },
+  continuing_past_the_action_line_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'Continuing past the action line is a real decision and sometimes the right one. It is the one that needs a sentence beside it.',
+  },
+  blood_loss_is_a_volume: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A blood loss runs from 0 to 10,000 mL.',
+  },
+  a_blood_loss_says_how_it_was_measured: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'Record how the blood loss was measured. Visual estimation understates by about a third, so "600 mL by eye" and "600 mL in a calibrated drape" are different facts.',
+  },
+  a_baby_is_numbered_from_one: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Babies in a delivery are numbered from one, in the order they were born.',
+  },
+  an_emergency_caesarean_names_its_indication: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'An emergency caesarean records why. It is the field a Robson audit reads and the one a court asks for.',
+  },
+  a_closed_activation_says_what_happened: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Closing the haemorrhage protocol records how it ended.',
+  },
+  an_apgar_is_out_of_ten: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'An APGAR score runs from 0 to 10.',
+  },
+  a_birth_weight_is_a_birth_weight: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A birth weight runs from 200 to 8,000 grams. A figure under 200 is usually kilograms.',
+  },
+  a_newborn_sex_is_recorded_as_one_of_four: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A newborn is recorded as male, female, ambiguous or unknown.',
+  },
+  a_gestation_at_birth_is_plausible: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A gestation at birth runs from 20 to 45 weeks.',
+  },
+  a_registered_birth_names_its_number: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A registration number arrives with the submission, not before it.',
+  },
+  a_second_stage_follows_an_active_phase: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Full dilatation cannot precede the start of the active phase.',
+  },
+  a_completed_labour_has_an_outcome: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A labour that is finished records how it ended — vaginal, assisted, caesarean, referred or undelivered.',
+  },
+  membranes_that_ruptured_say_when: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'Membranes that have ruptured record the time. The interval to delivery is what decides whether antibiotics are given.',
+  },
+  uq_wristband_pair: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'That wristband pair code is already on another baby at this hospital. The code is what a handover checks, so two babies cannot share one.',
+  },
+  uq_delivery_baby_seq: {
+    type: ProblemType.CONFLICT,
+    detail: 'That baby number is already recorded for this labour.',
+  },
+
   // ── OP-040 ────────────────────────────────────────────────────────────────
   the_obstetric_formula_adds_up: {
     type: ProblemType.VALIDATION_FAILED,

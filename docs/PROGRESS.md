@@ -401,6 +401,87 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-17 · Phase 8 · IP-011 — the labour room and the newborn
+
+**Built — the labour room, complete.** 9 tables, 10 permission keys, 6 events,
+1 entitlement, 1 screen, 19 integration tests, 40 database rules proven live in
+both directions.
+
+The other half of OP-040's journey, and the first console in the build that
+_produces a patient_ rather than recording one. A delivery does not describe a
+person; it makes one, with their own hospital number from the same series as
+everybody else's, and a link to their mother that the rest of their childhood
+depends on.
+
+**The action line is the whole point of a partograph.** Plotting dilatation
+against time and drawing two diagonals across it is one of the most effective
+safety interventions in obstetrics, and it works for exactly one reason:
+crossing the second line is supposed to force a decision. Augment, assist,
+section, refer — but decide, and write down which. What happens in practice is
+that the line is crossed, the chart keeps being filled in, and the decision
+arrives two hours later with a stillbirth or a ruptured uterus attached.
+
+So here, **crossing the action line stops the chart**: the next dilatation
+cannot be plotted until one of five decisions is recorded. "Continue
+expectantly" is one of the five — it is a real and sometimes correct choice, and
+it carries a sentence beside it. What is refused is silence.
+
+The block is deliberately narrow. The fetal heart, the blood pressure, the
+oxytocin and the drugs keep going onto the chart while it is stopped, because a
+rule that slowed the room down would be worse than the one it replaced. An
+abnormal fetal heart raises immediately and blocks nothing, for the same reason:
+a bradycardia needs a person in the room in seconds, and a rule that stopped the
+recording of it would be the opposite of a safety rule.
+
+**The minute after the birth.** Active management of the third stage — a
+uterotonic within one minute — is the single most effective thing anybody does
+about the leading cause of maternal death in India. The delay is _derived_ in
+seconds rather than asserted, because a unit that believes it does this and does
+not is only visible in the distribution of that number. Blood loss at or over
+500 mL vaginal, 1000 mL caesarean activates the haemorrhage protocol by itself:
+nobody activates one a moment too early, they activate it twenty minutes late
+having been sure it was settling. And tranexamic acid is judged against three
+hours **from the birth** rather than from the activation, because inside three
+hours it reduces death from bleeding and after it does not.
+
+**Two bands, one code.** Babies are swapped in busy units; it is discovered
+years later or never, and there is no remedy for the families or the hospital.
+Every handover scans both bands, the database decides whether they match from
+what the scanner read, and a newborn cannot be moved while the last check is
+unmatched. There is no override, because the only way past an unmatched pair is
+a matched one.
+
+**And this is where the sex of the baby is recorded** — the only column in the
+whole obstetric build that names it, because the baby is born and it goes on the
+certificate. OP-040 §B.6 asserts its absence from every antenatal table; this
+migration is the other half of that sentence.
+
+**Two defects the proofs found, both real.** `NULL IN (...)` is NULL and a CHECK
+evaluating to NULL passes, so `CHECK (ebl_ml IS NULL OR ebl_method IN (...))`
+happily accepted a blood loss with no measurement method — which is the case it
+existed for. And a `String(x ?? '')` on a JSON value tripped
+`no-base-to-string`, which was the linter correctly noticing that the value
+might be an object.
+
+**Deferred, recorded.** Cardiotocograph traces and their NICE/FIGO
+classification (EN-042 owns the device listener), newborn metabolic and hearing
+screening (OP-004 orders with their own sample-timing rules), the feeding log
+and fourth-stage observation series (IP-003's vitals with a tag), and
+stillbirth, neonatal-death and maternal-death registers with their reviews
+(NC-015 MDSR).
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module. Tracked, unchanged.
+
+**Gates** — 13/13 packages typecheck, lint and test (3,018 unit tests); 696 API
+integration tests across 28 files; 55 migrations; 859 non-partition tables;
+1,327 permission keys; 823 events; 61 entitlements; 68 role templates; 101
+screens.
+
+**Next:** OP-031 and IP-023, oncology and chemotherapy. The console whose
+central object is a protocol day, and where a dose given on the wrong one is
+lethal in a way no other prescribing error in this build is.
+
 ### 2026-09-16 · Phase 8 · OP-040 — the antenatal clinic
 
 **Built — the antenatal half of obstetrics, complete.** 8 tables, 15 permission

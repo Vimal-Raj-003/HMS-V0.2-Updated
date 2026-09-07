@@ -1,0 +1,447 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · IP-011 — the labour room and the newborn
+//
+// The other half of OP-040's journey, and the first console in the build that
+// *creates a patient*. A delivery does not record a person; it produces one,
+// with their own hospital number, their own record, and a link to their mother
+// that the rest of their childhood depends on.
+//
+// ── The partograph's action line is the point of a partograph ──────────────
+//
+// A labour chart is not a chart. Plotting cervical dilatation against time and
+// drawing two diagonal lines across it is one of the most effective safety
+// interventions in obstetrics, and it works for exactly one reason: crossing
+// the second line is supposed to force a decision. Augment, assist, section, or
+// refer — but decide, and write down which.
+//
+// What happens in practice is that the line is crossed, the chart keeps being
+// filled in, and the decision arrives two hours later with a stillbirth or a
+// ruptured uterus attached. So here, crossing the action line stops the chart:
+// the next dilatation cannot be plotted until somebody has recorded what they
+// decided to do. Observations of mother and baby continue — nothing about this
+// blocks care — but the *chart* does not advance.
+//
+// ── Two bands, and a code that has to match ────────────────────────────────
+//
+// A mother and her baby get a pair of wristbands carrying the same code, and
+// every handover scans both. A mismatch is not a warning. Babies are swapped in
+// busy units, it is discovered years later or never, and there is no remedy.
+//
+// ── And the sex of the baby is recorded here ───────────────────────────────
+//
+// This is the table where it belongs, and the only one in the whole obstetric
+// build that has the column. Before birth there is no lawful use for it and no
+// field for it anywhere (OP-040 §B.6). After birth it is on the birth
+// certificate, and withholding it would be its own kind of nonsense.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PartographStandard {
+  /// Alert line from 4 cm at 1 cm/hour, action line four hours to its right.
+  who_classic
+  /// WHO Labour Care Guide 2020: per-parameter reference thresholds, first
+  /// stage from 5 cm.
+  lcg
+
+  @@schema("specialty")
+}
+
+enum LabourOutcome {
+  vaginal
+  assisted
+  lscs
+  referred
+  undelivered
+
+  @@schema("specialty")
+}
+
+enum DeliveryMode {
+  spontaneous_vaginal
+  vacuum
+  forceps
+  breech
+  lscs_elective
+  lscs_emergency
+
+  @@schema("specialty")
+}
+
+enum NewbornStatus {
+  live
+  stillbirth_fresh
+  stillbirth_macerated
+  neonatal_death
+
+  @@schema("specialty")
+}
+
+/// One labour, from admission to outcome.
+model LabourEpisode {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String  @map("admission_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  /// The antenatal record, when there is one. A woman who arrives in labour
+  /// having booked nowhere still gets an episode.
+  pregnancyId String? @map("pregnancy_id") @db.Uuid
+
+  /// Copied from the pregnancy at admission, or entered. The gestation on the
+  /// labour chart has to be the gestation the paediatrician plans around, and a
+  /// live join to a record that may not exist is not that.
+  eddAtAdmission DateTime? @map("edd_at_admission") @db.Date
+  gpal           Json      @default("{}")
+  riskFlags      String[]  @default([]) @map("risk_flags")
+  bloodGroup     String?   @map("blood_group") @db.VarChar(8)
+  rhNegative     Boolean?  @map("rh_negative")
+
+  onsetAt          DateTime? @map("onset_at") @db.Timestamptz(6)
+  membraneStatus   String?   @map("membrane_status") @db.VarChar(16)
+  membraneRuptureAt DateTime? @map("membrane_rupture_at") @db.Timestamptz(6)
+  liquor           String?   @db.VarChar(24)
+  presentation     String?   @db.VarChar(24)
+  parity           Int       @default(0)
+
+  partographStandard PartographStandard @default(who_classic) @map("partograph_standard")
+  /// When the active phase began. Both alert and action lines are drawn from
+  /// it, so it is the anchor of the whole chart.
+  activePhaseFrom DateTime? @map("active_phase_from") @db.Timestamptz(6)
+  /// When full dilatation was reached — the start of the second-stage clock.
+  secondStageFrom DateTime? @map("second_stage_from") @db.Timestamptz(6)
+  epidural        Boolean   @default(false)
+
+  companionPresent Boolean @default(false) @map("companion_present")
+  consents         Json    @default("{}")
+
+  outcome     LabourOutcome?
+  completedAt DateTime?      @map("completed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  entries    PartographEntry[]
+  alerts     PartographAlert[]
+  deliveries Delivery[]
+
+  @@index([hospitalId, branchId, completedAt])
+  @@index([hospitalId, patientId])
+  @@map("labour_episodes")
+  @@schema("specialty")
+}
+
+/// One observation on the chart.
+model PartographEntry {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+
+  recordedAt DateTime @map("recorded_at") @db.Timestamptz(6)
+  /// `dilatation`, `descent`, `contractions`, `fhr`, `liquor`, `moulding`,
+  /// `caput`, `pulse`, `bp`, `temp`, `urine`, `oxytocin`, `drug`, `fluid`,
+  /// `pain_relief`, `position`, `intake`.
+  param      String   @db.VarChar(24)
+  value      Json
+
+  /// Pulled out of the value for the two parameters the lines are drawn on, so
+  /// the trigger and the chart read one number.
+  dilatationCm Int? @map("dilatation_cm")
+  fhr          Int?
+
+  source     String @default("manual") @db.VarChar(16)
+  recordedBy String @map("recorded_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  episode LabourEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, episodeId, recordedAt])
+  @@map("partograph_entries")
+  @@schema("specialty")
+}
+
+/// Something on the chart that obliges somebody to do something.
+model PartographAlert {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+
+  raisedAt DateTime @map("raised_at") @db.Timestamptz(6)
+  /// `alert_line`, `action_line`, `fhr_abnormal`, `second_stage_prolonged`.
+  kind     String   @db.VarChar(32)
+  details  Json     @default("{}")
+
+  /// An action-line alert blocks the chart until this is filled. The others
+  /// notify and do not block, because a slow labour and a bradycardia need
+  /// different things from a room.
+  blocking Boolean @default(false)
+
+  acknowledgedBy String?   @map("acknowledged_by") @db.Uuid
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  /// `augment`, `assist`, `caesarean`, `refer`, `continue_expectantly`. Not
+  /// free text: the point of the action line is that one of a small number of
+  /// things now happens.
+  decision       String?   @db.VarChar(32)
+  decisionNote   String?   @map("decision_note") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  episode LabourEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, episodeId, raisedAt])
+  @@map("partograph_alerts")
+  @@schema("specialty")
+}
+
+/// The birth of one baby. A twin delivery is two rows.
+model Delivery {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  episodeId  String @map("episode_id") @db.Uuid
+
+  babySeq     Int          @map("baby_seq")
+  mode        DeliveryMode
+  deliveredAt DateTime     @map("delivered_at") @db.Timestamptz(6)
+  place       String?      @db.VarChar(60)
+  attendants  Json         @default("[]")
+  indication  String?      @db.Text
+  otCaseId    String?      @map("ot_case_id") @db.Uuid
+  decisionToDeliveryMin Int? @map("decision_to_delivery_min")
+
+  episiotomy Boolean @default(false)
+  tearDegree String? @map("tear_degree") @db.VarChar(16)
+  repairBy   String? @map("repair_by") @db.Uuid
+
+  /// Active management of the third stage: a uterotonic within a minute of
+  /// birth, controlled cord traction, and uterine massage. It is the single
+  /// most effective thing anybody does to prevent the leading cause of
+  /// maternal death in India, and it is a one-minute window.
+  uterotonicDrug String?   @map("uterotonic_drug") @db.VarChar(60)
+  uterotonicAt   DateTime? @map("uterotonic_at") @db.Timestamptz(6)
+  /// Derived: seconds from birth to the uterotonic. Negative is impossible and
+  /// refused.
+  uterotonicDelaySec Int? @map("uterotonic_delay_sec")
+
+  placenta   Json @default("{}")
+  thirdStage Json @default("{}") @map("third_stage")
+
+  /// Estimated blood loss, and how it was estimated. Visual estimation
+  /// understates by roughly a third, which is why the method is recorded and
+  /// not just the number.
+  eblMl     Int?    @map("ebl_ml")
+  eblMethod String? @map("ebl_method") @db.VarChar(24)
+
+  complications Json @default("[]")
+  notes         String? @db.Text
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  episode        LabourEpisode   @relation(fields: [episodeId], references: [id], onDelete: Restrict)
+  newborn        Newborn?
+  pphActivations PphActivation[]
+
+  @@unique([episodeId, babySeq], map: "uq_delivery_baby_seq")
+  @@index([hospitalId, deliveredAt(sort: Desc)])
+  @@map("deliveries")
+  @@schema("specialty")
+}
+
+/// The postpartum haemorrhage protocol, with its clock running.
+model PphActivation {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  deliveryId String @map("delivery_id") @db.Uuid
+
+  activatedAt DateTime @map("activated_at") @db.Timestamptz(6)
+  /// `ebl_threshold` when the database raised it from the recorded loss,
+  /// `clinical` when somebody called it on the patient in front of them.
+  trigger     String   @db.VarChar(24)
+  eblAtTrigger Int?    @map("ebl_at_trigger")
+
+  /// `[{step, at, by}]`. Call for help, uterotonics, tranexamic acid, bimanual
+  /// compression, balloon tamponade, massive transfusion, theatre.
+  steps Json @default("[]")
+
+  /// Tranexamic acid within three hours of birth reduces death from bleeding;
+  /// after three hours it does not, and may harm. Derived from the steps.
+  txaAt        DateTime? @map("txa_at") @db.Timestamptz(6)
+  txaWithin3h  Boolean?  @map("txa_within_3h")
+
+  mtpActivationId String? @map("mtp_activation_id") @db.Uuid
+  otCaseId        String? @map("ot_case_id") @db.Uuid
+
+  outcome       String?   @db.Text
+  deactivatedAt DateTime? @map("deactivated_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  delivery Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, activatedAt(sort: Desc)])
+  @@map("pph_activations")
+  @@schema("specialty")
+}
+
+/// A baby.
+///
+/// `patient_id` is their own hospital number, created by the delivery. This is
+/// the only table in the obstetric build with a column for sex, and it is here
+/// because the baby is born: it goes on the birth certificate. Before birth
+/// there is no lawful use for it and no column anywhere (OP-040 §B.6).
+model Newborn {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId        String  @map("patient_id") @db.Uuid
+  motherPatientId  String  @map("mother_patient_id") @db.Uuid
+  motherAdmissionId String? @map("mother_admission_id") @db.Uuid
+  admissionId      String? @map("admission_id") @db.Uuid
+  deliveryId       String  @unique @map("delivery_id") @db.Uuid
+
+  birthAt DateTime      @map("birth_at") @db.Timestamptz(6)
+  sex     String        @db.VarChar(16)
+  status  NewbornStatus @default(live)
+
+  birthWeightG Int?     @map("birth_weight_g")
+  lengthCm     Decimal? @map("length_cm") @db.Decimal(4, 1)
+  hcCm         Decimal? @map("hc_cm") @db.Decimal(4, 1)
+  gaWeeks      Int?     @map("ga_weeks")
+
+  /// One and five minutes are mandatory on every live birth. Ten is mandatory
+  /// when the five-minute score is under seven, because that is the score that
+  /// predicts what happens next.
+  apgar1  Int? @map("apgar_1")
+  apgar5  Int? @map("apgar_5")
+  apgar10 Int? @map("apgar_10")
+  apgarComponents Json @default("{}") @map("apgar_components")
+
+  /// `{ppv: {startAt}, compressions: {...}, intubation: {...}, drugs: [...]}`.
+  /// Required whenever positive-pressure ventilation was given: a resuscitation
+  /// with no timeline is a resuscitation nobody can review.
+  resuscitation Json @default("{}")
+
+  vitaminKAt       DateTime? @map("vitamin_k_at") @db.Timestamptz(6)
+  cordClampDelayed Boolean   @default(false) @map("cord_clamp_delayed")
+  firstFeedAt      DateTime? @map("first_feed_at") @db.Timestamptz(6)
+  skinToSkinMin    Int?      @map("skin_to_skin_min")
+
+  /// The code on both wristbands. Unique per hospital, and every handover
+  /// scans both.
+  wristbandPairCode String  @map("wristband_pair_code") @db.VarChar(24)
+  nicuAdmitted      Boolean @default(false) @map("nicu_admitted")
+  /// "Baby of <mother>" until somebody registers a name. The hospital number
+  /// never changes when the name does.
+  tempName          Boolean @default(true) @map("temp_name")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  delivery      Delivery         @relation(fields: [deliveryId], references: [id], onDelete: Restrict)
+  exams         NewbornExam[]
+  identityChecks IdentityCheck[]
+  birthReport   BirthReport?
+
+  @@unique([hospitalId, wristbandPairCode], map: "uq_wristband_pair")
+  @@index([hospitalId, birthAt(sort: Desc)])
+  @@index([hospitalId, motherPatientId])
+  @@map("newborns")
+  @@schema("specialty")
+}
+
+model NewbornExam {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  newbornId  String @map("newborn_id") @db.Uuid
+
+  /// `initial`, `24h`, `discharge`.
+  kind      String   @db.VarChar(16)
+  examinedAt DateTime @map("examined_at") @db.Timestamptz(6)
+  examinedBy String   @map("examined_by") @db.Uuid
+
+  findings  Json @default("{}")
+  anomalies Json @default("[]")
+  /// Pulse oximetry screening for critical congenital heart disease: a
+  /// pre-ductal and a post-ductal saturation, and the difference between them.
+  cchdScreen Json @default("{}") @map("cchd_screen")
+  hip        String? @db.VarChar(24)
+  redReflex  String? @map("red_reflex") @db.VarChar(24)
+  weightG    Int?    @map("weight_g")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  newborn Newborn @relation(fields: [newbornId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, newbornId, examinedAt])
+  @@map("newborn_exams")
+  @@schema("specialty")
+}
+
+/// A scan of both bands, at every handover.
+model IdentityCheck {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  newbornId  String @map("newborn_id") @db.Uuid
+
+  checkedAt DateTime @map("checked_at") @db.Timestamptz(6)
+  /// What was actually scanned, not what should have been. The mismatch is the
+  /// record that matters.
+  motherBandScan String @map("mother_band_scan") @db.VarChar(24)
+  babyBandScan   String @map("baby_band_scan") @db.VarChar(24)
+  /// Derived. A scan pair that does not match is refused as a handover and
+  /// recorded as an incident.
+  matched        Boolean
+
+  context   String @db.VarChar(32)
+  checkedBy String @map("checked_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  newborn Newborn @relation(fields: [newbornId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, newbornId, checkedAt])
+  @@map("newborn_identity_checks")
+  @@schema("specialty")
+}
+
+/// Form 1, under the Registration of Births and Deaths Act.
+///
+/// Twenty-one days from the birth. After that a registration needs a
+/// magistrate, and the family finds out when the child is five and needs a
+/// school place.
+model BirthReport {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  newbornId  String @unique @map("newborn_id") @db.Uuid
+
+  form1 Json
+
+  /// Derived from the birth: the day the statutory window closes.
+  dueBy DateTime @map("due_by") @db.Date
+
+  verifiedBy String?   @map("verified_by") @db.Uuid
+  verifiedAt DateTime? @map("verified_at") @db.Timestamptz(6)
+  submittedAt DateTime? @map("submitted_at") @db.Timestamptz(6)
+  crsRegNo   String?   @map("crs_reg_no") @db.VarChar(60)
+
+  hospitalCertNo String?   @map("hospital_cert_no") @db.VarChar(40)
+  issuedAt       DateTime? @map("issued_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  newborn Newborn @relation(fields: [newbornId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, dueBy])
+  @@map("birth_reports")
+  @@schema("specialty")
+}

@@ -930,6 +930,30 @@ const ANC_CLINICIAN = [
   'obg.report.read',
 ] as const;
 
+/**
+ * IP-011 — the labour room.
+ *
+ * The split is by who is in the room. A midwife runs the labour, plots the
+ * chart, records the birth and the baby, and scans the bands; the decision at
+ * the action line is the obstetrician's, because the five things it names —
+ * augment, assist, section, refer, continue — are a doctor's to choose; and
+ * Form 1 belongs to medical records, because a statutory return to a Registrar
+ * is not a clinical note.
+ *
+ * Nobody holds a key to plot past the action line, because there is none.
+ */
+const LABOUR_FLOOR = [
+  'obs.labour.read',
+  'obs.labour.admit',
+  'obs.partograph.write',
+  'obs.delivery.write',
+  'obs.pph.manage',
+  'obs.newborn.write',
+  'obs.identity.verify',
+] as const;
+
+const LABOUR_DOCTOR = [...LABOUR_FLOOR, 'obs.partograph.decide', 'obs.report.read'] as const;
+
 const DERM_DELIVERY = ['derm.lesion.read', 'derm.phototherapy.deliver'] as const;
 
 const DERM_DOCTOR = [
@@ -1042,6 +1066,7 @@ const SPECIALTY_CONSOLE_DOCTOR = [
   ...HEALTHCHECK_CLINICAL,
   ...DIALYSIS_DOCTOR,
   ...ANC_CLINICIAN,
+  ...LABOUR_DOCTOR,
 ] as const;
 
 /** A resident records and plans; the signature and the override keys are not theirs. */
@@ -2939,6 +2964,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...LABOUR_DOCTOR,
       ...PROCEDURE_OPERATOR,
       ...CONSOLE_CLINICIAN,
       ...DISCHARGE_CONSULTANT,
@@ -3408,6 +3434,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...LABOUR_FLOOR,
       ...IMMUNISATION_FLOOR,
       ...DIALYSIS_NURSE,
       ...WOUND_BEDSIDE,
@@ -3566,6 +3593,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'ot-checklist',
     permissions: [
+      ...LABOUR_FLOOR,
       ...PROCEDURE_FLOOR,
       ...BLOOD_BEDSIDE,
       'code.call',
@@ -4272,6 +4300,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'records',
     homeWorkspace: 'mrd-queue',
     permissions: [
+      'obs.labour.read',
+      'obs.birth.report',
       ...MORTUARY_CUSTODIAN,
       'ip.discharge.read',
       'ipbill.clearance.read',
