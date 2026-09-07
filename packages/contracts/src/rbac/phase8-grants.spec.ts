@@ -863,4 +863,54 @@ describe('OP-010 — the procedure floor', () => {
     expect(getRoleTemplate('mrd_officer')?.permissions).toContain('obs.birth.report');
     expect(getRoleTemplate('nurse_ward')?.permissions).not.toContain('obs.birth.report');
   });
+  it('offers no key that reaches the vinca route or a lifetime ceiling', () => {
+    // The strongest absence in the build. Intrathecal vincristine is uniformly
+    // fatal and has killed dozens of people worldwide, every time in a system
+    // with a field where the route could be typed. There is no lawful clinical
+    // circumstance, so a permission would imply one.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    for (const absent of [
+      'onco.route.override',
+      'onco.vinca.override',
+      'onco.cumulative.override',
+      'onco.dose.override',
+      'onco.pharmacy.bypass',
+    ]) {
+      expect(keys, absent).not.toContain(absent);
+    }
+    // And no key in the module deletes anything.
+    expect(PERMISSION_CATALOGUE.filter((p) => p.key.startsWith('onco.') && p.action === 'delete')).toEqual(
+      [],
+    );
+  });
+
+  it('keeps the pharmacist’s recalculation out of the prescriber’s hands', () => {
+    // Two people doing the same arithmetic separately catches a decimal point
+    // only if the second is a different person who can stop the first.
+    expect(getRoleTemplate('pharmacist_ip')?.permissions).toContain('onco.pharmacy.verify');
+    expect(getRoleTemplate('doctor_ip')?.permissions).not.toContain('onco.pharmacy.verify');
+    expect(getRoleTemplate('nurse_ward')?.permissions).not.toContain('onco.pharmacy.verify');
+    // The chair is nursing's; the plan is not.
+    expect(getRoleTemplate('nurse_ward')?.permissions).toContain('onco.administer');
+    expect(getRoleTemplate('nurse_ward')?.permissions).not.toContain('onco.plan.write');
+  });
+
+  it('makes the countersignature high and reasoned, and the regimen library sensitive', () => {
+    const cosign = permission('onco.cycle.cosign');
+    expect(cosign.risk).toBe('high');
+    expect(cosign.requiresReason).toBe(true);
+
+    // Every plan in the hospital is a pin to a version of a regimen, so the
+    // library is a controlled document rather than a lookup table.
+    const library = permission('onco.regimen.configure');
+    expect(library.risk).toBe('high');
+    expect(library.sensitiveGrant).toBe(true);
+    expect(holdersOf('onco.regimen.configure').filter((h) => h !== 'super_admin')).toEqual([]);
+  });
+
+  it('never lets a licence stop a cycle mid-protocol', () => {
+    for (const key of ['onco.plan.write', 'onco.cycle.sign', 'onco.pharmacy.verify', 'onco.administer']) {
+      expect(permission(key).clinicalSafetyExempt, key).toBe(true);
+    }
+  });
 });

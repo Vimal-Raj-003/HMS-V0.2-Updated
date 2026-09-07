@@ -954,6 +954,34 @@ const LABOUR_FLOOR = [
 
 const LABOUR_DOCTOR = [...LABOUR_FLOOR, 'obs.partograph.decide', 'obs.report.read'] as const;
 
+/**
+ * OP-031 and IP-023 — oncology.
+ *
+ * Four holders, in the order a dose passes through them. The oncologist writes
+ * the plan and signs the cycle; the pharmacist recomputes it independently and
+ * can stop it; two nurses verify it at the chair; a second oncologist signs a
+ * cycle whose counts say not to.
+ *
+ * `onco.pharmacy.verify` is the one worth staring at. It goes to pharmacy and
+ * to nobody else — not to the oncologist, not to the day-care nurse. Two people
+ * doing the same arithmetic separately is the control that catches a decimal
+ * point, and it only works if the second one is a different person who can stop
+ * the first.
+ */
+const ONCO_CHAIR = ['onco.case.read', 'onco.administer', 'onco.toxicity.record'] as const;
+
+const ONCO_DOCTOR = [
+  ...ONCO_CHAIR,
+  'onco.case.manage',
+  'onco.plan.write',
+  'onco.cycle.schedule',
+  'onco.cycle.sign',
+  'onco.cycle.cosign',
+  'onco.report.read',
+] as const;
+
+const ONCO_PHARMACY = ['onco.case.read', 'onco.pharmacy.verify'] as const;
+
 const DERM_DELIVERY = ['derm.lesion.read', 'derm.phototherapy.deliver'] as const;
 
 const DERM_DOCTOR = [
@@ -1067,6 +1095,7 @@ const SPECIALTY_CONSOLE_DOCTOR = [
   ...DIALYSIS_DOCTOR,
   ...ANC_CLINICIAN,
   ...LABOUR_DOCTOR,
+  ...ONCO_DOCTOR,
 ] as const;
 
 /** A resident records and plans; the signature and the override keys are not theirs. */
@@ -2964,6 +2993,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'medical',
     homeWorkspace: 'ip-rounds',
     permissions: [
+      ...ONCO_DOCTOR,
       ...LABOUR_DOCTOR,
       ...PROCEDURE_OPERATOR,
       ...CONSOLE_CLINICIAN,
@@ -3376,6 +3406,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'vitals-room',
     permissions: [
+      ...ONCO_CHAIR,
       ...IMMUNISATION_FLOOR,
       ...HEALTHCHECK_FLOOR,
       ...ANC_FLOOR,
@@ -3434,6 +3465,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'nursing',
     homeWorkspace: 'nursing-station',
     permissions: [
+      ...ONCO_CHAIR,
       ...LABOUR_FLOOR,
       ...IMMUNISATION_FLOOR,
       ...DIALYSIS_NURSE,
@@ -3973,6 +4005,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-ward-indents',
     permissions: [
+      ...ONCO_PHARMACY,
       'ip.discharge.read',
       'ip.discharge.reconcile',
       'mar.read',
@@ -4013,6 +4046,7 @@ const templates: readonly RoleTemplate[] = [
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-admin',
     permissions: [
+      ...ONCO_PHARMACY,
       'mar.read',
       'mar.order.verify',
       'nursing.ward.read',

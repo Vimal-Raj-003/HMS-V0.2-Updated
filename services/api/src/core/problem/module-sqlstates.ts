@@ -56,6 +56,7 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'OP012', // dialysis: the isolation zone, the machine, the fluid, and the dialyser count
   'OP040', // antenatal: the dating rule, anti-D, PC-PNDT Form F and the MTP gates
   'IP011', // labour room: the action line, the third stage, APGAR and the wristband pair
+  'OP031', // oncology: the derived dose, the vinca never-event and the lifetime cap
 ]);
 
 /**

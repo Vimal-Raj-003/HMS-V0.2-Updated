@@ -481,6 +481,32 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: 'module.labour_room.enabled',
   },
+  {
+    key: 'chemo-daycare',
+    label: 'Chemotherapy day care',
+    href: '/oncology/daycare',
+    area: 'specialty',
+    permission: 'onco.case.read',
+    summary:
+      'Today\u2019s cycles, what is waiting on pharmacy, and the lifetime totals that will refuse a dose in eighteen months if nobody starts on them now.',
+    deniedExplanation:
+      'The plan and the signature are the oncologist\u2019s; the independent recalculation is pharmacy\u2019s and nobody else\u2019s; the chair is nursing\u2019s, with a colleague.',
+    keywords: [
+      'chemotherapy',
+      'oncology',
+      'cancer',
+      'regimen',
+      'cycle',
+      'bsa',
+      'carboplatin',
+      'doxorubicin',
+      'vincristine',
+      'ctcae',
+      'toxicity',
+      'day care',
+    ],
+    entitlement: 'module.oncology.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

@@ -493,6 +493,80 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
     detail: 'A conversion factor ends on or after the day it takes effect.',
   },
 
+  // ── OP-031 / IP-023 ───────────────────────────────────────────────────────
+  a_person_has_a_plausible_size: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A height of 30–250 cm and a weight of 1–400 kg. Every dose in the plan is computed from these two, so a typo here is a typo in all of them.',
+  },
+  performance_status_is_scored_in_range: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'ECOG runs 0 to 5, and Karnofsky 0 to 100 in tens.',
+  },
+  a_reduction_is_a_percentage: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A dose reduction is a percentage, 0 to 100.',
+  },
+  a_signed_cycle_names_its_signer: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A signature has a name and a time, or neither.',
+  },
+  a_deferred_cycle_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A deferred cycle records why. A patient who came in and went home again is a fact the next appointment depends on.',
+  },
+  two_nurses_are_two_people: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'The bedside check is two people. One nurse verifying twice is one person reading the same label twice, which is what the check exists to catch.',
+  },
+  an_infusion_ends_after_it_starts: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'An infusion ends after it starts.',
+  },
+  a_completed_infusion_has_an_end: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A completed infusion records when it finished.',
+  },
+  a_pharmacy_query_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A query or a rejection carries a note. Without one it is a queue somebody clears rather than a question somebody answers.',
+  },
+  a_pharmacy_decision_names_its_pharmacist: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A pharmacy decision records who made it and when.',
+  },
+  toxicity_items_are_a_list: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A toxicity assessment is a list of graded terms.',
+  },
+  uq_onco_case_no: {
+    type: ProblemType.CONFLICT,
+    detail: 'That case number is already in use at this hospital.',
+  },
+  uq_chemo_regimen_version: {
+    type: ProblemType.CONFLICT,
+    detail: 'Two versions of that regimen were written at the same moment. Try again.',
+  },
+  uq_regimen_drug_seq: {
+    type: ProblemType.CONFLICT,
+    detail: 'Two drugs in a regimen cannot share a sequence number — the order is the administration order.',
+  },
+  uq_chemo_cycle_day: {
+    type: ProblemType.CONFLICT,
+    detail: 'That cycle and day are already scheduled on this plan.',
+  },
+  uq_chemo_order_seq: {
+    type: ProblemType.CONFLICT,
+    detail: 'Two lines took the same sequence at the same moment. Try again.',
+  },
+  uq_cumulative_drug: {
+    type: ProblemType.CONFLICT,
+    detail: 'That drug already has a lifetime total on this case.',
+  },
+
   // ── IP-011 ────────────────────────────────────────────────────────────────
   a_decision_is_one_of_the_five: {
     type: ProblemType.VALIDATION_FAILED,

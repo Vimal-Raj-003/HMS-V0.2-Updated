@@ -401,6 +401,90 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-09-18 · Phase 8 · OP-031, IP-023 — oncology and chemotherapy
+
+**Built — oncology and the chemotherapy day care, complete.** 9 tables, 11
+permission keys, 5 events, 1 entitlement, 1 screen, 15 integration tests, 31
+database rules proven live in both directions.
+
+Every module in this build has rules whose violation harms somebody. This one
+has rules whose violation kills them the same week, and the errors are not
+exotic: a decimal point, a route, and a number nobody added up.
+
+**The dose is arithmetic, so the database does it.** Chemotherapy is dosed per
+square metre of body surface, and body surface is √(height × weight / 3600). A
+prescriber sends two measurements; every dose follows. A person doing that
+multiplication on a ward round and writing the answer in a box is the most
+documented fatal error in oncology, and it has killed children in every health
+system that has looked for it. There is no `bsa`, no `crcl`, no `calcDose` and
+no `finalDose` in any request in this module.
+
+The absolute cap sits on top of it, and exists for exactly the same reason:
+vincristine at 1.4 mg/m² computes to **2.55 mg** on a 1.82 m² adult, and 2.55 mg
+of vincristine is a neuropathy nobody recovers from. The cap holds it at 2, and
+the row says the cap applied — because a nurse should be able to see that the
+number in front of them is not the number the arithmetic produced.
+
+**A vinca alkaloid is never intrathecal, and there is nothing anywhere that can
+say otherwise.** This is the never-event: intrathecal vincristine is an
+ascending paralysis and then death over about a week, there is no treatment, and
+it has happened dozens of times worldwide — every time in a system that had a
+field where the route could be typed, and every time to somebody whose
+colleagues were competent and tired. The regimen library refuses it, the order
+line refuses it again, there is no override key, no reason field and no
+permission that reaches it, and **the refusal text tells the reader it is not a
+bug**, because the person who meets it will be certain the software is wrong.
+
+**The lifetime total is the database's, across years.** Doxorubicin's
+cardiomyopathy is irreversible past about 450 mg/m², accumulated across cycles,
+regimens, relapses and years, in a patient who may have been treated in three
+hospitals — and it arrives as heart failure a decade after the cancer was cured,
+when nothing on the chart looks like a mistake. `hms_app` holds **no write at
+all** on the totals; a SECURITY DEFINER trigger maintains them from completed
+administrations, and the ceiling refuses. The console warns at four-fifths,
+which is early on purpose: the way past a cap is a cardiology opinion and a
+different regimen, and both take weeks that nobody has on the day the refusal
+happens.
+
+**And three gates, each a different person.** Counts below the regimen's
+thresholds need a second oncologist in writing, taken from the session so a
+prescriber cannot name a colleague who has not looked. Nothing runs against a
+line pharmacy has not independently recalculated, and `onco.pharmacy.verify`
+goes to pharmacy alone — two people doing the same arithmetic separately only
+catches a decimal point if the second one can stop the first. And the two nurses
+at the chair are two people.
+
+**Four defects found, all real.** Same-timing triggers fire alphabetically, so a
+check named `a_cycle_is_signed…` ran _before_ the `derive_cycle_fitness` it
+depended on and judged a signature against the previous row's failures; deriving
+and validating belong in one function when the second reads the first. A
+parameter used both as an inserted column and as a lookup key made Postgres
+deduce two types and refuse the statement — the same trap as the dialyser label,
+now recorded. A child table with no `hospital_id` of its own was fenced off
+entirely by the RLS generator's `USING (false)`. And the lifetime-total trigger
+could not write to a table the application is deliberately denied, which is what
+SECURITY DEFINER is for: the REVOKE and the definer are the same decision seen
+from two sides.
+
+**Deferred, recorded.** Compounding worksheets and the cytotoxic hood log
+(OP-003 owns hazardous stock and EN-005 the labels), day-care chair scheduling
+(the same shape as the dialysis machine board, and it can reuse it), RECIST
+response assessment and tumour boards (OP-008 owns the imaging links), and the
+hospital-based cancer registry export (Phase 11's reporting).
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module. Tracked, unchanged.
+
+**Gates** — 13/13 packages typecheck, lint and test (3,018 unit tests); 711 API
+integration tests across 29 files; 56 migrations; 868 non-partition tables;
+1,338 permission keys; 828 events; 62 entitlements; 68 role templates; 102
+screens.
+
+**Next:** the remaining Phase 8 consoles, grouped rather than taken one at a
+time — psychiatry, paediatrics and geriatrics share the shape of a console
+whose central fact is an age or a capacity; fertility, telemedicine and referral
+share the shape of a hand-off.
+
 ### 2026-09-17 · Phase 8 · IP-011 — the labour room and the newborn
 
 **Built — the labour room, complete.** 9 tables, 10 permission keys, 6 events,

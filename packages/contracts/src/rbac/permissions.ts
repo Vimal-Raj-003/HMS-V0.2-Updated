@@ -11385,6 +11385,133 @@ const IP011 = group('IP-011', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-031 and IP-023, oncology and chemotherapy
+//
+// Four roles, in the order a dose passes through them: the oncologist writes
+// the plan and signs the cycle, the pharmacist recomputes it independently and
+// can stop it, two nurses verify it at the chair, and a second oncologist signs
+// a cycle whose counts say not to.
+//
+// ── There is no key that overrides the vinca route ─────────────────────────
+//
+// Not unassigned — absent, and this is the strongest absence in the build.
+// Intrathecal vincristine is uniformly fatal and has killed dozens of people
+// worldwide, every time in a system that had a field where the route could be
+// typed. There is no permission that reaches it, because there is no lawful
+// clinical circumstance and a key would imply one.
+//
+// ── Nor one that raises a lifetime anthracycline ceiling ───────────────────
+//
+// The way past it is a different regimen and a cardiologist, not a larger
+// number. A permission would make it a decision somebody takes at four in the
+// afternoon rather than a conversation.
+//
+// ── But `onco.cycle.cosign` exists, and is `high` ──────────────────────────
+//
+// Giving chemotherapy on counts below threshold is sometimes correct — a
+// curable disease in a patient whose marrow will not recover further with more
+// delay. It is a decision a second oncologist takes in writing, and the
+// database refuses one who is the first.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP031 = group('OP-031', 8, [
+  p(
+    'onco.case.read',
+    'onco_case',
+    'read',
+    'phi',
+    'low',
+    'Read the cancer case: staging, the plan, the cycles, the lifetime doses and the toxicity history.',
+    { phiRead: true },
+  ),
+  p(
+    'onco.case.manage',
+    'onco_case',
+    'update',
+    'phi',
+    'medium',
+    'Register and stage a cancer case, record biomarkers, performance status and intent.',
+  ),
+  p(
+    'onco.regimen.configure',
+    'chemo_regimen',
+    'configure',
+    'operational',
+    'high',
+    'Write and approve a regimen in the library: doses, days, routes, caps and the counts a cycle is not given below. Every plan in the hospital is a pin to a version of one of these.',
+    { sensitiveGrant: true, requiresReason: true },
+  ),
+  p(
+    'onco.plan.write',
+    'onco_treatment_plan',
+    'create',
+    'phi',
+    'medium',
+    'Write the treatment plan. The surface area, the clearance and every dose are computed from the measurements; none of them is typed.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'onco.cycle.schedule',
+    'chemo_cycle',
+    'create',
+    'phi',
+    'medium',
+    'Schedule a cycle and record the fitness bloods. What is out of range against the regimen is computed rather than judged.',
+  ),
+  p(
+    'onco.cycle.sign',
+    'chemo_cycle',
+    'sign',
+    'phi',
+    'medium',
+    'Sign the cycle order. A cycle whose counts are out of range cannot be signed without a second oncologist.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'onco.cycle.cosign',
+    'chemo_cycle',
+    'approve',
+    'phi',
+    'high',
+    'Countersign a cycle whose counts say not to give it. Sometimes correct, always a second person, and always in writing.',
+    { requiresReason: true },
+  ),
+  p(
+    'onco.pharmacy.verify',
+    'chemo_order_line',
+    'approve',
+    'phi',
+    'medium',
+    'The pharmacist’s independent recalculation. Nothing is administered against a line this has not approved, and the ability to stop it is what makes the second calculation worth doing.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'onco.administer',
+    'chemo_administration',
+    'record',
+    'phi',
+    'medium',
+    'Give the drug at the chair, with two nurses verifying against the label and the wristband.',
+    { clinicalSafetyExempt: true },
+  ),
+  p(
+    'onco.toxicity.record',
+    'toxicity_assessment',
+    'record',
+    'phi',
+    'medium',
+    'Grade toxicity on CTCAE. The worst grade and what it obliges are computed from the items.',
+  ),
+  p(
+    'onco.report.read',
+    'onco_report',
+    'read',
+    'phi',
+    'low',
+    'Cycles given and deferred, dose intensity, lifetime anthracycline exposure across the register, toxicity rates and pharmacy query rates.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -11495,6 +11622,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP012,
   ...OP040,
   ...IP011,
+  ...OP031,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

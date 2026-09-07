@@ -1,0 +1,468 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-031 · IP-023 — oncology and chemotherapy
+//
+// Every module in this build has rules whose violation harms somebody. This one
+// has rules whose violation kills them the same afternoon, and the errors are
+// not exotic: they are a decimal point, a route, and a number nobody added up.
+//
+// ── The dose is derived and has no request field ───────────────────────────
+//
+// Chemotherapy is dosed per square metre of body surface, and body surface is
+// √(height × weight / 3600). A prescriber types a height and a weight; the
+// machine does the rest. The alternative — a person doing that multiplication
+// on a ward round and writing the answer in a box — is the single most
+// documented fatal error in oncology, and it has killed children in every
+// health system that has looked for it.
+//
+// ── A vinca alkaloid is never given intrathecally ──────────────────────────
+//
+// This is the never-event. Vincristine into the spinal fluid is an ascending
+// paralysis, then death, over roughly a week, and there is no treatment. It has
+// happened dozens of times worldwide, always to somebody whose system had a
+// field where the route could be typed. There is no route enum value for it on
+// a vinca in this build, no override key, and no permission that reaches it.
+// §B.5 refuses it, and the refusal explains itself, because the person who hits
+// it will be sure it is a bug.
+//
+// ── And the cumulative dose is the database's, across years ────────────────
+//
+// Doxorubicin causes an irreversible cardiomyopathy past roughly 450 mg per
+// square metre — a lifetime total, accumulated across cycles, across regimens,
+// across relapses, across years, in a patient who may have been treated in
+// three hospitals. Nobody adds that up by hand, and the harm arrives as heart
+// failure a decade after the cancer was cured.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ChemoDoseBasis {
+  /// Per square metre of body surface. The commonest, and the dangerous one.
+  mg_m2
+  mg_kg
+  /// Carboplatin, by Calvert: AUC × (glomerular filtration rate + 25).
+  auc
+  flat
+  /// Per square metre, with the surface area capped — usually at 2.0 or 2.2 —
+  /// because the pharmacokinetics stop scaling in very large patients.
+  mg_m2_capped
+
+  @@schema("mdm")
+}
+
+enum OncoIntent {
+  curative
+  adjuvant
+  neoadjuvant
+  palliative
+
+  @@schema("specialty")
+}
+
+enum CycleStatus {
+  planned
+  fitness_pending
+  ready
+  pharm_pending
+  pharm_approved
+  in_progress
+  administered
+  deferred
+  cancelled
+
+  @@schema("specialty")
+}
+
+enum PharmStatus {
+  pending
+  approved
+  queried
+  rejected
+
+  @@schema("specialty")
+}
+
+/// A regimen, versioned and approved.
+model ChemoRegimen {
+  id         String  @id @db.Uuid
+  /// Null for the seeded library every hospital starts from.
+  hospitalId String? @map("hospital_id") @db.Uuid
+
+  code           String   @db.VarChar(40)
+  name           String   @db.VarChar(160)
+  indicationSites String[] @default([]) @map("indication_sites")
+  version        Int      @default(1)
+  status         String   @default("draft") @db.VarChar(16)
+
+  cycleLengthDays Int    @map("cycle_length_days")
+  plannedCycles   Int    @map("planned_cycles")
+  emetogenicity   String @default("moderate") @db.VarChar(16)
+
+  /// `{anc: 1.5, platelets: 100, creatinineMax: 1.5, bilirubinMax: 1.5}`.
+  /// The counts below which a cycle is not given.
+  labThresholds Json @default("{}") @map("lab_thresholds")
+
+  approvedBy String?   @map("approved_by") @db.Uuid
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(6)
+  notes      String?   @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  drugs ChemoRegimenDrug[]
+  plans OncoTreatmentPlan[]
+
+  @@unique([hospitalId, code, version], map: "uq_chemo_regimen_version")
+  @@index([hospitalId, status])
+  @@map("chemo_regimens")
+  @@schema("mdm")
+}
+
+/// One drug in a regimen.
+model ChemoRegimenDrug {
+  id        String @id @db.Uuid
+  /// Carried down from the regimen rather than joined for it: every table in
+  /// this build has its own tenant key, and the RLS generator needs one here
+  /// or it fences the table off entirely. Null on the seeded global library,
+  /// like its parent.
+  hospitalId String? @map("hospital_id") @db.Uuid
+  regimenId String @map("regimen_id") @db.Uuid
+
+  seq      Int
+  drugId   String? @map("drug_id") @db.Uuid
+  drugName String  @map("drug_name") @db.VarChar(120)
+  /// Normalised for the rules that turn on a drug class rather than a product:
+  /// `vinca`, `anthracycline`, `platinum`, `taxane`, `antimetabolite`, `other`.
+  drugClass String @map("drug_class") @db.VarChar(24)
+
+  doseBasis ChemoDoseBasis @map("dose_basis")
+  doseValue Decimal   @map("dose_value") @db.Decimal(10, 3)
+  unit      String    @db.VarChar(12)
+  /// The surface area at which `mg_m2_capped` stops scaling.
+  bsaCap    Decimal?  @map("bsa_cap") @db.Decimal(4, 2)
+  /// An absolute ceiling on the computed dose, whatever the arithmetic says.
+  /// Vincristine's is 2 mg, and it exists because the arithmetic is what kills.
+  absoluteCap Decimal? @map("absolute_cap") @db.Decimal(10, 3)
+
+  route      String @db.VarChar(16)
+  infusionMin Int?  @map("infusion_min")
+  diluent    String? @db.VarChar(60)
+  volumeMl   Int?    @map("volume_ml")
+  stabilityH Int?    @map("stability_h")
+  /// A drug that destroys tissue if it leaks out of the vein. Extravasation of
+  /// one is a surgical emergency.
+  vesicant   Boolean @default(false)
+
+  /// The days of the cycle this drug is given on. A drug given on the wrong
+  /// day of a protocol is an overdose with a plausible-looking chart.
+  days Int[]
+
+  /// A lifetime ceiling, in the drug's own unit per square metre. Doxorubicin
+  /// is 450; bleomycin is 400 units total.
+  cumulativeCap Decimal? @map("cumulative_cap") @db.Decimal(10, 2)
+  capUnit       String?  @map("cap_unit") @db.VarChar(16)
+
+  isPremed     Boolean @default(false) @map("is_premed")
+  isSupportive Boolean @default(false) @map("is_supportive")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  regimen ChemoRegimen @relation(fields: [regimenId], references: [id], onDelete: Cascade)
+
+  @@unique([regimenId, seq], map: "uq_regimen_drug_seq")
+  @@map("chemo_regimen_drugs")
+  @@schema("mdm")
+}
+
+/// A cancer case.
+model OncoCase {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  caseNo String @map("case_no") @db.VarChar(32)
+
+  primarySiteIcdo3 String  @map("primary_site_icdo3") @db.VarChar(16)
+  morphologyIcdo3  String? @map("morphology_icdo3") @db.VarChar(16)
+  laterality       Laterality @default(not_applicable)
+  grade            String? @db.VarChar(16)
+
+  dxDate  DateTime @map("dx_date") @db.Date
+  dxBasis String   @map("dx_basis") @db.VarChar(24)
+
+  biomarkers Json @default("{}")
+  /// `{cT, cN, cM, pT, pN, pM, stageGroup, edition}`.
+  tnm        Json @default("{}")
+
+  ecog Int?
+  kps  Int?
+
+  intent       OncoIntent
+  oncologistId String          @map("oncologist_id") @db.Uuid
+  status       String          @default("active") @db.VarChar(16)
+  registry     Json            @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plans       OncoTreatmentPlan[]
+  cumulative  OncoCumulativeDose[]
+  toxicities  ToxicityAssessment[]
+
+  @@unique([hospitalId, caseNo], map: "uq_onco_case_no")
+  @@index([hospitalId, patientId])
+  @@index([hospitalId, status])
+  @@map("onco_cases")
+  @@schema("specialty")
+}
+
+/// The plan: a regimen, pinned at a version, with this patient's numbers.
+model OncoTreatmentPlan {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  regimenId      String @map("regimen_id") @db.Uuid
+  regimenVersion Int    @map("regimen_version")
+
+  intent        OncoIntent
+  startDate     DateTime @map("start_date") @db.Date
+  plannedCycles Int      @map("planned_cycles")
+
+  /// The measurements. Everything else on this row is computed from them.
+  heightCm   Decimal @map("height_cm") @db.Decimal(5, 1)
+  weightKg   Decimal @map("weight_kg") @db.Decimal(5, 2)
+  ageYears   Int     @map("age_years")
+  /// Female physiology gets a 0.85 factor in Cockcroft-Gault. It is a
+  /// pharmacokinetic constant, not a demographic.
+  female     Boolean
+  creatinineMgDl Decimal? @map("creatinine_mg_dl") @db.Decimal(5, 2)
+
+  bsaMethod String  @default("mosteller") @map("bsa_method") @db.VarChar(16)
+  /// Derived. No request field: this multiplication is what kills people.
+  bsa       Decimal? @db.Decimal(4, 2)
+  /// Derived by Cockcroft-Gault, and capped at 125 for Calvert.
+  crcl      Decimal? @db.Decimal(6, 2)
+
+  consentId  String? @map("consent_id") @db.Uuid
+  estimateId String? @map("estimate_id") @db.Uuid
+
+  status     String  @default("draft") @db.VarChar(16)
+  stopReason String? @map("stop_reason") @db.Text
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  case    OncoCase     @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  regimen ChemoRegimen @relation(fields: [regimenId], references: [id], onDelete: Restrict)
+  cycles  ChemoCycle[]
+
+  @@index([hospitalId, caseId, startDate(sort: Desc)])
+  @@map("onco_treatment_plans")
+  @@schema("specialty")
+}
+
+/// One cycle.
+model ChemoCycle {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  planId     String @map("plan_id") @db.Uuid
+
+  cycleNo     Int      @map("cycle_no")
+  dayNo       Int      @default(1) @map("day_no")
+  scheduledAt DateTime @map("scheduled_at") @db.Timestamptz(6)
+
+  status CycleStatus @default(planned)
+
+  /// `{ancK, plateletsK, creatinine, bilirubin, weightKg, ecog, checkedAt}`.
+  /// The counts a cycle is or is not given on.
+  fitness Json @default("{}")
+  /// Derived from the fitness against the regimen's thresholds: what, if
+  /// anything, is out of range. Empty means fit.
+  fitnessFailures String[] @default([]) @map("fitness_failures")
+
+  deferredReason String? @map("deferred_reason") @db.Text
+  preauthId      String? @map("preauth_id") @db.Uuid
+  billId         String? @map("bill_id") @db.Uuid
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+  /// The second oncologist, when one is required — counts out of range, or a
+  /// dose outside the regimen's own band.
+  secondSignerId String?   @map("second_signer_id") @db.Uuid
+  secondSignedAt DateTime? @map("second_signed_at") @db.Timestamptz(6)
+  overrideReason String?   @map("override_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plan  OncoTreatmentPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  lines ChemoOrderLine[]
+
+  @@unique([planId, cycleNo, dayNo], map: "uq_chemo_cycle_day")
+  @@index([hospitalId, scheduledAt, status])
+  @@map("chemo_cycles")
+  @@schema("specialty")
+}
+
+/// One drug on one cycle, with its dose.
+model ChemoOrderLine {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  cycleId    String @map("cycle_id") @db.Uuid
+
+  regimenDrugId String @map("regimen_drug_id") @db.Uuid
+  seq           Int
+  drugName      String @map("drug_name") @db.VarChar(120)
+  drugClass     String @map("drug_class") @db.VarChar(24)
+
+  doseBasis  ChemoDoseBasis @map("dose_basis")
+  basisValue Decimal   @map("basis_value") @db.Decimal(10, 3)
+  /// Derived: the basis applied to this patient's surface area, weight or
+  /// clearance, then held to any absolute cap. There is no request field.
+  calcDose   Decimal?  @map("calc_dose") @db.Decimal(10, 3)
+  /// A reduction is a clinical decision and carries a reason.
+  reductionPct Decimal @default(0) @map("reduction_pct") @db.Decimal(5, 2)
+  reductionReason String? @map("reduction_reason") @db.VarChar(200)
+  /// Derived from the two above. Also no request field.
+  finalDose  Decimal?  @map("final_dose") @db.Decimal(10, 3)
+  unit       String    @db.VarChar(12)
+  /// True when an absolute ceiling bit. Vincristine's 2 mg is the one that
+  /// matters, and a nurse should be able to see that it applied.
+  capApplied Boolean   @default(false) @map("cap_applied")
+
+  route       String  @db.VarChar(16)
+  infusionMin Int?    @map("infusion_min")
+  diluent     String? @db.VarChar(60)
+  volumeMl    Int?    @map("volume_ml")
+  vesicant    Boolean @default(false)
+
+  /// The running lifetime total, before and after this dose. Maintained by
+  /// trigger from the administrations, never by a service.
+  cumulativeBefore Decimal? @map("cumulative_before") @db.Decimal(12, 2)
+  cumulativeAfter  Decimal? @map("cumulative_after") @db.Decimal(12, 2)
+
+  /// The pharmacist's independent recalculation. A gate, not a note.
+  pharmStatus PharmStatus @default(pending) @map("pharm_status")
+  pharmBy     String?     @map("pharm_by") @db.Uuid
+  pharmAt     DateTime?   @map("pharm_at") @db.Timestamptz(6)
+  pharmNotes  String?     @map("pharm_notes") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  cycle           ChemoCycle            @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  administrations ChemoAdministration[]
+
+  @@unique([cycleId, seq], map: "uq_chemo_order_seq")
+  @@index([hospitalId, cycleId])
+  @@map("chemo_order_lines")
+  @@schema("specialty")
+}
+
+/// The drug going in.
+model ChemoAdministration {
+  id          String @id @db.Uuid
+  hospitalId  String @map("hospital_id") @db.Uuid
+  cycleId     String @map("cycle_id") @db.Uuid
+  orderLineId String @map("order_line_id") @db.Uuid
+
+  chairId String? @map("chair_id") @db.Uuid
+
+  /// Two nurses, and they have to be two people. Same shape as the opioid
+  /// countersignature and the blood bedside check, for the same reason.
+  verifyNurse1Id  String  @map("verify_nurse1_id") @db.Uuid
+  verifyNurse2Id  String  @map("verify_nurse2_id") @db.Uuid
+  barcodeVerified Boolean @default(false) @map("barcode_verified")
+
+  startedAt DateTime  @map("started_at") @db.Timestamptz(6)
+  endedAt   DateTime? @map("ended_at") @db.Timestamptz(6)
+  rate      String?   @db.VarChar(40)
+  access    String    @default("peripheral") @db.VarChar(16)
+
+  reactions     Json    @default("[]")
+  /// A vesicant that has leaked out of the vein. A surgical emergency, and a
+  /// reportable incident.
+  extravasation Json?
+  vitals        Json    @default("[]")
+  interruptions Json    @default("[]")
+
+  completed Boolean @default(false)
+  notes     String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  orderLine ChemoOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, cycleId])
+  @@map("chemo_administrations")
+  @@schema("specialty")
+}
+
+/// What this patient has had, for life.
+///
+/// Maintained by trigger from the administrations. Doxorubicin's ceiling is a
+/// lifetime one — across cycles, regimens, relapses and years — and the harm
+/// arrives as heart failure a decade after the cancer was cured.
+model OncoCumulativeDose {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  caseId     String @map("case_id") @db.Uuid
+
+  drugName  String @map("drug_name") @db.VarChar(120)
+  drugClass String @map("drug_class") @db.VarChar(24)
+
+  totalDose  Decimal  @default(0) @map("total_dose") @db.Decimal(12, 2)
+  unit       String   @db.VarChar(12)
+  /// The figure the cap is expressed in, for the drugs whose ceiling is per
+  /// square metre rather than absolute.
+  totalPerM2 Decimal? @map("total_per_m2") @db.Decimal(12, 2)
+  cap        Decimal? @db.Decimal(12, 2)
+  lastAt     DateTime? @map("last_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  case OncoCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, drugName], map: "uq_cumulative_drug")
+  @@index([hospitalId, caseId])
+  @@map("onco_cumulative_doses")
+  @@schema("specialty")
+}
+
+/// CTCAE grading.
+model ToxicityAssessment {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  caseId     String  @map("case_id") @db.Uuid
+  cycleId    String? @map("cycle_id") @db.Uuid
+
+  assessedAt DateTime @map("assessed_at") @db.Timestamptz(6)
+  source     String   @default("clinician") @db.VarChar(16)
+
+  /// `[{term, grade, attribution}]`, graded 1–5 on CTCAE v5.
+  items    Json
+  /// Derived: the worst grade in the list. Grade 3 and above is what changes
+  /// the next cycle.
+  maxGrade Int? @map("max_grade")
+  /// Derived alongside it, and what a screen shows.
+  action   String? @db.VarChar(24)
+
+  assessedBy String   @map("assessed_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  case OncoCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId, assessedAt(sort: Desc)])
+  @@map("toxicity_assessments")
+  @@schema("specialty")
+}

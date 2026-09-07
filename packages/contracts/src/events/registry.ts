@@ -10817,6 +10817,92 @@ const painClinicEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — OP-031 and IP-023, oncology and chemotherapy.
+ *
+ * Five events. Two of them are somebody else's emergency — a febrile
+ * neutropenia and a vesicant that has leaked out of a vein — and two are the
+ * slow kind, which is worse: a lifetime anthracycline nearing its ceiling, and
+ * a pharmacy query standing between a patient and their cycle.
+ */
+const oncologyEvents: readonly EventDefinition[] = [
+  ev(
+    'onco.cycle.administered',
+    'chemo_cycle',
+    'OP-031',
+    'A cycle was given. Carries the doses actually administered, which drive the billing, the lifetime totals and the next cycle’s date.',
+    z.object({
+      cycleId: uuid,
+      planId: uuid,
+      caseId: uuid,
+      patientId: uuid,
+      cycleNo: z.number().int(),
+      dayNo: z.number().int(),
+      drugs: z.array(z.object({ name: z.string(), finalDose: z.string(), unit: z.string() })),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'onco.cumulative.approaching_cap',
+    'onco_cumulative_dose',
+    'OP-031',
+    'A lifetime cumulative dose has passed four-fifths of its ceiling. Leaves early on purpose: the way past an anthracycline cap is a cardiology opinion and a different regimen, and both take weeks to arrange.',
+    z.object({
+      caseId: uuid,
+      patientId: uuid,
+      drugName: z.string(),
+      totalPerM2: z.string(),
+      cap: z.string(),
+      fraction: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'onco.pharmacy.queried',
+    'chemo_order_line',
+    'OP-031',
+    'The pharmacist has queried a dose. Leaves the console because a patient is sitting in a day-care chair while it is resolved, and the oncologist who wrote it is on a ward round.',
+    z.object({
+      orderLineId: uuid,
+      cycleId: uuid,
+      drugName: z.string(),
+      status: z.string(),
+      notes: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'onco.toxicity.severe',
+    'toxicity_assessment',
+    'OP-031',
+    'A CTCAE grade three or worse. Febrile neutropenia inside it is a medical emergency with a sixty-minute antibiotic clock, and the person who records the grade is rarely the person who starts them.',
+    z.object({
+      assessmentId: uuid,
+      caseId: uuid,
+      patientId: uuid,
+      maxGrade: z.number().int(),
+      action: z.string().nullable(),
+      terms: z.array(z.string()),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+  ev(
+    'onco.extravasation',
+    'chemo_administration',
+    'OP-031',
+    'A vesicant has leaked out of the vein. Leaves at once: it is a surgical emergency, the antidote is time-critical and drug-specific, and it is a reportable incident.',
+    z.object({
+      administrationId: uuid,
+      cycleId: uuid,
+      patientId: uuid,
+      drugName: z.string(),
+      access: z.string(),
+      at: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 10950 },
+  ),
+];
+
+/**
  * Phase 8 — IP-011, the labour room and the newborn.
  *
  * Six events. Four of them leave because somebody outside the room has to move
@@ -11365,6 +11451,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...dialysisEvents,
   ...antenatalEvents,
   ...labourRoomEvents,
+  ...oncologyEvents,
   ...procedureEvents,
 ]);
 

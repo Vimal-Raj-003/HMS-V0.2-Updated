@@ -409,6 +409,14 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'The labour room console is not included in your plan.',
     upgradeCta: 'Ask about Hospital Clinical',
   }),
+  // The console is gated; the cycle is not. Every act in the chemotherapy chain
+  // carries `clinicalSafetyExempt`, because a patient mid-protocol whose cycle
+  // cannot be recorded is a patient whose lifetime anthracycline total stops
+  // being true.
+  ep('module.oncology.enabled', 'feature', 'route', 'OP-031/IP-023 Oncology and chemotherapy.', {
+    message: 'The oncology console is not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
   ep(
     'module.procedures.enabled',
     'feature',
