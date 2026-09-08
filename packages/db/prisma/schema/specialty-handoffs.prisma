@@ -1,0 +1,224 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-018 · OP-021 · IP-020 — the hand-offs
+//
+// Three modules about care passing from one person to another, and the same
+// failure in all three: the hand-off happens and nobody watches for the reply.
+//
+// ── Telemedicine has a drug list, and it is law ────────────────────────────
+//
+// India's Telemedicine Practice Guidelines came into force in March 2020, in a
+// week, because the alternative was a country with no lawful way to consult a
+// doctor. They are annexed to the Medical Council regulations, which makes them
+// binding on registration rather than advisory — and their centre is four
+// lists.
+//
+// List O is anything over the counter. List A is a small set a doctor may start
+// on a first consultation, but only having seen the patient — video, not a
+// phone call and not a chat. List B is an add-on to a medicine already running,
+// so it needs a follow-up rather than a first contact. And the prohibited list
+// is everything scheduled under the Narcotic Drugs and Psychotropic Substances
+// Act, which may not be prescribed by telemedicine at all, in any mode, ever.
+//
+// ── A referral is open until somebody replies ──────────────────────────────
+//
+// The commonest failure in a referral system is not a lost letter. It is a
+// referral sent, acknowledged, and never replied to — and the referrer assumes
+// silence means it was handled, which is how a suspected cancer waits eleven
+// months for a first appointment nobody chased.
+//
+// Phase 2 already built `clinical.referrals`. OP-021 does not build a second
+// one beside it: what this module adds is the *clock*, so the two new columns
+// and the rule that closes the loop go onto the table that already exists.
+//
+// ── And a pathway variance is the useful part of a pathway ─────────────────
+//
+// A clinical pathway that is followed tells you nothing. The variances are the
+// data: which step gets skipped, in which patients, and why.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The four lists of the Telemedicine Practice Guidelines.
+enum TelemedicineDrugList {
+  /// Over the counter. Any mode, any consultation.
+  list_o
+  /// A doctor may start these on a first consultation — by video only.
+  list_a
+  /// An add-on to a medicine already running. A follow-up, not a first contact.
+  list_b
+  /// Scheduled under the NDPS Act. Not by telemedicine, in any mode, ever.
+  prohibited
+
+  @@schema("mdm")
+}
+
+enum ConsultMode {
+  video
+  audio
+  text
+
+  @@schema("specialty")
+}
+
+/// Which list a drug is on, for telemedicine purposes.
+///
+/// Reference data with a legal edge, in `mdm` and read-only to the application:
+/// a hospital that could move a drug off the prohibited list has repealed the
+/// part of the Guidelines that matters.
+model TelemedicineDrugRule {
+  id       String  @id @db.Uuid
+  drugKey  String  @map("drug_key") @db.VarChar(80)
+  drugName String  @map("drug_name") @db.VarChar(160)
+  listCode TelemedicineDrugList @map("list_code")
+  /// Why, in a sentence a prescriber can read when they are refused.
+  note     String? @db.Text
+  source   String  @default("TPG-2020") @db.VarChar(40)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([drugKey], map: "uq_tele_drug_rule")
+  @@map("telemedicine_drug_rules")
+  @@schema("mdm")
+}
+
+/// A remote consultation.
+model TeleConsult {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  practitionerId String @map("practitioner_id") @db.Uuid
+  /// The Guidelines require the registration number on every prescription that
+  /// comes out of a tele-consultation.
+  practitionerRegNo String @map("practitioner_reg_no") @db.VarChar(60)
+
+  mode ConsultMode
+  /// A first consultation and a follow-up permit different things, which is
+  /// the whole architecture of the Guidelines.
+  firstConsult Boolean @default(true) @map("first_consult")
+  /// The consultation this one follows, when it is a follow-up.
+  followsConsultId String? @map("follows_consult_id") @db.Uuid
+
+  /// Who started it. A patient-initiated consultation carries implied consent
+  /// under the Guidelines; anything else needs it explicitly.
+  initiatedBy String @default("patient") @map("initiated_by") @db.VarChar(16)
+  consentId   String? @map("consent_id") @db.Uuid
+  /// How the patient's identity was established. The Guidelines require it, and
+  /// a tele-consultation with an unverified patient is a prescription to
+  /// somebody unknown.
+  identityVerification Json @default("{}") @map("identity_verification")
+
+  startedAt DateTime  @map("started_at") @db.Timestamptz(6)
+  endedAt   DateTime? @map("ended_at") @db.Timestamptz(6)
+
+  complaint String? @db.Text
+  advice    String? @db.Text
+  /// Set when the doctor decided the problem needed a room. A tele-consultation
+  /// that should have been an examination is the characteristic harm here.
+  referredInPerson Boolean @default(false) @map("referred_in_person")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  prescriptions TelePrescriptionLine[]
+
+  @@index([hospitalId, patientId, startedAt(sort: Desc)])
+  @@index([hospitalId, practitionerId, startedAt(sort: Desc)])
+  @@map("tele_consults")
+  @@schema("specialty")
+}
+
+/// One drug on a tele-prescription.
+model TelePrescriptionLine {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  consultId  String @map("consult_id") @db.Uuid
+
+  drugKey  String @map("drug_key") @db.VarChar(80)
+  drugName String @map("drug_name") @db.VarChar(160)
+  dose     String @db.VarChar(80)
+  frequency String @db.VarChar(40)
+  durationDays Int @map("duration_days")
+
+  /// Derived from the drug rules at the moment of prescribing, so a later
+  /// change to the list does not rewrite what was lawful then.
+  listCode TelemedicineDrugList? @map("list_code")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  consult TeleConsult @relation(fields: [consultId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, consultId])
+  @@map("tele_prescription_lines")
+  @@schema("specialty")
+}
+
+/// A clinical pathway, and where a patient is on it.
+model PathwayInstance {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+  patientId  String @map("patient_id") @db.Uuid
+
+  admissionId String? @map("admission_id") @db.Uuid
+  pathwayKey  String  @map("pathway_key") @db.VarChar(60)
+  pathwayName String  @map("pathway_name") @db.VarChar(160)
+  version     Int     @default(1)
+
+  /// `[{day, step, description, mandatory}]`, snapshotted at the start so a
+  /// later edit to the pathway does not rewrite a patient's history.
+  steps Json
+
+  startedAt   DateTime  @map("started_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  /// Derived from the step records: how many of the mandatory steps were done
+  /// on their day.
+  adherencePct Decimal? @map("adherence_pct") @db.Decimal(5, 2)
+  varianceCount Int     @default(0) @map("variance_count")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  records PathwayStepRecord[]
+
+  @@index([hospitalId, patientId, startedAt(sort: Desc)])
+  @@map("pathway_instances")
+  @@schema("specialty")
+}
+
+/// What actually happened at a step.
+model PathwayStepRecord {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  instanceId String @map("instance_id") @db.Uuid
+
+  stepKey String @map("step_key") @db.VarChar(60)
+  dayNo   Int    @map("day_no")
+
+  /// `done`, `varied`, `not_applicable`.
+  outcome String @db.VarChar(16)
+  doneAt  DateTime? @map("done_at") @db.Timestamptz(6)
+
+  /// A variance is the useful part of a pathway, and a variance with no reason
+  /// is a step somebody skipped.
+  varianceReason String? @map("variance_reason") @db.Text
+  /// `clinical`, `patient`, `system`, `resource`. Which of the four it was is
+  /// the whole point of collecting them: three of them are the hospital's
+  /// problem and one is not.
+  varianceCategory String? @map("variance_category") @db.VarChar(16)
+
+  recordedBy String   @map("recorded_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  instance PathwayInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@unique([instanceId, stepKey], map: "uq_pathway_step")
+  @@index([hospitalId, instanceId])
+  @@map("pathway_step_records")
+  @@schema("specialty")
+}

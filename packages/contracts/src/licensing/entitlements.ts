@@ -450,6 +450,22 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
       upgradeCta: 'Ask about Hospital Clinical',
     },
   ),
+  ep('module.telemedicine.enabled', 'feature', 'route', 'OP-018 Telemedicine.', {
+    message: 'The tele-clinic is not included in your plan.',
+    upgradeCta: 'Ask about Patient Engagement',
+  }),
+  // Gated at the console, not at the table. Phase 2 already writes referrals
+  // out of an encounter, and a hospital in arrears that could not record one
+  // would be a hospital whose consultants refer by telephone and write nothing
+  // down — which is the failure this module exists to stop.
+  ep('module.referrals.enabled', 'feature', 'route', 'OP-021 The referral desk.', {
+    message: 'The referral desk is not included in your plan.',
+    upgradeCta: 'Ask about Hospital Clinical',
+  }),
+  ep('module.pathways.enabled', 'feature', 'route', 'IP-020 Clinical pathways.', {
+    message: 'Clinical pathways are not included in your plan.',
+    upgradeCta: 'Ask about Hospital Clinical',
+  }),
 ]);
 
 const pointsByKey = new Map(ENFORCEMENT_POINTS.map((e) => [e.key, e]));

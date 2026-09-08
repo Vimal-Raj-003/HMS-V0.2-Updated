@@ -940,6 +940,57 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
       'This patient already has a live swallow order. Two is a ward with two answers to what they may safely eat, and the one they act on is whichever they happened to read.',
     nextAction: 'Supersede the existing order with the new one, giving a reason.',
   },
+
+  // ── OP-018, OP-021, IP-020 — the hand-offs ───────────────────────────────
+  a_followup_names_what_it_follows: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A follow-up says what it follows. The distinction is not paperwork: two of the four drug lists turn on whether this is a first contact.',
+  },
+  a_consultation_the_patient_did_not_start_has_consent: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A patient who rang the doctor has consented by ringing. Anybody else starting a consultation needs consent recorded against it.',
+  },
+  an_initiator_is_known: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A consultation is started by the patient, a practitioner, a caregiver or a health worker.',
+  },
+  a_teleprescription_is_time_limited: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A tele-prescription runs between one and ninety days. An unbounded remote course is a patient nobody sees again.',
+  },
+  a_step_outcome_is_known: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A pathway step was done, varied, or did not apply. There is no fourth answer.',
+  },
+  a_variance_says_why_and_of_what_kind: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A variance carries a reason and one of four categories — clinical, patient, system or resource. Three of those are the hospital’s problem and one is not, and a variance with no category cannot be counted into either.',
+    nextAction: 'Say why the step varied, and which of the four kinds of departure it was.',
+  },
+  a_completed_step_says_when: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A step marked done says when it was done.',
+  },
+  uq_pathway_step: {
+    type: ProblemType.CONFLICT,
+    detail: 'That step is already recorded on this pathway.',
+  },
+  uq_tele_drug_rule: {
+    type: ProblemType.CONFLICT,
+    detail: 'That drug already has a telemedicine list entry.',
+  },
+  referrals_reply_pairing: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A reply has an author and a time, or it has neither.',
+  },
+  referrals_target: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A referral goes to a department, a named practitioner, or an external facility.',
+  },
 };
 
 /** Wraps a unit of work so Postgres's refusals arrive as problems a person can act on. */

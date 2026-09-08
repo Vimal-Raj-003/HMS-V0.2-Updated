@@ -532,6 +532,36 @@ const POLYTRAUMA_NURSING = [
 ] as const;
 
 /**
+ * OP-018, OP-021 and IP-020 — the hand-offs.
+ *
+ * Three bundles, and the reason they are one comment is that all three modules
+ * fail the same way: a thing is handed over and nobody watches for what should
+ * come back.
+ *
+ * `tele.prescribe` looks like a broad key and is not. Which drugs it reaches
+ * follows from the four lists and the mode of the consultation, both read by
+ * the database; the prohibited list is unreachable from any key at all. So the
+ * key answers "may this person run a tele-clinic", which is an org-chart
+ * question, and the drug question is answered somewhere a permission cannot go.
+ *
+ * `referral.reply` is separate from `referral.raise` because the two live at
+ * opposite ends of the hand-off, and the external referring doctor holds only
+ * the reply half. Neither closes an unanswered referral — closure follows a
+ * reply, in the database.
+ *
+ * `pathway.step.record` sits in the bedside bundle rather than the doctor's.
+ * The nurse is who knows the physiotherapist did not come, and a pathway whose
+ * variances can only be recorded by a consultant on a ward round records none.
+ */
+const TELE_CLINICIAN = ['tele.read', 'tele.consult.conduct', 'tele.prescribe'] as const;
+
+const REFERRAL_CLINICIAN = ['referral.read', 'referral.raise', 'referral.reply'] as const;
+
+const PATHWAY_BEDSIDE = ['pathway.read', 'pathway.step.record'] as const;
+
+const PATHWAY_CLINICIAN = [...PATHWAY_BEDSIDE, 'pathway.start'] as const;
+
+/**
  * Phase 7A — the bed board, held as widely as the question "where is my patient?"
  *
  * A board only the bed manager can read is a board everybody phones the bed
@@ -543,6 +573,8 @@ const BED_BOARD_READER = ['bed.board.read', 'census.read', 'admission.read', 'ad
 /** The ward: admit, move, and keep the expected discharge honest. */
 const WARD_FLOOR = [
   ...BED_BOARD_READER,
+  ...PATHWAY_BEDSIDE,
+  'referral.read',
   'admission.request',
   'admission.update',
   'transfer.read',
@@ -1048,7 +1080,6 @@ const TRANSPLANT_LEAD = [
 ] as const;
 
 const ART_CLINIC = ['art.read', 'art.cycle.manage'] as const;
-
 const DERM_DELIVERY = ['derm.lesion.read', 'derm.phototherapy.deliver'] as const;
 
 const DERM_DOCTOR = [
@@ -1459,6 +1490,9 @@ const DOCTOR_CLINICAL = [
   ...CLINICAL_LOOKUP,
   ...CDSS_SAFETY_FLOOR,
   ...CONSULTATION,
+  ...TELE_CLINICIAN,
+  ...REFERRAL_CLINICIAN,
+  ...PATHWAY_CLINICIAN,
   ...PRESCRIBER,
   ...ORDERING,
   ...MOBILE_CLINICIAN,
@@ -1489,6 +1523,9 @@ const RESIDENT_CLINICAL = [
   ...CLINICAL_LOOKUP,
   ...CDSS_SAFETY_FLOOR,
   ...CHART_READ,
+  ...TELE_CLINICIAN,
+  ...REFERRAL_CLINICIAN,
+  ...PATHWAY_CLINICIAN,
   ...MOBILE_CLINICIAN,
   'opd.queue.read',
   'opd.encounter.create',
@@ -3465,6 +3502,11 @@ const templates: readonly RoleTemplate[] = [
       'tpl.form.read',
       'tpl.response.read',
       'org.patient.locate',
+      // The reply half of the hand-off, and only that. An external clinician
+      // answers the referral they were sent; they do not raise one into a
+      // hospital they do not work in.
+      'referral.read',
+      'referral.reply',
     ],
     abacDefaults: { ownPatientsOnly: true, dataClassMasks: ['aadhaar', 'address'] },
     mfaMandatory: true,

@@ -11801,6 +11801,107 @@ const IP019 = group('IP-019', 8, [
   }),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-018, OP-021 and IP-020, the hand-offs
+//
+// Three modules with one failure between them: the hand-off happens, and then
+// nobody watches for what should come back. A tele-consultation ends and the
+// prescription goes out with nothing behind it; a referral is sent and the
+// silence reads as "handled"; a pathway is started and the variances that were
+// the whole point of writing it down are never recorded.
+//
+// ── There is no key that reaches the prohibited list ───────────────────────
+//
+// Nothing scheduled under the NDPS Act may be prescribed by telemedicine, in
+// any mode, on any consultation, by anybody. It is the one absolute in the
+// Telemedicine Practice Guidelines. A permission would be a way round it with
+// a name on it, so there is none — the database refuses, and no key is
+// consulted before it does.
+//
+// ── Nor one that closes a referral nobody answered ─────────────────────────
+//
+// Closure follows a reply. The permission to work a referral is not a
+// permission to declare it finished.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP018 = group('OP-018', 8, [
+  p(
+    'tele.consult.conduct',
+    'tele_consult',
+    'create',
+    'phi',
+    'medium',
+    'Conduct a tele-consultation. The mode, the consent and the patient’s identity are recorded on it, and the drug lists read them.',
+  ),
+  p(
+    'tele.prescribe',
+    'tele_prescription_line',
+    'create',
+    'phi',
+    'medium',
+    'Prescribe out of a tele-consultation. Which drugs are reachable follows from the four lists and the mode, not from this key: the prohibited list is absolute, List A on a first consultation needs video, and List B needs a follow-up.',
+  ),
+  p(
+    'tele.read',
+    'tele_consult',
+    'read',
+    'phi',
+    'low',
+    'Read tele-consultations and what was prescribed on them.',
+    {
+      phiRead: true,
+    },
+  ),
+]);
+
+const OP021 = group('OP-021', 8, [
+  p(
+    'referral.raise',
+    'referral',
+    'create',
+    'phi',
+    'medium',
+    'Raise a referral. The urgency sets the date a reply is due, and it is derived rather than chosen.',
+  ),
+  p(
+    'referral.reply',
+    'referral',
+    'update',
+    'phi',
+    'medium',
+    'Acknowledge or reply to a referral. Closure follows a reply; this key does not close an unanswered one.',
+  ),
+  p(
+    'referral.read',
+    'referral',
+    'read',
+    'phi',
+    'low',
+    'Read the referral register, including the overdue list — the reason the module exists.',
+    { phiRead: true },
+  ),
+]);
+
+const IP020 = group('IP-020', 8, [
+  p('pathway.start', 'pathway_instance', 'create', 'phi', 'medium', 'Put a patient on a clinical pathway.'),
+  p(
+    'pathway.step.record',
+    'pathway_step_record',
+    'record',
+    'phi',
+    'low',
+    'Record a step as done, varied or not applicable. A variance carries a reason and one of four categories; adherence is the database’s arithmetic, not a figure anybody types.',
+  ),
+  p(
+    'pathway.read',
+    'pathway_instance',
+    'read',
+    'phi',
+    'low',
+    'Read pathways, adherence and the variance analysis.',
+    { phiRead: true },
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -11915,6 +12016,9 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP032,
   ...OP033,
   ...IP019,
+  ...OP018,
+  ...OP021,
+  ...IP020,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

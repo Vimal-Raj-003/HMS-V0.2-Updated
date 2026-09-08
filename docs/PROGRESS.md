@@ -5,15 +5,15 @@
 
 ## Current state
 
-| Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current phase          | **Phases 0–7 complete; Phase 8 in progress.** The specialty console framework (OP-025 §0) and the ophthalmology console are done and proved; roughly 33 consoles remain. **Phases 0–7 complete.** Phase 7 (Inpatient) finished on 2026-09-08 with step 7G — discharge, the versioned summary and the mortuary — and all ten of its provable exit gates pass. Gate 11 (the load test) has not been run: k6 is not installed here. Phase 8 (specialty consoles) is next and has no code.                                                                                                                                                                                                                                                                  |
-| Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                 |
-| Repo status            | **714 non-partition tables** outside the system schemas across fourteen tenant schemas (`clinical` 174, `core` 124, `billing` 96, `inventory` 82, `mdm` 66, `lab` 38, `rad` 34, `integration` 26, `patient` 18, `pharmacy` 17, `ops` 12, `engage` 11, `queue` 8, `finance` 2) — **0 business tables without RLS**; the only four without it are pg_partman's own `ext.part_config`, `ext.part_config_sub`, `ext.db_capabilities` and `public._prisma_migrations`. Read out of a live container, not copied from a commit. **46 migrations. 742 API routes. 88 Next.js screens.** Permission catalogue **1,144 keys**; event registry **773**.                                                                                                           |
-| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **3,062 unit tests, 20/20 packages**; `pnpm test:integration` **489 tests, 18/18 files** — including the Phase-1 scheduling flake fixed this session, which failed only at certain times of day. **Never run: both k6 scripts** (k6 is not installed here) and no Playwright golden path exists for any Phase 5–7 module.                                                                                                                                                                                                                                                                                                                                    |
-| Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path, and that is now the largest outstanding debt in the build. Against `docs/12` by _coverage_ rather than by DoD: every module in phases 0–7 has schema, contracts, API, screens and its rules proved live in both directions; phases 8–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, and release a body lawfully. It cannot yet run a specialty console, the ERP back office, a patient portal or the analytics layer.** |
-| Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                |
-| Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Current phase          | **Phases 0–7 complete; Phase 8 all but finished.** Twenty-eight of Phase 8's thirty consoles are built and proved — the framework (OP-025 §0), ophthalmology, the procedure and OPD nursing rooms, the device-heavy consoles, the therapy floor, the pain clinic, the programme consoles, dialysis, antenatal, the labour room, oncology, psychiatry, the two ends of life, transplant and ART, and now the three hand-offs (telemedicine, referrals, clinical pathways). **Two remain: OP-037 AYUSH and NC-033, the kitchen.**                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Repo status            | **855 non-partition tables** outside the system schemas across fifteen tenant schemas — **0 business tables without RLS**; the only four without it are pg_partman's own `ext.part_config`, `ext.part_config_sub`, `ext.db_capabilities` and `public._prisma_migrations`, plus the five deliberately-global reference catalogues that carry no `hospital_id` at all (`mdm.opioid_conversion_factors`, `mdm.immunisation_schedules`, `mdm.anticholinergic_scores`, `mdm.beers_criteria` and, new this session, `mdm.telemedicine_drug_rules` — published law, identical in every tenant, read-only to `hms_app`). `core.permissions` and `mdm.console_components` keep RLS on with a deliberately-open policy (D-17). Read out of a live container, not copied from a commit. **60 migrations. 1,041 API routes across 81 controllers. 121 Next.js screens.** Permission catalogue **1,374 keys**; event registry **841**; entitlements **70**. |
+| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **774 tests, 33/33 files**. **Never run: both k6 scripts** (k6 is not installed here) and no Playwright golden path exists for any Phase 5–8 module.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path, and that is now the largest outstanding debt in the build. Against `docs/12` by _coverage_ rather than by DoD: every module in phases 0–7 has schema, contracts, API, screens and its rules proved live in both directions; phases 8–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, and release a body lawfully. It cannot yet run a specialty console, the ERP back office, a patient portal or the analytics layer.**                                                                                                                                                                                        |
+| Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 The table counts, RLS coverage and migration state above were read out of a live container at this session's HEAD, not copied from a commit message: `core.v_rls_coverage` reports **423 monitored tables, 0 without RLS, 0 without a policy, 0 without a write check**, and the only deliberately-open policies remain the two catalogues (`core.permissions`, `core.setting_definitions` — D-17).
 
@@ -400,6 +400,109 @@ been hiding.
 
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
+
+### 2026-09-22 · Phase 8 · OP-018, OP-021, IP-020 — the hand-offs
+
+**Built — telemedicine, referral management and clinical pathways, complete.**
+5 tables (4 new, plus 4 columns on the referral table Phase 2 already built), 9
+permission keys, 3 events, 3 entitlements, 3 screens, 26 integration tests, 27
+database rules proven live in both directions.
+
+Grouped because they are three modules with one failure between them: the
+hand-off happens, and then nobody watches for what should come back.
+
+**Four lists, and one of them is absolute.** India's Telemedicine Practice
+Guidelines came into force in a week in March 2020 because the alternative was a
+country with no lawful way to consult a doctor, and they are annexed to the
+Medical Council regulations — binding on registration rather than advisory.
+Their structure is a list of what _may_ be prescribed remotely, which means a
+drug on no list is refused rather than allowed: a default-allow catalogue would
+make the whole annexure advisory the first time somebody adds a drug to the
+formulary and not to `mdm.telemedicine_drug_rules`.
+
+List A on a first consultation needs video, because the rule is that a doctor
+may start these having _seen_ the patient and a phone call is not seeing them.
+List B needs a follow-up, because it is an add-on to a medicine already running
+and a first contact by definition has nothing to add on to. And nothing
+scheduled under the NDPS Act is reachable in any mode, on any consultation, by
+anybody — held the only honest way an absolute can be held: **no override key,
+no override route, and no request field that expresses an exception.** The
+integration suite asserts three plausible bypass routes return 404 rather than
+403, which is the difference between a door that is locked and a door that is
+not there.
+
+The screen says all of this _before_ a drug is typed. `reachableLists` is the
+same rule read forwards, so a doctor on an audio first consultation sees List A
+struck through with the reason on it rather than discovering the refusal after
+the consultation has gone somewhere it cannot finish. The prohibited entries are
+shown refused rather than hidden: a catalogue that quietly omits them teaches a
+doctor the drug is missing from the formulary, and one that shows them struck
+through teaches what the rule actually is.
+
+**The clock, not a second table.** Phase 2 already wrote referrals out of an
+encounter, so OP-021 adds four columns and a trigger rather than a table beside
+it. What was missing was never the row: the commonest failure in a referral
+system is not a lost letter but a referral acknowledged and never replied to,
+with the referrer reading silence as "handled". The reply date is derived from
+the urgency — four hours, forty-eight hours, fourteen days — with no request
+field, because a referrer who could set it would make every emergency referral
+due whenever they felt like being told. Closing a referral nobody answered is
+refused; cancelling is not the same act and stays available, because one says
+somebody answered and the other says nobody will.
+
+`hoursRemaining` is deliberately signed. "Eleven days overdue" is the fact worth
+showing, and clamping it at zero would hide exactly the referrals the module
+exists to surface. The desk opens on the overdue list rather than the register.
+
+**The variance is the data.** A pathway that is followed tells you nothing.
+Which of four categories the departures fall into is the finding — clinical,
+patient, system, resource — and three of those are the hospital's problem while
+one is not, so the board separates them: counting a patient who declined
+alongside a missing physiotherapist makes a well-run pathway look like a
+badly-run one, and the first thing anybody does with a number like that is stop
+believing it. Adherence is a trigger's arithmetic over the step records on
+insert, update _and_ delete; there is no request field for it, and the screen
+shows it beside `outstanding` — the defined steps with no record at all, which
+no roll-up can see, because a step nobody recorded leaves no row to count.
+
+`pathway.step.record` sits in the bedside bundle and not the doctor's. The nurse
+is who knows the physiotherapist did not come, and a pathway whose variances can
+only be recorded by a consultant on a ward round records none.
+
+**Three defects, two of them the same shape as ones already recorded.**
+
+- `CHECK (... AND variance_category IN ('clinical','patient','system','resource'))`
+  **accepted a variance with no category**, because `NULL IN (...)` is NULL and a
+  CHECK that evaluates to NULL passes. Second occurrence after D-187, and the
+  reason it recurs is that the SQL reads as though it says what it means. Caught
+  by the proof script, which is what the proof script is for.
+- `mdm.telemedicine_drug_rules` **was swept into RLS with `USING (false)`** —
+  the migration carried a paragraph explaining it was exempt for the same reason
+  the Beers criteria are, and the generator's exemption list did not name it. The
+  failure is quiet in the worst way: the trigger works, the query succeeds, and
+  every drug comes back unlisted, so a hospital simply cannot prescribe remotely.
+  A comment is not an exemption. Same class as the oncology `hospital_id` fix
+  (D-195), opposite remedy.
+- A dead conjunct in the referral trigger (`status = 'closed' AND status <>
+'cancelled'`) — unreachable, harmless, and removed, because a migration is read
+  by whoever has to change it next.
+
+**Deferred, recorded.** ABDM-linked tele-consultation records and the
+`tele.consult` FHIR encounter (Phase 11 owns interop), the video bridge itself
+(the module records the mode and the consent, not the call), payer-side referral
+routing to an external facility's own system, and pathway _authoring_ — the
+step definitions are stored per instance rather than as a versioned library,
+which is deliberate for now and will want NC-015's template machinery.
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module. Tracked, unchanged.
+
+**Gates** — 20/20 packages typecheck, lint and test; `pnpm test:integration`
+**774 tests across 33 files, all green** (26 of them this module's); 60
+migrations; 855 non-partition tables; 1,374 permission keys; 841 events; 70
+entitlements; 1,041 API routes across 81 controllers; 121 Next.js screens.
+
+**Next:** the last two of Phase 8 — OP-037 AYUSH and NC-033, the kitchen.
 
 ### 2026-09-21 · Phase 8 · IP-019, OP-024 — transplant and assisted reproduction
 

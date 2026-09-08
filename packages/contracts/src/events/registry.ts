@@ -10870,6 +10870,62 @@ const transplantEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — OP-018, OP-021 and IP-020, the hand-offs.
+ *
+ * Three events, and every one of them is somebody outside the room being told
+ * that a thing handed over has not come back. That is the whole subject: the
+ * hand-off is easy and the watching is what nobody does.
+ */
+const handoffEvents: readonly EventDefinition[] = [
+  ev(
+    'tele.prescription.refused',
+    'tele_consult',
+    'OP-018',
+    'A tele-prescription was refused by the drug lists. Leaves the consultation because a doctor reaching for a prohibited drug remotely is usually a patient who needs to be seen today, and because the pattern across a month is what tells a hospital its telemedicine service is being asked to do something it cannot.',
+    z.object({
+      consultId: uuid,
+      practitionerId: uuid,
+      drugKey: z.string(),
+      listCode: z.string().nullable(),
+      mode: z.string(),
+      firstConsult: z.boolean(),
+    }),
+    { containsPhi: false, retentionDays: 3650 },
+  ),
+  ev(
+    'referral.overdue',
+    'referral',
+    'OP-021',
+    'A referral passed the date a reply was due. Leaves the department because the referrer has by now stopped waiting, and because the four hours on an emergency referral are not four hours anybody is watching a screen for.',
+    z.object({
+      referralId: uuid,
+      patientId: uuid,
+      urgency: z.string(),
+      raisedAt: z.string(),
+      replyDueAt: z.string(),
+      acknowledged: z.boolean(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'pathway.variance.recorded',
+    'pathway_step_record',
+    'IP-020',
+    'A pathway step varied. Leaves the ward because three of the four categories are the hospital’s problem — a system, a resource or a clinical decision — and the variance log is the only place those show up before they show up as length of stay.',
+    z.object({
+      recordId: uuid,
+      instanceId: uuid,
+      pathwayKey: z.string(),
+      stepKey: z.string(),
+      dayNo: z.number().int(),
+      varianceCategory: z.string(),
+      adherencePct: z.string().nullable(),
+    }),
+    { containsPhi: false, retentionDays: 3650 },
+  ),
+];
+
+/**
  * Phase 8 — OP-033, IP-015 and OP-034, the two ends of life.
  *
  * Three events, and each is a threshold somebody outside the room acts on: a
@@ -11632,6 +11688,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...psychiatryEvents,
   ...lifespanEvents,
   ...transplantEvents,
+  ...handoffEvents,
   ...procedureEvents,
 ]);
 

@@ -587,6 +587,76 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: 'module.transplant.enabled',
   },
+  {
+    key: 'tele-clinic',
+    label: 'Tele-clinic',
+    href: '/tele/clinic',
+    area: 'specialty',
+    permission: 'tele.read',
+    summary:
+      'Four lists decide what may be prescribed remotely, and the screen says which of them this consultation can reach before a drug is typed rather than after.',
+    deniedExplanation:
+      'Reading the clinic is wide; conducting a consultation and prescribing out of one are a registered practitioner\u2019s. Nothing scheduled under the NDPS Act is reachable from any key.',
+    keywords: [
+      'telemedicine',
+      'teleconsultation',
+      'video consult',
+      'remote',
+      'drug list',
+      'list a',
+      'list b',
+      'prohibited',
+      'ndps',
+      'prescription',
+    ],
+    entitlement: 'module.telemedicine.enabled',
+  },
+  {
+    key: 'referral-desk',
+    label: 'Referrals',
+    href: '/referrals/desk',
+    area: 'specialty',
+    permission: 'referral.read',
+    summary:
+      'A referral is open until somebody replies. The overdue list opens the screen, because a referral acknowledged and never answered is how silence gets read as \u201chandled\u201d.',
+    deniedExplanation:
+      'Reading the register is wide. Raising a referral is the referrer\u2019s and replying is the receiver\u2019s \u2014 an external clinician holds the reply half and no more.',
+    keywords: [
+      'referral',
+      'refer',
+      'onward',
+      'overdue',
+      'reply',
+      'acknowledge',
+      'urgency',
+      'two week wait',
+      'opinion',
+    ],
+    entitlement: 'module.referrals.enabled',
+  },
+  {
+    key: 'pathway-board',
+    label: 'Clinical pathways',
+    href: '/pathways/board',
+    area: 'specialty',
+    permission: 'pathway.read',
+    summary:
+      'A pathway that is followed tells you nothing. The variances are the data, and which of four kinds they are \u2014 clinical, patient, system, resource \u2014 is the finding.',
+    deniedExplanation:
+      'Recording a step is the bedside\u2019s, because the nurse is who knows the physiotherapist did not come. Starting a pathway is a prescriber\u2019s. Adherence is counted, so nobody holds a key to set it.',
+    keywords: [
+      'pathway',
+      'care pathway',
+      'protocol',
+      'variance',
+      'adherence',
+      'enhanced recovery',
+      'eras',
+      'length of stay',
+      'order set',
+    ],
+    entitlement: 'module.pathways.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

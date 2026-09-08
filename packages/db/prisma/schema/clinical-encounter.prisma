@@ -660,6 +660,12 @@ model Referral {
   reason        String  @db.Text
   sharedNote    String? @map("shared_note") @db.Text
   status        ReferralStatus @default(sent)
+  /// OP-021's contribution. Derived from the urgency: when a reply should have
+  /// arrived. The commonest failure in a referral system is not a lost letter
+  /// but a referral acknowledged and never replied to, with the referrer
+  /// reading silence as "handled".
+  replyDueAt    DateTime? @map("reply_due_at") @db.Timestamptz(6)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
   replyText     String? @map("reply_text") @db.Text
   repliedBy     String? @map("replied_by") @db.Uuid
   repliedAt     DateTime? @map("replied_at") @db.Timestamptz(6)

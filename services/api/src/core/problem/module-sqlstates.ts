@@ -60,6 +60,7 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'OP032', // psychiatry: presumed capacity, the admission clocks, restraint and ECT
   'OP033', // the two ends of life: the adult ceiling, grams, and the burden
   'IP019', // transplant and ART: the near relative, the panel, and one donation
+  'OP018', // the hand-offs: the four telemedicine lists, the referral clock, the pathway variance
 ]);
 
 /**

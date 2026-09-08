@@ -13,6 +13,8 @@ import { HealthCheckService } from './programme/healthcheck.service.js';
 import { ImmunisationService } from './programme/immunisation.service.js';
 import { AntenatalController } from './antenatal/antenatal.controller.js';
 import { AntenatalService } from './antenatal/antenatal.service.js';
+import { HandoffsController } from './handoffs/handoffs.controller.js';
+import { HandoffsService } from './handoffs/handoffs.service.js';
 import { TransplantController } from './transplant/transplant.controller.js';
 import { TransplantService } from './transplant/transplant.service.js';
 import { LifespanController } from './lifespan/lifespan.controller.js';
@@ -61,6 +63,7 @@ export const SPECIALTY_CONTROLLERS: Type<unknown>[] = [
   PsychiatryController,
   LifespanController,
   TransplantController,
+  HandoffsController,
 ];
 
 export const SPECIALTY_PROVIDERS: Provider[] = [
@@ -104,6 +107,10 @@ export const SPECIALTY_PROVIDERS: Provider[] = [
   PsychiatryService,
   LifespanService,
   TransplantService,
+
+  // OP-018, OP-021, IP-020. Three modules with one failure between them: the
+  // hand-off happens, and then nobody watches for what should come back.
+  HandoffsService,
 ];
 
 @Module({

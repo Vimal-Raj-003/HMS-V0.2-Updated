@@ -1017,4 +1017,57 @@ describe('OP-010 — the procedure floor', () => {
     expect(getRoleTemplate('nurse_ward')?.permissions).not.toContain('transplant.brainstem.certify');
     expect(getRoleTemplate('doctor_ip')?.permissions).not.toContain('transplant.donation.record');
   });
+
+  // ── OP-018, OP-021, IP-020 — the hand-offs ────────────────────────────────
+
+  it('offers no key that reaches the prohibited telemedicine list', () => {
+    // Nothing scheduled under the NDPS Act may be prescribed by telemedicine,
+    // in any mode, on any consultation, by anybody. It is the one absolute in
+    // the Telemedicine Practice Guidelines, and a permission would be a way
+    // round it with a name on it.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    for (const absent of [
+      'tele.prescribe.prohibited',
+      'tele.prescribe.override',
+      'tele.list.override',
+      'tele.mode.waive',
+    ]) {
+      expect(keys, absent).not.toContain(absent);
+    }
+  });
+
+  it('offers no key that closes a referral nobody answered', () => {
+    // Closure follows a reply. The permission to work a referral is not a
+    // permission to declare it finished, and there is no second key that is.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    for (const absent of ['referral.close', 'referral.close.unanswered', 'referral.clock.waive']) {
+      expect(keys, absent).not.toContain(absent);
+    }
+  });
+
+  it('offers no key that suppresses a pathway variance', () => {
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    for (const absent of ['pathway.variance.waive', 'pathway.adherence.set', 'pathway.step.force']) {
+      expect(keys, absent).not.toContain(absent);
+    }
+  });
+
+  it('puts the variance record at the bedside and the referral reply at both ends', () => {
+    // The nurse is who knows the physiotherapist did not come. A pathway whose
+    // variances can only be recorded by a consultant on a ward round records
+    // none.
+    expect(getRoleTemplate('nurse_ward')?.permissions).toContain('pathway.step.record');
+    expect(getRoleTemplate('nurse_ward')?.permissions).not.toContain('pathway.start');
+    expect(getRoleTemplate('doctor_ip')?.permissions).toContain('pathway.start');
+
+    // The external referring doctor answers the referral they were sent, and
+    // raises none into a hospital they do not work in.
+    expect(getRoleTemplate('referring_doctor')?.permissions).toContain('referral.reply');
+    expect(getRoleTemplate('referring_doctor')?.permissions).not.toContain('referral.raise');
+    expect(getRoleTemplate('doctor_consultant_opd')?.permissions).toContain('referral.raise');
+
+    // Telemedicine is a doctor's clinic, not a nurse's.
+    expect(getRoleTemplate('doctor_consultant_opd')?.permissions).toContain('tele.prescribe');
+    expect(getRoleTemplate('nurse_ward')?.permissions).not.toContain('tele.prescribe');
+  });
 });
