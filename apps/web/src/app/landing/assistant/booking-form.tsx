@@ -39,7 +39,34 @@ function tomorrow(): string {
 
 export function BookingForm({ hospitalId, intent, onDone, onCancel }: BookingFormProps) {
   const id = useId();
-  const [specialities, setSpecialities] = useState<PublicDirectory['specialities']>([]);
+  /**
+   * Seeded with the department the visitor actually named, before the directory
+   * has loaded.
+   *
+   * A controlled `<select>` whose `value` matches no `<option>` is a value the
+   * browser silently drops, and React does not re-apply it when the options
+   * arrive later because the prop never changed. So when the directory fetch
+   * resolved after the form's first paint — which is most of the time on a cold
+   * load — the form quietly reset to "No preference" for somebody who had just
+   * typed "an appointment with Orthopaedics". It was worse than a visible bug:
+   * it looked fine and discarded the one thing they had told us. An earlier
+   * test passed only because a warm fetch happened to resolve first.
+   *
+   * Making the option exist from the first render removes the race rather than
+   * narrowing it.
+   */
+  const [specialities, setSpecialities] = useState<PublicDirectory['specialities']>(() =>
+    intent.specialityKey !== undefined && intent.specialityName !== undefined
+      ? [
+          {
+            key: intent.specialityKey,
+            code: '',
+            name: intent.specialityName,
+            telemedicineAllowed: true,
+          },
+        ]
+      : [],
+  );
   /**
    * Controlled, not `defaultValue`.
    *
@@ -68,7 +95,9 @@ export function BookingForm({ hospitalId, intent, onDone, onCancel }: BookingFor
     })
       .then(async (r) => (r.ok ? ((await r.json()) as PublicDirectory) : null))
       .then((d) => {
-        if (d !== null) setSpecialities(d.specialities);
+        // The real list replaces the seed. It contains the seeded department
+        // too — it came from this same directory — so the selection survives.
+        if (d !== null && d.specialities.length > 0) setSpecialities(d.specialities);
       })
       .catch(() => {
         // A missing department list is not a reason to block the enquiry: the

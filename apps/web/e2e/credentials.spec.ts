@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { ROLE_TEMPLATES } from '@vims/contracts';
 import { signIn, signInAs, visibleNavLabels } from './fixtures';
+import { SEATS } from './seats';
 
 /**
  * Every seeded credential, signed in as itself.
@@ -19,36 +20,6 @@ import { signIn, signInAs, visibleNavLabels } from './fixtures';
  * works, that it lands on the workspace its role declares, and that the
  * navigation it is offered is the navigation of that role and not another's.
  */
-
-/** Mirrors `SEATS` in `packages/db/src/seed/users.ts`. */
-const SEATS: Readonly<Record<string, number>> = {
-  nurse_ward: 3,
-  nurse_opd: 3,
-  nurse_icu: 3,
-  nurse_er_triage: 2,
-  nurse_ot_scrub: 2,
-  doctor_consultant_opd: 3,
-  doctor_ip: 3,
-  doctor_emergency: 2,
-  surgeon: 2,
-  anaesthetist: 2,
-  resident_doctor: 2,
-  receptionist: 3,
-  cashier: 3,
-  billing_executive: 2,
-  hospital_admin: 2,
-  branch_admin: 2,
-  lab_technician: 3,
-  phlebotomist: 2,
-  radiology_technician: 2,
-  pharmacist_op: 3,
-  pharmacist_ip: 3,
-  housekeeping: 3,
-  ward_attendant: 2,
-  security_officer: 2,
-  patient: 3,
-  family_attendant: 2,
-};
 
 /** The roles the request named, plus the ones a hospital cannot run without. */
 const MUST_HAVE_SEATS = [

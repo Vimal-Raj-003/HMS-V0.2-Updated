@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { DEV_PASSWORD, signIn, stack, visibleNavLabels } from './fixtures';
+import { SEATS } from './seats';
 
 /**
  * Phase-0 exit gates 2 and 3.
@@ -106,11 +107,29 @@ test.describe('gate 3 — each role gets its own workspace', () => {
 test.describe('account lockout survives the browser', () => {
   test('five wrong passwords lock the account, and the correct one is then refused', async ({ page }) => {
     const { hospitalId } = stack();
-    // A dedicated account, deliberately NOT one of the gate-3 roles. Locking an
-    // account another test signs in with makes the suite order-dependent: it
-    // passes alone and fails in a full run, which is the most expensive kind of
-    // flake to diagnose.
-    const user = 'phlebotomist@vims-blr';
+
+    // A dedicated account, deliberately not one any other spec signs in as.
+    //
+    // This comment used to say the same thing above `phlebotomist@vims-blr`,
+    // and it was true when it was written. Then `credentials.spec.ts` arrived
+    // and signs in as every role in the seeded rota — phlebotomist among them —
+    // so this test locked an account two later tests needed, and they failed on
+    // the second and third viewport projects only. It passed alone and failed
+    // in a full run: exactly the flake the original comment set out to avoid,
+    // and it cost an afternoon to find.
+    //
+    // The prose was not the problem; relying on prose was. The assertion below
+    // makes the coupling structural, so the next person to widen the rota gets
+    // a named failure here instead of a wandering one three specs away.
+    const role = 'facility_maintenance';
+    const user = `${role}@vims-blr`;
+
+    expect(
+      SEATS[role],
+      `${role} is now part of the seeded rota, and credentials.spec.ts signs in as every role in it. ` +
+        `Locking it here would break those tests on whichever project runs second. ` +
+        `Pick a role that is not in SEATS.`,
+    ).toBeUndefined();
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await page.goto('/login');

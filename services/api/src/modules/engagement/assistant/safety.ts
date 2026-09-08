@@ -156,6 +156,73 @@ const CLINICAL_PATTERNS: readonly string[] = [
   'prescription for',
 ];
 
+/**
+ * The other shape a clinical question takes: a body part or a symptom, and a
+ * request to judge it.
+ *
+ * Substring matching cannot see "is this **lump** serious" — the patterns above
+ * say `is it serious`, and ordinary English put a noun in the middle. Live
+ * testing found it, and enumerating every noun that could sit there is the list
+ * nobody can review that the compaction rule was introduced to avoid.
+ *
+ * So this is a pair rule instead: one word from each column, anywhere in the
+ * message, is somebody asking a clinician's question. "Do you treat fractures"
+ * matches neither column and stays a directory question.
+ */
+const SYMPTOM_WORDS: readonly string[] = [
+  'lump',
+  'rash',
+  'swelling',
+  'swollen',
+  'fever',
+  'temperature',
+  'cough',
+  'headache',
+  'dizzy',
+  'dizziness',
+  'nausea',
+  'vomiting',
+  'diarrhoea',
+  'diarrhea',
+  'discharge',
+  'itching',
+  'numbness',
+  'tingling',
+  'cramps',
+  'this pain',
+  'my pain',
+  'the pain',
+  'ache',
+  'aching',
+  'sore',
+  'bruise',
+  'mole',
+  'ulcer',
+  'wound',
+  'infection',
+  'my symptoms',
+  'these symptoms',
+];
+
+const JUDGEMENT_WORDS: readonly string[] = [
+  'serious',
+  'normal',
+  'dangerous',
+  'worried',
+  'worry',
+  'worrying',
+  'should i be',
+  'is it ok',
+  'is it okay',
+  'is it fine',
+  'harmful',
+  'bad sign',
+  'what could',
+  'what might',
+  'mean',
+  'means',
+];
+
 /** The self-harm subset gets a different closing sentence. */
 const SELF_HARM = new Set([
   'kill myself',
@@ -304,6 +371,15 @@ export function screen(message: string): SafetyVerdict {
   for (const pattern of CLINICAL_PATTERNS) {
     if (!hit(pattern)) continue;
     return { kind: 'clinical', matched: pattern, reply: CLINICAL_REPLY };
+  }
+
+  // The pair rule, for the questions a fixed phrase cannot reach.
+  const symptom = SYMPTOM_WORDS.find((word) => hit(word));
+  if (symptom !== undefined) {
+    const judgement = JUDGEMENT_WORDS.find((word) => hit(word));
+    if (judgement !== undefined) {
+      return { kind: 'clinical', matched: `${symptom}+${judgement}`, reply: CLINICAL_REPLY };
+    }
   }
 
   return { kind: 'clear' };

@@ -123,8 +123,16 @@ test.describe('the assistant', () => {
 
     const form = page.getByRole('button', { name: /send request/i });
     await expect(form).toBeVisible({ timeout: 15_000 });
-    // The department the visitor named survives the directory load.
-    await expect(page.getByLabel('Department')).toHaveValue(/.+/);
+    // The department the visitor named is selected *immediately*, before the
+    // directory has loaded. `toHaveValue(/.+/)` used to be the assertion here
+    // and it passed by luck: the form seeds the option from the intent now, but
+    // when it did not, a controlled select whose value matched no option
+    // silently showed "No preference" until the fetch landed. Asserting the
+    // visible department name is what makes the difference detectable.
+    await expect(
+      page.getByLabel('Department').locator('option:checked'),
+      'the department the visitor named should be selected without waiting for the directory',
+    ).toHaveText('Orthopaedics');
 
     await page.getByRole('textbox', { name: 'Your name' }).fill('Meera Iyer');
     await page.getByRole('textbox', { name: 'Phone number' }).fill('+919876500011');

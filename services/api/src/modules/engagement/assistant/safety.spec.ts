@@ -80,6 +80,38 @@ describe('the clinical screen', () => {
   });
 });
 
+describe('the pair rule — a symptom and a request to judge it', () => {
+  // Found by driving the live stack, not by unit testing: "is this lump
+  // serious" reached the generic fallback, because the fixed pattern is
+  // `is it serious` and ordinary English put a noun in the middle. With a model
+  // configured that question would have gone to the model.
+  const pairs = [
+    'is this lump serious',
+    'is my rash normal',
+    'should I be worried about this swelling',
+    'my headache is getting worse, is that dangerous',
+    'what could this mole mean',
+    'is it ok that the wound is still discharging',
+  ];
+
+  it.each(pairs)('classifies %j as clinical', (message) => {
+    expect(screen(message).kind).toBe('clinical');
+  });
+
+  it('does not fire on a symptom word alone', () => {
+    // "Do you treat fractures" and "which department handles a rash" are
+    // directory questions, and answering them with a refusal would make the
+    // assistant useless for the thing it exists to do.
+    expect(screen('which department treats a rash').kind).toBe('clear');
+    expect(screen('do you treat fever in children').kind).toBe('clear');
+  });
+
+  it('does not fire on a judgement word alone', () => {
+    expect(screen('is the hospital serious about appointments').kind).toBe('clear');
+    expect(screen('what are your normal opening hours').kind).toBe('clear');
+  });
+});
+
 describe('everything else', () => {
   const ordinary = [
     'which departments do you have',
