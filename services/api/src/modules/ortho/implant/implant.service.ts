@@ -1195,6 +1195,14 @@ export class ImplantService {
    */
   async recordCheck(applicationId: string, body: CastCheckRequest): Promise<CastDetailView> {
     return this.guard(async (tx) => {
+      // Without this the insert reaches the database and the foreign key
+      // refuses it, which surfaces as a 500. The caller asked about a record
+      // that does not exist; the honest answer is that it does not exist.
+      const { rows: parent } = await tx.query<{ readonly present: number }>(
+        `SELECT 1 AS present FROM clinical.cast_applications WHERE id = $1 AND hospital_id = $2`,
+        [applicationId, this.hospitalId()],
+      );
+      if (parent[0] === undefined) throw AppError.notFound('That cast was not found.');
       const id = newId();
       const { rows } = await tx.query<Record<string, unknown>>(
         `INSERT INTO clinical.cast_checks (

@@ -169,7 +169,17 @@ export function PolytraumaCaseScreen(): React.JSX.Element {
 
   if (id === '') {
     return (
-      <EmptyState cause="No board was named in the address." nextAction="Open one from the board list." />
+      <section className="flex flex-col gap-6">
+        // The header renders above the empty state rather than only alongside // data. These screens are in
+        the registry, so they are reachable from the // navigation and the palette — and arriving from either
+        produced an // untitled page that named neither the screen nor the hospital. Every // other screen
+        draws its header first; these three did not, and a // 110-screen render sweep is what noticed.
+        <PageHeader
+          title="Polytrauma board"
+          description="One board per patient, with every specialty's plan on it and the conflicts between them named."
+        />
+        <EmptyState cause="No board was named in the address." nextAction="Open one from the board list." />
+      </section>
     );
   }
 

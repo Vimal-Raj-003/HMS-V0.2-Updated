@@ -998,6 +998,14 @@ export class FractureService {
 
   async recordExam(id: string, body: ExamRequest): Promise<OrthoEpisodeView> {
     return this.guard(async (tx) => {
+      // Without this the insert reaches the database and the foreign key
+      // refuses it, which surfaces as a 500. The caller asked about a record
+      // that does not exist; the honest answer is that it does not exist.
+      const { rows: parent } = await tx.query<{ readonly present: number }>(
+        `SELECT 1 AS present FROM clinical.ortho_episodes WHERE id = $1 AND hospital_id = $2`,
+        [id, this.hospitalId()],
+      );
+      if (parent[0] === undefined) throw AppError.notFound('That orthopaedic episode was not found.');
       await tx.query(
         `INSERT INTO clinical.ortho_exams
            (id, hospital_id, episode_id, at, by_id, rom, neurovascular, special_tests, notes, created_at)

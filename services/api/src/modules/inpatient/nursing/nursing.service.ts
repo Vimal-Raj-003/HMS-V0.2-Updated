@@ -961,11 +961,17 @@ export class NursingService {
       const { rows } = await tx.query<Record<string, unknown>>(
         `UPDATE clinical.ip_news2_escalations
             SET acknowledged_at = now(), acknowledged_by = $3,
-                ladder = ladder || jsonb_build_object('rung', rung::text, 'acknowledgedAt', now(), 'by', $3::text, 'note', $4::text),
+                -- $5 carries the same value as $3 deliberately. Used once as
+                -- a uuid column and once inside jsonb_build_object, a single
+                -- parameter is deduced as both uuid and text, and Postgres
+                -- refuses the whole statement with "inconsistent types deduced
+                -- for parameter $3" -- so this route answered 500 for every
+                -- escalation, not only the missing ones.
+                ladder = ladder || jsonb_build_object('rung', rung::text, 'acknowledgedAt', now(), 'by', $5::text, 'note', $4::text),
                 updated_at = now()
           WHERE id = $1 AND hospital_id = $2 AND acknowledged_at IS NULL AND resolved_at IS NULL
           RETURNING id`,
-        [id, this.hospitalId(), this.actorId(), body.note ?? null],
+        [id, this.hospitalId(), this.actorId(), body.note ?? null, this.actorId()],
       );
       if (rows[0] === undefined) throw AppError.conflict('That escalation is already answered or closed.');
 

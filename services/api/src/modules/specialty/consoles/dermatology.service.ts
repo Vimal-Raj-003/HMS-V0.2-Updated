@@ -127,6 +127,7 @@ export class DermatologyService extends ConsoleSupport {
 
   async observeLesion(lesionId: string, body: LesionObservationRequest): Promise<LesionObservationRow> {
     return this.guard(async (tx) => {
+      await this.requireParent(tx, 'specialty.derm_lesions', lesionId, 'That lesion');
       const id = newId();
       const { rows } = await tx.query<Record<string, unknown>>(
         `INSERT INTO specialty.derm_lesion_observations

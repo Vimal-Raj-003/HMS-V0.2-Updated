@@ -74,10 +74,20 @@ export function IpBillScreen(): React.JSX.Element {
 
   if (admissionId === '') {
     return (
-      <EmptyState
-        cause="No admission was named in the address."
-        nextAction="Open one from the admitted list."
-      />
+      <section className="flex flex-col gap-6">
+        // The header renders above the empty state rather than only alongside // data. These screens are in
+        the registry, so they are reachable from the // navigation and the palette — and arriving from either
+        produced an // untitled page that named neither the screen nor the hospital. Every // other screen
+        draws its header first; these three did not, and a // 110-screen render sweep is what noticed.
+        <PageHeader
+          title="Inpatient bill"
+          description="Room and per-day charges as they stand, derived from the occupancy timeline."
+        />
+        <EmptyState
+          cause="No admission was named in the address."
+          nextAction="Open one from the admitted list."
+        />
+      </section>
     );
   }
 

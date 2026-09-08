@@ -12,7 +12,7 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runSeed } from '@vims/db/seed';
@@ -146,6 +146,15 @@ const WEB_ENV: NodeJS.ProcessEnv = {
 };
 
 process.stdout.write(`[stack] building apps/web into ${E2E_DIST_DIR}\n`);
+
+// `next build` rewrites the tracked `next-env.d.ts` to point its route-types
+// reference at whatever `distDir` it was given. Running this suite therefore
+// left a modified file in the working tree that the lint rule then refuses to
+// commit — a green test run that breaks the next commit. Snapshot it here and
+// put it back afterwards.
+const NEXT_ENV = join(REPO_ROOT, 'apps', 'web', 'next-env.d.ts');
+const nextEnvBefore = readFileSync(NEXT_ENV, 'utf8');
+
 await once(
   spawn('npx', ['next', 'build'], {
     cwd: join(REPO_ROOT, 'apps', 'web'),
@@ -156,6 +165,8 @@ await once(
 ).then(([code]) => {
   if (code !== 0) throw new Error(`apps/web build failed with code ${String(code)}`);
 });
+
+writeFileSync(NEXT_ENV, nextEnvBefore);
 
 running.web = spawn('npx', ['next', 'start', '--port', String(WEB_PORT)], {
   cwd: join(REPO_ROOT, 'apps', 'web'),

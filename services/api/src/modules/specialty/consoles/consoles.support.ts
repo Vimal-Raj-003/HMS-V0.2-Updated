@@ -1191,4 +1191,34 @@ export class ConsoleSupport {
   protected guard<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T> {
     return withConsoleErrors(() => this.db.withTenant(currentTenantContext(), fn));
   }
+
+  /**
+   * Refuses with 404 when the parent a child row hangs off does not exist.
+   *
+   * Every console records children against a parent — an assessment against a
+   * wound, a visit against a pregnancy — and fills the child's denormalised
+   * columns with `(SELECT patient_id FROM parent WHERE id = $n)`. When the
+   * parent is not there that subquery returns NULL, the insert trips a NOT NULL
+   * violation, and a SQLSTATE no translation covers surfaces as a 500. The
+   * caller asked about a record that does not exist and got "something went
+   * wrong on our side", which is both wrong and unactionable.
+   *
+   * An API surface sweep found nine routes doing exactly that.
+   *
+   * `relation` is a literal written in this repository and never a value from a
+   * request, which is why interpolating it is safe here and would not be if it
+   * came from anywhere else.
+   */
+  protected async requireParent(
+    tx: TransactionClient,
+    relation: string,
+    id: string,
+    what: string,
+  ): Promise<void> {
+    const { rows } = await tx.query<{ readonly present: number }>(
+      `SELECT 1 AS present FROM ${relation} WHERE id = $1 AND hospital_id = $2`,
+      [id, this.hospitalId()],
+    );
+    if (rows[0] === undefined) throw AppError.notFound(`${what} was not found.`);
+  }
 }

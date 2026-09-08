@@ -144,8 +144,17 @@ async function main(): Promise<void> {
   const token = body.accessToken;
   if (token === undefined) throw new Error(`login failed: ${String(login.status)}`);
 
-  const targets = routes.filter((r) => !r.path.includes(':'));
-  process.stdout.write(`[sweep] ${String(targets.length)} parameterless routes\n`);
+  // Two passes. The parameterless routes exercise the happy path; the
+  // parameterised ones are called with a well-formed UUID that names nothing,
+  // which is the cheapest way to find a handler that assumes its row exists.
+  // A 404 there is the right answer and a 500 is a missing guard.
+  const NOWHERE = '00000000-0000-4000-8000-000000000000';
+  const targets = routes.map((r) => ({
+    ...r,
+    url: r.path.replace(/:[A-Za-z0-9_]+/g, NOWHERE),
+    parameterised: r.path.includes(':'),
+  }));
+  process.stdout.write(`[sweep] ${String(targets.length)} routes\n`);
 
   const results: {
     method: string;
@@ -153,6 +162,7 @@ async function main(): Promise<void> {
     status: number;
     file: string;
     detail: string;
+    parameterised: boolean;
   }[] = [];
 
   for (const r of targets) {
@@ -166,7 +176,7 @@ async function main(): Promise<void> {
     let status = 0;
     let detail = '';
     try {
-      const res = await fetch(`${origin}/api/v1${r.path}`, {
+      const res = await fetch(`${origin}/api/v1${r.url}`, {
         method: r.method,
         headers,
         ...(r.method === 'GET' ? {} : { body: '{}' }),
@@ -180,7 +190,14 @@ async function main(): Promise<void> {
       status = -1;
       detail = e instanceof Error ? e.message : String(e);
     }
-    results.push({ method: r.method, path: r.path, status, file: r.file, detail });
+    results.push({
+      method: r.method,
+      path: r.path,
+      status,
+      file: r.file,
+      detail,
+      parameterised: r.parameterised,
+    });
   }
 
   writeFileSync(OUT_FILE, JSON.stringify(results, null, 2));

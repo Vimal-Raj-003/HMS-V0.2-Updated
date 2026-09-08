@@ -350,6 +350,7 @@ export class AntenatalService extends ConsoleSupport {
 
   async recordVisit(pregnancyId: string, body: VisitRequest): Promise<AncVisitRow> {
     return this.guard(async (tx) => {
+      await this.requireParent(tx, 'specialty.pregnancies', pregnancyId, 'That pregnancy');
       const id = newId();
       // `ga_days`, `meows_score` and `meows_action` are absent from the column
       // list for the same reason the dating fields are.

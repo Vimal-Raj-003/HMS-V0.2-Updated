@@ -543,7 +543,11 @@ model OrthoExam {
   /// `{ nerve: finding }` — the examination that decides whether this is an
   /// emergency.
   neurovascular Json?
-  specialTests  Json?
+  /// `@map` is not decoration here: without it Prisma created the column as
+  /// `"specialTests"`, the only camelCase column in 868 tables, and the service
+  /// that writes `special_tests` — the name the convention promises — failed
+  /// with "column does not exist" on every call.
+  specialTests  Json?   @map("special_tests")
   notes         String? @db.Text
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)

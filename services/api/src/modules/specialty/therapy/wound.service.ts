@@ -99,6 +99,7 @@ export class WoundService extends ConsoleSupport {
 
   async assess(woundId: string, body: WoundAssessmentRequest): Promise<WoundDetail> {
     return this.guard(async (tx) => {
+      await this.requireParent(tx, 'specialty.wounds', woundId, 'That wound');
       const { rows } = await tx.query<Record<string, unknown>>(
         `INSERT INTO specialty.wound_assessments
            (id, hospital_id, wound_id, patient_id, assessed_at, assessed_by, context,
@@ -219,6 +220,7 @@ export class WoundService extends ConsoleSupport {
 
   async recordDressing(woundId: string, body: DressingRequest): Promise<WoundDetail> {
     return this.guard(async (tx) => {
+      await this.requireParent(tx, 'specialty.wounds', woundId, 'That wound');
       await tx.query(
         `INSERT INTO specialty.wound_dressing_events
            (id, hospital_id, branch_id, wound_id, patient_id, session_id, performed_at,

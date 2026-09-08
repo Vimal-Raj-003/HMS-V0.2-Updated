@@ -683,6 +683,14 @@ export class ProceduresService {
    */
   async recovery(procedureId: string, body: RecoveryRequest): Promise<RecoveryRow> {
     return this.guard(async (tx) => {
+      // Without this the insert reaches the database and the foreign key
+      // refuses it, which surfaces as a 500. The caller asked about a record
+      // that does not exist; the honest answer is that it does not exist.
+      const { rows: parent } = await tx.query<{ readonly present: number }>(
+        `SELECT 1 AS present FROM clinical.procedures WHERE id = $1 AND hospital_id = $2`,
+        [procedureId, this.hospitalId()],
+      );
+      if (parent[0] === undefined) throw AppError.notFound('That procedure was not found.');
       const actor = this.actorId();
       const { rows } = await tx.query<Record<string, unknown>>(
         `INSERT INTO clinical.procedure_recovery

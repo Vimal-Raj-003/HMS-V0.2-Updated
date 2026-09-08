@@ -242,6 +242,7 @@ export class HealthCheckService extends ConsoleSupport {
 
   async draftReport(episodeId: string, body: HcReportRequest): Promise<HcReportRow> {
     return this.guard(async (tx) => {
+      await this.requireParent(tx, 'specialty.hc_episodes', episodeId, 'That health-check episode');
       const { rows } = await tx.query<Record<string, unknown>>(
         `INSERT INTO specialty.hc_reports
            (id, hospital_id, episode_id, patient_id, version, domain_scores, risk_calcs,
