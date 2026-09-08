@@ -1,0 +1,3138 @@
+[
+  {
+    "method": "GET",
+    "path": "/healthz",
+    "status": 404,
+    "file": "services/api/src/core/health/health.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/readyz",
+    "status": 404,
+    "file": "services/api/src/core/health/health.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/lab/critical-values",
+    "status": 200,
+    "file": "services/api/src/modules/diagnostics/lab/critical.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/lab/catalogue/tests",
+    "status": 200,
+    "file": "services/api/src/modules/diagnostics/lab/lab.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/lab/catalogue/rejection-reasons",
+    "status": 200,
+    "file": "services/api/src/modules/diagnostics/lab/lab.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/lab/orders",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/lab/lab.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/lab/orders",
+    "status": 200,
+    "file": "services/api/src/modules/diagnostics/lab/lab.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/lab/qc/state",
+    "status": 200,
+    "file": "services/api/src/modules/diagnostics/lab/qc.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/lab/qc/runs",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/lab/qc.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/lab/qc/actions",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/lab/qc.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/lab/worklists/bench",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/lab/results.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/lab/results",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/lab/results.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/lab/results/verify",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/lab/results.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/lab/results/authorise",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/lab/results.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/investigations/worklist",
+    "status": 200,
+    "file": "services/api/src/modules/diagnostics/radiology/investigations.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/investigations/studies",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/radiology/investigations.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pacs/studies/ingest",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/radiology/pacs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pacs/mpps",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/radiology/pacs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pacs/studies",
+    "status": 200,
+    "file": "services/api/src/modules/diagnostics/radiology/pacs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pacs/reconciliation",
+    "status": 200,
+    "file": "services/api/src/modules/diagnostics/radiology/pacs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pacs/share-links",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/radiology/pacs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pacs/retention-policies",
+    "status": 200,
+    "file": "services/api/src/modules/diagnostics/radiology/pacs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pacs/purge-runs",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/radiology/pacs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/rad/orders",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/radiology/rad-orders.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/rad/orders",
+    "status": 200,
+    "file": "services/api/src/modules/diagnostics/radiology/rad-orders.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/rad/appointments",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/radiology/rad-orders.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/rad/reading-worklist",
+    "status": 200,
+    "file": "services/api/src/modules/diagnostics/radiology/rad-reports.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/rad/reports",
+    "status": 400,
+    "file": "services/api/src/modules/diagnostics/radiology/rad-reports.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/rad/critical-findings",
+    "status": 200,
+    "file": "services/api/src/modules/diagnostics/radiology/rad-reports.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/er/board",
+    "status": 200,
+    "file": "services/api/src/modules/emergency/er/er.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/er/zones",
+    "status": 200,
+    "file": "services/api/src/modules/emergency/er/er.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/er/zones",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/er/er.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/er/bays",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/er/er.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/er/bays/clean",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/er/er.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/er/visits",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/er/er.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/er/pre-alerts",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/er/er.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/fleet/board",
+    "status": 200,
+    "file": "services/api/src/modules/emergency/fleet/fleet.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/fleet/vehicles",
+    "status": 200,
+    "file": "services/api/src/modules/emergency/fleet/fleet.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/fleet/vehicles",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/fleet/fleet.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/fleet/crew",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/fleet/fleet.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/fleet/shifts",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/fleet/fleet.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/fleet/checklists",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/fleet/fleet.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/fleet/fuel",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/fleet/fleet.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/fleet/requests",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/fleet/fleet.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/fleet/trips",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/fleet/fleet.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/prehospital/records",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/fleet/fleet.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/prehospital/inbound",
+    "status": 200,
+    "file": "services/api/src/modules/emergency/fleet/fleet.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/mlc/register",
+    "status": 200,
+    "file": "services/api/src/modules/emergency/mlc/mlc.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/mlc/worklists",
+    "status": 200,
+    "file": "services/api/src/modules/emergency/mlc/mlc.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/mlc/cases",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/mlc/mlc.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/polytrauma",
+    "status": 200,
+    "file": "services/api/src/modules/emergency/polytrauma/polytrauma.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/polytrauma",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/polytrauma/polytrauma.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/trauma/board",
+    "status": 200,
+    "file": "services/api/src/modules/emergency/trauma/trauma.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/trauma/activations",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/trauma/trauma.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/trauma/surveys",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/trauma/trauma.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/trauma/scores",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/trauma/trauma.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/trauma/scores/amend",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/trauma/trauma.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/trauma/mci",
+    "status": 200,
+    "file": "services/api/src/modules/emergency/trauma/trauma.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/trauma/mci",
+    "status": 400,
+    "file": "services/api/src/modules/emergency/trauma/trauma.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/cash/shifts/open",
+    "status": 400,
+    "file": "services/api/src/modules/frontoffice/cash/cash.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/cash/shifts",
+    "status": 200,
+    "file": "services/api/src/modules/frontoffice/cash/cash.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/cash/payments",
+    "status": 400,
+    "file": "services/api/src/modules/frontoffice/cash/cash.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/queue/tokens",
+    "status": 400,
+    "file": "services/api/src/modules/frontoffice/queue/queue.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/queue/tokens",
+    "status": 200,
+    "file": "services/api/src/modules/frontoffice/queue/queue.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ip/board",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/beds/beds.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ip/census",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/beds/beds.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ip/buildings",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/beds/beds.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ip/wards",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/beds/beds.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ip/bed-classes",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/beds/beds.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ip/rooms",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/beds/beds.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ip/beds",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/beds/beds.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ip/admissions",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/beds/beds.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ip/admissions",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/beds/beds.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ip/holds",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/beds/beds.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ip/cleaning",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/beds/beds.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/icu/flowsheet",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/criticalcare/criticalcare.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/icu/scores",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/criticalcare/criticalcare.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/icu/bundles",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/criticalcare/criticalcare.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/code/carts",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/criticalcare/criticalcare.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/code/calls",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/criticalcare/criticalcare.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/code/calls",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/criticalcare/criticalcare.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/blood/donors",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/criticalcare/criticalcare.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/blood/units",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/criticalcare/criticalcare.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/blood/inventory",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/criticalcare/criticalcare.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/blood/requests",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/criticalcare/criticalcare.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/blood/issues",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/criticalcare/criticalcare.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ip/discharge",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/discharge/discharge.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ip/discharge",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/discharge/discharge.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/mortuary/cases",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/discharge/discharge.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/mortuary/cases",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/discharge/discharge.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ipbill/running",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/ipbilling/ipbilling.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ipbill/charge-runs",
+    "status": 201,
+    "file": "services/api/src/modules/inpatient/ipbilling/ipbilling.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ipbill/charge-runs",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/ipbilling/ipbilling.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ipbill/policy",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/ipbilling/ipbilling.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/nursing/ward",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/nursing/nursing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/nursing/assignments",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/nursing/nursing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/nursing/assessments",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/nursing/nursing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/nursing/mar",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/nursing/nursing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/nursing/mar/orders",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/nursing/nursing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/nursing/escalations",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/nursing/nursing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/nursing/fluids",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/nursing/nursing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/nursing/notes",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/nursing/nursing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/nursing/handovers",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/nursing/nursing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/nursing/devices",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/nursing/nursing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/nursing/isolation",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/nursing/nursing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/nursing/hai",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/nursing/nursing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/theatre/board",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/theatre/theatre.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/theatre/cases",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/theatre/theatre.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/cssd/sets",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/theatre/theatre.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/cssd/loads",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/theatre/theatre.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/cssd/loads",
+    "status": 200,
+    "file": "services/api/src/modules/inpatient/theatre/theatre.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/cssd/issues",
+    "status": 400,
+    "file": "services/api/src/modules/inpatient/theatre/theatre.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/consignment/agreements",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/consignment/agreements",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/consignment/receipts",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/consignment/stock",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/consignment/usages",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/consignment/usages",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/consignment/returns",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/consignment/reconciliations",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/consumption",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/consumption",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/finance/cost-centres",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/finance/cost-centres/consumption",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/finance/cost-centres",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/consignment.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/items",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/items.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/items/resolve",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/items.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/items",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/items.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/stores",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/items.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/stores",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/items.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/indents",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/movements.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/indents",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/movements.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/issues",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/movements.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/issues",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/movements.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/returns",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/movements.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/transfers",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/movements.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/transfers",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/movements.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/adjustments",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/movements.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/adjustments",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/movements.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/counts/plans",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/movements.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/counts/plans",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/movements.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/purchase/indents",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/purchase.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/purchase/indents",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/purchase.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/purchase/rfqs",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/purchase.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/purchase/rfqs",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/purchase.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/purchase/orders",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/purchase.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/purchase/orders",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/purchase.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/purchase/emergency",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/purchase.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/purchase/grns",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/purchase.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/purchase/grns",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/purchase.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/purchase/returns",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/purchase.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/purchase/invoices",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/purchase.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/purchase/invoices",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/purchase.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/stock",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/stock.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/ledger",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/stock.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/expiry",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/stock.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/inventory/putaway",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/stock.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/inventory/integrity",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/stock.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/vendors",
+    "status": 200,
+    "file": "services/api/src/modules/inventory/vendors.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/vendors",
+    "status": 400,
+    "file": "services/api/src/modules/inventory/vendors.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/departments",
+    "status": 200,
+    "file": "services/api/src/modules/masters/catalogue.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/specialities",
+    "status": 200,
+    "file": "services/api/src/modules/masters/catalogue.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/consult-types",
+    "status": 200,
+    "file": "services/api/src/modules/masters/catalogue.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/services",
+    "status": 200,
+    "file": "services/api/src/modules/masters/catalogue.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/rooms",
+    "status": 200,
+    "file": "services/api/src/modules/masters/catalogue.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/doctors",
+    "status": 200,
+    "file": "services/api/src/modules/masters/doctors.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/queues",
+    "status": 200,
+    "file": "services/api/src/modules/masters/operations.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/cash/counters",
+    "status": 200,
+    "file": "services/api/src/modules/masters/operations.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/areas",
+    "status": 200,
+    "file": "services/api/src/modules/masters/reference.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dietary/slots",
+    "status": 400,
+    "file": "services/api/src/modules/nonclinical/dietary/dietary.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/dietary/slots",
+    "status": 200,
+    "file": "services/api/src/modules/nonclinical/dietary/dietary.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dietary/recipes",
+    "status": 400,
+    "file": "services/api/src/modules/nonclinical/dietary/dietary.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/dietary/recipes",
+    "status": 200,
+    "file": "services/api/src/modules/nonclinical/dietary/dietary.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/dietary/holding-limits",
+    "status": 200,
+    "file": "services/api/src/modules/nonclinical/dietary/dietary.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dietary/diets",
+    "status": 400,
+    "file": "services/api/src/modules/nonclinical/dietary/dietary.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/dietary/diets",
+    "status": 200,
+    "file": "services/api/src/modules/nonclinical/dietary/dietary.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dietary/trays",
+    "status": 400,
+    "file": "services/api/src/modules/nonclinical/dietary/dietary.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/dietary/trays",
+    "status": 200,
+    "file": "services/api/src/modules/nonclinical/dietary/dietary.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/encounters",
+    "status": 200,
+    "file": "services/api/src/modules/opd/clinical/encounter.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/encounters",
+    "status": 400,
+    "file": "services/api/src/modules/opd/clinical/encounter.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/vitals/reference-ranges",
+    "status": 200,
+    "file": "services/api/src/modules/opd/clinical/vitals.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/vitals/records",
+    "status": 400,
+    "file": "services/api/src/modules/opd/clinical/vitals.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/vitals/records",
+    "status": 400,
+    "file": "services/api/src/modules/opd/clinical/vitals.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/vitals/recheck-requests",
+    "status": 400,
+    "file": "services/api/src/modules/opd/clinical/vitals.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/patients",
+    "status": 200,
+    "file": "services/api/src/modules/opd/patient/patient.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/patients/dedupe",
+    "status": 200,
+    "file": "services/api/src/modules/opd/patient/patient.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/patients",
+    "status": 400,
+    "file": "services/api/src/modules/opd/patient/patient.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/patients/merge",
+    "status": 400,
+    "file": "services/api/src/modules/opd/patient/patient.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/patients/unmerge",
+    "status": 400,
+    "file": "services/api/src/modules/opd/patient/patient.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/cdss/evaluate",
+    "status": 400,
+    "file": "services/api/src/modules/opd/prescribing/cdss.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/cdss/alerts",
+    "status": 200,
+    "file": "services/api/src/modules/opd/prescribing/cdss.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/cdss/reports/alert-fatigue",
+    "status": 200,
+    "file": "services/api/src/modules/opd/prescribing/cdss.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/orders",
+    "status": 400,
+    "file": "services/api/src/modules/opd/prescribing/orders.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/orders",
+    "status": 200,
+    "file": "services/api/src/modules/opd/prescribing/orders.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/drugs/search",
+    "status": 400,
+    "file": "services/api/src/modules/opd/prescribing/prescribing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/prescriptions",
+    "status": 400,
+    "file": "services/api/src/modules/opd/prescribing/prescribing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/appointments",
+    "status": 200,
+    "file": "services/api/src/modules/opd/scheduling/appointments.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/appointments",
+    "status": 400,
+    "file": "services/api/src/modules/opd/scheduling/appointments.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/visits",
+    "status": 200,
+    "file": "services/api/src/modules/opd/scheduling/visits.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/visits",
+    "status": 400,
+    "file": "services/api/src/modules/opd/scheduling/visits.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ortho/fractures",
+    "status": 200,
+    "file": "services/api/src/modules/ortho/fracture/fracture.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ortho/fractures",
+    "status": 400,
+    "file": "services/api/src/modules/ortho/fracture/fracture.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ortho/episodes",
+    "status": 400,
+    "file": "services/api/src/modules/ortho/fracture/fracture.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/implants/catalogue",
+    "status": 200,
+    "file": "services/api/src/modules/ortho/implant/implant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/implants/catalogue",
+    "status": 400,
+    "file": "services/api/src/modules/ortho/implant/implant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/implants/stock",
+    "status": 200,
+    "file": "services/api/src/modules/ortho/implant/implant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/implants/stock",
+    "status": 400,
+    "file": "services/api/src/modules/ortho/implant/implant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/implants/usages",
+    "status": 400,
+    "file": "services/api/src/modules/ortho/implant/implant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/implants/trace",
+    "status": 400,
+    "file": "services/api/src/modules/ortho/implant/implant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/implants/recalls",
+    "status": 200,
+    "file": "services/api/src/modules/ortho/implant/implant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/implants/recalls",
+    "status": 400,
+    "file": "services/api/src/modules/ortho/implant/implant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/casts/requests",
+    "status": 400,
+    "file": "services/api/src/modules/ortho/implant/implant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/casts",
+    "status": 200,
+    "file": "services/api/src/modules/ortho/implant/implant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/casts",
+    "status": 400,
+    "file": "services/api/src/modules/ortho/implant/implant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pharmacy/queue",
+    "status": 200,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pharmacy/queue",
+    "status": 400,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pharmacy/dispenses",
+    "status": 200,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pharmacy/dispenses",
+    "status": 400,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pharmacy/controlled-register",
+    "status": 200,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pharmacy/controlled-register",
+    "status": 400,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pharmacy/custody-checks",
+    "status": 400,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pharmacy/controlled-destructions",
+    "status": 400,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pharmacy/stock",
+    "status": 400,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pharmacy/returns",
+    "status": 400,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pharmacy/expiry",
+    "status": 200,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pharmacy/expiry-actions",
+    "status": 400,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pharmacy/recalls",
+    "status": 200,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pharmacy/recalls",
+    "status": 400,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pharmacy/cold-chain/readings",
+    "status": 400,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pharmacy/interventions",
+    "status": 400,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pharmacy/day-close",
+    "status": 200,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pharmacy/day-close",
+    "status": 400,
+    "file": "services/api/src/modules/pharmacy/pharmacy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/admin/audit",
+    "status": 200,
+    "file": "services/api/src/modules/platform/admin/audit-log.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/admin/branches",
+    "status": 200,
+    "file": "services/api/src/modules/platform/admin/branches.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/admin/flags",
+    "status": 200,
+    "file": "services/api/src/modules/platform/admin/flags.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/admin/licence",
+    "status": 200,
+    "file": "services/api/src/modules/platform/admin/licence.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/admin/permissions",
+    "status": 200,
+    "file": "services/api/src/modules/platform/admin/roles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/admin/roles",
+    "status": 200,
+    "file": "services/api/src/modules/platform/admin/roles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/admin/roles",
+    "status": 400,
+    "file": "services/api/src/modules/platform/admin/roles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/admin/settings/definitions",
+    "status": 200,
+    "file": "services/api/src/modules/platform/admin/settings.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/admin/settings",
+    "status": 200,
+    "file": "services/api/src/modules/platform/admin/settings.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "PUT",
+    "path": "/admin/settings",
+    "status": 400,
+    "file": "services/api/src/modules/platform/admin/settings.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/admin/users",
+    "status": 200,
+    "file": "services/api/src/modules/platform/admin/users.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/admin/users",
+    "status": 400,
+    "file": "services/api/src/modules/platform/admin/users.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/auth/login",
+    "status": 400,
+    "file": "services/api/src/modules/platform/auth/auth.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/me",
+    "status": 200,
+    "file": "services/api/src/modules/platform/session/session.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/procedures/rooms",
+    "status": 400,
+    "file": "services/api/src/modules/procedures/procedures.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/procedures/rooms",
+    "status": 200,
+    "file": "services/api/src/modules/procedures/procedures.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/procedures/orders",
+    "status": 400,
+    "file": "services/api/src/modules/procedures/procedures.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/procedures/orders",
+    "status": 200,
+    "file": "services/api/src/modules/procedures/procedures.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/opd-nursing/tasks",
+    "status": 400,
+    "file": "services/api/src/modules/procedures/procedures.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/opd-nursing/tasks",
+    "status": 200,
+    "file": "services/api/src/modules/procedures/procedures.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/billing/bills",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/billing/billing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/billing/bills",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/billing/billing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/billing/exceptions",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/billing/billing.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/estimates/templates",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/estimates/estimates.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/estimates/templates",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/estimates/estimates.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/estimates/variance",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/estimates/estimates.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/estimates/variance/summary",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/estimates/estimates.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/estimates",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/estimates/estimates.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/estimates",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/estimates/estimates.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/insurance/payers",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/insurance/insurance.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/insurance/payers",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/insurance/insurance.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/insurance/policies",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/insurance/insurance.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/insurance/cases",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/insurance/insurance.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/insurance/cases",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/insurance/insurance.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/insurance/preauths",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/insurance/insurance.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/insurance/preauths",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/insurance/insurance.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/leakage/rules",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/leakage/leakage.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/leakage/rules",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/leakage/leakage.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/leakage/scans",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/leakage/leakage.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/leakage/scans",
+    "status": 201,
+    "file": "services/api/src/modules/rcm/leakage/leakage.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/leakage/dashboard",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/leakage/leakage.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/leakage/findings",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/leakage/leakage.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/leakage/discharge-check",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/leakage/leakage.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/packages",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/packages/packages.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/packages",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/packages/packages.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/packages/bookings",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/packages/packages.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/packages/activations",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/packages/packages.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/packages/variances",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/packages/packages.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/payments/intents",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/payments/payments.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/payments/intents",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/payments/payments.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/payments/webhooks",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/payments/payments.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/payments/payments",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/payments/payments.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/payments/recon-exceptions",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/payments/payments.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/payouts/contracts",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/payouts/payouts.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/payouts/contracts",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/payouts/payouts.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/payouts/rules",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/payouts/payouts.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/payouts/periods",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/payouts/payouts.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/payouts/periods",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/payouts/payouts.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/payouts/tds",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/payouts/payouts.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/payouts/statements",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/payouts/payouts.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/schemes",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/schemes/schemes.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/schemes",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/schemes/schemes.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/schemes/packages",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/schemes/schemes.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/schemes/beneficiaries",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/schemes/schemes.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/schemes/cases",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/schemes/schemes.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/schemes/cases",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/schemes/schemes.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/schemes/cash-check",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/schemes/schemes.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/schemes/cash-attempts",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/schemes/schemes.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/schemes/claims",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/schemes/schemes.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/schemes/claims",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/schemes/schemes.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/schemes/shortfalls",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/schemes/schemes.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/tariff/plans",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/tariff/tariff.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/tariff/plans",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/tariff/tariff.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/tariff/resolve",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/tariff/tariff.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/tariff/resolve/batch",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/tariff/tariff.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/tariff/missing-rates",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/tariff/tariff.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/tariff/change-log",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/tariff/tariff.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/obg/pregnancies",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/antenatal/antenatal.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/obg/pregnancies",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/antenatal/antenatal.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/obg/schedule",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/antenatal/antenatal.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/obg/form-f",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/antenatal/antenatal.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/obg/form-f",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/antenatal/antenatal.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/obg/sonologists",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/antenatal/antenatal.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/obg/sonologists",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/antenatal/antenatal.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/obg/mtp",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/antenatal/antenatal.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/obg/mtp",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/antenatal/antenatal.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ayush/registrations",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/ayush/ayush.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ayush/registrations",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/ayush/ayush.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ayush/consults",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/ayush/ayush.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ayush/consults",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/ayush/ayush.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ayush/medicines",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/ayush/ayush.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ayush/medicines",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/ayush/ayush.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ayush/heavy-metal-limits",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/ayush/ayush.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ayush/procedures",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/ayush/ayush.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ayush/courses",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/ayush/ayush.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ayush/courses",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/ayush/ayush.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/cardio/consults",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/cardio/ecgs",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/cardio/ecgs",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/cardio/echoes",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/cardio/stress-tests",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/cardio/anticoagulation",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pulmo/consults",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pulmo/pft",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pulmo/pft",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pulmo/sleep-studies",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pulmo/sleep-studies",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pulmo/pap",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pulmo/pap",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ent/exams",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ent/audiology",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ent/audiology",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ent/hearing-aids",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ent/hearing-aids",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dental/tooth-events",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dental/plans",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/dental/plans",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dental/sittings",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/derm/lesions",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/derm/lesions",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/derm/scores",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/derm/scores",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/derm/biopsies",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/derm/biopsies",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/derm/phototherapy",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/derm/phototherapy",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/consoles/consoles.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dialysis/programs",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/dialysis/dialysis.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/dialysis/programs",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/dialysis/dialysis.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dialysis/accesses",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/dialysis/dialysis.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dialysis/prescriptions",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/dialysis/dialysis.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dialysis/machines",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/dialysis/dialysis.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/dialysis/machines",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/dialysis/dialysis.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/dialysis/board",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/dialysis/dialysis.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dialysis/sessions",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/dialysis/dialysis.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/dialysis/sessions",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/dialysis/dialysis.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/dialysis/dialysers",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/dialysis/dialysis.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/dialysis/dialysers",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/dialysis/dialysis.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/tele/consults",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/handoffs/handoffs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/tele/consults",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/handoffs/handoffs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/tele/drug-rules",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/handoffs/handoffs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/referrals",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/handoffs/handoffs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/referrals",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/handoffs/handoffs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pathways",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/handoffs/handoffs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pathways",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/handoffs/handoffs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pathways/variance-report",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/handoffs/handoffs.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/obs/labour-episodes",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/labour/labour.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/obs/labour-episodes",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/labour/labour.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/obs/pph-activations",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/labour/labour.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/obs/newborns",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/labour/labour.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/lifespan/growth",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/lifespan/lifespan.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/lifespan/growth",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/lifespan/lifespan.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/lifespan/paed-doses",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/lifespan/lifespan.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/lifespan/nicu-admissions",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/lifespan/lifespan.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/lifespan/nicu-admissions",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/lifespan/lifespan.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/lifespan/geri-assessments",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/lifespan/lifespan.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/lifespan/medication-reviews",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/lifespan/lifespan.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/lifespan/medication-reviews",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/lifespan/lifespan.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/onco/cases",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/oncology/oncology.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/onco/cases",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/oncology/oncology.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/onco/regimens",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/oncology/oncology.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/onco/regimens",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/oncology/oncology.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/onco/plans",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/oncology/oncology.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/onco/cycles",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/oncology/oncology.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/ophtha/visits",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/ophthalmology/ophthalmology.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/ophtha/visits",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/ophthalmology/ophthalmology.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pain/thresholds",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/pain/pain.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/pain/episodes",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/pain/pain.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pain/episodes",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/pain/pain.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/pain/opioids",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/pain/pain.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/immunisation/vials",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/programme/programme.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/immunisation/vials",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/programme/programme.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/immunisation/records",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/programme/programme.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/immunisation/records",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/programme/programme.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/immunisation/plan-doses",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/programme/programme.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/immunisation/breaches",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/programme/programme.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/immunisation/breaches",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/programme/programme.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/immunisation/aefi",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/programme/programme.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/immunisation/aefi",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/programme/programme.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/healthcheck/bookings",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/programme/programme.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/healthcheck/episodes",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/programme/programme.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/psy/episodes",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/psychiatry/psychiatry.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/psy/episodes",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/psychiatry/psychiatry.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/psy/scales",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/psychiatry/psychiatry.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/psy/capacity",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/psychiatry/psychiatry.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/psy/instruments",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/psychiatry/psychiatry.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/psy/admissions",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/psychiatry/psychiatry.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/psy/restraints",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/psychiatry/psychiatry.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/psy/restraints",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/psychiatry/psychiatry.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/psy/ect-courses",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/psychiatry/psychiatry.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/specialty/consoles",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/specialty.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/specialty/consoles",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/specialty.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/specialty/device-types",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/specialty.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/specialty/device-orders",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/specialty.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/specialty/device-orders",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/specialty.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/specialty/worklist",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/specialty.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/specialty/stages",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/specialty.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/therapy/episodes",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/therapy/therapy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/therapy/episodes",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/therapy/therapy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/wounds",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/therapy/therapy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/wounds",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/therapy/therapy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/nutrition/assessments",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/therapy/therapy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/nutrition/assessments",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/therapy/therapy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/nutrition/plans",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/therapy/therapy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/nutrition/plans",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/therapy/therapy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/slp/assessments",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/therapy/therapy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/slp/orders",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/therapy/therapy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/slp/orders",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/therapy/therapy.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/transplant/recipients",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/transplant/transplant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/transplant/recipients",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/transplant/transplant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/transplant/donations",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/transplant/transplant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/transplant/donations",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/transplant/transplant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/transplant/brainstem",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/transplant/transplant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/art/donors",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/transplant/transplant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/art/donors",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/transplant/transplant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "POST",
+    "path": "/art/cycles",
+    "status": 400,
+    "file": "services/api/src/modules/specialty/transplant/transplant.controller.ts",
+    "detail": ""
+  },
+  {
+    "method": "GET",
+    "path": "/art/cycles",
+    "status": 200,
+    "file": "services/api/src/modules/specialty/transplant/transplant.controller.ts",
+    "detail": ""
+  }
+]

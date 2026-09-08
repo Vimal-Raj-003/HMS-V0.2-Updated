@@ -83,7 +83,17 @@ running.pg = await startTestPostgres();
 // Seeds run as the schema owner: the application role is subject to RLS and
 // cannot write the code-owned catalogues, so it would silently seed nothing.
 process.env['DATABASE_MIGRATE_URL'] = running.pg.connectionString('migrator');
-await runSeed(running.pg.pool('migrator'), 'minimal');
+
+// `demo`, not `minimal`. The minimal tier deliberately skips
+// `seedModuleConfiguration`, and that step is what writes `core.lic_entitlements`
+// — so a minimally-seeded tenant has no licence document at all, and every
+// screen carrying an `entitlement` renders "not licensed" instead of itself.
+// Seven tests in this suite assert exactly those screens (the vitals room, the
+// consultation, the appointment book, the cash counter), and they had been
+// failing against a tenant that could not lawfully open any of them. The
+// suite's own queue-console test is the tell: it passes, and its name says
+// "and is never licence-gated".
+await runSeed(running.pg.pool('migrator'), 'demo');
 
 const hospital = await running.pg
   .pool('migrator')

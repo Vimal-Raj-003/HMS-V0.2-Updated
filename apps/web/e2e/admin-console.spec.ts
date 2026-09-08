@@ -66,7 +66,11 @@ test.describe('a hospital administrator', () => {
     const count = page.getByTestId('matrix-count');
     await expect(count).toBeVisible();
     // The seeded catalogue is large; the point is that a real number arrived.
-    await expect(count).toContainText(/Showing \d+ of \d+ permissions/);
+    // `[\d,]+` and not `\d+`: the count is rendered through `formatCount`, so
+    // once the catalogue passed a thousand keys the number arrived as
+    // "1,392" and a bare `\d+` stopped matching. The screen was right and this
+    // assertion was quietly wrong for every release since.
+    await expect(count).toContainText(/Showing [\d,]+ of [\d,]+ permissions/);
 
     await page.getByTestId('matrix-search').fill('audit');
     await expect(count).not.toContainText(/Showing 0 of/);
