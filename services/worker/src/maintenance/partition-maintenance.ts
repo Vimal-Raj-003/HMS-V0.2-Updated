@@ -96,6 +96,21 @@ export const PARTITIONED_TABLES: readonly PartitionedTable[] = Object.freeze([
   Object.freeze({ schema: 'inventory', table: 'stock_ledger' }),
   Object.freeze({ schema: 'inventory', table: 'temp_readings' }),
   Object.freeze({ schema: 'inventory', table: 'vnd_events' }),
+  // Three the list had fallen behind on. The database had them partitioned and
+  // this job did not know, which is the direction the spec beside it calls the
+  // dangerous one: the migrations premake now-1 … now+3 and nothing renews them,
+  // so once those months are spent every insert lands in the DEFAULT partition.
+  // ADR-0008 traded a clinical outage for a monitored anomaly and the monitor
+  // would have fired eventually — months after the premake ran out, on a table
+  // by then large enough that attaching a partition takes a lock nobody wants
+  // to take at 3 a.m.
+  //
+  // `ops.fleet_positions` is ambulance telemetry (RANGE on `at`),
+  // `billing.pay_webhook_events` the gateway callback log (`received_at`), and
+  // `mdm.tariff_change_log` the record of who changed a price (`changed_at`).
+  Object.freeze({ schema: 'ops', table: 'fleet_positions' }),
+  Object.freeze({ schema: 'billing', table: 'pay_webhook_events' }),
+  Object.freeze({ schema: 'mdm', table: 'tariff_change_log' }),
 ]);
 
 export interface PartitionMaintenanceOptions {

@@ -2422,6 +2422,26 @@ const appointmentEvents: readonly EventDefinition[] = [
     { containsPhi: true, retentionDays: 400 },
   ),
   ev(
+    'appointment.request.received',
+    'appointment',
+    'PE-009',
+    'Somebody asked for an appointment through the public assistant. This is an enquiry, not a booking: the caller is not a patient yet and their phone number is unverified, so a person telephones and books.',
+    z.object({
+      requestId: uuid,
+      // Deliberately no name and no phone number. The row carries them under
+      // RLS and audit; an outbox event is relayed to Redis, read by workers and
+      // kept for `retentionDays`, and a consumer needs to know an enquiry
+      // arrived — not who left it. Whoever handles it reads the row.
+      specialityKey: uuid.nullable(),
+      preferredDate: z.string().nullable(),
+      preferredPeriod: z.string().nullable(),
+      channel: z.string(),
+    }),
+    // `containsPhi: false` is a claim about the payload above, and it is true
+    // because nothing identifying is in it.
+    { containsPhi: false, retentionDays: 400 },
+  ),
+  ev(
     'appointment.confirmed',
     'appointment',
     'OP-001',

@@ -47,7 +47,34 @@ BEGIN
   RAISE NOTICE 'fixture ready: two tenants, one branch each';
 
   -- ── CASE 1: every application table has RLS with a write check ─────────────
-  SELECT count(*) INTO v_count FROM core.v_rls_coverage WHERE NOT rls_enabled;
+  --
+  -- Four `mdm` tables are outside RLS on purpose, and the exemption is checked
+  -- rather than trusted: each is named here *and* required to have no
+  -- `hospital_id` column. They are published law — the opioid conversion
+  -- factors, the Beers criteria, the anticholinergic scores and the
+  -- telemedicine drug lists — identical in every tenant, and a hospital that
+  -- could not read them could not refuse an unsafe prescription. Having no
+  -- tenant column is what makes "nothing to leak" a structural claim instead of
+  -- an assurance, so if somebody adds one this case starts failing again.
+  --
+  -- `mdm.immunisation_schedules` used to be on this list and no longer is: it
+  -- carries a nullable `hospital_id`, so a local variation on the national
+  -- schedule was readable by every other tenant. It now has the
+  -- nullable-hospital policy instead.
+  SELECT count(*) INTO v_count
+  FROM core.v_rls_coverage cov
+  WHERE NOT cov.rls_enabled
+    AND NOT (
+      cov.schema_name = 'mdm'
+      AND cov.table_name IN ('opioid_conversion_factors', 'beers_criteria',
+                             'anticholinergic_scores', 'telemedicine_drug_rules')
+      AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns col
+         WHERE col.table_schema = cov.schema_name
+           AND col.table_name = cov.table_name
+           AND col.column_name = 'hospital_id'
+      )
+    );
   IF v_count > 0 THEN
     RAISE WARNING 'FAIL case 1a: % table(s) have no row-level security', v_count;
     v_fail := v_fail + 1;
@@ -56,7 +83,9 @@ BEGIN
   END IF;
 
   SELECT count(*) INTO v_count
-  FROM core.v_rls_coverage WHERE is_tenant_scoped AND NOT has_write_check;
+  FROM core.v_rls_coverage cov
+  WHERE cov.is_tenant_scoped AND NOT cov.has_write_check
+    AND cov.rls_enabled;
   IF v_count > 0 THEN
     -- EN-041 §3.3.3: read isolation without a write check is useless.
     RAISE WARNING 'FAIL case 1b: % tenant-scoped table(s) have no WITH CHECK clause', v_count;
@@ -66,9 +95,15 @@ BEGIN
   END IF;
 
   -- ── CASE 2: only the sanctioned tables are world-readable ─────────────────
+  -- `mdm.console_components` joined the two catalogues several phases ago and
+  -- this list was never updated, so the case has been failing for a schema that
+  -- is correct. It is the registry of console building blocks — the same six
+  -- rows in every tenant, and RLS stays enabled with a deliberately open policy
+  -- rather than switched off, so the table still refuses a tenant column
+  -- silently appearing under it (D-17).
   SELECT string_agg(table_name, ', ' ORDER BY table_name) INTO v_open
   FROM core.v_rls_open_policies
-  WHERE table_name NOT IN ('permissions', 'setting_definitions');
+  WHERE table_name NOT IN ('permissions', 'setting_definitions', 'console_components');
   IF v_open IS NOT NULL THEN
     RAISE WARNING 'FAIL case 2: unexpected open policies on: %', v_open;
     v_fail := v_fail + 1;

@@ -187,7 +187,10 @@ writeFileSync(NEXT_ENV, nextEnvBefore);
 
 running.web = spawn('npx', ['next', 'start', '--port', String(WEB_PORT)], {
   cwd: join(REPO_ROOT, 'apps', 'web'),
-  env: { ...WEB_ENV, API_ORIGIN: apiOrigin },
+  // PE-011: the landing page's assistant renders only when it has been told
+  // which hospital it speaks for. Read at request time rather than baked into
+  // the build, which is why it belongs on `next start` and not on `next build`.
+  env: { ...WEB_ENV, API_ORIGIN: apiOrigin, LANDING_HOSPITAL_ID: hospitalId },
   stdio: 'inherit',
 });
 await waitForHttp(`${webOrigin}/login`, 120_000, 'apps/web');

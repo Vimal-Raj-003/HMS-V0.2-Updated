@@ -1992,6 +1992,37 @@ const OP001 = group('OP-001', 1, [
     'Manage the waitlist and offer released slots to waiting patients.',
   ),
 
+  // PE-009 — the public assistant's enquiries. Deliberately separate keys from
+  // `appointment.*`: working the enquiry list is a front-office job that does
+  // not by itself confer the right to book, and the conversion key is the one
+  // that does. An enquiry carries a name and a phone number given by somebody
+  // who is not yet a patient, so it is `phi` from the moment it lands.
+  p(
+    'appointment.request.list',
+    'appointment_request',
+    'list',
+    'phi',
+    'low',
+    'See the enquiries left by the public assistant, and work the queue.',
+  ),
+  p(
+    'appointment.request.update',
+    'appointment_request',
+    'update',
+    'phi',
+    'low',
+    'Mark an enquiry contacted or declined. Declining requires a reason, because an enquiry that vanishes without one cannot be told apart from one that was dropped.',
+    { requiresReason: true },
+  ),
+  p(
+    'appointment.request.convert',
+    'appointment_request',
+    'approve',
+    'phi',
+    'medium',
+    'Turn a verified enquiry into a real appointment. Held apart from `appointment.request.update` because this is the step where an unverified phone number becomes a patient-facing booking.',
+  ),
+
   p('visit.create', 'op_visit', 'create', 'phi', 'medium', 'Check a patient in and open an OP visit.'),
   p('visit.list', 'op_visit', 'list', 'phi', 'low', 'List visits for a doctor, a department or a day.'),
   p(

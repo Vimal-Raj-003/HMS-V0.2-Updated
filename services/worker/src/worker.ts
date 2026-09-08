@@ -8,6 +8,7 @@ import { createHealthServer, type ComponentState, type HealthServer } from './he
 import { CRITICAL_QUEUES, escalateOverdueCriticalValues } from './escalation/critical-value-escalation.js';
 import { sealAuditChains } from './maintenance/audit-chain-sealer.js';
 import { ensureMonthPartitions } from './maintenance/partition-maintenance.js';
+import { sweepPublicRateLimits } from './maintenance/rate-limit-sweeper.js';
 import { PlaywrightPdfRenderer } from './print/pdf-renderer.js';
 import { MapTransportResolver } from './print/print-dispatcher.js';
 import { createPrintWorker, type PrintJobOutcome, type PrintJobRef } from './print/print-queue.js';
@@ -51,6 +52,8 @@ export interface StartedWorker {
 
 export const AUDIT_SEAL_JOB = 'audit.seal';
 export const PARTITION_ENSURE_JOB = 'partition.ensure';
+/** PE-009 §C: drops rate-limit counters for callers who stopped calling. */
+export const RATE_LIMIT_SWEEP_JOB = 'ratelimit.sweep';
 /**
  * `docs/07 §4` lists "EWS escalation" and "critical result fan-out" under the
  * `critical` class, so this belongs there and not in `maintenance`. A ladder
@@ -182,6 +185,13 @@ export function createWorkerRuntime(env: WorkerEnv, logger: Logger): WorkerRunti
                 },
               };
             }
+            case RATE_LIMIT_SWEEP_JOB: {
+              const swept = await sweepPublicRateLimits(maintenancePool);
+              if (swept.deleted > 0) {
+                logger.info({ event: 'worker.ratelimit.swept', rows: swept.deleted });
+              }
+              return { job: job.name, detail: { deleted: swept.deleted } };
+            }
             default:
               throw new Error(`No handler is registered for maintenance job "${job.name}".`);
           }
@@ -208,6 +218,16 @@ export function createWorkerRuntime(env: WorkerEnv, logger: Logger): WorkerRunti
         { every: env.PARTITION_MAINTENANCE_INTERVAL_MS },
         { name: PARTITION_ENSURE_JOB, data: { reason: 'schedule' }, opts: jobOptionsFor('maintenance') },
       );
+      // Hourly. The rows are tiny and bounded by distinct callers, so this is
+      // tidiness rather than pressure relief; anything more frequent would be
+      // a delete looking for work.
+      const RATE_LIMIT_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+      await maintenanceQueue.upsertJobScheduler(
+        RATE_LIMIT_SWEEP_JOB,
+        { every: RATE_LIMIT_SWEEP_INTERVAL_MS },
+        { name: RATE_LIMIT_SWEEP_JOB, data: { reason: 'schedule' }, opts: jobOptionsFor('maintenance') },
+      );
+      mounted.push(`public-rate-limit-sweeper(maintenance,${String(RATE_LIMIT_SWEEP_INTERVAL_MS)}ms)`);
       mounted.push(`audit-chain-sealer(maintenance,${env.AUDIT_SEAL_INTERVAL_MS}ms)`);
       mounted.push(`partition-maintenance(maintenance,${env.PARTITION_MAINTENANCE_INTERVAL_MS}ms)`);
 

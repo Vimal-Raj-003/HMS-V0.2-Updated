@@ -208,6 +208,7 @@ Row-by-row evidence for every X and C claim: `docs/14-source-coverage-crosswalk.
 | PE-006 | Corporate Client Portal (employee health, utilisation, invoices)                        | 10    | P2  | M      |
 | PE-007 | Referring Doctor Portal (referral tracking, reports, payouts)                           | 10    | P2  | M      |
 | PE-008 | TPA / Payer Portal (pre-auth queries, document exchange)                                | 10    | P2  | M      |
+| PE-009 | Public Site Assistant (landing page chat, department directory, appointment requests)   | 8     | P2  | M      |
 
 ## Domain 8 — AI & Advanced Tech (`docs/modules/08-ai/`)
 

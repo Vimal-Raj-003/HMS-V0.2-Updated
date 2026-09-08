@@ -213,6 +213,12 @@ const APPOINTMENT_DESK = [
   'appointment.update',
   'appointment.cancel',
   'appointment.waitlist',
+  // PE-009: the enquiries the public assistant leaves. They belong to whoever
+  // already works the appointment book — an enquiry queue nobody is granted is
+  // a queue that silently fills up, which is worse than not collecting them.
+  'appointment.request.list',
+  'appointment.request.update',
+  'appointment.request.convert',
 ] as const;
 
 const VISIT_DESK = ['visit.create', 'visit.list', 'visit.update', 'visit.cancel', 'visit.transfer'] as const;

@@ -65,7 +65,7 @@ const STATE_COLOUR: Record<Call['state'], string> = {
   waiting: 'var(--q-waiting)',
 };
 
-export function LandingBoard() {
+export function QueueBoard() {
   const [frame, setFrame] = useState(0);
 
   useEffect(() => {

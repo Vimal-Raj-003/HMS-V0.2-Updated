@@ -1,0 +1,75 @@
+/// PE-009 · The public assistant's two tables.
+///
+/// See `migrations/20260927100000_pe009_public_assistant/migration.sql` for why
+/// an enquiry is not an appointment and why consent is a CHECK rather than a
+/// column the application remembers to set.
+
+/// An enquiry from the public site. The visitor is not a patient yet — creating
+/// one from unverified text would put unverified names into the master patient
+/// index — so front office telephones, verifies and books, and `appointmentId`
+/// records what the enquiry became.
+model AppointmentRequest {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  branchId   String? @map("branch_id") @db.Uuid
+
+  /// web_assistant | web_form | phone | walk_in
+  channel        String  @default("web_assistant") @db.VarChar(24)
+  requesterName  String  @map("requester_name") @db.VarChar(120)
+  requesterPhone String  @map("requester_phone") @db.VarChar(20)
+  requesterEmail String? @map("requester_email") @db.VarChar(254)
+
+  specialityKey   String? @map("speciality_key") @db.Uuid
+  practitionerKey String? @map("practitioner_key") @db.Uuid
+  /// The published slot the visitor picked, when they picked one. Holding it is
+  /// not booking it: the slot's `online_booked_count` moves only when front
+  /// office converts the enquiry into an appointment.
+  slotId          String? @map("slot_id") @db.Uuid
+
+  preferredDate   DateTime? @map("preferred_date") @db.Date
+  /// morning | afternoon | evening | any
+  preferredPeriod String?   @map("preferred_period") @db.VarChar(12)
+  /// Short on purpose. A public box that invites a symptom narrative collects
+  /// health data from somebody who was not told it was being collected.
+  reason          String?   @db.VarChar(280)
+
+  /// A CHECK accepts only `true`. There is no insert without consent.
+  consentGiven       Boolean @map("consent_given")
+  consentTextVersion String  @map("consent_text_version") @db.VarChar(24)
+  locale             String  @default("en-IN") @db.VarChar(12)
+
+  /// new | contacted | booked | declined | expired
+  status        String    @default("new") @db.VarChar(16)
+  appointmentId String?   @map("appointment_id") @db.Uuid
+  handledBy     String?   @map("handled_by") @db.Uuid
+  handledAt     DateTime? @map("handled_at") @db.Timestamptz(6)
+  declineReason String?   @map("decline_reason") @db.VarChar(200)
+
+  /// SHA-256 of the caller address. There is deliberately no column for the
+  /// address itself.
+  requesterIpHash Bytes? @map("requester_ip_hash")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, status, createdAt], map: "appointment_requests_worklist_idx")
+  @@index([hospitalId, requesterPhone], map: "appointment_requests_phone_idx")
+  @@map("appointment_requests")
+  @@schema("engage")
+}
+
+/// Request counters for unauthenticated endpoints. One row per caller with a
+/// self-rolling window, so the table is bounded by distinct callers rather than
+/// by traffic. Postgres rather than Redis, following `core.idempotency_keys`.
+model PublicRateLimit {
+  hospitalId  String   @map("hospital_id") @db.Uuid
+  bucket      String   @db.VarChar(32)
+  subjectHash Bytes    @map("subject_hash")
+  windowStart DateTime @map("window_start") @db.Timestamptz(6)
+  hits        Int
+
+  @@id([hospitalId, bucket, subjectHash])
+  @@index([windowStart], map: "public_rate_limits_window_idx")
+  @@map("public_rate_limits")
+  @@schema("engage")
+}

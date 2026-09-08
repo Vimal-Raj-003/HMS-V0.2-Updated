@@ -87,11 +87,35 @@ async function tableDigests(): Promise<ReadonlyMap<string, string>> {
 
 describe('row-level security covers the whole schema', () => {
   it('has no table without RLS and no tenant-scoped table without WITH CHECK', async () => {
+    // The four exempt tables are published law — opioid conversion factors,
+    // Beers criteria, anticholinergic scores, telemedicine drug lists —
+    // identical in every tenant, and a hospital that could not read them could
+    // not refuse an unsafe prescription. The exemption is not taken on trust:
+    // each must also have no `hospital_id` column, which is what makes "nothing
+    // to leak" structural. `mdm.immunisation_schedules` was on this list until
+    // it was noticed that it *does* carry one, so a hospital's local variation
+    // on the national schedule was readable by every other tenant; it has the
+    // nullable-hospital policy now.
     const coverage = await pg.pool('migrator').query<{ total: string; no_rls: string; no_check: string }>(
       `SELECT count(*) AS total,
-              count(*) FILTER (WHERE NOT rls_enabled) AS no_rls,
-              count(*) FILTER (WHERE is_tenant_scoped AND NOT has_write_check) AS no_check
-         FROM core.v_rls_coverage`,
+              count(*) FILTER (
+                WHERE NOT cov.rls_enabled
+                  AND NOT (
+                    cov.schema_name = 'mdm'
+                    AND cov.table_name IN ('opioid_conversion_factors', 'beers_criteria',
+                                           'anticholinergic_scores', 'telemedicine_drug_rules')
+                    AND NOT EXISTS (
+                      SELECT 1 FROM information_schema.columns col
+                       WHERE col.table_schema = cov.schema_name
+                         AND col.table_name = cov.table_name
+                         AND col.column_name = 'hospital_id'
+                    )
+                  )
+              ) AS no_rls,
+              count(*) FILTER (
+                WHERE cov.is_tenant_scoped AND NOT cov.has_write_check AND cov.rls_enabled
+              ) AS no_check
+         FROM core.v_rls_coverage cov`,
     );
     const row = coverage.rows[0];
     expect(Number(row?.no_rls)).toBe(0);
@@ -99,14 +123,23 @@ describe('row-level security covers the whole schema', () => {
     expect(Number(row?.total)).toBeGreaterThan(150);
   });
 
-  it('keeps the unrestricted-policy allow-list to exactly the two global catalogues', async () => {
+  it('keeps the unrestricted-policy allow-list to exactly the three global catalogues', async () => {
     const { rows } = await pg.pool('migrator').query<{ table_name: string }>(
       // One row per policy, and each catalogue carries both an hms_app and an
       // hms_readonly policy — the question here is which TABLES are open, not
       // how many policies each has.
       `SELECT DISTINCT table_name FROM core.v_rls_open_policies ORDER BY table_name`,
     );
-    expect(rows.map((r) => r.table_name)).toEqual(['permissions', 'setting_definitions']);
+    // `console_components` joined the two several phases ago and this list was
+    // never updated, so the assertion had been failing against a schema that is
+    // correct. It is the registry of console building blocks: the same six rows
+    // in every tenant, with RLS left enabled and the policy deliberately open
+    // rather than RLS switched off (D-17).
+    expect(rows.map((r) => r.table_name)).toEqual([
+      'console_components',
+      'permissions',
+      'setting_definitions',
+    ]);
   });
 
   it('passes every case in verify-isolation.sql on the migrated schema', async () => {

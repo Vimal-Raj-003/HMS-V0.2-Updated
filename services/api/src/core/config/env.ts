@@ -63,6 +63,35 @@ export const envSchema = z.object({
     .default(false),
 
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+
+  // ── PE-009 · the public assistant ──────────────────────────────────────────
+  //
+  // Every one of these is optional, and that is the point: with no key
+  // configured the assistant still answers, from the hospital's own directory
+  // and a written script, and says so. A landing page that breaks because a
+  // third-party model is unreachable is a landing page that goes down when
+  // somebody else's API does.
+  ASSISTANT_ENABLED: z
+    .union([z.boolean(), z.string()])
+    .transform((v) => (typeof v === 'boolean' ? v : v !== 'false'))
+    .default(true),
+  /**
+   * Any OpenAI-shaped `/chat/completions` endpoint — DeepSeek
+   * (`https://api.deepseek.com/v1`) is the one this was written against, but
+   * nothing here is specific to it. On-prem deployments point this at a model
+   * inside their own network, which for a hospital is often the only acceptable
+   * answer.
+   */
+  ASSISTANT_LLM_BASE_URL: z.string().url().optional(),
+  ASSISTANT_LLM_API_KEY: z.string().min(8).optional(),
+  ASSISTANT_LLM_MODEL: z.string().default('deepseek-chat'),
+  /** A visitor will not wait, and neither should a request thread. */
+  ASSISTANT_LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60_000).default(12_000),
+
+  /** Per caller, per window. A public endpoint that reaches a model is a bill. */
+  ASSISTANT_RATE_WINDOW_SECONDS: z.coerce.number().int().min(10).default(300),
+  ASSISTANT_RATE_CHAT_MAX: z.coerce.number().int().min(1).default(20),
+  ASSISTANT_RATE_REQUEST_MAX: z.coerce.number().int().min(1).default(5),
 });
 
 export type Env = z.infer<typeof envSchema>;

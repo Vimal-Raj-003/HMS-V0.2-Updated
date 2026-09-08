@@ -5,15 +5,15 @@
 
 ## Current state
 
-| Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current phase          | **Phases 0–8 complete.** Phase 8 finished on 2026-09-08 with NC-033, the kitchen: all thirty specialty consoles are built, proved live in both directions, and committed. **Phase 9 (ERP and non-clinical) is next and has no code** beyond the `nonclinical` module folder NC-033 opened.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Repo status            | **868 non-partition tables** outside the system schemas across fifteen tenant schemas — **0 business tables without RLS**; the only five without it are the deliberately-global reference catalogues that carry no `hospital_id` at all (`mdm.opioid_conversion_factors`, `mdm.immunisation_schedules`, `mdm.anticholinergic_scores`, `mdm.beers_criteria`, `mdm.telemedicine_drug_rules` — published law, identical in every tenant, read-only to `hms_app`), plus pg_partman's own three and `public._prisma_migrations`. `core.permissions` and `mdm.console_components` keep RLS on with a deliberately-open policy (D-17). Read out of a live container. **62 migrations. 1,077 API routes across 83 controllers. 123 Next.js screens.** Permission catalogue **1,392 keys**; event registry **847**; entitlements **72**. |
-| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **819 tests, 37/37 files**; `pnpm test:e2e` **112 passed, 0 failed** — green for the first time, and now including all 110 registered screens. The API surface sweep (`apps/web/e2e/api-sweep.mts`) calls **all 1,077 routes with zero crashes**. **Never run: both k6 scripts** (k6 is not installed here).                                                                                                                                                                                                                                                                                                                                                                             |
-| Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path. Against `docs/12` by _coverage_: every module in phases 0–8 has schema, contracts, API, screens and its rules proved live in both directions; phases 9–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, release a body lawfully, run all thirty specialty consoles — and, since RC-006, turn the work done in one into a priced line on a patient's bill.** It cannot yet run the ERP back office, a patient portal, or the analytics and interop layer.                                          |
-| Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Current phase          | **Phases 0–8 complete, plus PE-009.** Phase 8 finished on 2026-09-08 with NC-033, the kitchen: all thirty specialty consoles are built, proved live in both directions, and committed. PE-009 (the public landing page and its assistant) was built on 2026-09-28 out of phase order because the product had no front door. **Phase 9 (ERP and non-clinical) is next and has no code** beyond the `nonclinical` module folder NC-033 opened.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Repo status            | **868 non-partition tables** outside the system schemas across fifteen tenant schemas — **0 business tables without RLS**; the only five without it are the deliberately-global reference catalogues that carry no `hospital_id` at all (`mdm.opioid_conversion_factors`, `mdm.immunisation_schedules`, `mdm.anticholinergic_scores`, `mdm.beers_criteria`, `mdm.telemedicine_drug_rules` — published law, identical in every tenant, read-only to `hms_app`), plus pg_partman's own three and `public._prisma_migrations`. `core.permissions` and `mdm.console_components` keep RLS on with a deliberately-open policy (D-17). Read out of a live container. **62 migrations. 1,077 API routes across 83 controllers. 123 Next.js screens.** Permission catalogue **1,392 keys**; event registry **847**; entitlements **72**.                                                                                                                    |
+| Last green CI          | **Green on this machine, 2026-09-28.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **12/12 tasks — 1,019 tests** (`@vims/api` 837, worker 61, testing 56, integration-hub 49, realtime 16), green for the first time including `@vims/testing`'s RLS coverage and the worker's partition list, both of which had been red for several phases (D-245…D-247); `pnpm test:e2e` **451 passed, 3 failed of 454** across three viewport projects, including the new `e2e/landing.spec.ts` (13 × 3). The three are flakes, not regressions — two WebKit/tablet logins and one WebKit `"due to access control checks"` on an in-flight fetch, in code this session did not touch; all three pass on a re-run (156/156). Recorded as flaky rather than reported as green. `verify-isolation.sql` passes **all 11 cases** for the first time. **Never run: both k6 scripts** (k6 is not installed here). |
+| Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path. Against `docs/12` by _coverage_: every module in phases 0–8 has schema, contracts, API, screens and its rules proved live in both directions; phases 9–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, release a body lawfully, run all thirty specialty consoles — and, since RC-006, turn the work done in one into a priced line on a patient's bill.** It cannot yet run the ERP back office, a patient portal, or the analytics and interop layer.                                                                                                                                                             |
+| Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 The table counts, RLS coverage and migration state above were read out of a live container at this session's HEAD, not copied from a commit message: `core.v_rls_coverage` reports **423 monitored tables, 0 without RLS, 0 without a policy, 0 without a write check**, and the only deliberately-open policies remain the two catalogues (`core.permissions`, `core.setting_definitions` — D-17).
 
@@ -400,6 +400,111 @@ been hiding.
 
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
+
+### 2026-09-28 · PE-009 · The front door, and the assistant that stands at it
+
+Two pieces of work that share a page: the landing page rebuilt, and a public
+assistant behind it.
+
+**The landing page.** Direction stated before a line was written — "clinical
+instrument at night": the `docs/06` layered stack, hairline rules, JetBrains
+Mono display type, one live-signal accent, and motion that means something. The
+motion is CSS, IntersectionObserver and the Web Animations API, with **no
+animation library** — `CLAUDE.md` §2 locks the stack behind an ADR and a fade,
+a rise and a stroke sweep are platform primitives (D-237). The hero backdrop is
+a real PQRST rhythm strip that draws itself; the first attempt ran the QRS spike
+straight through the second line of the body copy, which is a legibility failure
+however good it looks in a screenshot, so it was moved to the foot of the hero
+where it crosses nothing and fills what had been dead space.
+
+Every figure on the page was counted from this repository and the counting
+command is recorded beside it in `landing/content.ts` (D-238): 1,080 endpoints,
+908 models, 253 triggers, 122 policies, 123 screens, 71 role templates. The
+section that carries the page is "What the database refuses" — four rules quoted
+as the text Postgres actually raises, with their references: the vinca route
+(OP-031 §B.2), the brain-stem interval (IP-019 §B.2), the absent foetal-sex
+column (OP-040 §B.6), the two-person bedside check (IP-007 §B.1).
+
+**The assistant.** Public, rate-limited, and deliberately unable to do most of
+what a demo would have it do.
+
+- It captures an appointment **request**, not an appointment (D-239). A website
+  visitor is not a patient, and creating one from unverified text would put
+  unverified names into the master patient index; nothing proves the phone
+  number belongs to the person typing it, because no OTP provider is wired
+  (O-2). Front office telephones and books; `appointment_id` records what the
+  enquiry became, and a trigger refuses to re-point a converted one.
+- The red-flag screen runs **before** the model, not inside its prompt (D-240).
+  Chest pain, stroke signs, anaphylaxis and self-harm get one written answer and
+  the model is never consulted — `source: 'safety'` is the assertion the tests
+  make. A system prompt is a request to a model; a function that returns before
+  the model is called is a property of the system.
+- The model has **no tools** (D-241). A booking intent is detected by keyword
+  matching and opens an ordinary React form; there is no path from a generated
+  token to a SQL statement, which is the only non-probabilistic answer to prompt
+  injection.
+- What the assistant may see is decided by `mdm` master data — `website_visible`,
+  `online_booking_enabled`, `online_quota` — which were already in the schema
+  (D-242). `online_quota` is not the clinic's capacity, so the internet cannot
+  consume a morning reception was holding back.
+- With no model configured at all it still answers, from the hospital's own
+  directory. That is a supported deployment and the fallback for every
+  deployment on the morning the vendor is down.
+
+`RATE_LIMIT_*` had been in the environment contract since phase 0 with nothing
+reading it; PE-009 is the first endpoint that could not ship without one. It is
+a Postgres counter that commits in its **own** transaction before the work
+(D-243) — a counter incremented inside the request transaction rolls back with
+the request, leaving an endpoint that errors completely unmetered.
+
+**Built** — migration `20260927100000_pe009_public_assistant` (2 tables, 7
+CHECKs, 1 trigger, RLS, grants); `engage-assistant.prisma`; three permissions
+granted to the appointment desk; `services/api/src/modules/engagement/assistant/`
+(9 files); a second, deliberately narrow Next proxy for the four public routes
+that attaches no credential and forwards the caller's address; the landing page
+and its four motion primitives; the widget and its booking form.
+
+**Tested** — `safety.spec.ts` 29 unit tests; `assistant.integration.spec.ts` 18
+integration tests against a real container; `e2e/landing.spec.ts` in a real
+browser across three viewports. The suites found six real defects, all fixed:
+four gaps in the red-flag list where ordinary English broke substring matching
+("her face **is** drooping"), a landing-page `<dl>` that axe rejected, and a
+production bug where `LANDING_HOSPITAL_ID` was frozen by `next build` because
+`/` is prerendered — an operator setting it on their server would have got no
+assistant and no error.
+
+**Stubbed / deferred** — no OTP, so no confirmed booking from the web (O-2). No
+screen yet for the front-office enquiry worklist; the endpoints exist and are
+permissioned, and a clerk currently reaches them through the API. The assistant
+answers only in the language the visitor writes in when a model is configured;
+the scripted fallback is English only.
+
+**Open questions raised** — **O-15**: the red-flag list was written by an
+engineer, not a clinician, and it is deliberately over-inclusive. Before this is
+switched on for a live hospital it belongs in front of that hospital's emergency
+physician, and it should become configurable master data rather than a constant
+(D-244).
+
+**Three defects found on the way, none of them PE-009's** — this was the first
+work in a while to run the _whole_ integration suite rather than one package's,
+and it found three things that had been quietly red:
+
+- `mdm.immunisation_schedules` was on the RLS-exempt list as "published law,
+  identical in every tenant", but it carries a nullable `hospital_id` — so a
+  hospital's local variation on the national schedule would have been readable
+  by every other tenant. Nothing had leaked: the table is empty. It has the
+  nullable-hospital policy now, and the migration asserts the general invariant
+  (D-245).
+- `verify-isolation.sql` — the gate that ends "This build must not ship" — had
+  been failing three cases for several phases, two of them because its
+  allow-lists were stale rather than because the schema was wrong. A gate that
+  is always red is worse than no gate: a real regression looks identical
+  (D-246).
+- Three partitioned tables were missing from the worker's premake list, so once
+  the migrations' four premade months ran out every insert would have landed in
+  the DEFAULT partition (D-247).
+
+**Next step** — the front-office worklist screen for enquiries, then Phase 9.
 
 ### 2026-09-27 · The three shifts, walked — and the two places the journey broke
 
