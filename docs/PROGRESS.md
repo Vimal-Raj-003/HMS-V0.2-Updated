@@ -5,15 +5,15 @@
 
 ## Current state
 
-| Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current phase          | **Phases 0–7 complete; Phase 8 all but finished.** Twenty-nine of Phase 8's thirty consoles are built and proved — the framework (OP-025 §0), ophthalmology, the procedure and OPD nursing rooms, the device-heavy consoles, the therapy floor, the pain clinic, the programme consoles, dialysis, antenatal, the labour room, oncology, psychiatry, the two ends of life, transplant and ART, the three hand-offs, and AYUSH. **One remains: NC-033, the kitchen.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Repo status            | **855 non-partition tables** outside the system schemas across fifteen tenant schemas — **0 business tables without RLS**; the only four without it are pg_partman's own `ext.part_config`, `ext.part_config_sub`, `ext.db_capabilities` and `public._prisma_migrations`, plus the five deliberately-global reference catalogues that carry no `hospital_id` at all (`mdm.opioid_conversion_factors`, `mdm.immunisation_schedules`, `mdm.anticholinergic_scores`, `mdm.beers_criteria` and, new this session, `mdm.telemedicine_drug_rules` — published law, identical in every tenant, read-only to `hms_app`). `core.permissions` and `mdm.console_components` keep RLS on with a deliberately-open policy (D-17). Read out of a live container, not copied from a commit. **60 migrations. 1,041 API routes across 81 controllers. 121 Next.js screens.** Permission catalogue **1,374 keys**; event registry **841**; entitlements **70**. |
-| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **793 tests, 34/34 files**. **Never run: both k6 scripts** (k6 is not installed here) and no Playwright golden path exists for any Phase 5–8 module.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path, and that is now the largest outstanding debt in the build. Against `docs/12` by _coverage_ rather than by DoD: every module in phases 0–7 has schema, contracts, API, screens and its rules proved live in both directions; phases 8–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, and release a body lawfully. It cannot yet run a specialty console, the ERP back office, a patient portal or the analytics layer.**                                                                                                                                                                                        |
-| Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Current phase          | **Phases 0–8 complete.** Phase 8 finished on 2026-09-08 with NC-033, the kitchen: all thirty specialty consoles are built, proved live in both directions, and committed. **Phase 9 (ERP and non-clinical) is next and has no code** beyond the `nonclinical` module folder NC-033 opened.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Repo status            | **868 non-partition tables** outside the system schemas across fifteen tenant schemas — **0 business tables without RLS**; the only five without it are the deliberately-global reference catalogues that carry no `hospital_id` at all (`mdm.opioid_conversion_factors`, `mdm.immunisation_schedules`, `mdm.anticholinergic_scores`, `mdm.beers_criteria`, `mdm.telemedicine_drug_rules` — published law, identical in every tenant, read-only to `hms_app`), plus pg_partman's own three and `public._prisma_migrations`. `core.permissions` and `mdm.console_components` keep RLS on with a deliberately-open policy (D-17). Read out of a live container. **62 migrations. 1,077 API routes across 83 controllers. 123 Next.js screens.** Permission catalogue **1,392 keys**; event registry **847**; entitlements **72**.                              |
+| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **793 tests, 34/34 files**. **Never run: both k6 scripts** (k6 is not installed here) and no Playwright golden path exists for any Phase 5–8 module.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path, and that is now by a distance the largest outstanding debt in the build. Against `docs/12` by _coverage_ rather than by DoD: every module in phases 0–8 has schema, contracts, API, screens and its rules proved live in both directions; phases 9–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, release a body lawfully, and run all thirty specialty consoles — dialysis to Panchakarma, the labour room to the tray line. It cannot yet run the ERP back office, a patient portal, or the analytics and interop layer.** |
+| Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 The table counts, RLS coverage and migration state above were read out of a live container at this session's HEAD, not copied from a commit message: `core.v_rls_coverage` reports **423 monitored tables, 0 without RLS, 0 without a policy, 0 without a write check**, and the only deliberately-open policies remain the two catalogues (`core.permissions`, `core.setting_definitions` — D-17).
 
@@ -400,6 +400,137 @@ been hiding.
 
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
+
+### 2026-09-24 · Phase 8 · NC-033 — the kitchen — **Phase 8 complete**
+
+**Built — the tray line, complete.** 6 tables (4 operational, 2 master), 9
+permission keys, 3 events, 1 entitlement, 1 screen, 18 integration tests, 33
+database rules proven live in both directions, 12 diet types seeded.
+
+The Phase 8 half of NC-033 only. The canteen till, the staff subsidy, kitchen
+stores, HACCP audit logs and food waste are Phase 9: they are an ERP problem,
+and converting a diet order into a tray is patient safety wearing an apron.
+
+**The kitchen does not decide what a patient eats.** The diet type, the allergen
+list and the two IDDSI levels are copied onto every tray by a trigger and have
+no request field, so a tray is a record of what was true when the food was
+assembled rather than a join that changes underneath the audit. On the diet
+itself those columns are revoked from the application at column level.
+
+**A tray is where an allergy actually kills somebody.** Allergies are written
+down meticulously in the chart and then a peanut arrives on a tray, because the
+tray was assembled from a menu and the menu does not know the patient. So a
+recipe whose allergens intersect the patient's is refused — not warned about —
+and the screen strikes the dish through _before_ anybody plates it.
+
+**And IDDSI is the other half of the same problem.** OP-035 has written swallow
+orders since Phase 3, and `slp_swallow_orders` has carried an `ack_kitchen_at`
+column since then: the order was built expecting a kitchen to read it. This is
+the kitchen. A recipe above the patient's assessed level cannot go on their
+tray, and — unlike the allergen guard — **there is no override for anybody**. A
+childhood reaction to raw peanut is not a reason to withhold roasted chutney for
+forty years, so that rule has a door with a dietician's name on it; a patient
+assessed at level 4 who is handed level 7 toast aspirates it, so that one has
+none. The two refusals render differently on the screen for exactly this reason:
+a single greyed-out chip would teach that they are the same kind of rule.
+
+**NPO is derived, never chosen**, from the nil-by-mouth window against the meal
+slot's serve time — in the hospital's own timezone, through a definer lookup,
+because "breakfast is at eight" is a wall-clock fact and the session's timezone
+is whoever happened to connect. A held tray still exists and still prints,
+marked: a bed with no tray and no explanation is a bed somebody chases the
+kitchen about, and sometimes one where somebody quietly finds a biscuit.
+
+**Hot food leaves at 63 °C or above, cold at 5 °C or below** — FSSAI Schedule 4
+and every HACCP plan built on it. A trolley below temperature is not one to
+deliver quickly; the outcomes are reheat or discard, both recorded.
+
+**Four defects, three of them classes already recorded.**
+
+- **`REVOKE UPDATE` on the diet's clinical columns locked out the dietician**,
+  because the dietician is `hms_app` too — the application connects as one role,
+  and which person is behind a request is a permission key rather than a
+  database identity. A column revoke cannot separate two users who share a role.
+  Fixed the way the codebase already fixes this: the revoke stands, and there is
+  exactly one door through it, a SECURITY DEFINER function the kitchen's own
+  update path cannot reach through any statement it could write. Caught by the
+  integration suite returning 500 on the dietician's own route.
+- **`BEFORE UPDATE OF <cols>` watches the statement's column list**, so an
+  UPDATE that set only `diet_type_code` did not run the derivation and the typed
+  value stuck — the rule defeated by the shape of the trigger. Third appearance
+  after D-179. The trigger now takes no `OF` list at all.
+- **Same-timing triggers fire alphabetically**, so the dispatch check ran before
+  the NPO hold was derived and refused an empty tray instead of a fasting
+  patient. D-193's problem again, solved by naming (`trg_a_…`, `trg_b_…`) rather
+  than by merging.
+- And a **wall-clock/instant confusion**: `date + interval` compared against a
+  `timestamptz` uses the session timezone, which would have moved every meal for
+  anybody connecting from another zone.
+
+**One thing made impossible rather than written down.** No column on a tray, an
+item or a diet may name a diagnosis, and a migration-time assertion refuses one.
+Tray labels travel the corridors on open trolleys; "Diabetic — Mrs Sharma, Ca
+breast" is genuinely more useful to a tray line than "Mrs S., bed 12", and
+somebody will eventually add the column. Fifth use of the technique.
+
+**Deferred to Phase 9, recorded.** The canteen POS, tokens and staff subsidy;
+kitchen stores with recipe-based consumption and FEFO on perishables; the HACCP
+log tables (temperature rounds, cleaning, pest control, food-handler fitness);
+food waste tracking; outsourced-caterer SLA; the cycle menu planner and the
+production sheet; tray-label printing through EN-005.
+
+---
+
+## Phase 8 complete
+
+All thirty consoles are built, proved and committed. The phase added, across
+sixteen sessions: **the framework** (OP-025 §0) and twenty-nine consoles on it —
+ophthalmology, the procedure and OPD nursing rooms, cardiology, pulmonology,
+ENT, dental, dermatology, the therapy floor (physio, wounds, dietetics, speech
+and swallow), the pain clinic, immunisation, health check-ups, dialysis,
+antenatal, the labour room, oncology, psychiatry, paediatrics and the neonatal
+unit, geriatrics, transplant, assisted reproduction, telemedicine, referrals,
+clinical pathways, AYUSH and the kitchen.
+
+**What Phase 8 is actually about.** Every one of these consoles exists because a
+specialty has a rule that a general clinical record cannot express, and in
+almost every case that rule is a number or a sequence somebody is tempted to
+work around on a busy afternoon: the six hours between brain-stem examinations,
+the oleation before a Virechana, the anti-D within seventy-two hours, the
+lifetime anthracycline dose, the vinca that is never intrathecal, the IDDSI
+level on a tray. The phase's whole method was to make those rules _database
+shapes_ — triggers, CHECKs, partial unique indexes, GiST exclusions, SECURITY
+DEFINER functions, column grants — and to give the derived ones no request field
+at all, so the proof that a number cannot be overridden is that nothing can
+express it.
+
+**Where an exception is legitimate**, it is a named route with a `high`
+permission, a mandatory reason and an audit row — never a hole. Five rules have
+no exception at all and say so in the migration next to the paragraph explaining
+why: the NDPS prohibited list, the Authorisation Committee, the brain-stem
+interval, the one gamete donation in a lifetime, and the IDDSI ceiling.
+
+**Cumulative for Phase 8:** 62 migrations; 868 non-partition tables; 1,392
+permission keys; 847 events; 72 entitlements; 1,077 API routes across 83
+controllers; 123 Next.js screens.
+
+**Still outstanding, and now the largest debt in the build:** no Playwright
+golden path and no k6 script for any Phase 5–8 module, so **no module in those
+four phases meets `CLAUDE.md` §7's full Definition of Done** despite every one
+of them having schema, contracts, API, screens and rules proved live. This has
+been carried in every entry since Phase 5 and is unchanged.
+
+---
+
+**Gates** — 20/20 packages typecheck, lint and test; `pnpm test:integration`
+**811 tests across 35 files, all green** (18 of them this module's); 62
+migrations; 868 non-partition tables; 1,392 permission keys; 847 events; 72
+entitlements; 1,077 API routes across 83 controllers; 123 Next.js screens.
+
+**Next:** Phase 9 — ERP and non-clinical. Accounts and the general ledger,
+HR/payroll/roster, assets and biomedical, ambulance, housekeeping, laundry, the
+canteen half of this module, gate and visitor, complaints, documents,
+quality/NABH, biomedical waste, legal, budget, and marketing/CRM.
 
 ### 2026-09-23 · Phase 8 · OP-037 — AYUSH
 

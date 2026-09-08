@@ -532,6 +532,46 @@ const POLYTRAUMA_NURSING = [
 ] as const;
 
 /**
+ * NC-033 — the tray line.
+ *
+ * The kitchen owns *whether the tray goes*, not what is on it. The diet type,
+ * the allergen list and the IDDSI level come from OP-011's order and OP-035's
+ * swallow order, and the column grants make that true rather than merely
+ * intended — so the kitchen bundle is wide on operations and holds nothing
+ * clinical.
+ *
+ * `dietary.allergen.override` is the exception, and it is the dietician's. It
+ * is `high` and reasoned because it is the one place in this module where a
+ * person may put a known allergen in front of a patient — and it exists at all
+ * because the alternative to a recorded override is a nurse quietly swapping a
+ * bowl, which is the same decision with no name on it.
+ *
+ * There is no override for the swallow order, for anybody.
+ */
+const KITCHEN_FLOOR = [
+  'dietary.read',
+  'dietary.diet.read',
+  'dietary.diet.operational',
+  'dietary.tray.plan',
+  'dietary.tray.assemble',
+  'dietary.tray.dispatch',
+] as const;
+
+const KITCHEN_LEAD = [...KITCHEN_FLOOR, 'dietary.master.manage'] as const;
+
+/** The ward's half: the tray arrives, and somebody records what was eaten. */
+const TRAY_RECEIVER = ['dietary.read', 'dietary.diet.read', 'dietary.tray.deliver'] as const;
+
+/** The dietician's: everything the kitchen has, plus the one override. */
+const DIET_PRESCRIBER = [
+  'dietary.read',
+  'dietary.diet.read',
+  'dietary.diet.operational',
+  'dietary.allergen.override',
+  'dietary.master.manage',
+] as const;
+
+/**
  * OP-018, OP-021 and IP-020 — the hand-offs.
  *
  * Three bundles, and the reason they are one comment is that all three modules
@@ -608,6 +648,7 @@ const HOUSEKEEPING_FLOOR = ['bed.board.read', 'housekeeping.task.read', 'houseke
  * defeats the witness rule by making one person do everything.
  */
 const NURSING_BEDSIDE = [
+  ...TRAY_RECEIVER,
   'nursing.ward.read',
   'nursing.assessment.record',
   'nursing.note.write',
@@ -4396,6 +4437,7 @@ const templates: readonly RoleTemplate[] = [
       // a patient can manage is the speech therapist's finding, and a diet plan
       // that contradicts it is the aspiration.
       'slp.swallow_order.read',
+      ...DIET_PRESCRIBER,
       'nursing.ward.read',
       'nursing.assessment.record',
       'nursing.note.write',
@@ -4961,6 +5003,10 @@ const templates: readonly RoleTemplate[] = [
       // it is the only way the tray changes, and it is the only clinical key
       // this role holds.
       ...SWALLOW_ACKNOWLEDGER,
+      // NC-033. Wide on operations, and holding nothing that decides what a
+      // patient eats — the diet type, the allergens and the IDDSI level are
+      // revoked from the application at column level.
+      ...KITCHEN_LEAD,
       'org.read',
       'mdm.read',
       'tpl.form.read',

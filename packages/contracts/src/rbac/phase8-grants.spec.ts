@@ -1075,6 +1075,42 @@ describe('OP-010 — the procedure floor', () => {
     expect(permission('ayush.registration.manage').requiresReason).toBe(true);
   });
 
+  // ── NC-033 — the kitchen ──────────────────────────────────────────────────
+
+  it('offers no key that overrides a swallow order, and none that sets a diet', () => {
+    // A patient assessed at IDDSI level 4 who is handed level 7 toast
+    // aspirates it, and the person who can change that is the one who did the
+    // assessment. The exception to a swallow order is a new swallow order.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    for (const absent of [
+      'dietary.iddsi.override',
+      'dietary.texture.override',
+      'dietary.swallow.waive',
+      'dietary.diet.prescribe',
+      'dietary.allergen.clear',
+      'dietary.npo.override',
+      'dietary.temperature.override',
+    ]) {
+      expect(keys, absent).not.toContain(absent);
+    }
+    // The allergen override is the one real exception, and it is high and
+    // reasoned — because the alternative to a recorded override is a nurse
+    // quietly swapping a bowl.
+    expect(permission('dietary.allergen.override').risk).toBe('high');
+    expect(permission('dietary.allergen.override').requiresReason).toBe(true);
+  });
+
+  it('gives the kitchen the trolley and the dietician the judgement', () => {
+    expect(getRoleTemplate('kitchen_staff')?.permissions).toContain('dietary.tray.dispatch');
+    // The kitchen owns whether the tray goes, never what is on it.
+    expect(getRoleTemplate('kitchen_staff')?.permissions).not.toContain('dietary.allergen.override');
+    expect(getRoleTemplate('dietician')?.permissions).toContain('dietary.allergen.override');
+    // And the ward records what actually arrived and what was eaten, because a
+    // week at twenty per cent is a nutrition referral.
+    expect(getRoleTemplate('nurse_ward')?.permissions).toContain('dietary.tray.deliver');
+    expect(getRoleTemplate('nurse_ward')?.permissions).not.toContain('dietary.tray.dispatch');
+  });
+
   it('keeps the AYUSH clinic and the credentialling file in different hands', () => {
     // A vaidya and a homoeopath hold the same template. Which consultation
     // each can open follows from their council registration, read by the

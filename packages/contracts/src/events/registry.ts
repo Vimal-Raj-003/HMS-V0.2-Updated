@@ -10870,6 +10870,61 @@ const transplantEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — NC-033, the kitchen.
+ *
+ * Three events, and all three go to somebody who is not in the kitchen: a ward
+ * that needs to know why a tray did not come, a dietician whose allergen guard
+ * was overridden, and a food-safety lead whose control point failed.
+ */
+const dietaryEvents: readonly EventDefinition[] = [
+  ev(
+    'dietary.tray.held',
+    'meal_tray',
+    'NC-033',
+    'A tray was held because the patient is nil by mouth. Leaves the kitchen because the ward needs to know the patient was not simply missed — a bed with no tray and no explanation is a bed somebody chases the kitchen about, and sometimes one where somebody quietly finds a biscuit.',
+    z.object({
+      trayId: uuid,
+      patientId: uuid,
+      wardId: uuid.nullable(),
+      slotCode: z.string(),
+      serviceDate: z.string(),
+      holdReason: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 1095 },
+  ),
+  ev(
+    'dietary.allergen.overridden',
+    'meal_item',
+    'NC-033',
+    'A dietician served an item the allergen guard refused. Not an error — it is a clinical judgement the module deliberately allows — but the one exception in this module, so it leaves the tray line and is counted.',
+    z.object({
+      itemId: uuid,
+      trayId: uuid,
+      patientId: uuid,
+      recipeId: uuid,
+      allergens: z.array(z.string()),
+      overrideBy: uuid,
+    }),
+    { containsPhi: true, retentionDays: 2555 },
+  ),
+  ev(
+    'dietary.temperature.failed',
+    'meal_tray',
+    'NC-033',
+    'A trolley failed its hot-holding or cold-holding check at dispatch. Leaves the kitchen because a control point that fails twice in a week is an equipment problem rather than a tray problem, and nobody sees that from inside a single refusal.',
+    z.object({
+      trayId: uuid,
+      slotCode: z.string(),
+      wardId: uuid.nullable(),
+      recordedTenthC: z.number().int(),
+      requiredTenthC: z.number().int(),
+      band: z.string(),
+    }),
+    { containsPhi: false, retentionDays: 1095 },
+  ),
+];
+
+/**
  * Phase 8 — OP-037, AYUSH.
  *
  * Three events, and each one leaves the console because somebody outside it has
@@ -11744,6 +11799,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...transplantEvents,
   ...handoffEvents,
   ...ayushEvents,
+  ...dietaryEvents,
   ...procedureEvents,
 ]);
 

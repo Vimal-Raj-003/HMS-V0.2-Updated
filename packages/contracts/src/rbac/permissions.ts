@@ -12007,6 +12007,110 @@ const OP037 = group('OP-037', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — NC-033, the kitchen
+//
+// The Phase 8 half: diet orders becoming trays. The canteen till, the staff
+// subsidy, kitchen stores and food waste are Phase 9.
+//
+// ── The kitchen does not decide what a patient eats ────────────────────────
+//
+// The dietician and the ward do, through OP-011 and the swallow order OP-035
+// writes. So there is no key here that sets a diet type, a texture level or an
+// allergen list — those columns are revoked from the application at column
+// level and derived onto the tray by a trigger.
+//
+// ── There is no key that overrides a swallow order ─────────────────────────
+//
+// A patient assessed at IDDSI level 4 who is handed level 7 toast aspirates it,
+// and the person who can change that is the one who did the assessment. The
+// exception to a swallow order is a new swallow order.
+//
+// ── The allergen override is the one real exception, and it is a dietician's ─
+//
+// Because there is a real clinical judgement behind it — a childhood reaction
+// to raw peanut is not a reason to withhold roasted chutney for forty years —
+// and because the alternative to a recorded override is a nurse quietly
+// swapping a bowl.
+// ═════════════════════════════════════════════════════════════════════════════
+const NC033 = group('NC-033', 8, [
+  p(
+    'dietary.read',
+    'meal_tray',
+    'read',
+    'phi',
+    'low',
+    'Read the tray line: what is planned for each ward, what is held, what went out and what came back.',
+    { phiRead: true },
+  ),
+  p(
+    'dietary.diet.read',
+    'active_diet',
+    'read',
+    'phi',
+    'low',
+    'Read the live diets by bed, with the allergens and the IDDSI levels the trays are checked against.',
+    { phiRead: true },
+  ),
+  p(
+    'dietary.diet.operational',
+    'active_diet',
+    'update',
+    'phi',
+    'low',
+    'Record a preference, an attendant meal or a bed move against a live diet. Not the diet type, the allergens or the texture level — those are the order’s, and the column grants say so.',
+  ),
+  p(
+    'dietary.tray.plan',
+    'meal_tray',
+    'create',
+    'phi',
+    'low',
+    'Plan the trays for a meal. Everything clinical on a tray is copied from the live diet; there is nothing here to type.',
+  ),
+  p(
+    'dietary.tray.assemble',
+    'meal_item',
+    'create',
+    'phi',
+    'low',
+    'Put dishes on a tray. The allergen and IDDSI checks are the database’s and fire here, because this is where a recipe meets a patient.',
+  ),
+  p(
+    'dietary.allergen.override',
+    'meal_item',
+    'override',
+    'phi',
+    'high',
+    'Serve an item the allergen guard refused. A dietician’s judgement, named and reasoned on the item — and the only exception in this module. There is none for a swallow order.',
+    { requiresReason: true },
+  ),
+  p(
+    'dietary.tray.dispatch',
+    'meal_tray',
+    'update',
+    'operational',
+    'low',
+    'Send a trolley, with its temperature. Hot food leaves at 63 °C or above and cold at 5 °C or below; a reading outside that is refused, and the answers are reheat or discard.',
+  ),
+  p(
+    'dietary.tray.deliver',
+    'meal_tray',
+    'record',
+    'phi',
+    'low',
+    'Record delivery and what the patient actually ate. A week at twenty per cent is a nutrition referral, which is why this is a clinical field and not a catering one.',
+  ),
+  p(
+    'dietary.master.manage',
+    'recipe',
+    'configure',
+    'operational',
+    'medium',
+    'Maintain recipes, diet types and meal slots. A recipe’s allergens and IDDSI level are revoked from the application, so this key edits everything about a dish except what makes it dangerous.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -12125,6 +12229,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP021,
   ...IP020,
   ...OP037,
+  ...NC033,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

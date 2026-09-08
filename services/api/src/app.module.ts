@@ -64,6 +64,7 @@ import {
 import { INVENTORY_CONTROLLERS, INVENTORY_PROVIDERS } from './modules/inventory/inventory.module.js';
 import { EMERGENCY_CONTROLLERS, EMERGENCY_PROVIDERS } from './modules/emergency/emergency.module.js';
 import { INPATIENT_CONTROLLERS, INPATIENT_PROVIDERS } from './modules/inpatient/inpatient.module.js';
+import { NONCLINICAL_CONTROLLERS, NONCLINICAL_PROVIDERS } from './modules/nonclinical/nonclinical.module.js';
 import { SPECIALTY_CONTROLLERS, SPECIALTY_PROVIDERS } from './modules/specialty/specialty.module.js';
 import { PROCEDURE_CONTROLLERS, PROCEDURE_PROVIDERS } from './modules/procedures/procedures.module.js';
 import { ORTHO_CONTROLLERS, ORTHO_PROVIDERS } from './modules/ortho/ortho.module.js';
@@ -133,6 +134,7 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     ...ORTHO_CONTROLLERS,
     ...INPATIENT_CONTROLLERS,
     ...SPECIALTY_CONTROLLERS,
+    ...NONCLINICAL_CONTROLLERS,
     ...PROCEDURE_CONTROLLERS,
     ...PHARMACY_CONTROLLERS,
   ],
@@ -191,6 +193,7 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     ...ORTHO_PROVIDERS,
     ...INPATIENT_PROVIDERS,
     ...SPECIALTY_PROVIDERS,
+    ...NONCLINICAL_PROVIDERS,
     ...PROCEDURE_PROVIDERS,
     { provide: APP_FILTER, useClass: ProblemFilter },
     { provide: APP_GUARD, useClass: AuthGuard },

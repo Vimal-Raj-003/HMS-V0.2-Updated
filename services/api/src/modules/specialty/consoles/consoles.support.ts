@@ -1044,6 +1044,88 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
     type: ProblemType.CONFLICT,
     detail: 'A procedure with that code is already in the master.',
   },
+
+  // ── NC-033 — the kitchen ──────────────────────────────────────────────────
+  an_allergen_override_is_signed_and_reasoned: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'Serving a known allergen needs a name and a reason. Both halves or neither: a signature on a blank page is what an audit finds two years later and cannot interpret.',
+  },
+  a_portion_is_a_portion: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A tray carries between one and twenty portions of a dish.',
+  },
+  an_iddsi_level_is_on_the_framework: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'IDDSI runs 0 to 4 for drinks and 3 to 7 for foods.',
+  },
+  a_diet_iddsi_level_is_on_the_framework: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A texture diet names a level on the IDDSI framework: 0–7 for food, 0–4 for fluids.',
+  },
+  a_patient_iddsi_level_is_on_the_framework: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A swallow order names a level on the IDDSI framework: 0–7 for food, 0–4 for fluids.',
+  },
+  an_npo_window_runs_forwards: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A nil-by-mouth window ends after it starts.',
+  },
+  a_cutoff_precedes_the_service: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'The count freezes before the meal is served. A cut-off after the service time is a cut-off that never happens.',
+  },
+  a_dispatch_is_signed: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A dispatch has a name on it and a time, or it has neither.',
+  },
+  a_delivery_is_signed: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A delivery has a name on it and a time, or it has neither.',
+  },
+  a_delivery_follows_a_dispatch: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A tray is delivered after it leaves the kitchen, not before.',
+  },
+  an_intake_is_a_percentage: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'Intake runs from nought to a hundred per cent.',
+  },
+  a_refusal_or_return_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A tray that was refused, returned or cancelled says why. A week of unexplained refusals is either a patient who is not eating or a kitchen nobody has told, and the sentence is what separates them.',
+  },
+  a_held_tray_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A held tray carries the reason it was held.',
+  },
+  uq_meal_tray: {
+    type: ProblemType.CONFLICT,
+    detail: 'This patient already has a tray planned for that meal.',
+  },
+  uq_meal_item: {
+    type: ProblemType.CONFLICT,
+    detail: 'That dish is already on this tray.',
+  },
+  uq_active_diet_admission: {
+    type: ProblemType.CONFLICT,
+    detail:
+      'This admission already has a live diet. Two would be two answers to what the patient may eat, and the tray would take whichever it read.',
+  },
+  uq_meal_slot_code: {
+    type: ProblemType.CONFLICT,
+    detail: 'A meal slot with that code already exists at this branch.',
+  },
+  uq_recipe_code: {
+    type: ProblemType.CONFLICT,
+    detail: 'A recipe with that code is already in the menu.',
+  },
+  uq_diet_type_code: {
+    type: ProblemType.CONFLICT,
+    detail: 'A diet type with that code already exists.',
+  },
 };
 
 /** Wraps a unit of work so Postgres's refusals arrive as problems a person can act on. */

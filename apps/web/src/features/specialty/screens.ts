@@ -687,6 +687,33 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: 'module.ayush.enabled',
   },
+  {
+    key: 'dietary-tray-line',
+    label: 'Tray line',
+    href: '/dietary/tray-line',
+    area: 'specialty',
+    permission: 'dietary.read',
+    summary:
+      'What is on a tray comes from the diet order and the swallow order. What the kitchen owns is whether the tray goes \u2014 and the menu is filtered against the patient before anybody plates a dish.',
+    deniedExplanation:
+      'The kitchen assembles and dispatches; the ward records what was eaten; the dietician holds the one override, over the allergen guard. Nobody overrides a swallow order.',
+    keywords: [
+      'diet',
+      'kitchen',
+      'tray',
+      'meal',
+      'menu',
+      'allergen',
+      'iddsi',
+      'texture',
+      'npo',
+      'nil by mouth',
+      'nutrition',
+      'haccp',
+      'food safety',
+    ],
+    entitlement: 'module.dietary.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

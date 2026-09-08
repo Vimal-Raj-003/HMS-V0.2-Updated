@@ -470,6 +470,14 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'The AYUSH consoles are not included in your plan.',
     upgradeCta: 'Ask about Specialty Consoles',
   }),
+  // Gated at the console, not at the guard. A hospital in arrears whose tray
+  // line stopped checking allergens would be a hospital where the licence
+  // state can kill somebody, so the checks live in the database and only the
+  // screen is licensed.
+  ep('module.dietary.enabled', 'feature', 'route', 'NC-033 The kitchen and the tray line.', {
+    message: 'The dietary and kitchen console is not included in your plan.',
+    upgradeCta: 'Ask about Hospital Operations',
+  }),
 ]);
 
 const pointsByKey = new Map(ENFORCEMENT_POINTS.map((e) => [e.key, e]));
