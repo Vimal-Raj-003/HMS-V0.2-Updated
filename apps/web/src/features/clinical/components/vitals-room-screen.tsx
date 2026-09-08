@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge, Button, EmptyState, Kbd, useToast } from '@vims/ui';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { HeartPulse } from '@/lib/icons';
 import { AsyncPanel } from '@/features/admin/components/async-panel';
 import { PageHeader } from '@/features/admin/components/page-header';
@@ -17,6 +17,7 @@ import {
   acknowledgeVitalsAlert,
   getAllergies,
   listReferenceRanges,
+  listOpenVisitsForPatient,
   listVitals,
   recordVitals,
 } from '../api/client';
@@ -101,6 +102,34 @@ export function VitalsRoomScreen(): React.JSX.Element {
   const [saveKey, setSaveKey] = useState(newIdempotencyKey);
 
   const ready = isIdentifier(patientId);
+
+  /**
+   * The visit this reading belongs to, found rather than asked for.
+   *
+   * OP-007 refuses an observation that belongs to no visit, admission or ER
+   * attendance. This field used to be labelled "optional", so a nurse could
+   * fill in a whole set of readings, press save, and be refused by the server
+   * with the cuff already off the arm. A nurse standing in the vitals room is
+   * looking at somebody who checked in, so the screen looks the visit up.
+   */
+  const visitsQuery = useQuery({
+    queryKey: keys.visitsForPatient(patientId),
+    queryFn: ({ signal }) => listOpenVisitsForPatient(patientId, { signal }),
+    enabled: ready,
+    staleTime: 30_000,
+  });
+
+  const openVisits = useMemo(
+    () => (visitsQuery.data?.items ?? []).filter((v) => v.status !== 'cancelled' && v.status !== 'closed'),
+    [visitsQuery.data],
+  );
+
+  // Filled once, and never over a value the nurse typed themselves.
+  useEffect(() => {
+    if (!ready || visitId !== '') return;
+    const only = openVisits[0];
+    if (openVisits.length === 1 && only !== undefined) setVisitId(only.id);
+  }, [ready, visitId, openVisits]);
   const canReadHistory = granted.has('vitals.record.read');
   const canReadBands = granted.has('vitals.configure');
   const canReadPatient = granted.has('patient.record.read');
@@ -189,7 +218,16 @@ export function VitalsRoomScreen(): React.JSX.Element {
     },
   });
 
-  const canSave = ready && hasAnyMeasurement(form) && problems.length === 0 && !save.isPending;
+  // The visit is not optional to OP-007, so it is not optional here either.
+  const visitProblem =
+    ready && !isIdentifier(visitId)
+      ? openVisits.length === 0 && !visitsQuery.isPending
+        ? 'This patient has no open visit. A reading has to belong to one, so check them in first.'
+        : 'Choose the visit this reading belongs to.'
+      : null;
+
+  const canSave =
+    ready && isIdentifier(visitId) && hasAnyMeasurement(form) && problems.length === 0 && !save.isPending;
 
   const shortcuts: readonly Shortcut[] = useMemo(
     () => [
@@ -294,9 +332,9 @@ export function VitalsRoomScreen(): React.JSX.Element {
           }}
         />
         <ContextField
-          label="Visit (optional)"
+          label="Visit"
           testId="vitals-visit"
-          hint="Attaches the reading to today's visit so the doctor's screen picks it up."
+          hint="Found from the patient's open visit. A reading has to belong to one — the server refuses an observation that belongs to nothing."
           value={visitId}
           onChange={setVisitId}
         />
@@ -338,12 +376,12 @@ export function VitalsRoomScreen(): React.JSX.Element {
                 }}
               />
 
-              {problems.length === 0 ? null : (
+              {problems.length === 0 && visitProblem === null ? null : (
                 // The live region is the wrapper: `role="alert"` on a `<ul>`
                 // replaces its list role and orphans every `<li>` inside it.
                 <div role="alert" data-testid="vitals-problems">
                   <ul className="flex flex-col gap-1">
-                    {problems.map((message) => (
+                    {[...problems, ...(visitProblem === null ? [] : [visitProblem])].map((message) => (
                       <li key={message} className="text-sm text-danger-on-surface">
                         {message}
                       </li>

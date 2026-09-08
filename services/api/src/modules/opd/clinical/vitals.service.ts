@@ -215,6 +215,28 @@ export class VitalsService {
         });
       }
 
+      // The patient has been through the vitals room, so the visit says so.
+      //
+      // Nothing did this. A walk-in opened as `waiting_vitals`, the nurse
+      // recorded the reading, and the visit stayed `waiting_vitals` for ever —
+      // so OP-002's precondition refused every consultation and the doctor had
+      // to declare "see without vitals" on a patient whose vitals were sitting
+      // in the record. A safety rule that has to be overridden on every patient
+      // is not a safety rule; it is a habit, and the first thing it teaches is
+      // to reach for the override.
+      //
+      // In this transaction rather than off the event, because the doctor's
+      // screen is the very next thing that happens and a relay that has not run
+      // yet is a doctor being refused for no reason they can see.
+      if (body.visitId !== undefined) {
+        await tx.query(
+          `UPDATE clinical.op_visits
+              SET status = 'waiting_doctor', updated_at = now()
+            WHERE id = $1 AND hospital_id = $2 AND status = 'waiting_vitals'`,
+          [body.visitId, getContext().hospitalId],
+        );
+      }
+
       await this.audit.write(tx, {
         action: 'insert',
         entity: 'clinical.vitals',

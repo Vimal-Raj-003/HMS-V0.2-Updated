@@ -10,7 +10,7 @@
 | Current phase          | **Phases 0–8 complete.** Phase 8 finished on 2026-09-08 with NC-033, the kitchen: all thirty specialty consoles are built, proved live in both directions, and committed. **Phase 9 (ERP and non-clinical) is next and has no code** beyond the `nonclinical` module folder NC-033 opened.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Repo status            | **868 non-partition tables** outside the system schemas across fifteen tenant schemas — **0 business tables without RLS**; the only five without it are the deliberately-global reference catalogues that carry no `hospital_id` at all (`mdm.opioid_conversion_factors`, `mdm.immunisation_schedules`, `mdm.anticholinergic_scores`, `mdm.beers_criteria`, `mdm.telemedicine_drug_rules` — published law, identical in every tenant, read-only to `hms_app`), plus pg_partman's own three and `public._prisma_migrations`. `core.permissions` and `mdm.console_components` keep RLS on with a deliberately-open policy (D-17). Read out of a live container. **62 migrations. 1,077 API routes across 83 controllers. 123 Next.js screens.** Permission catalogue **1,392 keys**; event registry **847**; entitlements **72**. |
-| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **819 tests, 37/37 files**; `pnpm test:e2e` **105 passed, 0 failed** — green for the first time, and now including all 110 registered screens. The API surface sweep (`apps/web/e2e/api-sweep.mts`) calls **all 1,077 routes with zero crashes**. **Never run: both k6 scripts** (k6 is not installed here).                                                                                                                                                                                                                                                                                                                                                                             |
+| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **819 tests, 37/37 files**; `pnpm test:e2e` **112 passed, 0 failed** — green for the first time, and now including all 110 registered screens. The API surface sweep (`apps/web/e2e/api-sweep.mts`) calls **all 1,077 routes with zero crashes**. **Never run: both k6 scripts** (k6 is not installed here).                                                                                                                                                                                                                                                                                                                                                                             |
 | Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path. Against `docs/12` by _coverage_: every module in phases 0–8 has schema, contracts, API, screens and its rules proved live in both directions; phases 9–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, release a body lawfully, run all thirty specialty consoles — and, since RC-006, turn the work done in one into a priced line on a patient's bill.** It cannot yet run the ERP back office, a patient portal, or the analytics and interop layer.                                          |
 | Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -400,6 +400,51 @@ been hiding.
 
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
+
+### 2026-09-27 · The three shifts, walked — and the two places the journey broke
+
+Not a screen check and not a route check: a _day_. `e2e/clinical-cycles.spec.ts`
+walks a receptionist's shift, a nurse's and a doctor's as one serial journey —
+register a patient at the desk, open the visit, issue the token, record the
+vitals, open the consultation, prescribe — and asserts that the identity created
+at the desk is the one the clinic treats.
+
+It broke twice, and both breaks were hand-offs between modules that each worked
+perfectly on their own. Nothing in the repo could have found them: the unit
+tests mock the fetch, the integration tests never open a browser, the route
+sweep only asks whether an endpoint answers, and the 110-screen sweep only asks
+whether a screen paints.
+
+**The vitals room could not save a reading.** The visit field was labelled
+"Visit (optional)" and OP-007 refuses an observation belonging to no visit,
+admission or ER attendance — so a nurse could enter a full set of readings,
+press save, and be refused by the server with the cuff already off the arm. The
+screen contradicted the API in the one place a nurse would find out last. It now
+looks the patient's open visit up rather than asking for it, and Save stays
+disabled with a plain sentence when there is not one.
+
+**And nothing released the patient to the doctor.** A walk-in opens as
+`waiting_vitals`; the nurse records the reading; the visit stayed
+`waiting_vitals` for ever, because no code anywhere moved it on. OP-002's
+precondition then refused _every_ consultation, and the only way through was for
+the doctor to declare "see without vitals" — on a patient whose vitals were
+sitting in the record. **A safety rule that has to be overridden on every
+patient is not a safety rule; it is a habit, and the first thing it teaches is
+to reach for the override.** Recording vitals now advances the visit, in the
+same transaction, because the doctor's screen is the very next thing that
+happens.
+
+**What the journey also documents is where there is no screen at all.** Opening
+a walk-in visit and opening an encounter both had to be done through the API,
+and each is marked `NO SCREEN` in the spec. A receptionist taking somebody who
+arrived without an appointment has nowhere to do it, and a doctor whose clinic
+was not set up by somebody else has no way in. Those are gaps, not test
+plumbing, and they are named where a reader will meet them.
+
+**Gates** — 20/20 packages typecheck, lint and test; `pnpm test:e2e` **112
+passed, 0 failed** (105 plus the seven cycle steps); `pnpm test:integration`
+**819 tests, 37/37 files**. Five vitals unit tests had to be updated: they were
+asserting the behaviour the first bug produced.
 
 ### 2026-09-26 · RC-006 · A clinical act becoming money
 

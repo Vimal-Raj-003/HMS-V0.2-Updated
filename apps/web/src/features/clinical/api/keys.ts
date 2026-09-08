@@ -20,6 +20,8 @@ export function clinicalKeys(hospitalId: string) {
     referenceRanges: () => [...root, 'vitals', 'reference-ranges'] as const,
     vitalsFor: (patientId: string) => [...root, 'vitals', 'patient', patientId] as const,
     vitals: () => [...root, 'vitals'] as const,
+    /** The open visits a reading can be attached to. */
+    visitsForPatient: (patientId: string) => [...root, 'visits', 'patient', patientId] as const,
 
     encounter: (id: string) => [...root, 'encounter', id] as const,
     encounters: () => [...root, 'encounter'] as const,

@@ -90,6 +90,25 @@ export async function listVitals(
   );
 }
 
+/**
+ * The patient's open visits, so the vitals room can attach a reading to one.
+ *
+ * OP-007 refuses an observation that belongs to no visit, admission or ER
+ * attendance — and the vitals room used to offer the visit as optional, let the
+ * nurse fill in a whole set of readings, and only then be refused. A nurse in
+ * the vitals room is looking at somebody who checked in, so the screen finds
+ * that visit rather than asking them to paste its identifier.
+ */
+export async function listOpenVisitsForPatient(
+  patientId: string,
+  options: Signal = {},
+): Promise<Page<{ readonly id: string; readonly status: string }>> {
+  return request<Page<{ readonly id: string; readonly status: string }>>(
+    `${V1}/visits${queryString({ patientId, limit: 10 })}`,
+    withSignal(options),
+  );
+}
+
 export async function getVitals(id: string, options: Signal = {}): Promise<VitalsDetail> {
   return request<VitalsDetail>(`${V1}/vitals/records/${id}`, withSignal(options));
 }

@@ -26,6 +26,7 @@ const recordVitals = vi.hoisted(() => vi.fn());
 const acknowledgeVitalsAlert = vi.hoisted(() => vi.fn());
 const getAllergies = vi.hoisted(() => vi.fn());
 const getPatient = vi.hoisted(() => vi.fn());
+const listOpenVisitsForPatient = vi.hoisted(() => vi.fn());
 
 vi.mock('../api/client', () => ({
   listReferenceRanges,
@@ -33,12 +34,14 @@ vi.mock('../api/client', () => ({
   recordVitals,
   acknowledgeVitalsAlert,
   getAllergies,
+  listOpenVisitsForPatient,
 }));
 
 vi.mock('@/features/patient/api/client', () => ({ getPatient }));
 
 const HOSPITAL = '0192f0e2-0000-7000-8000-000000000011';
 const PATIENT = '0192f0e2-0000-7000-8000-0000000000a1';
+const VISIT = '0192f0e2-0000-7000-8000-0000000000b1';
 
 /** `nurse_opd` (docs/05 row 16) — note the absence of `vitals.configure`. */
 const VITALS_NURSE = [
@@ -212,6 +215,13 @@ beforeEach(() => {
   getAllergies.mockResolvedValue([]);
   getPatient.mockResolvedValue(patientRecord());
   recordVitals.mockResolvedValue(savedRecord());
+  // A reading has to belong to a visit — OP-007 refuses one that belongs to
+  // nothing — so the room finds the patient's open visit and fills the field.
+  listOpenVisitsForPatient.mockResolvedValue({
+    items: [{ id: VISIT, status: 'waiting_vitals' }],
+    nextCursor: null,
+    hasMore: false,
+  });
 });
 
 describe('flagging', () => {
