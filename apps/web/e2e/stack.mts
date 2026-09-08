@@ -78,6 +78,23 @@ async function shutdown(code: number): Promise<never> {
 process.on('SIGTERM', () => void shutdown(0));
 process.on('SIGINT', () => void shutdown(0));
 
+// `@vims/db`'s exports map sends `@vims/db/seed` to `dist/` unless the
+// `development` condition is set, and neither this process nor the API child it
+// spawns sets it — so this suite seeds from the last *built* copy of the seed
+// rather than the source in front of you. A seed change is then silently not
+// under test until somebody happens to rebuild, which is how three logins per
+// role were added and the suite could not sign in as any of them.
+//
+// Building it here rather than changing the resolution keeps this process and
+// the API child on the same copy, which is the property that actually matters.
+process.stdout.write('[stack] building @vims/db so the seed is the current one\n');
+await once(
+  spawn('pnpm', ['--filter', '@vims/db', 'build'], { cwd: REPO_ROOT, stdio: 'inherit' }),
+  'exit',
+).then(([code]) => {
+  if (code !== 0) throw new Error(`@vims/db build failed with code ${String(code)}`);
+});
+
 running.pg = await startTestPostgres();
 
 // Seeds run as the schema owner: the application role is subject to RLS and

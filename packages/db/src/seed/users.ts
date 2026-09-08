@@ -38,19 +38,113 @@ export interface SeededUser {
   readonly hospital: SeededHospital;
   readonly roleKey: string;
   readonly username: string;
+  /** 1-based. Seat 1 keeps the bare `<role>@<hospital>` username. */
+  readonly seat: number;
+  readonly personName: string;
+}
+
+/**
+ * How many people a hospital actually has doing each job.
+ *
+ * One account per role was enough to prove a permission and useless for
+ * anything else: a ward with one nurse cannot hand over, two nurses cannot
+ * countersign each other, and a rule that says "a second person witnesses this"
+ * cannot be exercised at all. Every role that works a rota or takes part in a
+ * two-person check gets three; the desks that are genuinely one person get one.
+ *
+ * `super_admin` stays at one on purpose. It is the SaaS operator's account, not
+ * a hospital job, and more of them is more ways in rather than more capacity.
+ */
+const SEATS: Readonly<Record<string, number>> = {
+  // The wards and clinics — rotas, handovers, and the two-person checks that
+  // need two people who are not the same person.
+  nurse_ward: 3,
+  nurse_opd: 3,
+  nurse_icu: 3,
+  nurse_er_triage: 2,
+  nurse_ot_scrub: 2,
+  doctor_consultant_opd: 3,
+  doctor_ip: 3,
+  doctor_emergency: 2,
+  surgeon: 2,
+  anaesthetist: 2,
+  resident_doctor: 2,
+
+  // The desks and the back office.
+  receptionist: 3,
+  cashier: 3,
+  billing_executive: 2,
+  hospital_admin: 2,
+  branch_admin: 2,
+
+  // Diagnostics and pharmacy — a maker and a checker are two people.
+  lab_technician: 3,
+  phlebotomist: 2,
+  radiology_technician: 2,
+  pharmacist_op: 3,
+  pharmacist_ip: 3,
+
+  // Facilities and the floor.
+  housekeeping: 3,
+  ward_attendant: 2,
+  security_officer: 2,
+
+  // The portal side.
+  patient: 3,
+  family_attendant: 2,
+};
+
+/**
+ * Names, so a login list reads like a hospital rather than a fixture.
+ *
+ * Deliberately ordinary Indian names in the hospital's own region, and
+ * deliberately not the names of any real staff — `docs/09` §11 is explicit that
+ * a seed never carries real data.
+ */
+const SEAT_NAMES: readonly (readonly [string, string])[] = [
+  ['Anita', 'Rao'],
+  ['Suresh', 'Kulkarni'],
+  ['Fatima', 'Sheikh'],
+  ['Rajesh', 'Naik'],
+  ['Divya', 'Menon'],
+];
+
+function seatName(roleKey: string, seat: number): readonly [string, string] {
+  // Offset by the role so two roles do not both start at "Anita Rao".
+  const base = seedIndexOf(roleKey);
+  const picked = SEAT_NAMES[(base + seat - 1) % SEAT_NAMES.length];
+  // The modulo cannot leave the array, but saying so with `!` asks the reader
+  // to verify that; a fallback says it without asking.
+  return picked ?? ['Demo', 'Staff'];
 }
 
 export function demoUsers(tenancy: SeededTenancy): readonly SeededUser[] {
   const users: SeededUser[] = [];
   for (const hospital of tenancy.hospitals) {
     for (const template of ROLE_TEMPLATES) {
-      const username = `${template.key}@${hospital.code.toLowerCase()}`;
-      users.push({
-        id: seedId('user', hospital.code, template.key),
-        hospital,
-        roleKey: template.key,
-        username,
-      });
+      const seats = SEATS[template.key] ?? 1;
+      for (let seat = 1; seat <= seats; seat += 1) {
+        // Seat 1 keeps the bare username. Every spec in the repository signs in
+        // as `<role>@<hospital>`, and renaming it to `<role>.1@` would break
+        // all of them to no purpose.
+        const suffix = seat === 1 ? '' : `.${String(seat)}`;
+        const [given, family] = seatName(template.key, seat);
+        users.push({
+          // Seat 1 keeps its original id as well as its username. Giving it a
+          // new one would try to insert a second row with a username the first
+          // already holds, and `users_group_username_key` refuses that — the
+          // seed is meant to be re-runnable, not to fight itself.
+          id:
+            seat === 1
+              ? seedId('user', hospital.code, template.key)
+              : seedId('user', hospital.code, template.key, String(seat)),
+          hospital,
+          roleKey: template.key,
+          username: `${template.key}${suffix}@${hospital.code.toLowerCase()}`,
+          seat,
+          personName: `${given} ${family}`,
+        });
+      }
     }
   }
   return users;
@@ -74,20 +168,25 @@ export async function seedUsers(ctx: SeedContext, tenancy: SeededTenancy): Promi
     const hospital = user.hospital;
     const main = mainBranchOf(hospital);
     const roleId = seedId('role-template', template.key);
-    const displayName = `${template.name} (${hospital.code})`;
+    // The person's name leads, because a handover list that reads
+    // "Nurse — Ward (VIMS-BLR)" three times is a list nobody can use.
+    const displayName = `${user.personName} — ${template.name} (${hospital.code})`;
 
     users.push({
       id: user.id,
       hospital_id: hospital.id,
       group_id: tenancy.groupId,
       username: user.username,
-      email: `${template.key}.${hospital.code.toLowerCase()}@demo.vims.local`,
+      email: `${template.key}.${String(user.seat)}.${hospital.code.toLowerCase()}@demo.vims.local`,
       // Synthetic, in the reserved 999-prefixed test range so it can never
       // reach a real handset (docs/09 §11: never real data).
-      mobile: `+9199900${String(10_000 + seedIndexOf(template.key)).slice(-5)}`,
-      name: { family: 'Demo', given: template.name },
+      mobile: `+9199900${String(10_000 + seedIndexOf(template.key) * 8 + user.seat).slice(-5)}`,
+      name: {
+        family: user.personName.split(' ')[1] ?? 'Demo',
+        given: user.personName.split(' ')[0] ?? template.name,
+      },
       display_name: displayName.slice(0, 200),
-      employee_id: `EMP-${hospital.code}-${String(template.docsRow).padStart(3, '0')}`,
+      employee_id: `EMP-${hospital.code}-${String(template.docsRow).padStart(3, '0')}-${String(user.seat)}`,
       type:
         template.category === 'external' ? 'external' : template.category === 'device' ? 'device' : 'staff',
       status: 'active',
@@ -106,7 +205,7 @@ export async function seedUsers(ctx: SeedContext, tenancy: SeededTenancy): Promi
       professional:
         template.category === 'medical'
           ? {
-              registrationNo: `KMC/DEMO/${String(template.docsRow).padStart(4, '0')}`,
+              registrationNo: `KMC/DEMO/${String(template.docsRow).padStart(4, '0')}${String(user.seat)}`,
               council: 'Karnataka Medical Council',
               speciality: template.name,
             }
@@ -127,7 +226,10 @@ export async function seedUsers(ctx: SeedContext, tenancy: SeededTenancy): Promi
     });
 
     assignments.push({
-      id: seedId('user-role', hospital.code, template.key),
+      id:
+        user.seat === 1
+          ? seedId('user-role', hospital.code, template.key)
+          : seedId('user-role', hospital.code, template.key, String(user.seat)),
       hospital_id: hospital.id,
       user_id: user.id,
       role_id: roleId,
@@ -147,7 +249,10 @@ export async function seedUsers(ctx: SeedContext, tenancy: SeededTenancy): Promi
 
     for (const b of hospital.branches) {
       access.push({
-        id: seedId('branch-access', hospital.code, template.key, b.code),
+        id:
+          user.seat === 1
+            ? seedId('branch-access', hospital.code, template.key, b.code)
+            : seedId('branch-access', hospital.code, template.key, b.code, String(user.seat)),
         hospital_id: hospital.id,
         user_id: user.id,
         branch_id: b.id,

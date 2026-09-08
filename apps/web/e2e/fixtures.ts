@@ -19,13 +19,25 @@ export function stack(): StackHandoff {
  * what makes the helper mean what it says.
  */
 export async function signIn(page: Page, roleKey: string): Promise<void> {
+  await signInAs(page, `${roleKey}@vims-blr`);
+}
+
+/**
+ * The same thing, by full username.
+ *
+ * Roles have more than one seat — `nurse_ward@`, `nurse_ward.2@`,
+ * `nurse_ward.3@` — because a hospital has a rota, and half the rules in this
+ * system need two people who are not the same person. `signIn` names a role and
+ * gets seat one; this names the seat.
+ */
+export async function signInAs(page: Page, username: string): Promise<void> {
   const { hospitalId } = stack();
   await page.goto('/login');
   await page.getByLabel('Hospital').fill(hospitalId);
-  await page.getByLabel('Username, email or employee ID').fill(`${roleKey}@vims-blr`);
+  await page.getByLabel('Username, email or employee ID').fill(username);
   await page.getByLabel('Password').fill(DEV_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page).toHaveURL(/\/dashboard/);
+  await expect(page, `${username} should reach a workspace`).toHaveURL(/\/dashboard/);
   await expect(page.getByTestId('role-nav')).toBeVisible();
 }
 
