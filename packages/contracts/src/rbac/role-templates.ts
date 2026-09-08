@@ -2198,6 +2198,10 @@ const BILLING_APPROVER = [
   'bill.list',
   'bill.discount.approve',
   'bill.cancel',
+  // Reversing a billed charge is the approver's, not the desk's, for the same
+  // reason the credit note is: the person who posted a line is not the person
+  // who decides it should come off.
+  'bill.item.reverse',
   'invoice.read',
   'invoice.credit_note',
   'invoice.cancel',

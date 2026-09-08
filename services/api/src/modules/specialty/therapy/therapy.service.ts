@@ -504,6 +504,19 @@ export class TherapyService extends ConsoleSupport {
 
       const episode = await this.episodeWithin(tx, asText(row['episode_id']));
 
+      // The session happened, so it is chargeable. Raised in the transaction
+      // that recorded it: a session without its charge is work the hospital
+      // will never bill for, and thirty consoles shipped in exactly that state.
+      await this.raiseChargeIntent(tx, {
+        sourceModule: 'THERAPY',
+        sourceTable: 'specialty.therapy_sessions',
+        sourceId: id,
+        patientId: asText(row['patient_id']),
+        actKind: `session:${episode.discipline}`,
+        description: `${episode.discipline} session`,
+        encounterId: null,
+      });
+
       // The last authorised session has been used. The person who can extend it
       // is at the payer desk, not on the therapy floor.
       if (episode.authorisationExhausted && episode.sessionsAuthorised !== null) {

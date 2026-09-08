@@ -208,6 +208,21 @@ export class ImmunisationService extends ConsoleSupport {
       const row = rows[0];
       if (row === undefined) throw AppError.conflict('The dose was not recorded.');
 
+      // The dose was given, so it is chargeable. A vaccine given free under a
+      // national programme is mapped `not_billable` by the hospital rather than
+      // left unmapped, because "we do not charge for this" and "nobody has
+      // priced it" are different answers and the biller's worklist has to tell
+      // them apart.
+      await this.raiseChargeIntent(tx, {
+        sourceModule: 'IMMUNISATION',
+        sourceTable: 'specialty.vaccination_records',
+        sourceId: id,
+        patientId: body.patientId,
+        actKind: 'dose',
+        description: 'Immunisation dose',
+        visitId: body.visitId ?? null,
+      });
+
       // The plan follows the record, not the other way round: a dose given
       // without a plan is still a dose, and a plan updated without a dose is a
       // child recorded as protected who is not.

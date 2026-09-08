@@ -1,0 +1,70 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// RC-006 · What a console's work costs
+//
+// Thirty specialty consoles shipped, and not one of them could produce a
+// billable line — because there was nowhere to say what any of their work is
+// worth. `mdm.device_result_types` carried a `billing_service_code` and was the
+// only master in the database that did, so the one path that raised a charge
+// intent was the one path that had somewhere to look the service up.
+//
+// ── One table rather than fifteen columns ──────────────────────────────────
+//
+// The alternative was `billing_service_code` on every console's own master:
+// the dialysis session, the therapy session, the chemotherapy cycle, the
+// Panchakarma procedure. Fifteen migrations, fifteen places to look, and
+// fifteen chances for one of them to be forgotten the way `device_result_types`
+// was remembered. A hospital configures pricing in one place instead.
+//
+// ── And a hospital's own decision, not a seeded one ────────────────────────
+//
+// What a dialysis session costs is not a fact about dialysis; it is a fact
+// about this hospital's tariff. So the map is per-hospital and empty until
+// somebody fills it — and an act whose kind is not mapped still raises its
+// charge intent, carrying no service. The biller sees that the work was done
+// and that nobody has priced it, which is the same answer RC-003 gives for a
+// missing rate: held, never zeroed. A zero-rupee line on a patient's bill reads
+// as "free" rather than "not yet worked out", and only one of those is true.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ConsoleChargeMap {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String? @map("branch_id") @db.Uuid
+
+  /// The console that did the work — `DIALYSIS`, `AYUSH`, `THERAPY`. Free text
+  /// rather than a foreign key to `specialty_consoles`, because the consoles
+  /// that bill are not all in that registry: the therapy floor, the labour
+  /// room and the tray line are modules of their own.
+  consoleCode String @map("console_code") @db.VarChar(40)
+
+  /// What was done, in the console's own words: `session`, `cycle`,
+  /// `procedure:virechana`, `assessment`. The console chooses the vocabulary
+  /// and this table is where a hospital attaches money to it.
+  actKind String @map("act_kind") @db.VarChar(80)
+
+  /// The catalogue row RC-003 prices. Nullable so a hospital can record that it
+  /// has *considered* an act and decided it is not separately billable —
+  /// which is a different statement from never having mapped it.
+  serviceId String? @map("service_id") @db.Uuid
+
+  /// Set when the act is deliberately not charged for. Distinguishes "included
+  /// in the room rate" from "nobody has got to it yet", and the biller's
+  /// worklist needs to tell those apart.
+  notBillable Boolean @default(false) @map("not_billable")
+
+  /// What a quantity of one means here — a session, an hour, a millilitre.
+  /// Recorded so a biller reading a line knows what they are looking at.
+  qtyUnit String? @map("qty_unit") @db.VarChar(24)
+
+  note String? @db.Text
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, consoleCode, actKind], map: "uq_console_charge_map")
+  @@index([hospitalId, consoleCode])
+  @@map("console_charge_map")
+  @@schema("mdm")
+}

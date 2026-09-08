@@ -271,3 +271,70 @@ async function seedDialysisMachines(ctx: SeedContext, tenancy: SeededTenancy): P
 
   await ctx.write({ table: 'specialty.dialysis_machines', conflict: ['id'] }, rows);
 }
+
+/**
+ * What a console's work costs — RC-006's map.
+ *
+ * Seeded because a demo tenant with thirty consoles and no pricing is a demo
+ * that cannot show a bill, and because the map is the thing that was missing
+ * rather than a detail of it: `billing.charge_intents` was built to receive
+ * these charges and stood empty for thirty consoles.
+ *
+ * Each row points at a service by code and is skipped when the catalogue does
+ * not have it, so this stays correct as the service catalogue changes rather
+ * than failing the whole seed over a name.
+ */
+const CONSOLE_CHARGES: readonly (readonly [string, string, string | null, string])[] = [
+  // [console, act kind, service code (null = deliberately not billable), unit]
+  //
+  // Mapped against the codes this seed's own service catalogue actually has.
+  // An act whose service is not in the catalogue is left unmapped on purpose:
+  // it still raises its charge intent and appears on the biller's worklist as
+  // unpriced work, which is the behaviour worth demonstrating.
+  ['THERAPY', 'session:wound', 'DRESS', 'dressing'],
+  ['IMMUNISATION', 'dose', 'INJ', 'dose'],
+  // A dietician review inside an admission is included in the room rate at this
+  // demo hospital. Recorded as a decision rather than left unmapped, because
+  // "we do not charge for this" and "nobody has priced it" are different
+  // answers and the worklist has to tell them apart.
+  ['THERAPY', 'session:nutrition', null, 'session'],
+];
+
+export async function seedConsoleCharges(ctx: SeedContext, tenancy: SeededTenancy): Promise<void> {
+  const rows: SeedRow[] = [];
+  for (const h of tenancy.hospitals) {
+    for (const [consoleCode, actKind, serviceCode, unit] of CONSOLE_CHARGES) {
+      const serviceId =
+        serviceCode === null
+          ? null
+          : ((
+              await ctx.db.query<{ id: string }>(
+                `SELECT id FROM mdm.mdm_services WHERE hospital_id = $1 AND code = $2 LIMIT 1`,
+                [h.id, serviceCode],
+              )
+            ).rows[0]?.id ?? null);
+
+      // A code the catalogue does not have leaves the act unmapped, which the
+      // biller's worklist shows as unpriced work. Better than a mapping that
+      // points at nothing.
+      if (serviceCode !== null && serviceId === null) continue;
+
+      rows.push({
+        id: seedId('console-charge', h.code, `${consoleCode}:${actKind}`),
+        hospital_id: h.id,
+        branch_id: null,
+        console_code: consoleCode,
+        act_kind: actKind,
+        service_id: serviceId,
+        not_billable: serviceId === null,
+        qty_unit: unit,
+        note: null,
+        active: true,
+        created_at: SEED_EPOCH,
+        created_by: null,
+        updated_at: SEED_EPOCH,
+      });
+    }
+  }
+  await ctx.write({ table: 'mdm.console_charge_map', conflict: ['id'] }, rows);
+}

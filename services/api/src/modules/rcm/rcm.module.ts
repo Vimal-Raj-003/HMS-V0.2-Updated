@@ -3,6 +3,8 @@ import { AppModule } from '../../app.module.js';
 import { NumberingService } from '../../core/numbering/numbering.service.js';
 import { BillingController } from './billing/billing.controller.js';
 import { BillingService } from './billing/billing.service.js';
+import { ChargesController } from './charges/charges.controller.js';
+import { ChargesService } from './charges/charges.service.js';
 import { EstimatesController } from './estimates/estimates.controller.js';
 import { EstimatesService } from './estimates/estimates.service.js';
 import { InsuranceController } from './insurance/insurance.controller.js';
@@ -37,6 +39,9 @@ import { TariffService } from './tariff/tariff.service.js';
 export const RCM_CONTROLLERS: Type<unknown>[] = [
   TariffController,
   BillingController,
+  // RC-006's bridge: the only path by which work done in a clinical console
+  // reaches a bill.
+  ChargesController,
   PaymentsController,
   PackagesController,
   InsuranceController,
@@ -56,6 +61,7 @@ export const RCM_PROVIDERS: Provider[] = [
   NumberingService,
   TariffService,
   BillingService,
+  ChargesService,
   PaymentsService,
   PackagesService,
   InsuranceService,

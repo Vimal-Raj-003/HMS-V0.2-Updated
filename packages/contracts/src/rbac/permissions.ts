@@ -6613,7 +6613,16 @@ const OP005 = group('OP-005', 5, [
     'create',
     'financial',
     'medium',
-    'Post a charge line onto an open bill, priced through RC-003.',
+    'Post a charge line onto an open bill, priced through RC-003. Also posts the charges the clinical consoles raised, which is the only way work done in a console reaches a bill.',
+  ),
+  p(
+    'bill.item.reverse',
+    'bill_item',
+    'override',
+    'financial',
+    'high',
+    'Reverse a charge that has already reached a bill. The database refuses to cancel one — a billed line is reversed with a reason, and the pair is what a credit note is made of — so this key exists to make that reason attributable.',
+    { requiresReason: true },
   ),
   p(
     'bill.item.remove',

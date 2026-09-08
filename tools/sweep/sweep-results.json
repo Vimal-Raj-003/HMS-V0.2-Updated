@@ -5369,6 +5369,30 @@
   },
   {
     "method": "GET",
+    "path": "/billing/charges/pending",
+    "status": 200,
+    "file": "services/api/src/modules/rcm/charges/charges.controller.ts",
+    "detail": "",
+    "parameterised": false
+  },
+  {
+    "method": "POST",
+    "path": "/billing/bills/:id/post-charges",
+    "status": 404,
+    "file": "services/api/src/modules/rcm/charges/charges.controller.ts",
+    "detail": "",
+    "parameterised": true
+  },
+  {
+    "method": "POST",
+    "path": "/billing/charges/:id/reverse",
+    "status": 400,
+    "file": "services/api/src/modules/rcm/charges/charges.controller.ts",
+    "detail": "",
+    "parameterised": true
+  },
+  {
+    "method": "GET",
     "path": "/estimates/templates",
     "status": 200,
     "file": "services/api/src/modules/rcm/estimates/estimates.controller.ts",

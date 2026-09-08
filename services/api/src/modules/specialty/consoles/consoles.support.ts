@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ProblemType } from '@vims/contracts';
+import { ProblemType, newId } from '@vims/contracts';
 import { AuditService } from '../../../core/audit/audit.service.js';
 import { getContext } from '../../../core/context/request-context.js';
 import { DatabaseService, type TransactionClient } from '../../../core/db/database.service.js';
@@ -1190,6 +1190,110 @@ export class ConsoleSupport {
 
   protected guard<T>(fn: (tx: TransactionClient) => Promise<T>): Promise<T> {
     return withConsoleErrors(() => this.db.withTenant(currentTenantContext(), fn));
+  }
+
+  /**
+   * Raises the charge for a clinical act, in the transaction that recorded it.
+   *
+   * The act and its charge are written together or not at all. An act without
+   * its intent is work the hospital did and will never bill for; an intent
+   * without its act is a bill for something nobody did. Thirty consoles shipped
+   * with neither, which is why nothing done in any of them was billable.
+   *
+   * What this does *not* do is price anything. The intent carries a service key
+   * and a quantity; RC-003 resolves the rate when a biller posts it, against the
+   * tariff in force on the day and the payer on the bill. A console that priced
+   * its own work would be a second pricing engine that disagrees with the first
+   * one the day a corporate plan changes.
+   *
+   * `(hospital_id, source_table, source_id)` is unique, so raising twice for the
+   * same session is refused by the database rather than by a check here — the
+   * console can call this on every save without keeping track.
+   */
+  protected async raiseChargeIntent(
+    tx: TransactionClient,
+    intent: {
+      readonly sourceModule: string;
+      readonly sourceTable: string;
+      readonly sourceId: string;
+      readonly patientId: string;
+      readonly description: string;
+      /** What was done, in the console's own words. Looked up in the map. */
+      readonly actKind: string;
+      readonly qty?: number;
+      readonly encounterId?: string | null;
+      readonly visitId?: string | null;
+      readonly admissionId?: string | null;
+    },
+  ): Promise<string | null> {
+    // What the act is worth is the hospital's decision, held in
+    // `mdm.console_charge_map`. An act nobody has mapped still raises its
+    // intent, carrying no service: the biller sees that the work happened and
+    // that nobody has priced it, which is the same answer RC-003 gives for a
+    // missing rate. Held, never zeroed — a zero-rupee line reads as "free"
+    // rather than "not yet worked out", and only one of those is true.
+    const { rows: mapped } = await tx.query<Record<string, unknown>>(
+      `SELECT service_id, not_billable FROM mdm.console_charge_map
+        WHERE hospital_id = $1 AND console_code = $2 AND act_kind = $3 AND active`,
+      [this.hospitalId(), intent.sourceModule, intent.actKind],
+    );
+    const mapping = mapped[0];
+
+    // A hospital that has decided this act is not separately billable has
+    // answered the question, and there is nothing to raise.
+    if (mapping !== undefined && mapping['not_billable'] === true) return null;
+
+    const serviceKey = mapping === undefined ? null : (mapping['service_id'] as string | null);
+    const id = newId();
+    const { rows } = await tx.query<{ readonly id: string }>(
+      `INSERT INTO billing.charge_intents
+         (id, hospital_id, branch_id, patient_id, encounter_id, visit_id, admission_id,
+          source_module, source_table, source_id, service_key, description, qty, currency,
+          status, created_at, created_by, updated_at, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'INR','pending', now(),$14, now(),$14)
+       ON CONFLICT (hospital_id, source_table, source_id) DO NOTHING
+       RETURNING id`,
+      [
+        id,
+        this.hospitalId(),
+        this.branchId(),
+        intent.patientId,
+        intent.encounterId ?? null,
+        intent.visitId ?? null,
+        intent.admissionId ?? null,
+        intent.sourceModule,
+        intent.sourceTable,
+        intent.sourceId,
+        serviceKey,
+        intent.description,
+        intent.qty ?? 1,
+        this.actorId(),
+      ],
+    );
+    // Null when the act already had its charge. That is the normal answer to
+    // saving the same session twice, not a failure.
+    return rows[0]?.id ?? null;
+  }
+
+  /**
+   * Voids the charge for an act that was cancelled.
+   *
+   * Only while it is still pending: once a charge has reached a bill the
+   * database refuses to cancel it, because a billed line is reversed with a
+   * reason and the pair is what a credit note is made of.
+   */
+  protected async voidChargeIntent(
+    tx: TransactionClient,
+    sourceTable: string,
+    sourceId: string,
+  ): Promise<void> {
+    await tx.query(
+      `UPDATE billing.charge_intents
+          SET status = 'cancelled', updated_at = now(), updated_by = $3
+        WHERE hospital_id = $1 AND source_table = $2 AND source_id = $4
+          AND status = 'pending'`,
+      [this.hospitalId(), sourceTable, this.actorId(), sourceId],
+    );
   }
 
   /**

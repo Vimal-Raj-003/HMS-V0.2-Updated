@@ -5,15 +5,15 @@
 
 ## Current state
 
-| Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Current phase          | **Phases 0–8 complete.** Phase 8 finished on 2026-09-08 with NC-033, the kitchen: all thirty specialty consoles are built, proved live in both directions, and committed. **Phase 9 (ERP and non-clinical) is next and has no code** beyond the `nonclinical` module folder NC-033 opened.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| Repo status            | **868 non-partition tables** outside the system schemas across fifteen tenant schemas — **0 business tables without RLS**; the only five without it are the deliberately-global reference catalogues that carry no `hospital_id` at all (`mdm.opioid_conversion_factors`, `mdm.immunisation_schedules`, `mdm.anticholinergic_scores`, `mdm.beers_criteria`, `mdm.telemedicine_drug_rules` — published law, identical in every tenant, read-only to `hms_app`), plus pg_partman's own three and `public._prisma_migrations`. `core.permissions` and `mdm.console_components` keep RLS on with a deliberately-open policy (D-17). Read out of a live container. **62 migrations. 1,077 API routes across 83 controllers. 123 Next.js screens.** Permission catalogue **1,392 keys**; event registry **847**; entitlements **72**.                              |
-| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **813 tests, 36/36 files**; `pnpm test:e2e` **105 passed, 0 failed** — green for the first time, and now including all 110 registered screens. The API surface sweep (`apps/web/e2e/api-sweep.mts`) calls **all 1,077 routes with zero crashes**. **Never run: both k6 scripts** (k6 is not installed here).                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path, and that is now by a distance the largest outstanding debt in the build. Against `docs/12` by _coverage_ rather than by DoD: every module in phases 0–8 has schema, contracts, API, screens and its rules proved live in both directions; phases 9–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, release a body lawfully, and run all thirty specialty consoles — dialysis to Panchakarma, the labour room to the tray line. It cannot yet run the ERP back office, a patient portal, or the analytics and interop layer.** |
-| Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Current phase          | **Phases 0–8 complete.** Phase 8 finished on 2026-09-08 with NC-033, the kitchen: all thirty specialty consoles are built, proved live in both directions, and committed. **Phase 9 (ERP and non-clinical) is next and has no code** beyond the `nonclinical` module folder NC-033 opened.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Repo status            | **868 non-partition tables** outside the system schemas across fifteen tenant schemas — **0 business tables without RLS**; the only five without it are the deliberately-global reference catalogues that carry no `hospital_id` at all (`mdm.opioid_conversion_factors`, `mdm.immunisation_schedules`, `mdm.anticholinergic_scores`, `mdm.beers_criteria`, `mdm.telemedicine_drug_rules` — published law, identical in every tenant, read-only to `hms_app`), plus pg_partman's own three and `public._prisma_migrations`. `core.permissions` and `mdm.console_components` keep RLS on with a deliberately-open policy (D-17). Read out of a live container. **62 migrations. 1,077 API routes across 83 controllers. 123 Next.js screens.** Permission catalogue **1,392 keys**; event registry **847**; entitlements **72**. |
+| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **819 tests, 37/37 files**; `pnpm test:e2e` **105 passed, 0 failed** — green for the first time, and now including all 110 registered screens. The API surface sweep (`apps/web/e2e/api-sweep.mts`) calls **all 1,077 routes with zero crashes**. **Never run: both k6 scripts** (k6 is not installed here).                                                                                                                                                                                                                                                                                                                                                                             |
+| Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path. Against `docs/12` by _coverage_: every module in phases 0–8 has schema, contracts, API, screens and its rules proved live in both directions; phases 9–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, release a body lawfully, run all thirty specialty consoles — and, since RC-006, turn the work done in one into a priced line on a patient's bill.** It cannot yet run the ERP back office, a patient portal, or the analytics and interop layer.                                          |
+| Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 The table counts, RLS coverage and migration state above were read out of a live container at this session's HEAD, not copied from a commit message: `core.v_rls_coverage` reports **423 monitored tables, 0 without RLS, 0 without a policy, 0 without a write check**, and the only deliberately-open policies remain the two catalogues (`core.permissions`, `core.setting_definitions` — D-17).
 
@@ -400,6 +400,78 @@ been hiding.
 
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
+
+### 2026-09-26 · RC-006 · A clinical act becoming money
+
+The gap the interrelation audit named, closed: **not one of the thirty specialty
+consoles could produce a billable line**, and the hospital did all of that work
+for free.
+
+**What was already there.** `billing.charge_intents` had been designed properly
+and left empty. A status running pending → posted, a `bill_line_id` to point at
+what the charge became, a unique index on `(hospital_id, source_table,
+source_id)` making one charge per act structural, and a trigger refusing to
+cancel a charge that has already reached a bill — because a billed line is
+reversed with a reason and the pair is what a credit note is made of. Every
+column said "a module hands work over and a biller posts it". Nobody wrote a row
+and nobody drained one.
+
+**Two halves were missing, and only one was code.**
+
+_Somewhere to say what an act is worth._ `mdm.device_result_types` carried a
+`billing_service_code` and was the only master in the database that did, which
+is exactly why the single path that raised an intent was the single path with
+somewhere to look the service up. The alternative to fifteen more such columns
+is one `mdm.console_charge_map`: per hospital, because what a dialysis session
+costs is a fact about a tariff rather than about dialysis, and holding three
+states rather than two — priced, _deliberately not billable_, and not yet
+mapped. That third distinction is the one a biller's worklist has to make and
+could not.
+
+_And the drain._ `ChargesService` posts pending intents onto a bill through
+`BillingService.postItems`, so every line is priced by RC-003 against the tariff
+in force on the day and the payer on the bill. There is no `unitPrice` field
+anywhere in the request: a biller who could type a price would be a second
+pricing engine, and the two would disagree the first time a corporate plan
+changed.
+
+**An act nobody has priced still raises its charge**, carrying no service, and
+posting leaves it exactly where it is. Held, never zeroed — the same answer
+RC-003 already gives for a missing rate, and for the same reason: a zero-rupee
+line reads as "free" rather than "not yet worked out", and only one of those is
+true.
+
+**Safe to run twice by construction.** `postItems` conflicts on
+`(bill_id, source_module, source_ref_id)` and skips; the reconciliation is an
+`UPDATE ... FROM` keyed on the same pair. A run that posts the lines and dies
+before marking the intents leaves them pending, and the next run finds the lines
+already there and marks them. A new trigger refuses to move a posted charge to a
+different line, which is what makes that claim true rather than intended.
+
+**Four consoles wired** — the therapy floor on attendance, AYUSH on a performed
+procedure (act kind carrying the procedure code, because a hospital prices
+Abhyanga and Virechana differently), oncology on a signed cycle, and
+immunisation on a given dose. The remaining consoles need one call each and the
+helper is on `ConsoleSupport`.
+
+**One defect of my own, worth recording.** The poster handed `postItems` a
+`performedAt` built with `String(date)`; `pg` returns a JS `Date` there, and
+`postItems` takes the first ten characters as the day it prices against — so
+RC-003 was being asked for a rate on "Mon Sep 0". Found by the end-to-end test
+rather than by review.
+
+**And the reason none of this was noticed:** the whole of RCM — billing, tariff,
+payments, packages, insurance, schemes, estimates, leakage, payouts — **had no
+integration spec at all.** There is now one, and it walks the path: a
+physiotherapy session attended, a charge raised naming a real service, a bill
+opened, the charge posted at the published tariff price, the intent pointing at
+the line it became, a second post billing nothing again, a reversal refused
+without a reason and accepted with one, and unmapped work recorded rather than
+lost.
+
+**Gates** — 20/20 packages typecheck and lint; `pnpm test:integration` **819
+tests, 37/37 files** (the RC-006 end-to-end spec is 6 of them); 64 migrations;
+1,080 API routes.
 
 ### 2026-09-25 · Verification · The first end-to-end check of what was built
 

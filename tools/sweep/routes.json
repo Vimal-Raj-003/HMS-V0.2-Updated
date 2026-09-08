@@ -4026,6 +4026,24 @@
     "permission": "billing.exception.read"
   },
   {
+    "file": "services/api/src/modules/rcm/charges/charges.controller.ts",
+    "method": "GET",
+    "path": "/billing/charges/pending",
+    "permission": "bill.read"
+  },
+  {
+    "file": "services/api/src/modules/rcm/charges/charges.controller.ts",
+    "method": "POST",
+    "path": "/billing/bills/:id/post-charges",
+    "permission": "bill.item.post"
+  },
+  {
+    "file": "services/api/src/modules/rcm/charges/charges.controller.ts",
+    "method": "POST",
+    "path": "/billing/charges/:id/reverse",
+    "permission": "bill.item.reverse"
+  },
+  {
     "file": "services/api/src/modules/rcm/estimates/estimates.controller.ts",
     "method": "GET",
     "path": "/estimates/templates",

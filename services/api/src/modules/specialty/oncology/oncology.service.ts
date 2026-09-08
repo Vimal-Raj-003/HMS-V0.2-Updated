@@ -387,6 +387,30 @@ export class OncologyService extends ConsoleSupport {
       );
       const detail = await this.cycleDetailWithin(tx, id);
 
+      const { rows: pat } = await tx.query<{ readonly patient_id: string }>(
+        `SELECT c.patient_id
+           FROM specialty.chemo_cycles y
+           JOIN specialty.onco_treatment_plans p ON p.id = y.plan_id
+           JOIN specialty.onco_cases c ON c.id = p.case_id
+          WHERE y.id = $1 AND y.hospital_id = $2`,
+        [id, this.hospitalId()],
+      );
+      const patientId = pat[0]?.patient_id ?? null;
+
+      // A signed cycle is one the pharmacy will make up and a nurse will run,
+      // so this is the moment it becomes chargeable. The drugs themselves are
+      // dispensed and billed by OP-003; what is raised here is the cycle's own
+      // administration.
+      if (patientId !== null)
+        await this.raiseChargeIntent(tx, {
+          sourceModule: 'ONCO',
+          sourceTable: 'specialty.chemo_cycles',
+          sourceId: id,
+          patientId: patientId,
+          actKind: 'cycle',
+          description: `Chemotherapy cycle ${String(detail.cycle.cycleNo)}`,
+        });
+
       await this.audit.write(tx, {
         action: 'sign',
         entity: 'chemo_cycle',

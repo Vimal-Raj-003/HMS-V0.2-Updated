@@ -546,11 +546,24 @@ export class AyushService extends ConsoleSupport {
         ],
       );
       const session = await this.sessionWithin(tx, id);
+      const course = await this.courseWithin(tx, session.courseId);
+
+      // The procedure was performed, so it is chargeable — and the act kind
+      // carries the procedure code, because a hospital prices Abhyanga and
+      // Virechana differently and a single "AYUSH session" rate would be a
+      // number nobody could defend.
+      await this.raiseChargeIntent(tx, {
+        sourceModule: 'AYUSH',
+        sourceTable: 'specialty.ayush_therapy_sessions',
+        sourceId: id,
+        patientId: course.patientId,
+        actKind: `procedure:${session.procedureCode}`,
+        description: session.procedureName ?? session.procedureCode,
+      });
 
       // The stop is real: the next session is refused by the database, and
       // somebody has to know why the patient is waiting.
       if (body.adverseEvent !== undefined) {
-        const course = await this.courseWithin(tx, session.courseId);
         await this.outbox.publish(
           tx,
           consoleEvent('ayush.therapy.adverse', id, {
