@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { API_ORIGIN } from '@/lib/api-origin';
+import { clientAddressConfig, resolveClientAddress } from '@/lib/client-address';
 
 /**
  * The landing page's door to the assistant — and the only proxy here that does
@@ -17,10 +18,11 @@ import { API_ORIGIN } from '@/lib/api-origin';
  *   - It attaches **no** authorization header. There is nothing to attach, and
  *     that is the point: this path cannot escalate, because it has no
  *     credential to escalate with.
- *   - It forwards the caller's address. Without this every visitor would arrive
- *     at the API wearing the Next server's IP, the rate limiter would see one
- *     enormous caller, and the first person to ask three questions would lock
- *     out everybody else in the country.
+ *   - It forwards the caller's address, but only when the deployment has said
+ *     which proxy header it can believe. An unconfigured deployment forwards
+ *     nothing rather than forwarding something the caller chose — see
+ *     `lib/client-address.ts` for why the left-most `X-Forwarded-For` entry is
+ *     a rate-limit bypass and not an IP address.
  */
 
 /** By name, not by prefix. */
@@ -38,25 +40,6 @@ function refuse(status: number, title: string, detail: string): NextResponse {
   );
 }
 
-/**
- * The address the API should rate-limit against.
- *
- * The left-most entry of `x-forwarded-for` is the original client where a
- * trusted edge wrote the chain. This is a landing page behind Cloudflare or
- * Nginx in every documented deployment; where it is not, `x-real-ip` or the
- * platform header is used, and if none is present the API falls back to the
- * socket address, which is the Next server — pessimistic, and it fails closed.
- */
-function callerAddress(request: Request): string | null {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded !== null && forwarded.trim() !== '') {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first !== undefined && first !== '') return first;
-  }
-  const real = request.headers.get('x-real-ip');
-  return real !== null && real.trim() !== '' ? real.trim() : null;
-}
-
 async function proxy(request: Request, segments: readonly string[]): Promise<Response> {
   const route = segments[0];
   if (segments.length !== 1 || route === undefined || !PUBLIC_ROUTES.has(route)) {
@@ -67,7 +50,20 @@ async function proxy(request: Request, segments: readonly string[]): Promise<Res
   const contentType = request.headers.get('content-type');
   if (contentType !== null) headers.set('content-type', contentType);
 
-  const caller = callerAddress(request);
+  // Only what a proxy this deployment has declared trustworthy actually wrote —
+  // see `lib/client-address.ts`. Taking the left-most `X-Forwarded-For` entry,
+  // which is what this did first, hands the caller their own rate-limit key:
+  // a fresh value per request is a fresh bucket per request, and the limiter in
+  // front of a metered language model counts to one forever.
+  //
+  // `null` means the deployment has not said what is in front of it, and then
+  // no address is forwarded at all. The API falls back to the socket address —
+  // this process — so all public traffic shares one bucket. Restrictive, and
+  // deliberately the safer failure: throttled real visitors get noticed and
+  // fixed, an absent limiter gets noticed on the invoice.
+  const caller = resolveClientAddress(request.headers, clientAddressConfig());
+  // Set, never appended to: the value the API sees must be exactly the one
+  // resolved here, with nothing the caller supplied left in front of it.
   if (caller !== null) headers.set('x-forwarded-for', caller);
 
   const search = new URL(request.url).search;

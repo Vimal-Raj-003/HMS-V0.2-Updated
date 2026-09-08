@@ -504,6 +504,13 @@ and it found three things that had been quietly red:
   the migrations' four premade months ran out every insert would have landed in
   the DEFAULT partition (D-247).
 
+**Fixed after review** — an automated security pass on the committed code found
+the public proxy keying its rate limiter on the left-most `X-Forwarded-For`
+entry, which a caller controls: a fresh value per request is a fresh bucket per
+request, so the limiter in front of a metered model counted to one forever. It
+now believes only a header the deployment has named, and forwards nothing when
+none is named (D-248, `apps/web/src/lib/client-address.ts`, 10 unit tests).
+
 **Next step** — the front-office worklist screen for enquiries, then Phase 9.
 
 ### 2026-09-27 · The three shifts, walked — and the two places the journey broke

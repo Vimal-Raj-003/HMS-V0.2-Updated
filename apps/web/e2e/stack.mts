@@ -141,6 +141,17 @@ running.api = spawn('npx', ['tsx', 'src/main.ts'], {
     // asserts rate limiting, so nothing is hidden by lifting it here; the limit
     // itself is covered by the API's own integration tests.
     RATE_LIMIT_AUTH_MAX: '10000',
+    // Same argument for PE-009's public budgets, with an extra reason. The
+    // browser suite reaches the assistant through the Next proxy from
+    // localhost, and that proxy deliberately forwards **no** caller address
+    // unless the deployment has declared a trusted one (see
+    // `lib/client-address.ts`) — so every browser test arrives at the API as the
+    // same caller and shares one bucket. Three projects × the landing spec would
+    // spend a 20-message budget several times over and fail on timing rather
+    // than on behaviour. The limiter's own behaviour, including that it meters
+    // refused work, is asserted in `assistant.integration.spec.ts`.
+    ASSISTANT_RATE_CHAT_MAX: '10000',
+    ASSISTANT_RATE_REQUEST_MAX: '10000',
     LOG_LEVEL: 'error',
   },
   stdio: 'inherit',

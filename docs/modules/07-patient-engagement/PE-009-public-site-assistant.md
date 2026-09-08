@@ -145,6 +145,16 @@ Known boundary: a body that fails Zod is rejected by the validation pipe before
 the service runs and is not counted. That path touches no database and no model;
 the edge tier covers it.
 
+**Which address a caller is counted against is deployment configuration, and the
+default is to trust nothing.** `X-Forwarded-For` is a list each proxy appends to,
+so its left-most entry is whatever the caller sent — keying the limiter on it
+lets one caller mint a fresh bucket per request, which is not a weakened limiter
+but no limiter at all. Set `ASSISTANT_CLIENT_IP_HEADER` to a header your edge
+_overwrites_ (`cf-connecting-ip`, `x-vercel-forwarded-for`, Nginx's `x-real-ip`
+behind a `set_real_ip_from` allow-list), or `ASSISTANT_TRUSTED_PROXY_HOPS` to the
+number of appending proxies in front. With neither set, no address is forwarded
+and every public visitor shares one bucket.
+
 ## 8. Configuration
 
 | Variable                                     | Meaning                                                                                |
