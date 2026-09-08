@@ -11902,6 +11902,111 @@ const IP020 = group('IP-020', 8, [
   ),
 ]);
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Phase 8 — OP-037, AYUSH
+//
+// Five systems India regulates as medicine, registered by two statutory
+// councils that do not recognise each other's registers.
+//
+// ── There is no key that prescribes outside a registration ─────────────────
+//
+// The National Commission for Indian System of Medicine registers a vaidya in
+// Ayurveda and a hakim in Unani; the National Commission for Homoeopathy
+// registers a homoeopath. One is not a licence in another, and cross-system
+// practice is what state regulators actually prosecute. So the boundary is a
+// registration row with validity dates, read by a trigger — not a key, because
+// a key would be a way round a statutory register with a name on it.
+//
+// ── Nor one that skips the oleation before a pradhana karma ────────────────
+//
+// Vamana and Virechana are induced emesis and induced purgation, and the
+// classical texts are unambiguous that they follow adequate oleation. The
+// prerequisite is a completed purvakarma session recording samyak lakshana,
+// and there is no permission that stands in for one.
+//
+// ── Nor one that overrides a gender match ──────────────────────────────────
+//
+// Abhyanga, Basti and Hijama are performed by hand on an undressed patient.
+// The only exception is the patient's own recorded consent. An administrator
+// holding a waive key would be exactly the wrong person holding it.
+// ═════════════════════════════════════════════════════════════════════════════
+const OP037 = group('OP-037', 8, [
+  p(
+    'ayush.read',
+    'ayush_consult',
+    'read',
+    'phi',
+    'low',
+    'Read AYUSH consultations, courses and therapy logs.',
+    { phiRead: true },
+  ),
+  p(
+    'ayush.consult.record',
+    'ayush_consult',
+    'update',
+    'phi',
+    'medium',
+    'Conduct an AYUSH consultation. Which system it may be in follows from the practitioner’s registration, which the database reads; this key does not choose.',
+  ),
+  p(
+    'ayush.consult.sign',
+    'ayush_consult',
+    'sign',
+    'phi',
+    'medium',
+    'Sign a consultation. A signature needs at least one NAMASTE-coded diagnosis, because an uncoded AYUSH diagnosis cannot be counted, exported or audited.',
+  ),
+  p(
+    'ayush.rx.create',
+    'ayush_prescription_line',
+    'create',
+    'phi',
+    'medium',
+    'Prescribe from the AYUSH formulary. A heavy-metal preparation carries a duration ceiling and a monitoring requirement, both the database’s and neither reachable from here.',
+  ),
+  p(
+    'ayush.course.plan',
+    'ayush_course',
+    'create',
+    'phi',
+    'medium',
+    'Plan a Panchakarma course, a Unani regimen, Siddha therapy or a naturopathy schedule.',
+  ),
+  p(
+    'ayush.therapy.record',
+    'ayush_therapy_session',
+    'record',
+    'phi',
+    'low',
+    'Perform and log a therapy session. The oleation prerequisite, the consent and the therapist gender match are all enforced by the database rather than by this key.',
+  ),
+  p(
+    'ayush.therapy.review',
+    'ayush_therapy_session',
+    'approve',
+    'phi',
+    'medium',
+    'Review a session that recorded an adverse event. Until this happens the course does not continue — which is the point of the key rather than a side effect of it.',
+  ),
+  p(
+    'ayush.registration.manage',
+    'ayush_registration',
+    'configure',
+    'operational',
+    'high',
+    'Record a practitioner’s council registration and its validity. The registration is the boundary on what they may practise, so entering a false one is the one act here that could put a patient in front of an unregistered practitioner.',
+    { requiresReason: true },
+  ),
+  p(
+    'ayush.formulary.manage',
+    'ayush_medicine',
+    'configure',
+    'operational',
+    'medium',
+    'Maintain the hospital’s AYUSH formulary. The Schedule E1 and heavy-metal classifications are revoked from the application at column level, so this key edits everything about a medicine except what makes it dangerous.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -12019,6 +12124,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP018,
   ...OP021,
   ...IP020,
+  ...OP037,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

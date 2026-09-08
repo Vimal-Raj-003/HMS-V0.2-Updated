@@ -13,6 +13,8 @@ import { HealthCheckService } from './programme/healthcheck.service.js';
 import { ImmunisationService } from './programme/immunisation.service.js';
 import { AntenatalController } from './antenatal/antenatal.controller.js';
 import { AntenatalService } from './antenatal/antenatal.service.js';
+import { AyushController } from './ayush/ayush.controller.js';
+import { AyushService } from './ayush/ayush.service.js';
 import { HandoffsController } from './handoffs/handoffs.controller.js';
 import { HandoffsService } from './handoffs/handoffs.service.js';
 import { TransplantController } from './transplant/transplant.controller.js';
@@ -64,6 +66,7 @@ export const SPECIALTY_CONTROLLERS: Type<unknown>[] = [
   LifespanController,
   TransplantController,
   HandoffsController,
+  AyushController,
 ];
 
 export const SPECIALTY_PROVIDERS: Provider[] = [
@@ -111,6 +114,10 @@ export const SPECIALTY_PROVIDERS: Provider[] = [
   // OP-018, OP-021, IP-020. Three modules with one failure between them: the
   // hand-off happens, and then nobody watches for what should come back.
   HandoffsService,
+
+  // OP-037. Five systems India regulates as medicine, and the boundary on all
+  // five is a council registration the database reads rather than a role.
+  AyushService,
 ];
 
 @Module({

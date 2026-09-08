@@ -657,6 +657,36 @@ export const SPECIALTY_SCREENS: readonly SpecialtyScreen[] = [
     ],
     entitlement: 'module.pathways.enabled',
   },
+  {
+    key: 'ayush-board',
+    label: 'AYUSH',
+    href: '/ayush/board',
+    area: 'specialty',
+    permission: 'ayush.read',
+    summary:
+      'Five systems India regulates as medicine. The boundary on all five is a council registration, and the boundary inside Panchakarma is the oleation before the procedure.',
+    deniedExplanation:
+      'Which system a practitioner may work in follows from their council registration rather than from a key. Recording that registration is the credentialling office\u2019s and is reasoned; the review that restarts a stopped course is a physician\u2019s.',
+    keywords: [
+      'ayush',
+      'ayurveda',
+      'homoeopathy',
+      'unani',
+      'siddha',
+      'yoga',
+      'naturopathy',
+      'panchakarma',
+      'vamana',
+      'virechana',
+      'basti',
+      'snehapana',
+      'bhasma',
+      'rasa aushadhi',
+      'hijama',
+      'varmam',
+    ],
+    entitlement: 'module.ayush.enabled',
+  },
 ];
 
 export function specialtyScreen(key: string): SpecialtyScreen {

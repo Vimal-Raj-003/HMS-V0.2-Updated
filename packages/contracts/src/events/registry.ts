@@ -10870,6 +10870,60 @@ const transplantEvents: readonly EventDefinition[] = [
 ];
 
 /**
+ * Phase 8 — OP-037, AYUSH.
+ *
+ * Three events, and each one leaves the console because somebody outside it has
+ * to act: a pharmacist keeping a statutory register, a physician whose course
+ * has stopped, and a laboratory that does not yet know it owes a result.
+ */
+const ayushEvents: readonly EventDefinition[] = [
+  ev(
+    'ayush.schedule_e1.prescribed',
+    'ayush_prescription_line',
+    'OP-037',
+    'A Schedule E1 substance was prescribed. Leaves the console because the Drugs and Cosmetics Rules make the dispensing register a statutory document kept by the pharmacy, and a register assembled from the console at month end is a register nobody wrote.',
+    z.object({
+      lineId: uuid,
+      consultId: uuid,
+      medicineId: uuid,
+      medicineName: z.string(),
+      durationDays: z.number().int(),
+      heavyMetal: z.boolean(),
+    }),
+    { containsPhi: false, retentionDays: 3650 },
+  ),
+  ev(
+    'ayush.monitoring.due',
+    'ayush_prescription_line',
+    'OP-037',
+    'A heavy-metal preparation passed the point at which liver and kidney monitoring falls due. Leaves the console because the harm reported from Rasa aushadhi is chronic use without monitoring, and the person who will notice is whoever is holding the result — not whoever wrote the prescription three weeks ago.',
+    z.object({
+      lineId: uuid,
+      patientId: uuid,
+      medicineName: z.string(),
+      monitoringDueAt: z.string(),
+      monitoringOrderId: uuid.nullable(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+  ev(
+    'ayush.therapy.adverse',
+    'ayush_therapy_session',
+    'OP-037',
+    'A therapy session recorded an adverse event, and the course has stopped until a physician reviews it. Leaves the therapy room at once, because the stop is real: the next session is refused by the database and somebody has to know why the patient is waiting.',
+    z.object({
+      sessionId: uuid,
+      courseId: uuid,
+      patientId: uuid,
+      dayNo: z.number().int(),
+      procedureCode: z.string(),
+      adverseEvent: z.string(),
+    }),
+    { containsPhi: true, retentionDays: 3650 },
+  ),
+];
+
+/**
  * Phase 8 — OP-018, OP-021 and IP-020, the hand-offs.
  *
  * Three events, and every one of them is somebody outside the room being told
@@ -11689,6 +11743,7 @@ export const EVENT_REGISTRY: readonly EventDefinition[] = Object.freeze([
   ...lifespanEvents,
   ...transplantEvents,
   ...handoffEvents,
+  ...ayushEvents,
   ...procedureEvents,
 ]);
 

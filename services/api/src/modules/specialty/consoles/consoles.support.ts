@@ -991,6 +991,59 @@ const CONSTRAINT_TRANSLATIONS: Readonly<Record<string, Translation>> = {
     type: ProblemType.VALIDATION_FAILED,
     detail: 'A referral goes to a department, a named practitioner, or an external facility.',
   },
+
+  // ── OP-037 — AYUSH ────────────────────────────────────────────────────────
+  uq_ayush_registration: {
+    type: ProblemType.CONFLICT,
+    detail: 'This practitioner already has a registration recorded in that system.',
+    nextAction: 'Update the existing registration rather than adding a second one.',
+  },
+  a_council_registration_runs_forwards: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A council registration expires after it starts.',
+  },
+  a_course_has_a_length: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A prescription runs between one and three hundred and sixty-five days.',
+  },
+  a_potency_is_on_a_real_scale: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A homoeopathic potency is on the centesimal, decimal, LM or mother-tincture scale.',
+  },
+  uq_ayush_session: {
+    type: ProblemType.CONFLICT,
+    detail: 'That procedure is already recorded on that day of this course.',
+  },
+  a_skipped_session_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'A skipped therapy says why. Most skips are a contraindication found at the door, and that is the sentence the physician needs on the round.',
+  },
+  a_review_has_a_reviewer: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A review has a name on it and a time, or it has neither.',
+  },
+  a_therapist_has_one_gender: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'The list of therapists and the list of genders describe the same people.',
+  },
+  a_gender_is_a_gender: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail: 'A therapist is recorded as male, female or other.',
+  },
+  an_aborted_course_says_why: {
+    type: ProblemType.VALIDATION_FAILED,
+    detail:
+      'An abandoned course says why. Without it, a course somebody stopped is indistinguishable from one nobody finished entering.',
+  },
+  uq_ayush_medicine_code: {
+    type: ProblemType.CONFLICT,
+    detail: 'A medicine with that code is already in the formulary.',
+  },
+  uq_ayush_procedure_code: {
+    type: ProblemType.CONFLICT,
+    detail: 'A procedure with that code is already in the master.',
+  },
 };
 
 /** Wraps a unit of work so Postgres's refusals arrive as problems a person can act on. */

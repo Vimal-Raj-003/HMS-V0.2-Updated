@@ -466,6 +466,10 @@ export const ENFORCEMENT_POINTS: readonly EnforcementPoint[] = Object.freeze([
     message: 'Clinical pathways are not included in your plan.',
     upgradeCta: 'Ask about Hospital Clinical',
   }),
+  ep('module.ayush.enabled', 'feature', 'route', 'OP-037 AYUSH.', {
+    message: 'The AYUSH consoles are not included in your plan.',
+    upgradeCta: 'Ask about Specialty Consoles',
+  }),
 ]);
 
 const pointsByKey = new Map(ENFORCEMENT_POINTS.map((e) => [e.key, e]));

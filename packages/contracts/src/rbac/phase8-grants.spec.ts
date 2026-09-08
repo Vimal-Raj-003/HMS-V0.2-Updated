@@ -1052,6 +1052,45 @@ describe('OP-010 — the procedure floor', () => {
     }
   });
 
+  // ── OP-037 — AYUSH ────────────────────────────────────────────────────────
+
+  it('offers no key that prescribes outside a registration', () => {
+    // The councils keep separate registers and cross-system practice is what
+    // they prosecute. A permission would be a way round a statutory register
+    // with a name on it.
+    const keys = PERMISSION_CATALOGUE.map((p) => p.key);
+    for (const absent of [
+      'ayush.crosssystem.prescribe',
+      'ayush.registration.waive',
+      'ayush.system.override',
+      'ayush.oleation.waive',
+      'ayush.gender_match.override',
+      'ayush.heavy_metal.override',
+    ]) {
+      expect(keys, absent).not.toContain(absent);
+    }
+    // Recording a registration is the one act that could put a patient in
+    // front of an unregistered practitioner, so it is high and reasoned.
+    expect(permission('ayush.registration.manage').risk).toBe('high');
+    expect(permission('ayush.registration.manage').requiresReason).toBe(true);
+  });
+
+  it('keeps the AYUSH clinic and the credentialling file in different hands', () => {
+    // A vaidya and a homoeopath hold the same template. Which consultation
+    // each can open follows from their council registration, read by the
+    // database — not from a role per system, which is a matrix nobody can
+    // keep right the day somebody qualifies in a second one.
+    expect(getRoleTemplate('doctor_consultant_opd')?.permissions).toContain('ayush.consult.sign');
+    expect(getRoleTemplate('doctor_consultant_opd')?.permissions).not.toContain('ayush.registration.manage');
+    expect(getRoleTemplate('medical_superintendent')?.permissions).toContain('ayush.registration.manage');
+
+    // A Panchakarma therapist performs and logs; the review after an adverse
+    // event is a physician's, because the review is what restarts the course.
+    expect(getRoleTemplate('therapist')?.permissions).toContain('ayush.therapy.record');
+    expect(getRoleTemplate('therapist')?.permissions).not.toContain('ayush.therapy.review');
+    expect(getRoleTemplate('therapist')?.permissions).not.toContain('ayush.rx.create');
+  });
+
   it('puts the variance record at the bedside and the referral reply at both ends', () => {
     // The nurse is who knows the physiotherapist did not come. A pathway whose
     // variances can only be recorded by a consultant on a ward round records

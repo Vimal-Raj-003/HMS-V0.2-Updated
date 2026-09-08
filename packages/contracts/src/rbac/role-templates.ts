@@ -1080,6 +1080,32 @@ const TRANSPLANT_LEAD = [
 ] as const;
 
 const ART_CLINIC = ['art.read', 'art.cycle.manage'] as const;
+
+/**
+ * OP-037 — AYUSH.
+ *
+ * The bundles are narrow because the *registration* is the real boundary and it
+ * is not a permission. A vaidya and a homoeopath hold the same template and can
+ * open different consultations, because the database reads their council
+ * registration and refuses the other — which is the only design that stays
+ * right when somebody qualifies in a second system, or lets a registration
+ * lapse.
+ *
+ * `ayush.registration.manage` is the exception and is `high` and reasoned. It
+ * is the one act in this module that could put a patient in front of an
+ * unregistered practitioner, and it belongs to the office that keeps the
+ * credentialling file rather than to the clinic.
+ */
+const AYUSH_THERAPIST = ['ayush.read', 'ayush.therapy.record'] as const;
+
+const AYUSH_PHYSICIAN = [
+  ...AYUSH_THERAPIST,
+  'ayush.consult.record',
+  'ayush.consult.sign',
+  'ayush.rx.create',
+  'ayush.course.plan',
+  'ayush.therapy.review',
+] as const;
 const DERM_DELIVERY = ['derm.lesion.read', 'derm.phototherapy.deliver'] as const;
 
 const DERM_DOCTOR = [
@@ -1197,6 +1223,7 @@ const SPECIALTY_CONSOLE_DOCTOR = [
   ...PSY_PSYCHIATRIST,
   ...LIFESPAN_CLINICIAN,
   ...ART_CLINIC,
+  ...AYUSH_PHYSICIAN,
 ] as const;
 
 /** A resident records and plans; the signature and the override keys are not theirs. */
@@ -2862,6 +2889,11 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'clinical-governance',
     permissions: [
+      // The credentialling file is this office's. A registration entered here
+      // is what stands between a patient and an unregistered practitioner, so
+      // the key is high and reasoned and lives where the certificates do.
+      'ayush.registration.manage',
+      'ayush.read',
       'ophtha.visit.read',
       'ophtha.report.read',
       ...CONSOLE_CLINICIAN,
@@ -4169,6 +4201,8 @@ const templates: readonly RoleTemplate[] = [
     category: 'pharmacy',
     homeWorkspace: 'pharmacy-admin',
     permissions: [
+      'ayush.formulary.manage',
+      'ayush.read',
       'lifespan.read',
       'geri.medication.review',
       ...ONCO_PHARMACY,
@@ -4389,6 +4423,10 @@ const templates: readonly RoleTemplate[] = [
       // hospitals, and the department scopes which console they actually open.
       ...WOUND_BEDSIDE,
       ...SLP_CLINICAL,
+      // A Panchakarma therapist is this template in most hospitals. What they
+      // may actually perform is decided by the procedure master and the
+      // gender match, both in the database, not by a role of their own.
+      ...AYUSH_THERAPIST,
       'nursing.ward.read',
       'nursing.note.write',
       'nursing.assessment.record',

@@ -1,0 +1,311 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · NC-033 — the kitchen
+//
+// The Phase 8 half only: diet orders becoming trays. The canteen till, the
+// staff subsidy, kitchen stores, HACCP audit logs and food waste are Phase 9,
+// because they are an ERP problem and this is a patient-safety one.
+//
+// ── The kitchen does not decide what a patient eats ────────────────────────
+//
+// The dietician and the ward do, through OP-011 and the swallow order OP-035
+// already writes. What the kitchen owns is *whether the tray goes*, and the
+// four rules below are all versions of that.
+//
+// ── A tray is where an allergy actually kills somebody ─────────────────────
+//
+// Allergies are recorded meticulously in the chart and then a peanut arrives on
+// a tray, because the tray was assembled from a menu and the menu does not know
+// the patient. So the meal row carries the patient's food allergens copied at
+// the moment it is planned, and a recipe whose allergens intersect them is
+// refused. Not warned about: refused.
+//
+// ── And IDDSI is the other half of the same problem ────────────────────────
+//
+// OP-035 writes a swallow order with a food level and a fluid level on the
+// IDDSI framework, and a patient assessed at level 4 who is handed level 7
+// toast aspirates it. `slp_swallow_orders` already has an `ack_kitchen_at`
+// column — Phase 3 built the order expecting a kitchen to read it, and this is
+// the kitchen. The tray reads the live order and cannot exceed it.
+//
+// ── NPO is derived, never chosen ───────────────────────────────────────────
+//
+// A patient nil by mouth for theatre at 07:00 is not a patient whose breakfast
+// tray somebody should remember to cancel. The meal row's status is computed
+// from the NPO window against the meal slot's serve time, so forgetting is not
+// one of the available actions.
+//
+// ── The temperature at dispatch is a food-safety rule with a number ────────
+//
+// FSSAI Schedule 4 and every HACCP plan built on it: hot food held at 63 °C or
+// above, cold at 5 °C or below. A trolley below 63 °C is not a trolley to
+// deliver quickly; it is one to reheat or discard, and both are recorded
+// outcomes rather than an override.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum DietCategory {
+  regular
+  therapeutic
+  texture
+  tube_feed
+  paediatric
+  religious
+
+  @@schema("mdm")
+}
+
+/// What happened to one tray. `held_npo` is derived rather than chosen.
+enum MealStatus {
+  planned
+  held_npo
+  assembled
+  dispatched
+  delivered
+  refused
+  returned
+  cancelled
+
+  @@schema("ops")
+}
+
+/// The three temperature classes a HACCP plan distinguishes. `ambient` covers
+/// what neither rule applies to — a sealed packet of biscuits.
+enum ServeTemperature {
+  hot
+  cold
+  ambient
+
+  @@schema("mdm")
+}
+
+/// A diet type. Shared with OP-011, which is what prescribes it.
+model DietType {
+  id         String  @id @db.Uuid
+  hospitalId String? @map("hospital_id") @db.Uuid
+
+  code     String       @db.VarChar(40)
+  name     String       @db.VarChar(120)
+  category DietCategory
+
+  /// What this diet excludes, as a list the recipe check reads.
+  excludes Json @default("[]")
+  /// The IDDSI food level this diet implies, when it implies one. A texture
+  /// diet that did not carry its level would be a label rather than a rule.
+  iddsiFoodLevel  Int? @map("iddsi_food_level")
+  iddsiFluidLevel Int? @map("iddsi_fluid_level")
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, code], map: "uq_diet_type_code")
+  @@map("dk_diet_types")
+  @@schema("mdm")
+}
+
+/// A meal service. The cut-off is what freezes the production count.
+model MealSlot {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  code String @db.VarChar(20)
+  name String @db.VarChar(60)
+
+  /// Local clock times, as minutes past midnight — a meal slot is a wall-clock
+  /// fact about a hospital, not an instant, and storing it as a timestamptz
+  /// would make "breakfast" move twice a year in some deployments.
+  serveMinute  Int @map("serve_minute")
+  cutoffMinute Int @map("cutoff_minute")
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  meals MealTray[]
+
+  @@unique([hospitalId, branchId, code], map: "uq_meal_slot_code")
+  @@map("dk_meal_slots")
+  @@schema("ops")
+}
+
+/// A recipe, with the two facts the tray rules read: what it contains that
+/// somebody might react to, and how far up the IDDSI ladder it sits.
+model Recipe {
+  id         String  @id @db.Uuid
+  hospitalId String? @map("hospital_id") @db.Uuid
+
+  code String @db.VarChar(60)
+  name String @db.VarChar(160)
+
+  /// Free text is not good enough here. These are matched against the
+  /// patient's recorded allergens, so they come from a controlled list and the
+  /// migration seeds it.
+  allergens String[] @default([])
+
+  /// Where this sits on the IDDSI framework: 0–4 for fluids, 3–7 for food.
+  /// A recipe above the patient's assessed level cannot go on their tray.
+  iddsiLevel Int @map("iddsi_level")
+
+  serveTemperature ServeTemperature @default(hot) @map("serve_temperature")
+
+  isVeg  Boolean @default(true) @map("is_veg")
+  isEgg  Boolean @default(false) @map("is_egg")
+  isJain Boolean @default(false) @map("is_jain")
+  isHalal Boolean @default(false) @map("is_halal")
+
+  nutrients Json @default("{}")
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  items MealItem[]
+
+  @@unique([hospitalId, code], map: "uq_recipe_code")
+  @@index([iddsiLevel])
+  @@map("dk_recipes")
+  @@schema("mdm")
+}
+
+/// One admitted patient's live diet, as the kitchen sees it.
+///
+/// A read model with exactly one row per admission. What is on it comes from
+/// OP-011's order and OP-035's swallow order; the kitchen writes only the
+/// operational half — preferences, an attendant meal, a delivery instruction.
+model ActiveDiet {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  admissionId String  @unique(map: "uq_active_diet_admission") @map("admission_id") @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  wardId      String? @map("ward_id") @db.Uuid
+  bedLabel    String? @map("bed_label") @db.VarChar(40)
+
+  dietTypeCode String @map("diet_type_code") @db.VarChar(40)
+  /// The order this came from. A diet with no order behind it is a diet the
+  /// kitchen invented.
+  orderRef     String? @map("order_ref") @db.Uuid
+
+  /// Copied from the patient's record when the diet is set, and refreshed on
+  /// every change. A tray assembled against a stale allergy list is the exact
+  /// failure this table exists to stop, so the copy is the trigger's and there
+  /// is no request field.
+  allergens String[] @default([])
+
+  /// From the live swallow order, when there is one. Null means unrestricted.
+  iddsiFoodLevel  Int? @map("iddsi_food_level")
+  iddsiFluidLevel Int? @map("iddsi_fluid_level")
+  swallowOrderId  String? @map("swallow_order_id") @db.Uuid
+
+  /// The window during which no tray goes. Derived from theatre and procedure
+  /// orders upstream; held here so the meal rule is one comparison.
+  npoFrom DateTime? @map("npo_from") @db.Timestamptz(6)
+  npoTo   DateTime? @map("npo_to") @db.Timestamptz(6)
+
+  preferences   Json    @default("{}")
+  attendantMeal Boolean @default(false) @map("attendant_meal")
+  instructions  String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  trays MealTray[]
+
+  @@index([hospitalId, wardId])
+  @@map("dk_active_diets")
+  @@schema("ops")
+}
+
+/// One tray, for one patient, at one meal.
+model MealTray {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  serviceDate DateTime @map("service_date") @db.Date
+  slotId      String   @map("slot_id") @db.Uuid
+  slot        MealSlot @relation(fields: [slotId], references: [id])
+
+  activeDietId String     @map("active_diet_id") @db.Uuid
+  activeDiet   ActiveDiet @relation(fields: [activeDietId], references: [id], onDelete: Cascade)
+
+  /// Copied at planning from the active diet, so a tray is a record of what was
+  /// true when it was assembled rather than a join that changes underneath the
+  /// audit. None of the four has a request field.
+  patientId       String   @map("patient_id") @db.Uuid
+  wardId          String?  @map("ward_id") @db.Uuid
+  bedLabel        String?  @map("bed_label") @db.VarChar(40)
+  dietTypeCode    String   @map("diet_type_code") @db.VarChar(40)
+  allergens       String[] @default([])
+  iddsiFoodLevel  Int?     @map("iddsi_food_level")
+  iddsiFluidLevel Int?     @map("iddsi_fluid_level")
+
+  ticketNo String? @map("ticket_no") @db.VarChar(40)
+
+  status MealStatus @default(planned)
+
+  /// Set when the status is `held_npo`, by the trigger that derived it.
+  holdReason String? @map("hold_reason") @db.Text
+
+  /// The trolley temperature at the moment of dispatch, in tenths of a degree
+  /// Celsius to keep it an integer. Hot food leaves at 63 °C or above and cold
+  /// at 5 °C or below; a reading outside that is a tray to reheat or discard.
+  dispatchTempTenthC Int?      @map("dispatch_temp_tenth_c")
+  dispatchedAt       DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  dispatchedBy       String?   @map("dispatched_by") @db.Uuid
+
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz(6)
+  deliveredBy String?   @map("delivered_by") @db.Uuid
+
+  /// What the patient actually ate. The reason NC-033 is a clinical module and
+  /// not a catering one: a week of 20% intake is a nutrition referral.
+  intakePct Int?    @map("intake_pct")
+  feedback  Json    @default("{}")
+  exception String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  items MealItem[]
+
+  @@unique([activeDietId, serviceDate, slotId], map: "uq_meal_tray")
+  @@index([hospitalId, serviceDate, slotId, wardId])
+  @@index([hospitalId, status])
+  @@map("dk_meal_trays")
+  @@schema("ops")
+}
+
+/// One dish on one tray. The allergen and IDDSI rules fire here, because this
+/// is where a recipe meets a patient.
+model MealItem {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  trayId String   @map("tray_id") @db.Uuid
+  tray   MealTray @relation(fields: [trayId], references: [id], onDelete: Cascade)
+
+  recipeId String @map("recipe_id") @db.Uuid
+  recipe   Recipe @relation(fields: [recipeId], references: [id])
+
+  portions Int @default(1)
+
+  /// Stamped from the recipe by the trigger that checked it, so the tray keeps
+  /// a record of what it was checked against.
+  allergens  String[] @default([])
+  iddsiLevel Int?     @map("iddsi_level")
+
+  /// The dietician's decision to serve an item the allergen rule refused, with
+  /// the reason. The only exception, and it is a named one with a name on it.
+  overrideBy     String? @map("override_by") @db.Uuid
+  overrideReason String? @map("override_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([trayId, recipeId], map: "uq_meal_item")
+  @@index([hospitalId, trayId])
+  @@map("dk_meal_items")
+  @@schema("ops")
+}

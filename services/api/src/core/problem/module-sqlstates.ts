@@ -61,6 +61,7 @@ export const MODULE_SQLSTATES: ReadonlySet<string> = new Set([
   'OP033', // the two ends of life: the adult ceiling, grams, and the burden
   'IP019', // transplant and ART: the near relative, the panel, and one donation
   'OP018', // the hand-offs: the four telemedicine lists, the referral clock, the pathway variance
+  'OP037', // AYUSH: the registration, the heavy metal, the oleation and the gender match
 ]);
 
 /**

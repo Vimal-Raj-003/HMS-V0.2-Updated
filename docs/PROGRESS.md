@@ -7,10 +7,10 @@
 
 | Field                  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current phase          | **Phases 0–7 complete; Phase 8 all but finished.** Twenty-eight of Phase 8's thirty consoles are built and proved — the framework (OP-025 §0), ophthalmology, the procedure and OPD nursing rooms, the device-heavy consoles, the therapy floor, the pain clinic, the programme consoles, dialysis, antenatal, the labour room, oncology, psychiatry, the two ends of life, transplant and ART, and now the three hand-offs (telemedicine, referrals, clinical pathways). **Two remain: OP-037 AYUSH and NC-033, the kitchen.**                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Current phase          | **Phases 0–7 complete; Phase 8 all but finished.** Twenty-nine of Phase 8's thirty consoles are built and proved — the framework (OP-025 §0), ophthalmology, the procedure and OPD nursing rooms, the device-heavy consoles, the therapy floor, the pain clinic, the programme consoles, dialysis, antenatal, the labour room, oncology, psychiatry, the two ends of life, transplant and ART, the three hand-offs, and AYUSH. **One remains: NC-033, the kitchen.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Repo status            | **855 non-partition tables** outside the system schemas across fifteen tenant schemas — **0 business tables without RLS**; the only four without it are pg_partman's own `ext.part_config`, `ext.part_config_sub`, `ext.db_capabilities` and `public._prisma_migrations`, plus the five deliberately-global reference catalogues that carry no `hospital_id` at all (`mdm.opioid_conversion_factors`, `mdm.immunisation_schedules`, `mdm.anticholinergic_scores`, `mdm.beers_criteria` and, new this session, `mdm.telemedicine_drug_rules` — published law, identical in every tenant, read-only to `hms_app`). `core.permissions` and `mdm.console_components` keep RLS on with a deliberately-open policy (D-17). Read out of a live container, not copied from a commit. **60 migrations. 1,041 API routes across 81 controllers. 121 Next.js screens.** Permission catalogue **1,374 keys**; event registry **841**; entitlements **70**. |
-| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **774 tests, 33/33 files**. **Never run: both k6 scripts** (k6 is not installed here) and no Playwright golden path exists for any Phase 5–8 module.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **793 tests, 34/34 files**. **Never run: both k6 scripts** (k6 is not installed here) and no Playwright golden path exists for any Phase 5–8 module.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path, and that is now the largest outstanding debt in the build. Against `docs/12` by _coverage_ rather than by DoD: every module in phases 0–7 has schema, contracts, API, screens and its rules proved live in both directions; phases 8–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, and release a body lawfully. It cannot yet run a specialty console, the ERP back office, a patient portal or the analytics layer.**                                                                                                                                                                                        |
 | Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -400,6 +400,100 @@ been hiding.
 
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
+
+### 2026-09-23 · Phase 8 · OP-037 — AYUSH
+
+**Built — the five AYUSH consoles, complete.** 7 tables (5 clinical, 2 master),
+9 permission keys, 3 events, 1 entitlement, 1 screen, 19 integration tests, 39
+database rules proven live in both directions, and 17 classical procedures
+seeded.
+
+Ayurveda, Homoeopathy, Unani, Siddha, and Yoga & Naturopathy — five systems
+India regulates as medicine, with statutory registration, licensed
+pharmacopoeias and inspected hospitals. This console is not a notes field with
+a different heading, and the four rules below are why.
+
+**A registration is per system, and it is the boundary.** The National
+Commission for Indian System of Medicine registers a vaidya in Ayurveda and a
+hakim in Unani; the National Commission for Homoeopathy registers a homoeopath.
+One is not a licence in another, and cross-system practice is what state
+regulators actually prosecute. So a vaidya and a homoeopath hold the _same_
+role template and can open different consultations, because a trigger reads the
+register — a role per system would be a grant matrix nobody could keep right
+the day somebody qualifies in a second one. The check tests the validity dates
+rather than the existence of a row, because the way this fails in a real
+hospital is a renewal nobody chased, and the board therefore opens on the
+lapsed and nearly-lapsed ones.
+
+**Bhasmas contain metals, and the metal is the point.** Rasa aushadhi — the
+mineral preparations of Ayurveda and Siddha — contain mercury, lead, arsenic
+and iron by design, incinerated to an ash the classical texts hold safe when
+properly prepared and properly dosed. Whether that is true is above this
+codebase's pay grade. What is not in dispute is that the reported harm is
+_chronic use without monitoring_, so a heavy-metal line carries a hard ceiling
+(45 days) and past a shorter threshold (21) cannot exist without a liver and
+kidney monitoring order recorded against it. Both numbers are SQL functions, so
+a formulary committee moves one definition; and `/heavy-metal-limits` returns
+them so the composer shows the ceiling rather than discovering it by refusal.
+
+**Pradhana karma follows adequate oleation.** Vamana and Virechana are induced
+emesis and induced purgation. They follow Snehapana — days of graded internal
+oleation — and the texts judge adequacy by a named sign, samyak snigdha
+lakshana. Performed on an unoleated patient they cause dehydration, electrolyte
+collapse and, in the deaths that get reported, aspiration. So the prerequisite
+is a trigger and not a checklist item, and the session's _phase_ is copied from
+the procedure master rather than named on the request — a session that could
+name its own phase could name `purva` and walk past the rule entirely.
+
+**A therapy is done to a body by a person.** Abhyanga, Basti, Hijama and Varmam
+are performed by hand on an undressed patient. Gender matching is not a
+preference setting; it is the reason a great many patients attend at all. The
+only exception is `genderWaiverConsentId` — a consent id, never a boolean,
+because a boolean is something an administrator can set. The patient's gender
+is read from the patient record rather than copied onto the session, so there
+is one answer to what it is.
+
+**And an adverse event stops the course** until a physician has reviewed it,
+with the review a separate key from the therapist's: the review is what
+restarts the course, so it belongs to whoever can decide it should restart.
+
+**A defect worth the whole session.** AYUSH's `a_registration_runs_forwards`
+collided with PC-PNDT's constraint of the same name. Postgres allows it; the
+API's constraint→message map does not, because it is keyed on the bare
+constraint name — so the second rule written would have shown the first one's
+sentence to a real person with nothing failing anywhere. Renamed, and then made
+unfalsifiable: a migration-time assertion now refuses any two tables in the
+tenant schemas sharing a CHECK, UNIQUE or EXCLUDE name (partitions excluded,
+since they inherit their parent's and are the same rule). A sweep of the live
+database found this was the only genuine collision across 862 tables.
+
+**Two smaller ones.** `ON CONFLICT (hospital_id, code)` never fires when
+`hospital_id` is NULL — NULLs are distinct in a plain unique index — so the
+seed of 17 global procedures would have duplicated on a second run; rewritten
+as `WHERE NOT EXISTS`. And `REVOKE UPDATE (col)` against a role holding the
+table privilege is a no-op that reads exactly like a rule; the heavy-metal
+classification is protected the way the ART donation count is, with a
+table-level REVOKE and a column-level GRANT of everything else.
+
+**Deferred, recorded.** NAMASTE terminology bulk import and the ICD-11 TM2
+mapping table (EN-027 owns masters, Phase 11 owns interop), the ABDM AYUSH EHR
+FHIR profiles, in-house preparation batch records and the Schedule E1
+_dispensing_ register (OP-003's pharmacy owns dispensing; this module raises
+`ayush.schedule_e1.prescribed` into it), the drug–herb interaction seed list
+(EN-029), therapy room and equipment scheduling (OP-015's engine), and the yoga
+asana contraindication library.
+
+**Still outstanding across Phase 5–8:** no Playwright golden path and no k6
+script for any module. Tracked, unchanged.
+
+**Gates** — 20/20 packages typecheck, lint and test; `pnpm test:integration`
+**793 tests across 34 files, all green** (19 of them this module's); 61
+migrations; 862 non-partition tables; 1,383 permission keys; 844 events; 71
+entitlements; 1,061 API routes; 122 Next.js screens.
+
+**Next:** NC-033, the kitchen — the last module in Phase 8, and the Phase 8
+half of it: diet orders becoming trays, the allergen and IDDSI guards, the NPO
+hold and the hot-holding temperature at dispatch.
 
 ### 2026-09-22 · Phase 8 · OP-018, OP-021, IP-020 — the hand-offs
 

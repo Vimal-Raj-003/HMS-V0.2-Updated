@@ -1,0 +1,449 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 · OP-037 — AYUSH
+//
+// Five systems of medicine that India regulates as medicine: Ayurveda,
+// Homoeopathy, Unani, Siddha, and Yoga & Naturopathy. Practitioners are
+// registered by statutory councils, their medicines are licensed under the
+// Drugs and Cosmetics Act, and the hospital that offers them is inspected. So
+// this console is not a notes field with a different heading.
+//
+// ── A registration is per system, and it is the boundary ───────────────────
+//
+// The National Commission for Indian System of Medicine registers a vaidya in
+// Ayurveda, a hakim in Unani, a Siddha physician in Siddha; the National
+// Commission for Homoeopathy registers a homoeopath. A registration in one is
+// not a licence in another, and cross-system prescribing is the thing state
+// regulators actually prosecute. So the system on a consultation has to match a
+// live registration held by the practitioner conducting it, and a prescription
+// inherits the consultation's system rather than naming its own.
+//
+// ── Bhasmas contain metals, and the metal is the point ─────────────────────
+//
+// Rasa aushadhi — the mineral preparations of Ayurveda and Siddha — contain
+// mercury, lead, arsenic and iron by design, incinerated to an ash the texts
+// hold to be safe when properly prepared and properly dosed. Whether that is
+// true is above this file's pay grade. What is not in dispute is the dose and
+// the duration: heavy-metal preparations are for short courses with liver and
+// kidney monitoring, and the harm in the literature is chronic use without it.
+// So a heavy-metal line carries a hard duration ceiling and, past a shorter
+// threshold, cannot exist without a monitoring order recorded against it.
+//
+// ── Panchakarma is a procedure, and it has a prerequisite ──────────────────
+//
+// Vamana and Virechana are induced emesis and induced purgation. They are
+// preceded by Snehapana — days of graded internal oleation — and the classical
+// texts are unambiguous that they follow *adequate* oleation, judged by the
+// samyak snigdha lakshana. Performing them on an unoleated patient is the
+// characteristic serious harm of Panchakarma practice: dehydration, electrolyte
+// collapse, and in the reported deaths, aspiration.
+//
+// So the prerequisite is a database rule and not a checklist item: a pradhana
+// karma session on a course with no completed purvakarma session showing samyak
+// lakshana is refused.
+//
+// ── And a therapy is done to a body by a person ────────────────────────────
+//
+// Abhyanga, Basti, Hijama and Varmam are performed on an undressed patient by
+// hand. Gender matching is not a preference setting; it is the reason a great
+// many patients will attend at all, and the exception is the patient's own
+// recorded choice rather than an administrator's.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The five systems the Ministry of AYUSH recognises. Yoga and Naturopathy are
+/// one registration and so one member.
+enum AyushSystem {
+  ayurveda
+  homoeopathy
+  unani
+  siddha
+  yoga_naturopathy
+
+  @@schema("specialty")
+}
+
+/// Which council registered the practitioner. Two exist, and they do not
+/// recognise each other's registers.
+enum AyushCouncil {
+  /// National Commission for Indian System of Medicine — Ayurveda, Unani,
+  /// Siddha, and Sowa-Rigpa.
+  ncism
+  /// National Commission for Homoeopathy.
+  nch
+  /// State board, where the state maintains its own register.
+  state_board
+
+  @@schema("specialty")
+}
+
+enum AyushMedicineType {
+  /// A formulation from a named classical text, with a reference.
+  classical
+  /// A licensed ASU or homoeopathic product from a manufacturer.
+  proprietary
+  /// A homoeopathic remedy, which carries a potency rather than a dose.
+  homoeo_remedy
+  /// A raw drug — a herb, a mineral — dispensed as itself.
+  raw_drug
+  /// Prepared in the hospital's own pharmacy against a batch record.
+  inhouse
+
+  @@schema("mdm")
+}
+
+/// The three stages of a Panchakarma course. The order is the safety rule.
+enum PanchakarmaPhase {
+  /// Preparation: Deepana-Pachana, Snehapana, Abhyanga, Swedana.
+  purva
+  /// The main procedure: Vamana, Virechana, Basti, Nasya, Raktamokshana.
+  pradhana
+  /// Recovery: Samsarjana krama, the graded return to normal diet.
+  paschat
+
+  @@schema("mdm")
+}
+
+/// The classical judgement of whether a procedure achieved what it should.
+/// Ayoga is under-effect, atiyoga over-effect, and both change what happens
+/// next.
+enum AyushLakshana {
+  samyak
+  ayoga
+  atiyoga
+
+  @@schema("specialty")
+}
+
+enum AyushCourseStatus {
+  planned
+  consented
+  in_progress
+  completed
+  aborted
+
+  @@schema("specialty")
+}
+
+enum AyushSessionStatus {
+  scheduled
+  done
+  skipped
+  rescheduled
+
+  @@schema("specialty")
+}
+
+/// A practitioner's registration, per system.
+///
+/// The row *is* the boundary: a consultation's system must match a live one of
+/// these held by the doctor conducting it, and there is no permission that
+/// substitutes for having it.
+model AyushRegistration {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  practitionerId String      @map("practitioner_id") @db.Uuid
+  system         AyushSystem
+  council        AyushCouncil
+  registrationNo String      @map("registration_no") @db.VarChar(60)
+
+  /// A registration that has lapsed is not a registration. The trigger reads
+  /// this, so an expired one closes the console rather than warning about it.
+  validFrom DateTime  @map("valid_from") @db.Date
+  validTo   DateTime? @map("valid_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, practitionerId, system], map: "uq_ayush_registration")
+  @@index([hospitalId, system])
+  @@map("ayush_registrations")
+  @@schema("specialty")
+}
+
+/// The medicine master. Global to the hospital rather than per-branch, because
+/// a formulation is a formulation.
+model AyushMedicine {
+  id         String  @id @db.Uuid
+  hospitalId String? @map("hospital_id") @db.Uuid
+
+  system AyushSystem
+  code   String            @db.VarChar(80)
+  name   String            @db.VarChar(200)
+  type   AyushMedicineType
+
+  /// For a classical formulation: the text and the chapter it comes from.
+  /// "Dashamoola Kwatha — Sahasrayogam" is the reference a pharmacist checks.
+  classicalRef Json? @map("classical_ref")
+  form         String? @db.VarChar(40)
+  manufacturer String? @db.VarChar(200)
+  licenceNo    String? @map("licence_no") @db.VarChar(60)
+
+  /// Schedule E1 of the Drugs and Cosmetics Rules: the poisonous substances of
+  /// Ayurveda, Siddha and Unani, dispensable only against a registered
+  /// practitioner's prescription and entered in a register.
+  scheduleE1 Boolean @default(false) @map("schedule_e1")
+
+  /// A Rasa aushadhi or Bhasma — mercury, lead, arsenic, iron. Sets the
+  /// duration ceiling and the monitoring requirement, both in the database.
+  heavyMetal Boolean @default(false) @map("heavy_metal")
+
+  contraindications Json @default("[]")
+  interactions      Json @default("[]")
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  lines AyushPrescriptionLine[]
+
+  @@unique([hospitalId, code], map: "uq_ayush_medicine_code")
+  @@index([system, name])
+  @@map("ayush_medicines")
+  @@schema("mdm")
+}
+
+/// The procedure master. Carries the two facts the session rules read: which
+/// phase the procedure belongs to, and whether it is done on a body in a way
+/// that makes the therapist's gender the patient's business.
+model AyushProcedure {
+  id         String  @id @db.Uuid
+  hospitalId String? @map("hospital_id") @db.Uuid
+
+  system AyushSystem
+  code   String @db.VarChar(80)
+  name   String @db.VarChar(200)
+
+  phase PanchakarmaPhase
+
+  defaultDurationMin Int    @map("default_duration_min")
+  roomType           String @map("room_type") @db.VarChar(40)
+
+  /// Vamana, Virechana, Basti, Raktamokshana, Kshara sutra, Hijama, Fasd. The
+  /// consent is separate from the course's and is checked at the session.
+  requiresConsent Boolean @default(false) @map("requires_consent")
+  /// Abhyanga, Basti, Hijama, Varmam — performed by hand on an undressed
+  /// patient.
+  genderMatchRequired Boolean @default(false) @map("gender_match_required")
+  /// Raktamokshana and leech therapy draw blood; Hijama and Fasd cut. These
+  /// generate biomedical waste and need the same consent an incision does.
+  invasive Boolean @default(false)
+
+  contraindications Json @default("[]")
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([hospitalId, code], map: "uq_ayush_procedure_code")
+  @@index([system, phase])
+  @@map("ayush_procedures")
+  @@schema("mdm")
+}
+
+/// A consultation in one of the five systems.
+///
+/// `system` is not a label on the note. It decides which medicines are
+/// reachable, which assessment sections mean anything, and — through the
+/// practitioner's registration — whether the consultation may happen at all.
+model AyushConsult {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId      String  @map("patient_id") @db.Uuid
+  encounterId    String? @map("encounter_id") @db.Uuid
+  practitionerId String  @map("practitioner_id") @db.Uuid
+
+  system AyushSystem
+
+  /// System-specific and deliberately shapeless: Ashtavidha pareeksha has eight
+  /// named examinations and Envagai thervu has eight different ones, and
+  /// forcing both into one column set would produce a table where most columns
+  /// are null most of the time and none of them are checked.
+  assessment Json @default("{}")
+
+  /// NAMASTE — the Ministry's standardised terminology — plus ICD-11 TM2 where
+  /// a mapping exists. At least one coded diagnosis is required to sign,
+  /// because an uncoded AYUSH diagnosis cannot be counted, exported to ABDM, or
+  /// audited.
+  diagnoses Json @default("[]")
+
+  plan          Json    @default("{}")
+  pathyaApathya Json    @default("{}") @map("pathya_apathya")
+  lifestyle     Json    @default("{}")
+  notes         String? @db.Text
+
+  signedBy String?   @map("signed_by") @db.Uuid
+  signedAt DateTime? @map("signed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  lines   AyushPrescriptionLine[]
+  courses AyushCourse[]
+
+  @@index([hospitalId, patientId, createdAt(sort: Desc)])
+  @@index([hospitalId, system, createdAt(sort: Desc)])
+  @@map("ayush_consults")
+  @@schema("specialty")
+}
+
+/// A prescription line.
+///
+/// There is no `system` field: it comes from the consultation, and a line whose
+/// medicine belongs to another system is refused rather than reassigned.
+model AyushPrescriptionLine {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  consultId  String       @map("consult_id") @db.Uuid
+  consult    AyushConsult @relation(fields: [consultId], references: [id], onDelete: Cascade)
+  medicineId String       @map("medicine_id") @db.Uuid
+  medicine   AyushMedicine @relation(fields: [medicineId], references: [id])
+
+  dose String @db.VarChar(60)
+  unit String @db.VarChar(20)
+
+  /// The vehicle a medicine is taken with — honey, warm water, milk, ghee. In
+  /// Ayurveda it is part of the prescription rather than an afterthought,
+  /// because it changes what the medicine does.
+  anupana String? @db.VarChar(120)
+  /// When, relative to food and to the day: Pratah, Sayam, before or after.
+  kala String? @db.VarChar(60)
+
+  /// Homoeopathy only, and required there. A remedy without a potency is not a
+  /// prescription.
+  potency    String? @db.VarChar(20)
+  scale      String? @db.VarChar(4)
+  repetition String? @db.VarChar(60)
+
+  durationDays Int @map("duration_days")
+
+  /// Stamped from the medicine master at the moment of prescribing, so a later
+  /// reclassification does not rewrite what was written.
+  scheduleE1 Boolean @default(false) @map("schedule_e1")
+  heavyMetal Boolean @default(false) @map("heavy_metal")
+
+  /// The liver and kidney monitoring a long heavy-metal course requires. Not
+  /// optional past the threshold: the trigger refuses the line without it.
+  monitoringOrderId String?   @map("monitoring_order_id") @db.Uuid
+  /// Derived. When the monitoring falls due.
+  monitoringDueAt   DateTime? @map("monitoring_due_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([hospitalId, consultId])
+  @@map("ayush_prescription_lines")
+  @@schema("specialty")
+}
+
+/// A therapy course — Panchakarma, a Unani regimen, Siddha Varmam, a
+/// naturopathy schedule. One shape for all four, because the sequencing rule is
+/// the same in all four.
+model AyushCourse {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+  branchId   String @map("branch_id") @db.Uuid
+
+  patientId   String       @map("patient_id") @db.Uuid
+  consultId   String       @map("consult_id") @db.Uuid
+  consult     AyushConsult @relation(fields: [consultId], references: [id], onDelete: Cascade)
+  admissionId String?      @map("admission_id") @db.Uuid
+
+  system AyushSystem
+  name   String      @db.VarChar(200)
+
+  /// The day-by-day plan. Each entry names a procedure code and a day.
+  planDays Json @map("plan_days")
+
+  /// The course-level consent. A pradhana karma session needs it *and* the
+  /// procedure's own where the procedure is invasive.
+  consentId String? @map("consent_id") @db.Uuid
+
+  status    AyushCourseStatus @default(planned)
+  startDate DateTime          @map("start_date") @db.Date
+  endDate   DateTime?         @map("end_date") @db.Date
+
+  abortReason String? @map("abort_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sessions AyushTherapySession[]
+
+  @@index([hospitalId, patientId, startDate(sort: Desc)])
+  @@index([hospitalId, status])
+  @@map("ayush_courses")
+  @@schema("specialty")
+}
+
+/// One therapy session.
+///
+/// The four rules that live on this table are the ones people are hurt by when
+/// they are absent: the oleation prerequisite, the consent, the gender match,
+/// and the stop after an adverse event.
+model AyushTherapySession {
+  id         String @id @db.Uuid
+  hospitalId String @map("hospital_id") @db.Uuid
+
+  courseId String      @map("course_id") @db.Uuid
+  course   AyushCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  dayNo         Int              @map("day_no")
+  procedureCode String           @map("procedure_code") @db.VarChar(80)
+  /// Copied from the procedure master by trigger. No request field: a session
+  /// that could name its own phase could name `purva` and skip the oleation
+  /// rule entirely.
+  phase         PanchakarmaPhase?
+
+  roomId       String?  @map("room_id") @db.Uuid
+  therapistIds String[] @map("therapist_ids") @db.Uuid
+  /// The genders of the people performing it, as recorded at the session. The
+  /// match is against the patient's, read from the patient record.
+  therapistGenders String[] @map("therapist_genders") @db.VarChar(10)
+  /// The patient's own recorded choice to proceed without a match. An
+  /// administrator cannot supply this; it is a consent id.
+  genderWaiverConsentId String? @map("gender_waiver_consent_id") @db.Uuid
+
+  /// Vitals and the state of the gut before the procedure. Mandatory before a
+  /// session can be marked done, because most of the contraindications are
+  /// things you find by asking.
+  prechecks Json @default("{}")
+
+  medicinesUsed Json @default("[]") @map("medicines_used")
+  /// Temperature for Swedana, flow for Shirodhara, volume and retention for
+  /// Basti, vega count for Vamana and Virechana.
+  params        Json @default("{}")
+
+  /// Samyak, ayoga or atiyoga. On a purvakarma session this is what the next
+  /// phase depends on.
+  lakshana AyushLakshana?
+
+  adverseEvent     String?   @map("adverse_event") @db.Text
+  /// A session with an adverse event blocks the next one until a physician has
+  /// looked at it. Set by the review, not by the therapist.
+  reviewedBy       String?   @map("reviewed_by") @db.Uuid
+  reviewedAt       DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewNote       String?   @map("review_note") @db.Text
+
+  tolerance   String? @db.VarChar(40)
+  postAdvice  String? @map("post_advice") @db.Text
+  skipReason  String? @map("skip_reason") @db.Text
+
+  status      AyushSessionStatus @default(scheduled)
+  performedAt DateTime?          @map("performed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  recordedBy String  @map("recorded_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([courseId, dayNo, procedureCode], map: "uq_ayush_session")
+  @@index([hospitalId, courseId, dayNo])
+  @@map("ayush_therapy_sessions")
+  @@schema("specialty")
+}
