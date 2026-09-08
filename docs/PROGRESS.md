@@ -10,7 +10,7 @@
 | Current phase          | **Phases 0–8 complete.** Phase 8 finished on 2026-09-08 with NC-033, the kitchen: all thirty specialty consoles are built, proved live in both directions, and committed. **Phase 9 (ERP and non-clinical) is next and has no code** beyond the `nonclinical` module folder NC-033 opened.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Repo status            | **868 non-partition tables** outside the system schemas across fifteen tenant schemas — **0 business tables without RLS**; the only five without it are the deliberately-global reference catalogues that carry no `hospital_id` at all (`mdm.opioid_conversion_factors`, `mdm.immunisation_schedules`, `mdm.anticholinergic_scores`, `mdm.beers_criteria`, `mdm.telemedicine_drug_rules` — published law, identical in every tenant, read-only to `hms_app`), plus pg_partman's own three and `public._prisma_migrations`. `core.permissions` and `mdm.console_components` keep RLS on with a deliberately-open policy (D-17). Read out of a live container. **62 migrations. 1,077 API routes across 83 controllers. 123 Next.js screens.** Permission catalogue **1,392 keys**; event registry **847**; entitlements **72**.                              |
-| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **793 tests, 34/34 files**. **Never run: both k6 scripts** (k6 is not installed here) and no Playwright golden path exists for any Phase 5–8 module.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Last green CI          | **Green on this machine, 2026-09-08.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages**; `pnpm test:integration` **811 tests, 35/35 files**; `pnpm test:e2e` **105 passed, 0 failed** — green for the first time, and now including all 110 registered screens. The API surface sweep (`apps/web/e2e/api-sweep.mts`) calls **all 1,077 routes with zero crashes**. **Never run: both k6 scripts** (k6 is not installed here).                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path, and that is now by a distance the largest outstanding debt in the build. Against `docs/12` by _coverage_ rather than by DoD: every module in phases 0–8 has schema, contracts, API, screens and its rules proved live in both directions; phases 9–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, release a body lawfully, and run all thirty specialty consoles — dialysis to Panchakarma, the labour room to the tray line. It cannot yet run the ERP back office, a patient portal, or the analytics and interop layer.** |
 | Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -400,6 +400,73 @@ been hiding.
 
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
+
+### 2026-09-25 · Verification · The first end-to-end check of what was built
+
+No new modules. This session ran the product instead of building more of it, and
+the headline is that **`pnpm test:e2e` had never been in the "last green CI"
+line** — the browser suite had been unverified for many sessions and had eight
+failures nobody had seen.
+
+**The API surface, swept.** A new `apps/web/e2e/api-sweep.mts` boots a seeded
+stack, mints a role holding every key in the catalogue, and calls **all 1,077
+routes** — the parameterised ones with a well-formed UUID that names nothing,
+which is the cheapest way to find a handler that assumes its row exists. A
+malformed id would be caught by the schema and never reach the handler, so it
+would prove nothing.
+
+Nine routes crashed. Seven were missing a not-found guard: the handler inserted
+a child row straight away, the foreign key or a NOT NULL column refused it, and
+a SQLSTATE no translation covers surfaced as "something went wrong on our side"
+where the honest answer was "no such record". **Two were broken for real records
+as well**, and had shipped that way:
+
+- `PATCH /nursing/escalations/:id/acknowledge` used one parameter as both a uuid
+  column and a jsonb value, so Postgres refused the statement outright.
+  **Nobody could ever acknowledge a NEWS2 escalation.** Third appearance of the
+  D-194 class.
+- `POST /ortho/episodes/:id/exams` wrote `special_tests` while the column had
+  been created `"specialTests"` — the only camelCase column in 868 tables,
+  because one Prisma field carried no `@map`. **No orthopaedic examination could
+  ever be recorded.** `docs/03`'s "the database is snake_case" was true
+  everywhere except the one place a service depended on it, which is what an
+  unenforced convention looks like from the inside. A migration now asserts it.
+
+After the fixes: **1,077 routes, zero crashes** — 235 reads, 595 empty POSTs
+correctly refused by their schemas, 205 honest 404s, 38 conflicts, and the only
+two remaining 404s on reads are `/healthz` and `/readyz`, which are deliberately
+mounted outside the `/api/v1` prefix.
+
+**The browser suite, made green and then widened.** Both of its eight failures
+were in the suite rather than the product. It seeded the `minimal` tier, which
+deliberately skips `seedModuleConfiguration` — the step that writes
+`core.lic_entitlements` — so every run built a tenant holding no licence at all,
+and every screen carrying an `entitlement` rendered "not licensed" instead of
+itself. Seven tests asserted exactly those screens. The suite's own queue-console
+test was the tell: it passed, and its name says "and is never licence-gated".
+The eighth asserted `/Showing \d+ of \d+ permissions/` against a count rendered
+through `formatCount`; the catalogue passed a thousand keys and the number
+started arriving as "1,392", which `\d+` does not match. The screen was right
+and the assertion had been quietly wrong ever since.
+
+Then the gap that mattered more: **the suite had never opened 100 of the 110
+registered screens.** `e2e/screen-coverage.spec.ts` now opens every one as a
+persona holding its key. A console can be built, migrated, permissioned, routed
+and licensed and still throw on first paint, and nothing else in the repo would
+notice — the unit tests mock the fetch and the integration tests never open a
+browser. It found three screens rendering an untitled empty state, reachable
+from the navigation and the palette, and they now draw their header first.
+
+**Gates** — 20/20 packages typecheck and lint; `pnpm test:e2e` **105 passed, 0
+failed** (was 73/8); the API sweep **1,077 routes, 0 crashes**; 63 migrations.
+
+**Still outstanding.** No k6 script for any module. And the interrelation audit
+that prompted this session stands unchanged: 400 of 847 registered events are
+never published or consumed, only ~23 event types have a consumer that acts,
+204 of 868 tables have no code touching them, and **not one of the fourteen
+specialty console services writes a charge intent** — thirty consoles, nothing
+billable. The sweep proves every route _answers_; it does not prove the modules
+are joined to each other, and they largely are not.
 
 ### 2026-09-24 · Phase 8 · NC-033 — the kitchen — **Phase 8 complete**
 
