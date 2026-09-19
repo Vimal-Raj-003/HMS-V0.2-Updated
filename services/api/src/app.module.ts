@@ -71,6 +71,8 @@ import {
   ASSISTANT_CONTROLLERS,
   ASSISTANT_PROVIDERS,
 } from './modules/engagement/assistant/assistant.module.js';
+// Phase 9A.1 (NC-009). The ledger everything else in phase 9 posts into.
+import { LEDGER_CONTROLLERS, LEDGER_PROVIDERS } from './modules/finance/ledger/ledger.module.js';
 import { PROCEDURE_CONTROLLERS, PROCEDURE_PROVIDERS } from './modules/procedures/procedures.module.js';
 import { ORTHO_CONTROLLERS, ORTHO_PROVIDERS } from './modules/ortho/ortho.module.js';
 import { RCM_CONTROLLERS, RCM_PROVIDERS } from './modules/rcm/rcm.module.js';
@@ -140,6 +142,7 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     ...INPATIENT_CONTROLLERS,
     ...SPECIALTY_CONTROLLERS,
     ...ASSISTANT_CONTROLLERS,
+    ...LEDGER_CONTROLLERS,
     ...NONCLINICAL_CONTROLLERS,
     ...PROCEDURE_CONTROLLERS,
     ...PHARMACY_CONTROLLERS,
@@ -200,6 +203,7 @@ import { QueueService } from './modules/frontoffice/queue/queue.service.js';
     ...INPATIENT_PROVIDERS,
     ...SPECIALTY_PROVIDERS,
     ...ASSISTANT_PROVIDERS,
+    ...LEDGER_PROVIDERS,
     ...NONCLINICAL_PROVIDERS,
     ...PROCEDURE_PROVIDERS,
     { provide: APP_FILTER, useClass: ProblemFilter },

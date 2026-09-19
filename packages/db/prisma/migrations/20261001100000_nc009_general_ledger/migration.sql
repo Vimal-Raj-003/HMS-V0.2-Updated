@@ -332,35 +332,6 @@ ALTER TABLE "finance"."journal_lines"
 
 
 
--- Foreign keys, written the way every other migration here writes them:
--- separate statements with an explicit ON UPDATE. Postgres defaults the
--- clause to NO ACTION and `pg_get_constraintdef` then omits it, so leaving it
--- implicit reads as schema drift for ever after: Postgres never prints its own
--- default, so only an explicit CASCADE round-trips through introspection.
-
-ALTER TABLE "finance"."books" ADD CONSTRAINT "books_legal_entity_id_fkey"
-  FOREIGN KEY ("legal_entity_id") REFERENCES "finance"."legal_entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "finance"."fiscal_years" ADD CONSTRAINT "fiscal_years_book_id_fkey"
-  FOREIGN KEY ("book_id") REFERENCES "finance"."books"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "finance"."fiscal_periods" ADD CONSTRAINT "fiscal_periods_fiscal_year_id_fkey"
-  FOREIGN KEY ("fiscal_year_id") REFERENCES "finance"."fiscal_years"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "finance"."accounts" ADD CONSTRAINT "accounts_parent_id_fkey"
-  FOREIGN KEY ("parent_id") REFERENCES "finance"."accounts"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "finance"."journals" ADD CONSTRAINT "journals_book_id_fkey"
-  FOREIGN KEY ("book_id") REFERENCES "finance"."books"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "finance"."journals" ADD CONSTRAINT "journals_fiscal_period_id_fkey"
-  FOREIGN KEY ("fiscal_period_id") REFERENCES "finance"."fiscal_periods"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "finance"."journals" ADD CONSTRAINT "journals_reverses_journal_id_fkey"
-  FOREIGN KEY ("reverses_journal_id") REFERENCES "finance"."journals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "finance"."journal_lines" ADD CONSTRAINT "journal_lines_journal_id_fkey"
-  FOREIGN KEY ("journal_id") REFERENCES "finance"."journals"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "finance"."journal_lines" ADD CONSTRAINT "journal_lines_account_id_fkey"
-  FOREIGN KEY ("account_id") REFERENCES "finance"."accounts"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "finance"."journal_lines" ADD CONSTRAINT "journal_lines_cost_centre_id_fkey"
-  FOREIGN KEY ("cost_centre_id") REFERENCES "finance"."cost_centres"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "finance"."posting_rules" ADD CONSTRAINT "posting_rules_account_id_fkey"
-  FOREIGN KEY ("account_id") REFERENCES "finance"."accounts"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
 -- ═════════════════════════════════════════════════════════════════════════════
 -- §C. TURNING DOMAIN EVENTS INTO JOURNALS
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -400,6 +371,36 @@ ALTER TABLE "finance"."posting_rules"
 ALTER TABLE "finance"."posting_rules"
   ADD CONSTRAINT "a_posting_rule_runs_forwards"
   CHECK ("effective_to" IS NULL OR "effective_to" > "effective_from");
+
+
+-- Foreign keys, written the way every other migration here writes them:
+-- separate statements with an explicit ON UPDATE. Postgres defaults the
+-- clause to NO ACTION and `pg_get_constraintdef` then omits it, so leaving it
+-- implicit reads as schema drift for ever after: Postgres never prints its own
+-- default, so only an explicit CASCADE round-trips through introspection.
+
+ALTER TABLE "finance"."books" ADD CONSTRAINT "books_legal_entity_id_fkey"
+  FOREIGN KEY ("legal_entity_id") REFERENCES "finance"."legal_entities"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "finance"."fiscal_years" ADD CONSTRAINT "fiscal_years_book_id_fkey"
+  FOREIGN KEY ("book_id") REFERENCES "finance"."books"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "finance"."fiscal_periods" ADD CONSTRAINT "fiscal_periods_fiscal_year_id_fkey"
+  FOREIGN KEY ("fiscal_year_id") REFERENCES "finance"."fiscal_years"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "finance"."accounts" ADD CONSTRAINT "accounts_parent_id_fkey"
+  FOREIGN KEY ("parent_id") REFERENCES "finance"."accounts"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "finance"."journals" ADD CONSTRAINT "journals_book_id_fkey"
+  FOREIGN KEY ("book_id") REFERENCES "finance"."books"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "finance"."journals" ADD CONSTRAINT "journals_fiscal_period_id_fkey"
+  FOREIGN KEY ("fiscal_period_id") REFERENCES "finance"."fiscal_periods"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "finance"."journals" ADD CONSTRAINT "journals_reverses_journal_id_fkey"
+  FOREIGN KEY ("reverses_journal_id") REFERENCES "finance"."journals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "finance"."journal_lines" ADD CONSTRAINT "journal_lines_journal_id_fkey"
+  FOREIGN KEY ("journal_id") REFERENCES "finance"."journals"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "finance"."journal_lines" ADD CONSTRAINT "journal_lines_account_id_fkey"
+  FOREIGN KEY ("account_id") REFERENCES "finance"."accounts"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "finance"."journal_lines" ADD CONSTRAINT "journal_lines_cost_centre_id_fkey"
+  FOREIGN KEY ("cost_centre_id") REFERENCES "finance"."cost_centres"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "finance"."posting_rules" ADD CONSTRAINT "posting_rules_account_id_fkey"
+  FOREIGN KEY ("account_id") REFERENCES "finance"."accounts"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 
 -- ═════════════════════════════════════════════════════════════════════════════

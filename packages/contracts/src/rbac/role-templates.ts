@@ -4686,6 +4686,19 @@ const templates: readonly RoleTemplate[] = [
       'receipt.export',
       'receipt.petty.manage',
 
+      // NC-009. The accountant owns the ledger: reads it, maintains the chart,
+      // posts and reverses. Closing a period and deciding which accounts an
+      // event posts to are the controller's, and both sit here because in a
+      // hospital of this size the accountant *is* the controller — a group
+      // that separates the two gives `finance.period.close` and
+      // `finance.posting_rule.manage` to a different template.
+      'finance.ledger.read',
+      'finance.account.manage',
+      'finance.journal.post',
+      'finance.journal.reverse',
+      'finance.period.close',
+      'finance.posting_rule.manage',
+
       'receipt.report.read',
       'receipt.daybook.read',
       'receipt.daybook.close',
@@ -5341,6 +5354,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'audit-workspace',
     permissions: [
+      // NC-009: an auditor reads the ledger and posts nothing into it.
+      'finance.ledger.read',
+
       'lab.order.list',
       'lab.order.read',
       'lab.report.read',

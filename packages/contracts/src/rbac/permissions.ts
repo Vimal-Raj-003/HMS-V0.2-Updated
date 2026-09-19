@@ -12151,6 +12151,67 @@ const NC033 = group('NC-033', 8, [
   ),
 ]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-009 — Accounts & Finance (the general ledger)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `financial`, not `operational`: a trial balance is the hospital's money, and
+// `docs/04` treats reading it as a disclosure. The split between reading the
+// ledger and posting into it is the ordinary segregation of duties — a clerk
+// who can see the books is not thereby somebody who can write in them.
+const NC009 = group('NC-009', 9, [
+  p(
+    'finance.ledger.read',
+    'fin_journal',
+    'read',
+    'financial',
+    'low',
+    'Read the chart of accounts, journals and the trial balance.',
+  ),
+  p(
+    'finance.account.manage',
+    'fin_account',
+    'manage',
+    'financial',
+    'medium',
+    'Add or amend a ledger account. The account type decides its normal balance, so this is the shape of every report built on it.',
+  ),
+  p(
+    'finance.journal.post',
+    'fin_journal',
+    'create',
+    'financial',
+    'medium',
+    'Post a manual journal. Automatic journals are raised by the posting engine from domain events and are not reachable through this key.',
+  ),
+  p(
+    'finance.journal.reverse',
+    'fin_journal',
+    'override',
+    'financial',
+    'high',
+    'Reverse a posted journal with a counter-entry. A posted journal is never edited or deleted, so this is the only way to correct one — and the reason is what an auditor reads.',
+    { requiresReason: true },
+  ),
+  p(
+    'finance.period.close',
+    'fin_fiscal_period',
+    'approve',
+    'financial',
+    'high',
+    'Close or reopen an accounting period. A closed period is what a filed return rests on; reopening one changes numbers somebody has already submitted.',
+    { requiresReason: true },
+  ),
+  p(
+    'finance.posting_rule.manage',
+    'fin_posting_rule',
+    'configure',
+    'financial',
+    'high',
+    'Decide which accounts a domain event posts to. Getting this wrong misstates revenue silently, which is why it is held by the controller and not by the desk.',
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -12270,6 +12331,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...IP020,
   ...OP037,
   ...NC033,
+  ...NC009,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));
