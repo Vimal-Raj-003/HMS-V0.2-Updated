@@ -137,3 +137,61 @@ export interface TrialBalance {
   /** Always true, given the deferred constraint. Returned so a caller can assert it. */
   readonly balances: boolean;
 }
+
+// ── NC-009 §3.3 · period close and the statements ──────────────────────────
+
+export const listPeriodsQuerySchema = z.object({ bookId: uuid });
+export type ListPeriodsQuery = z.infer<typeof listPeriodsQuerySchema>;
+
+export const closePeriodSchema = z.object({
+  /**
+   * `closed` is a controller's working state and may be reopened. `locked` is
+   * final and is what a filed return rests on — the database refuses to reopen
+   * it, so the two are deliberately different words rather than a boolean.
+   */
+  status: z.enum(['closed', 'locked', 'open']),
+});
+export type ClosePeriodRequest = z.infer<typeof closePeriodSchema>;
+
+export const statementQuerySchema = z.object({
+  bookId: uuid,
+  fiscalYearId: uuid.optional(),
+});
+export type StatementQuery = z.infer<typeof statementQuerySchema>;
+
+export interface PeriodRow {
+  readonly id: string;
+  readonly periodNo: number;
+  readonly startsOn: string;
+  readonly endsOn: string;
+  readonly status: string;
+  readonly closedAt: string | null;
+  /** What still stands between this period and a close. Empty means it is ready. */
+  readonly blockers: readonly string[];
+}
+
+export interface ProfitAndLossLine {
+  readonly accountCode: string;
+  readonly accountName: string;
+  readonly accountType: string;
+  readonly amount: string;
+}
+
+export interface ProfitAndLoss {
+  readonly income: readonly ProfitAndLossLine[];
+  readonly expense: readonly ProfitAndLossLine[];
+  readonly totalIncome: string;
+  readonly totalExpense: string;
+  readonly profit: string;
+}
+
+export interface BalanceSheet {
+  readonly assets: string;
+  readonly liabilities: string;
+  readonly equity: string;
+  /** Income less expense for the year. Never stored — storing it double-counts. */
+  readonly retainedEarningsCurrent: string;
+  /** Always zero, and returned so a caller can assert it rather than trust it. */
+  readonly outBy: string;
+  readonly balances: boolean;
+}

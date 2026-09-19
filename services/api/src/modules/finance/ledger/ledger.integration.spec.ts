@@ -31,14 +31,14 @@ const state = { bookId: '', periodId: '', bank: '', income: '', heading: '' };
 class LedgerTestModule {}
 
 function call(options: {
-  readonly method: 'GET' | 'POST';
+  readonly method: 'GET' | 'POST' | 'PATCH';
   readonly url: string;
   readonly payload?: Record<string, unknown>;
   readonly reason?: string;
 }) {
   const headers: Record<string, string> = { authorization: `Bearer ${token}` };
   if (options.reason !== undefined) headers['x-reason'] = options.reason;
-  if (options.method === 'POST') headers['idempotency-key'] = newId();
+  if (options.method !== 'GET') headers['idempotency-key'] = newId();
   return app.inject({
     method: options.method,
     url: options.url,
@@ -324,5 +324,120 @@ describe('NC-009 · the trial balance', () => {
     const tb = res.json<{ totalDebit: string; totalCredit: string; balances: boolean }>();
     expect(tb.totalDebit).toBe(tb.totalCredit);
     expect(tb.balances).toBe(true);
+  });
+});
+
+describe('NC-009 §3.3 · closing a period', () => {
+  it('shows what stands between a period and a close, before the attempt', async () => {
+    const res = await call({ method: 'GET', url: `/api/v1/finance/periods?bookId=${state.bookId}` });
+    expect(res.statusCode).toBe(200);
+    const periods = res.json<{ periodNo: number; status: string; blockers: string[] }[]>();
+    // One period was created in the fixture; a close screen that can only say
+    // "no" after the attempt is one a controller learns to fear.
+    expect(periods.length).toBeGreaterThan(0);
+    expect(Array.isArray(periods[0]?.blockers)).toBe(true);
+  });
+
+  it('refuses to close over money that has not reached the ledger', async () => {
+    // A receipt dated inside the period, with no journal naming it.
+    await pg.pool('migrator').query(
+      `INSERT INTO core.outbox_events
+         (id, hospital_id, branch_id, aggregate, aggregate_id, aggregate_version,
+          event_type, schema_version, payload, contains_phi, actor_type, correlation_id, occurred_at)
+       VALUES ($1,$2,$3,'test',$4,1,'receipt.issued',1,$5::jsonb,false,'system',$6,'2026-10-18')`,
+      [newId(), hospitalId, branchId, newId(), JSON.stringify({ amount: '10.00' }), newId()],
+    );
+
+    const blocked = await call({
+      method: 'PATCH',
+      url: `/api/v1/finance/periods/${state.periodId}`,
+      payload: { status: 'closed' },
+      reason: 'month end',
+    });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json<{ detail: string }>().detail).toMatch(/not reached the ledger/i);
+
+    // And the worklist says so before you try.
+    const listed = await call({ method: 'GET', url: `/api/v1/finance/periods?bookId=${state.bookId}` });
+    const period = listed.json<{ id: string; blockers: string[] }[]>().find((p) => p.id === state.periodId);
+    expect(period?.blockers.some((b) => /not reached the ledger/i.test(b))).toBe(true);
+  });
+
+  it('closes once the period is settled, and refuses to reopen a locked one', async () => {
+    await pg.pool('migrator').query(`DELETE FROM core.outbox_events WHERE event_type = 'receipt.issued'`);
+
+    const closed = await call({
+      method: 'PATCH',
+      url: `/api/v1/finance/periods/${state.periodId}`,
+      payload: { status: 'closed' },
+      reason: 'month end',
+    });
+    expect(closed.statusCode).toBe(200);
+    expect(closed.json<{ status: string }>().status).toBe('closed');
+
+    // Closed is a working state: a controller may reopen it.
+    const reopened = await call({
+      method: 'PATCH',
+      url: `/api/v1/finance/periods/${state.periodId}`,
+      payload: { status: 'open' },
+      reason: 'late invoice found',
+    });
+    expect(reopened.json<{ status: string }>().status).toBe('open');
+
+    // Locked is not.
+    await call({
+      method: 'PATCH',
+      url: `/api/v1/finance/periods/${state.periodId}`,
+      payload: { status: 'locked' },
+      reason: 'return filed',
+    });
+    const refused = await call({
+      method: 'PATCH',
+      url: `/api/v1/finance/periods/${state.periodId}`,
+      payload: { status: 'open' },
+      reason: 'changed my mind',
+    });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<{ detail: string }>().detail).toMatch(/locked/i);
+  });
+});
+
+describe('NC-009 §3.3 · the statements', () => {
+  it('reports income signed so that positive always means earned', async () => {
+    const res = await call({
+      method: 'GET',
+      url: `/api/v1/finance/profit-and-loss?bookId=${state.bookId}`,
+    });
+    expect(res.statusCode).toBe(200);
+    const pnl = res.json<{ income: { amount: string }[]; totalIncome: string; profit: string }>();
+    // The fixture credited consultation income; income is credit-normal, and
+    // the view flips the sign so nobody downstream has to remember that.
+    expect(Number(pnl.totalIncome)).toBeGreaterThan(0);
+    expect(pnl.profit).toBe(pnl.totalIncome);
+  });
+
+  it('produces a balance sheet that balances', async () => {
+    const res = await call({
+      method: 'GET',
+      url: `/api/v1/finance/balance-sheet?bookId=${state.bookId}`,
+    });
+    expect(res.statusCode).toBe(200);
+    const bs = res.json<{
+      assets: string;
+      liabilities: string;
+      equity: string;
+      retainedEarningsCurrent: string;
+      outBy: string;
+      balances: boolean;
+    }>();
+
+    // assets = liabilities + equity + profit, which follows from every journal
+    // balancing rather than from anything this endpoint does.
+    expect(bs.outBy).toBe('0.00');
+    expect(bs.balances).toBe(true);
+    expect(Number(bs.assets)).toBeCloseTo(
+      Number(bs.liabilities) + Number(bs.equity) + Number(bs.retainedEarningsCurrent),
+      2,
+    );
   });
 });

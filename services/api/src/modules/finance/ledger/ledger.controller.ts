@@ -1,22 +1,31 @@
-import { Body, Controller, Get, Inject, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 import { Idempotent } from '../../../core/idempotency/idempotency.decorator.js';
 import { Permission } from '../../../core/policy/permission.decorator.js';
 import { ZodBody } from '../../../core/validation/zod.pipe.js';
 import { LedgerService } from './ledger.service.js';
 import {
+  closePeriodSchema,
   createAccountSchema,
   listAccountsQuerySchema,
   listJournalsQuerySchema,
+  listPeriodsQuerySchema,
   postJournalSchema,
   reverseJournalSchema,
+  statementQuerySchema,
   trialBalanceQuerySchema,
   type AccountRow,
+  type BalanceSheet,
+  type ClosePeriodRequest,
   type CreateAccountRequest,
   type JournalRow,
   type ListAccountsQuery,
   type ListJournalsQuery,
+  type ListPeriodsQuery,
+  type PeriodRow,
   type PostJournalRequest,
+  type ProfitAndLoss,
   type ReverseJournalRequest,
+  type StatementQuery,
   type TrialBalance,
   type TrialBalanceQuery,
 } from './ledger.schemas.js';
@@ -93,5 +102,47 @@ export class LedgerController {
     @Query(new ZodBody(trialBalanceQuerySchema)) query: TrialBalanceQuery,
   ): Promise<TrialBalance> {
     return this.svc.trialBalance(query);
+  }
+  // ── NC-009 §3.3 · period close and the statements ────────────────────────
+
+  /** Each period with what still stands between it and a close. */
+  @Permission('finance.ledger.read')
+  @Get('periods')
+  async listPeriods(
+    @Query(new ZodBody(listPeriodsQuerySchema)) query: ListPeriodsQuery,
+  ): Promise<readonly PeriodRow[]> {
+    return this.svc.listPeriods(query);
+  }
+
+  /**
+   * Closes, locks or reopens a period.
+   *
+   * `PATCH`, not three verbs: a period has one status and this sets it. The
+   * preconditions live in triggers — unfinished journals and money that has
+   * not reached the ledger both refuse the close — so this route cannot be the
+   * thing that forgets to check.
+   */
+  @Permission('finance.period.close')
+  @Patch('periods/:id')
+  async setPeriodStatus(
+    @Param('id') id: string,
+    @Body(new ZodBody(closePeriodSchema)) body: ClosePeriodRequest,
+  ): Promise<PeriodRow> {
+    return this.svc.setPeriodStatus(id, body);
+  }
+
+  @Permission('finance.ledger.read')
+  @Get('profit-and-loss')
+  async profitAndLoss(
+    @Query(new ZodBody(statementQuerySchema)) query: StatementQuery,
+  ): Promise<ProfitAndLoss> {
+    return this.svc.profitAndLoss(query);
+  }
+
+  /** Balances by construction; `outBy` is returned so a caller can check. */
+  @Permission('finance.ledger.read')
+  @Get('balance-sheet')
+  async balanceSheet(@Query(new ZodBody(statementQuerySchema)) query: StatementQuery): Promise<BalanceSheet> {
+    return this.svc.balanceSheet(query);
   }
 }

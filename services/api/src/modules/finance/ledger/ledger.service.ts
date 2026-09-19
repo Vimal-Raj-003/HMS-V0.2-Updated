@@ -7,12 +7,19 @@ import { AppError } from '../../../core/problem/app-error.js';
 import { currentTenantContext } from '../../../core/tenancy/tenant-context.js';
 import type {
   AccountRow,
+  BalanceSheet,
+  ClosePeriodRequest,
   CreateAccountRequest,
   JournalRow,
   ListAccountsQuery,
   ListJournalsQuery,
+  ListPeriodsQuery,
+  PeriodRow,
   PostJournalRequest,
+  ProfitAndLoss,
+  ProfitAndLossLine,
   ReverseJournalRequest,
+  StatementQuery,
   TrialBalance,
   TrialBalanceQuery,
 } from './ledger.schemas.js';
@@ -373,6 +380,200 @@ export class LedgerService {
       const totalCredit = asMoney(totals.rows[0]?.['c']);
 
       return { rows, totalDebit, totalCredit, balances: totalDebit === totalCredit };
+    });
+  }
+
+  // ── NC-009 §3.3 · period close ───────────────────────────────────────────
+
+  /**
+   * The periods, each carrying what stands between it and a close.
+   *
+   * The blockers are computed here rather than left for the controller to
+   * discover by trying: `trg_a_period_closes_only_when_settled` refuses with a
+   * good message, but a close screen that can only say "no" after the fact is
+   * one a controller learns to fear. The same two questions the trigger asks
+   * are asked here, so the answer is visible before the attempt.
+   */
+  async listPeriods(query: ListPeriodsQuery): Promise<readonly PeriodRow[]> {
+    return this.db.withTenant(currentTenantContext(), async (tx) => this.readPeriods(tx, query.bookId));
+  }
+
+  /**
+   * Takes the caller's transaction rather than opening one.
+   *
+   * `setPeriodStatus` used to finish by calling `listPeriods`, which opened a
+   * second transaction while the first still held an uncommitted UPDATE on the
+   * same row — so the close returned a 500 instead of a period. Anything that
+   * has to be read back inside a write belongs on the write's own client.
+   */
+  private async readPeriods(tx: TransactionClient, bookId: string): Promise<readonly PeriodRow[]> {
+    const result = await tx.query<Record<string, unknown>>(
+      `SELECT p.id, p.period_no, p.starts_on, p.ends_on, p.status, p.closed_at,
+                (SELECT count(*) FROM finance.journals j
+                  WHERE j.fiscal_period_id = p.id AND j.status = 'draft')::int AS drafts,
+                (SELECT count(*) FROM core.outbox_events e
+                  WHERE e.hospital_id = p.hospital_id
+                    AND e.occurred_at::date BETWEEN p.starts_on AND p.ends_on
+                    AND e.event_type IN (SELECT DISTINCT event_type FROM finance.posting_rules WHERE active = true)
+                    AND NOT EXISTS (
+                      SELECT 1 FROM finance.journals j2
+                       WHERE j2.book_id = p.book_id AND j2.source_module = 'outbox'
+                         AND j2.source_event = e.event_type AND j2.source_ref_id = e.id
+                    ))::int AS unposted
+           FROM finance.fiscal_periods p
+          WHERE p.book_id = $1
+          ORDER BY p.period_no`,
+      [bookId],
+    );
+
+    return result.rows.map((r) => {
+      const drafts = Number(r['drafts'] ?? 0);
+      const unposted = Number(r['unposted'] ?? 0);
+      const blockers: string[] = [];
+      if (drafts > 0) {
+        blockers.push(`${String(drafts)} unfinished journal(s) — post or discard them.`);
+      }
+      if (unposted > 0) {
+        blockers.push(
+          `${String(unposted)} money event(s) have not reached the ledger. Closing now would leave that revenue in no month at all.`,
+        );
+      }
+      return {
+        id: asText(r['id']),
+        periodNo: Number(r['period_no']),
+        startsOn: asDate(r['starts_on']),
+        endsOn: asDate(r['ends_on']),
+        status: asText(r['status']),
+        closedAt: r['closed_at'] instanceof Date ? r['closed_at'].toISOString() : null,
+        blockers,
+      };
+    });
+  }
+
+  /**
+   * Closes, locks or reopens a period.
+   *
+   * The service does not re-check the preconditions. They are triggers, and a
+   * second copy here would be a second opinion that disagrees the first time
+   * somebody writes a path that skips this method.
+   */
+  async setPeriodStatus(periodId: string, body: ClosePeriodRequest): Promise<PeriodRow> {
+    const ctx = getContext();
+    return this.db
+      .withTenant(currentTenantContext(), async (tx) => {
+        const before = await tx.query<{ status: string; book_id: string }>(
+          `SELECT status, book_id FROM finance.fiscal_periods WHERE id = $1`,
+          [periodId],
+        );
+        const prior = before.rows[0];
+        if (prior === undefined) throw AppError.notFound('That accounting period does not exist.');
+
+        const reopening = body.status === 'open';
+        await tx.query(
+          // `$2::text` everywhere it appears. Used bare it is inferred as
+          // `varchar` by the assignment and as `text` by the comparison, and
+          // Postgres refuses a parameter it has deduced two types for.
+          `UPDATE finance.fiscal_periods
+              SET status = $2::text,
+                  closed_by = CASE WHEN $2::text = 'open' THEN NULL ELSE $3::uuid END,
+                  closed_at = CASE WHEN $2::text = 'open' THEN NULL ELSE now() END,
+                  updated_at = now()
+            WHERE id = $1`,
+          [periodId, body.status, ctx.userId],
+        );
+
+        await this.audit.write(tx, {
+          action: reopening ? 'override' : 'approve',
+          entity: 'fin_fiscal_period',
+          rowId: periodId,
+          businessKey: null,
+          dataClass: 'financial',
+          patientId: null,
+          encounterId: null,
+          reasonText: ctx.reason ?? null,
+          before: { status: prior.status },
+          after: { status: body.status },
+        });
+
+        const rows = await this.readPeriods(tx, prior.book_id);
+        const row = rows.find((p) => p.id === periodId);
+        if (row === undefined) throw AppError.notFound('That accounting period does not exist.');
+        return row;
+      })
+      .catch(translate);
+  }
+
+  // ── NC-009 §3.3 · the statements ─────────────────────────────────────────
+
+  async profitAndLoss(query: StatementQuery): Promise<ProfitAndLoss> {
+    return this.db.withTenant(currentTenantContext(), async (tx) => {
+      const result = await tx.query<Record<string, unknown>>(
+        `SELECT account_code, account_name, account_type, sum(amount)::text AS amount
+           FROM finance.v_profit_and_loss
+          WHERE book_id = $1 AND ($2::uuid IS NULL OR fiscal_year_id = $2::uuid)
+          GROUP BY account_code, account_name, account_type
+          ORDER BY account_code`,
+        [query.bookId, query.fiscalYearId ?? null],
+      );
+      const lines: ProfitAndLossLine[] = result.rows.map((r) => ({
+        accountCode: asText(r['account_code']),
+        accountName: asText(r['account_name']),
+        accountType: asText(r['account_type']),
+        amount: asMoney(r['amount']),
+      }));
+
+      // Totalled in SQL, for the same reason the trial balance is: these are
+      // decimals, and adding them as JavaScript numbers is how a statement
+      // ends up out by a paisa that does not exist.
+      const totals = await tx.query<Record<string, unknown>>(
+        `SELECT coalesce(sum(amount) FILTER (WHERE account_type = 'income'), 0)::numeric(18,2)::text  AS inc,
+                coalesce(sum(amount) FILTER (WHERE account_type = 'expense'), 0)::numeric(18,2)::text AS exp,
+                (coalesce(sum(amount) FILTER (WHERE account_type = 'income'), 0)
+                 - coalesce(sum(amount) FILTER (WHERE account_type = 'expense'), 0))::numeric(18,2)::text AS profit
+           FROM finance.v_profit_and_loss
+          WHERE book_id = $1 AND ($2::uuid IS NULL OR fiscal_year_id = $2::uuid)`,
+        [query.bookId, query.fiscalYearId ?? null],
+      );
+      const t = totals.rows[0] ?? {};
+
+      return {
+        income: lines.filter((l) => l.accountType === 'income'),
+        expense: lines.filter((l) => l.accountType === 'expense'),
+        totalIncome: asMoney(t['inc']),
+        totalExpense: asMoney(t['exp']),
+        profit: asMoney(t['profit']),
+      };
+    });
+  }
+
+  async balanceSheet(query: StatementQuery): Promise<BalanceSheet> {
+    return this.db.withTenant(currentTenantContext(), async (tx) => {
+      const result = await tx.query<Record<string, unknown>>(
+        `SELECT coalesce(sum(assets), 0)::numeric(18,2)::text                    AS assets,
+                coalesce(sum(liabilities), 0)::numeric(18,2)::text               AS liabilities,
+                coalesce(sum(equity), 0)::numeric(18,2)::text                    AS equity,
+                coalesce(sum(retained_earnings_current), 0)::numeric(18,2)::text AS profit,
+                (coalesce(sum(assets), 0)
+                 - (coalesce(sum(liabilities), 0) + coalesce(sum(equity), 0)
+                    + coalesce(sum(retained_earnings_current), 0)))::numeric(18,2)::text AS out_by
+           FROM finance.v_balance_sheet
+          WHERE book_id = $1 AND ($2::uuid IS NULL OR fiscal_year_id = $2::uuid)`,
+        [query.bookId, query.fiscalYearId ?? null],
+      );
+      const r = result.rows[0] ?? {};
+      const outBy = asMoney(r['out_by']);
+
+      return {
+        assets: asMoney(r['assets']),
+        liabilities: asMoney(r['liabilities']),
+        equity: asMoney(r['equity']),
+        retainedEarningsCurrent: asMoney(r['profit']),
+        outBy,
+        // Zero by construction — every journal balances, so assets always
+        // equal liabilities plus equity plus profit. Returned rather than
+        // asserted so a caller can check rather than trust.
+        balances: Number(outBy) === 0,
+      };
     });
   }
 
