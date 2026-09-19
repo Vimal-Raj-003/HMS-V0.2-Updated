@@ -12212,6 +12212,71 @@ const NC009 = group('NC-009', 9, [
   ),
 ]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-012 + RC-005 — Corporate credit and collections
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Raising an invoice and forgiving one are deliberately far apart: the first is
+// a clerk's daily work, the second is where money leaves a hospital quietly.
+// `finance.ar.writeoff.approve` is NOT marked `requiresSecondPerson` — that
+// flag makes a key unusable as a route decorator (the policy engine evaluates
+// it without a co-signer and would deny everybody) — so the second person is
+// enforced where it cannot be talked around: `approved_by <> requested_by` is a
+// CHECK constraint.
+const NC012 = group('NC-012', 9, [
+  p(
+    'finance.corporate.read',
+    'fin_corporate_invoice',
+    'read',
+    'financial',
+    'low',
+    'See corporate accounts, their invoices and the ageing worklist.',
+  ),
+  p(
+    'finance.corporate.account.manage',
+    'fin_corporate_account',
+    'manage',
+    'financial',
+    'high',
+    'Set a corporate credit limit, payment terms, or put an account on hold. The limit decides how much treatment a hospital gives away before it stops.',
+    { requiresReason: true },
+  ),
+  p(
+    'finance.corporate.invoice.raise',
+    'fin_corporate_invoice',
+    'create',
+    'financial',
+    'medium',
+    'Consolidate finalised bills into an invoice to a company. A bill can reach one invoice only, which the database enforces.',
+  ),
+  p(
+    'finance.corporate.invoice.cancel',
+    'fin_corporate_invoice',
+    'cancel',
+    'financial',
+    'high',
+    'Cancel a corporate invoice so its bills can be re-consolidated.',
+    { requiresReason: true },
+  ),
+  p(
+    'finance.ar.followup.record',
+    'fin_ar_followup',
+    'record',
+    'financial',
+    'low',
+    'Log a collection attempt and what came of it. The log is append-only.',
+  ),
+  p(
+    'finance.ar.writeoff.approve',
+    'fin_ar_write_off',
+    'approve',
+    'financial',
+    'critical',
+    'Write off a corporate debt as uncollectable. The approver may not be the person who requested it, and the database refuses the case where they are.',
+    { requiresReason: true, sensitiveGrant: true },
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -12332,6 +12397,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...OP037,
   ...NC033,
   ...NC009,
+  ...NC012,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

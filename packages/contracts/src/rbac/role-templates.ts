@@ -4699,6 +4699,16 @@ const templates: readonly RoleTemplate[] = [
       'finance.period.close',
       'finance.posting_rule.manage',
 
+      // NC-012 / RC-005. Raising and chasing are the accountant's daily work;
+      // the write-off is the one key here that is `critical`, and the second
+      // person it needs is a CHECK constraint rather than a hope.
+      'finance.corporate.read',
+      'finance.corporate.account.manage',
+      'finance.corporate.invoice.raise',
+      'finance.corporate.invoice.cancel',
+      'finance.ar.followup.record',
+      'finance.ar.writeoff.approve',
+
       'receipt.report.read',
       'receipt.daybook.read',
       'receipt.daybook.close',
@@ -5354,8 +5364,9 @@ const templates: readonly RoleTemplate[] = [
     category: 'governance',
     homeWorkspace: 'audit-workspace',
     permissions: [
-      // NC-009: an auditor reads the ledger and posts nothing into it.
+      // NC-009 / NC-012: an auditor reads the books and writes nothing.
       'finance.ledger.read',
+      'finance.corporate.read',
 
       'lab.order.list',
       'lab.order.read',

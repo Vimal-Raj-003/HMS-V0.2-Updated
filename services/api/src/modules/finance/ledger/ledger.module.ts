@@ -1,4 +1,6 @@
 import type { Provider, Type } from '@nestjs/common';
+import { CorporateController } from '../corporate/corporate.controller.js';
+import { CorporateService } from '../corporate/corporate.service.js';
 import { LedgerController } from './ledger.controller.js';
 import { LedgerService } from './ledger.service.js';
 
@@ -10,5 +12,5 @@ import { LedgerService } from './ledger.service.js';
  * database and need a `forwardRef` back through `app.module.ts` to reach the
  * shared guards.
  */
-export const LEDGER_CONTROLLERS: readonly Type<unknown>[] = [LedgerController];
-export const LEDGER_PROVIDERS: readonly Provider[] = [LedgerService];
+export const LEDGER_CONTROLLERS: readonly Type<unknown>[] = [LedgerController, CorporateController];
+export const LEDGER_PROVIDERS: readonly Provider[] = [LedgerService, CorporateService];

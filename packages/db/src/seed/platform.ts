@@ -51,6 +51,11 @@ const SERIES: readonly (readonly [key: string, pattern: string, gapless: boolean
   // RC-007 §5.6: a scheme case and its claim carry the authority's reference on
   // every document and every appeal. Gapless, because a missing claim number in
   // a settlement batch is a claim the authority will say it never received.
+  // NC-012 §3: a corporate invoice is a tax document a company's accounts
+  // payable files and reconciles. Gapless per branch per FY — a missing number
+  // in a client's set is a question their auditor asks and the hospital cannot
+  // answer.
+  ['CORP_INVOICE', '{BR}/CINV/{FY}/{SEQ:6}', true, 'fy'],
   ['SCHEME_CASE', '{BR}/SCH/{FY}/{SEQ:6}', true, 'fy'],
   ['SCHEME_CLAIM', '{BR}/SCLM/{FY}/{SEQ:6}', true, 'fy'],
   // RC-008 §5.7: an estimate is a document a family keeps and brings back. Not
