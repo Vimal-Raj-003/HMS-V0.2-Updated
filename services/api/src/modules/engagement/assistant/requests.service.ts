@@ -201,13 +201,22 @@ export class AppointmentRequestService {
   async list(query: RequestListQuery): Promise<readonly AppointmentRequestRow[]> {
     return this.db.withTenant(currentTenantContext(), async (tx) => {
       const result = await tx.query<Record<string, unknown>>(
-        `SELECT id, channel, requester_name, requester_phone, requester_email,
-                speciality_key, practitioner_key, slot_id,
-                preferred_date, preferred_period, reason,
-                status, appointment_id, handled_at, decline_reason, created_at
-           FROM engage.appointment_requests
-          WHERE ($1::text IS NULL OR status = $1::text)
-          ORDER BY created_at
+        `SELECT r.id, r.channel, r.requester_name, r.requester_phone, r.requester_email,
+                r.speciality_key, s.name AS speciality_name,
+                r.practitioner_key, p.display_name AS practitioner_name,
+                r.slot_id,
+                r.preferred_date, r.preferred_period, r.reason,
+                r.status, r.appointment_id, r.handled_at, r.decline_reason, r.created_at
+           FROM engage.appointment_requests r
+           -- LEFT joins on purpose: a department or consultant retired since the
+           -- enquiry arrived must still let the row render, or the clerk sees a
+           -- blank cell and cannot tell a missing name from a missing preference.
+           LEFT JOIN mdm.mdm_specialities s
+             ON s.record_key = r.speciality_key AND s.status = 'active'
+           LEFT JOIN mdm.mdm_practitioners p
+             ON p.record_key = r.practitioner_key AND p.status = 'active'
+          WHERE ($1::text IS NULL OR r.status = $1::text)
+          ORDER BY r.created_at
           LIMIT $2`,
         [query.status ?? null, query.limit],
       );
@@ -337,7 +346,9 @@ function toRow(r: Record<string, unknown>): AppointmentRequestRow {
     requesterPhone: text(r['requester_phone']),
     requesterEmail: textOrNull(r['requester_email']),
     specialityKey: textOrNull(r['speciality_key']),
+    specialityName: textOrNull(r['speciality_name']),
     practitionerKey: textOrNull(r['practitioner_key']),
+    practitionerName: textOrNull(r['practitioner_name']),
     slotId: textOrNull(r['slot_id']),
     preferredDate: iso(r['preferred_date'])?.slice(0, 10) ?? null,
     preferredPeriod: textOrNull(r['preferred_period']),

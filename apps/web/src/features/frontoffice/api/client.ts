@@ -1,6 +1,8 @@
 import { newIdempotencyKey, queryString, request } from './http';
 import type {
   AppointmentDetail,
+  AppointmentRequestRow,
+  AppointmentRequestStatus,
   AppointmentListItem,
   BoardView,
   BookAppointmentRequest,
@@ -22,6 +24,7 @@ import type {
   ShiftView,
   SlotView,
   TokenView,
+  UpdateAppointmentRequest,
   VoidReceiptRequest,
 } from './types';
 
@@ -256,4 +259,65 @@ export async function voidReceipt(
   reason: string,
 ): Promise<PaymentView> {
   return request<PaymentView>(`${CASH}/receipts/${receiptId}/void`, { method: 'POST', body, reason });
+}
+
+// ── PE-009 · enquiries from the public assistant ────────────────────────────
+
+const ENQUIRIES = '/api/v1/appointment-requests';
+
+/**
+ * The enquiry worklist.
+ *
+ * `status` is server-side rather than a client filter because the desk works
+ * one bucket at a time and the list is unbounded — a hospital that has run the
+ * assistant for a year should not ship a year of handled enquiries to a browser
+ * so that it can hide all but today's.
+ */
+export async function listAppointmentRequests(
+  status: AppointmentRequestStatus | 'all',
+  limit = 50,
+): Promise<readonly AppointmentRequestRow[]> {
+  const query = queryString({ ...(status === 'all' ? {} : { status }), limit });
+  return request<readonly AppointmentRequestRow[]>(`${ENQUIRIES}${query}`);
+}
+
+/**
+ * Marks an enquiry contacted, declined or expired.
+ *
+ * `reason` is required by the signature, not by a runtime check, because
+ * `appointment.request.update` is `requiresReason` in the catalogue — a caller
+ * who forgot would discover it as a 403 in production. Declining additionally
+ * carries `declineReason` in the body: the API refuses a decline without one,
+ * because an enquiry that disappears silently cannot be told apart from one
+ * somebody dropped.
+ */
+export async function updateAppointmentRequest(
+  id: string,
+  body: UpdateAppointmentRequest,
+  reason: string,
+): Promise<AppointmentRequestRow> {
+  return request<AppointmentRequestRow>(`${ENQUIRIES}/${id}`, {
+    method: 'PATCH',
+    body,
+    reason,
+  });
+}
+
+/**
+ * Records which appointment an enquiry became.
+ *
+ * It does **not** book. The appointment is created through the ordinary
+ * appointment routes by somebody holding `appointment.create`, and this links
+ * the two afterwards — two booking engines is one too many, and the other one
+ * is the one that understands slots, capacity and overbooking.
+ */
+export async function convertAppointmentRequest(
+  id: string,
+  appointmentId: string,
+): Promise<AppointmentRequestRow> {
+  return request<AppointmentRequestRow>(`${ENQUIRIES}/${id}/convert`, {
+    method: 'POST',
+    body: { appointmentId },
+    idempotencyKey: newIdempotencyKey(),
+  });
 }

@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { signIn } from './fixtures';
 
 /**
  * The landing page and its assistant, in a real browser.
@@ -186,5 +187,39 @@ test.describe('the assistant', () => {
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: /hospital assistant/i })).toBeHidden();
     await expect(page.getByRole('button', { name: /ask a question/i })).toBeFocused();
+  });
+});
+
+test.describe('the enquiry reaches the front office', () => {
+  test('an enquiry left on the public site appears on the clerk’s worklist', async ({ page }) => {
+    // The whole point of PE-009, and the half that was missing until now: the
+    // API captured enquiries into a table with no screen, so the hospital was
+    // collecting names and phone numbers from its own website and nobody could
+    // see them. This walks the loop a stranger and a clerk actually share.
+    const name = `E2E Enquirer ${String(Date.now()).slice(-6)}`;
+
+    await page.goto('/');
+    await page.getByRole('button', { name: /ask a question/i }).click();
+    await page.getByPlaceholder(/ask about departments/i).fill('book an appointment with Orthopaedics');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('button', { name: /send request/i })).toBeVisible({ timeout: 15_000 });
+
+    await page.getByRole('textbox', { name: 'Your name' }).fill(name);
+    await page.getByRole('textbox', { name: 'Phone number' }).fill('+919845099887');
+    await page.getByRole('checkbox').check();
+    await page.getByRole('button', { name: /send request/i }).click();
+    await expect(page.getByText(/thank you/i)).toBeVisible({ timeout: 15_000 });
+
+    // Now the other side of the desk.
+    await signIn(page, 'receptionist');
+    await page.goto('/frontoffice/enquiries');
+    await expect(page.getByTestId('enquiries-screen')).toBeVisible();
+
+    await expect(page.getByText(name)).toBeVisible({ timeout: 15_000 });
+    // The department the visitor named survived the whole journey, resolved to
+    // a readable name by the API rather than left as a UUID.
+    await expect(page.getByText('Orthopaedics').first()).toBeVisible();
+    // And the screen never calls it a booking.
+    await expect(page.getByText(/requests, not bookings/i)).toBeVisible();
   });
 });

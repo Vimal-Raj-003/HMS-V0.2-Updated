@@ -479,3 +479,42 @@ export interface PatientListItem {
   readonly status: string;
   readonly last_visit_at: string | null;
 }
+
+// ── PE-009 · enquiries from the public assistant ────────────────────────────
+
+/**
+ * One enquiry left by the landing page's assistant.
+ *
+ * Not an appointment, and the type is deliberately shaped so it cannot be
+ * mistaken for one: there is no patient id, no slot booked and no encounter.
+ * The caller is a member of the public whose phone number nobody has verified,
+ * which is exactly why front office telephones before booking anything.
+ */
+export interface AppointmentRequestRow {
+  readonly id: string;
+  readonly channel: string;
+  readonly requesterName: string;
+  readonly requesterPhone: string;
+  readonly requesterEmail: string | null;
+  readonly specialityKey: string | null;
+  /** Resolved by the API, because `/specialities` needs `mdm.read` and a clerk has not got it. */
+  readonly specialityName: string | null;
+  readonly practitionerKey: string | null;
+  readonly practitionerName: string | null;
+  readonly slotId: string | null;
+  readonly preferredDate: string | null;
+  readonly preferredPeriod: string | null;
+  readonly reason: string | null;
+  readonly status: string;
+  readonly appointmentId: string | null;
+  readonly handledAt: string | null;
+  readonly declineReason: string | null;
+  readonly createdAt: string;
+}
+
+export type AppointmentRequestStatus = 'new' | 'contacted' | 'booked' | 'declined' | 'expired';
+
+export interface UpdateAppointmentRequest {
+  readonly status: 'contacted' | 'declined' | 'expired';
+  readonly declineReason?: string;
+}

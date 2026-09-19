@@ -404,17 +404,39 @@ describe('PE-009 · what front office does with it', () => {
   let requestId = '';
 
   it('is on a worklist somebody can actually read', async () => {
+    // A real department, so the row proves the name is resolved rather than
+    // left as a UUID for the clerk to decipher.
+    const speciality = await pg.pool('migrator').query<{ record_key: string; name: string }>(
+      `SELECT record_key, name FROM mdm.mdm_specialities
+        WHERE hospital_id = $1 AND status = 'active' LIMIT 1`,
+      [hospitalId],
+    );
+    const dept = speciality.rows[0];
+
     const created = await anonymous({
       method: 'POST',
       url: '/api/v1/assistant/appointment-requests',
-      payload: { hospitalId, name: 'Worklist Test', phone: '+919876500033', consent: true },
+      payload: {
+        hospitalId,
+        name: 'Worklist Test',
+        phone: '+919876500033',
+        consent: true,
+        ...(dept === undefined ? {} : { specialityKey: dept.record_key }),
+      },
     });
     requestId = created.json<{ id: string }>().id;
 
     const res = await asStaff({ method: 'GET', url: '/api/v1/appointment-requests?status=new' });
     expect(res.statusCode).toBe(200);
-    const rows = res.json<{ id: string; requesterName: string }[]>();
-    expect(rows.some((r) => r.id === requestId)).toBe(true);
+    const rows = res.json<{ id: string; requesterName: string; specialityName: string | null }[]>();
+    const mine = rows.find((r) => r.id === requestId);
+    expect(mine).toBeDefined();
+
+    // Resolved by the API, not by the browser. `/api/v1/specialities` needs
+    // `mdm.read`, which a receptionist does not hold — so a worklist that made
+    // the screen join client-side would show a UUID to exactly the people who
+    // use it.
+    if (dept !== undefined) expect(mine?.specialityName).toBe(dept.name);
   });
 
   it('needs a session to read', async () => {

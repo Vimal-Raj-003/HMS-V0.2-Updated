@@ -121,7 +121,18 @@ export interface AppointmentRequestRow {
   readonly requesterPhone: string;
   readonly requesterEmail: string | null;
   readonly specialityKey: string | null;
+  /**
+   * Resolved here, not by the browser.
+   *
+   * The obvious alternative was for the worklist screen to fetch
+   * `/api/v1/specialities` and join client-side, and it would have failed for
+   * the people who use the screen: that endpoint needs `mdm.read`, which a
+   * receptionist does not hold. A clerk looking at an enquiry needs to read the
+   * department, not a UUID, so the join belongs here.
+   */
+  readonly specialityName: string | null;
   readonly practitionerKey: string | null;
+  readonly practitionerName: string | null;
   readonly slotId: string | null;
   readonly preferredDate: string | null;
   readonly preferredPeriod: string | null;

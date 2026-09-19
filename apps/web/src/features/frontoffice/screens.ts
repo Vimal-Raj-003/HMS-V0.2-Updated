@@ -73,6 +73,20 @@ export const FRONT_OFFICE_SCREENS: readonly FrontOfficeScreen[] = [
     keywords: ['cash', 'counter', 'shift', 'receipt', 'payment', 'refund', 'void', 'denomination', 'float'],
     entitlement: 'module.cash_counter.enabled',
   },
+  {
+    key: 'enquiries',
+    label: 'Website enquiries',
+    href: '/frontoffice/enquiries',
+    permission: 'appointment.request.list',
+    summary:
+      'Appointment requests left by the public assistant — telephone, verify, then book through the appointment book.',
+    deniedExplanation:
+      'The enquiry queue is worked by reception and the call centre. Your roles do not include either.',
+    keywords: ['enquiry', 'enquiries', 'request', 'website', 'assistant', 'chatbot', 'callback', 'lead'],
+    // Gated with the appointments module: an enquiry is only useful to a
+    // hospital that can act on it, and acting on it means booking.
+    entitlement: 'module.appointments.enabled',
+  },
 ];
 
 export function frontOfficeScreen(key: string): FrontOfficeScreen {

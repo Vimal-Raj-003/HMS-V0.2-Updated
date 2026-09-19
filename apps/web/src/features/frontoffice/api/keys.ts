@@ -30,6 +30,12 @@ export function frontOfficeKeys(hospitalId: string) {
     shift: (shiftId: string) => [...root, 'cash', 'shift', shiftId] as const,
     closePreview: (shiftId: string) => [...root, 'cash', 'close-preview', shiftId] as const,
     cash: () => [...root, 'cash'] as const,
+
+    // PE-009. Keyed on status because the worklist filters server-side: the
+    // "new" tab and the "contacted" tab are different queries, and sharing one
+    // cache entry would show a clerk the list they just filtered away.
+    enquiries: (status: string) => [...root, 'enquiries', status] as const,
+    enquiriesRoot: () => [...root, 'enquiries'] as const,
   };
 }
 

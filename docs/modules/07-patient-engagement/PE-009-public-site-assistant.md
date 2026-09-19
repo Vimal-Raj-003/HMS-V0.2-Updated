@@ -40,8 +40,9 @@ It is defined as much by what it refuses as by what it does.
 - A conversational turn, answered by a configured language model when there is
   one and by the hospital's own directory when there is not.
 - Capture of an appointment request, with consent.
-- A staff worklist: list, mark contacted or declined, link to the appointment it
-  became.
+- A staff worklist **screen** at `/frontoffice/enquiries`: the open queue, a
+  dialable number, the department resolved to its name, mark contacted, decline
+  with a reason, and the link to the appointment it became.
 
 ### 3.2 Explicitly out of scope
 

@@ -10,7 +10,7 @@
 | Current phase          | **Phases 0–8 complete, plus PE-009.** Phase 8 finished on 2026-09-08 with NC-033, the kitchen: all thirty specialty consoles are built, proved live in both directions, and committed. PE-009 (the public landing page and its assistant) was built on 2026-09-28 out of phase order because the product had no front door. **Phase 9 (ERP and non-clinical) is next and has no code** beyond the `nonclinical` module folder NC-033 opened.                                                                                                                                                                                                                                                                                                                                                                                    |
 | Repo status (previous) | **423 application tables** across ten tenant schemas (`core` 141, `clinical` 67, `mdm` 49, `lab` 41, `rad` 36, `integration` 29, `patient` 19, `billing` 18, `engage` 13, `queue` 10) — 667 relations once the 244 monthly partitions are counted. **14 migrations**, all applied to a real container. 4 idempotent seed tiers. **125 API route handlers across 33 controllers**; **24 Next.js pages**.                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Repo status            | **868 non-partition tables** outside the system schemas across fifteen tenant schemas — **0 business tables without RLS**; the only five without it are the deliberately-global reference catalogues that carry no `hospital_id` at all (`mdm.opioid_conversion_factors`, `mdm.immunisation_schedules`, `mdm.anticholinergic_scores`, `mdm.beers_criteria`, `mdm.telemedicine_drug_rules` — published law, identical in every tenant, read-only to `hms_app`), plus pg_partman's own three and `public._prisma_migrations`. `core.permissions` and `mdm.console_components` keep RLS on with a deliberately-open policy (D-17). Read out of a live container. **62 migrations. 1,077 API routes across 83 controllers. 123 Next.js screens.** Permission catalogue **1,392 keys**; event registry **847**; entitlements **72**. |
-| Last green CI          | **Green on this machine, 2026-09-28.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages, 3,021 unit tests**; `pnpm test:integration` **12/12 tasks, 1,019 tests** (`@vims/api` 837, worker 61, testing 56, integration-hub 49, realtime 16); `pnpm test:e2e` **454 passed, 0 failed** across three viewport projects — the first completely clean full browser run, after the `phlebotomist` order-dependency was found and fixed (D-251). `verify-isolation.sql` passes **all 11 cases**. **Never run: both k6 scripts** (k6 is not installed here).                                                                                                                                                                                                                                                       |
+| Last green CI          | **Green on this machine, 2026-10-01.** `pnpm lint` and `pnpm typecheck` 20/20; `pnpm test` **20/20 packages, 3,029 unit tests**; `pnpm test:integration` **12/12 tasks, 1,019 tests**; `pnpm test:e2e` **449 passed, 2 failed of 451** across three viewport projects — both failures are webkit-ipad only, in code this session did not touch (a patient-registration step and a WebKit `"due to access control checks"` on an in-flight fetch), and both pass on a re-run (93/93). `verify-isolation.sql` passes **all 11 cases**. **Never run: both k6 scripts** (k6 is not installed here).                                                                                                                                                                                                                                 |
 | Modules complete       | **0 / 177** to `CLAUDE.md` §7's Definition of Done — no module has both its k6 script and its e2e golden path. Against `docs/12` by _coverage_: every module in phases 0–8 has schema, contracts, API, screens and its rules proved live in both directions; phases 9–13 have none. **The system can register, queue, consult, prescribe, order and report diagnostics, dispense, hold stock, price and bill, take money, triage and resuscitate, run a theatre and an ICU, transfuse, admit, nurse, discharge with a signed summary, release a body lawfully, run all thirty specialty consoles — and, since RC-006, turn the work done in one into a priced line on a patient's bill.** It cannot yet run the ERP back office, a patient portal, or the analytics and interop layer.                                          |
 | Blocking questions     | **O-1** blocks Phase 2's exit gate 9, **O-2** blocks Phase 1 gate 3, **O-4** blocks Phase 1 gate 6, **O-12** (analyzer and PACS vendor inventory) blocks every Phase 3 gate that touches a device, and the new **O-14** asks whether JWT signing stays on HS256 shared secrets or moves to the RS256/EdDSA that `EN-007 §Security` names. See `docs/DECISIONS.md` → "Open" for O-1…O-14.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Project path           | `~/Desktop/Test/HMS/vims-hms-build-kit` (renamed — see D-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -400,6 +400,44 @@ been hiding.
 
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
+
+### 2026-10-01 · PE-009 · The half of the loop that was missing
+
+The assistant captured enquiries into `engage.appointment_requests` from the day
+it shipped, with three permissioned staff endpoints and integration tests. It had
+no screen. The module doc argued that "a queue nobody can read is worse than a
+queue that was never collected" and then shipped exactly that — the hospital
+collecting names and phone numbers from its own website into a table with no
+owner, which is a DPDP problem as much as an operational one.
+
+**Built** — `/frontoffice/enquiries`: the open queue by status, the enquirer's
+number as a `tel:` link because ringing it is the job, the department resolved to
+a readable name, mark-contacted, and decline behind `ConfirmWithReasonDialog`.
+Registered in `FRONT_OFFICE_SCREENS`, so navigation, the console home, the ⌘K
+palette and the screen-coverage suite all picked it up without further wiring.
+
+**Two decisions worth the words.**
+
+The first design had the browser fetch `/api/v1/specialities` and join
+client-side. That endpoint needs `mdm.read`, which a receptionist does not hold —
+so the column would have shown a UUID to exactly the people who use the screen.
+The join moved into `listAppointmentRequests` (D-252).
+
+And the screen cannot book. A "Book" button here would be a second booking engine
+beside the appointment book, knowing nothing about slot capacity or overbooking.
+An enquiry becomes an appointment through OP-001, and only then is it linked
+(D-253). The header says "requests, not bookings" in words, because the most
+damaging thing this screen could imply is that the patient already has a slot.
+
+**Tested** — 8 component tests (read-only sessions told they are read-only rather
+than shown dead buttons; a decline that cannot reach the API without a reason; a
+closed enquiry offering no action; an empty queue that explains itself), the
+integration spec extended to assert the department name is resolved server-side,
+and a new browser test that walks the whole loop: a stranger submits on the public
+site, a receptionist signs in, and the enquiry is on their worklist with the
+department intact.
+
+**Next step** — Phase 9 (ERP and non-clinical) remains the large unbuilt block.
 
 ### 2026-09-28 · PE-009 · The front door, and the assistant that stands at it
 
