@@ -8,6 +8,7 @@ import { createHealthServer, type ComponentState, type HealthServer } from './he
 import { CRITICAL_QUEUES, escalateOverdueCriticalValues } from './escalation/critical-value-escalation.js';
 import { sealAuditChains } from './maintenance/audit-chain-sealer.js';
 import { ensureMonthPartitions } from './maintenance/partition-maintenance.js';
+import { postLedgerEntries } from './finance/ledger-poster.js';
 import { sweepPublicRateLimits } from './maintenance/rate-limit-sweeper.js';
 import { PlaywrightPdfRenderer } from './print/pdf-renderer.js';
 import { MapTransportResolver } from './print/print-dispatcher.js';
@@ -54,6 +55,8 @@ export const AUDIT_SEAL_JOB = 'audit.seal';
 export const PARTITION_ENSURE_JOB = 'partition.ensure';
 /** PE-009 §C: drops rate-limit counters for callers who stopped calling. */
 export const RATE_LIMIT_SWEEP_JOB = 'ratelimit.sweep';
+/** NC-009 §3.2: turns money events into journals. */
+export const LEDGER_POST_JOB = 'ledger.post';
 /**
  * `docs/07 §4` lists "EWS escalation" and "critical result fan-out" under the
  * `critical` class, so this belongs there and not in `maintenance`. A ladder
@@ -185,6 +188,22 @@ export function createWorkerRuntime(env: WorkerEnv, logger: Logger): WorkerRunti
                 },
               };
             }
+            case LEDGER_POST_JOB: {
+              const result = await postLedgerEntries(maintenancePool);
+              if (result.posted > 0) {
+                logger.info({ event: 'worker.ledger.posted', journals: result.posted });
+              }
+              // An event that cannot be valued or has nowhere to land is the
+              // finance exception worklist, and silence about it is how a
+              // period close fails to tie out three weeks later.
+              for (const problem of result.problems) {
+                logger.warn({ event: 'worker.ledger.unpostable', detail: problem });
+              }
+              return {
+                job: job.name,
+                detail: { posted: result.posted, skipped: result.skipped, problems: result.problems.length },
+              };
+            }
             case RATE_LIMIT_SWEEP_JOB: {
               const swept = await sweepPublicRateLimits(maintenancePool);
               if (swept.deleted > 0) {
@@ -228,6 +247,17 @@ export function createWorkerRuntime(env: WorkerEnv, logger: Logger): WorkerRunti
         { name: RATE_LIMIT_SWEEP_JOB, data: { reason: 'schedule' }, opts: jobOptionsFor('maintenance') },
       );
       mounted.push(`public-rate-limit-sweeper(maintenance,${String(RATE_LIMIT_SWEEP_INTERVAL_MS)}ms)`);
+
+      // Every two minutes. Frequent enough that a controller looking at the
+      // ledger sees this morning's takings, infrequent enough that it is not
+      // polling the outbox for its own sake.
+      const LEDGER_POST_INTERVAL_MS = 2 * 60 * 1000;
+      await maintenanceQueue.upsertJobScheduler(
+        LEDGER_POST_JOB,
+        { every: LEDGER_POST_INTERVAL_MS },
+        { name: LEDGER_POST_JOB, data: { reason: 'schedule' }, opts: jobOptionsFor('maintenance') },
+      );
+      mounted.push(`ledger-poster(maintenance,${String(LEDGER_POST_INTERVAL_MS)}ms)`);
       mounted.push(`audit-chain-sealer(maintenance,${env.AUDIT_SEAL_INTERVAL_MS}ms)`);
       mounted.push(`partition-maintenance(maintenance,${env.PARTITION_MAINTENANCE_INTERVAL_MS}ms)`);
 

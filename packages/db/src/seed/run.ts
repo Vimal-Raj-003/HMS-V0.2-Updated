@@ -39,6 +39,7 @@ import { seedDiagnostics } from './diagnostics.js';
 import { seedSupplyChain } from './inventory.js';
 import { seedPharmacy } from './pharmacy.js';
 import { seedEmergency } from './emergency.js';
+import { seedFinance } from './finance.js';
 import { seedLeakage } from './leakage.js';
 import { seedSchemes } from './schemes.js';
 import { seedTariff } from './tariff.js';
@@ -123,6 +124,9 @@ export async function runSeed(db: Pool, tier: Tier): Promise<ReturnType<typeof t
     await seedTariff(ctx, tenancy);
     await seedSchemes(ctx, tenancy);
     await seedLeakage(ctx, tenancy);
+    // NC-009. After the tariff and schemes, because the chart of accounts is
+    // what the money those produce will land in.
+    await seedFinance(ctx, tenancy);
     await seedEmergency(ctx, tenancy);
     await seedSpecialtyConsoles(ctx, tenancy);
     // After the tariff and the service catalogue, because a charge map points
