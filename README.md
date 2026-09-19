@@ -1,78 +1,212 @@
-# Vim's HMS — Build Kit
+# Vim's HMS
 
-**What this is:** everything Claude Code needs to build **Vim's HMS** — an enterprise, multi-tenant,
-cloud + on-prem Hospital Management System — from an empty folder to a production system, in phases you control.
+An enterprise, multi-tenant Hospital Management System for Indian hospitals of 50–2000+ beds,
+built to run in the cloud **or** inside the hospital. Next.js 15 PWA, NestJS 11 modular monolith,
+PostgreSQL 17.
 
-**Who it is for:** VIMS ENTERPRISE (Vimal) building the product with Claude Code, targeting Indian hospitals of
-50–2000+ beds (trauma & orthopaedic centres first), architected to expand to UAE/Qatar/Africa/SEA.
+Built by VIMS ENTERPRISE. India-first (ABDM, NABH, NABL, GST, DPDP Act 2023), global-ready by
+configuration.
 
----
-
-## Start here (5 minutes)
-
-1. Create an empty repo. Copy the contents of this kit into it (`CLAUDE.md` at the root, `docs/` beside it).
-2. Read `docs/prompts/README-how-to-use-these-prompts.md` — it explains the loop.
-3. Open Claude Code in that repo and paste the whole of `docs/prompts/phase-00-foundation.md`.
-4. Answer its questions, run the exit gate at the bottom of the prompt, then move to Phase 1.
-
-Do not skip Phase 0. Everything else inherits its tenancy, auth, audit and design rails.
+> **Status:** Phases 0–8 and 9A are built and tested. Phases 9B–13 are not started.
+> See [Build status](#build-status) for what that means in practice, and
+> [Known gaps](#known-gaps) for what is deliberately unfinished.
 
 ---
 
-## What is in the kit
+## Run it locally
 
-| Path                                    | What it is                                                                                                                                                                              | When you read it                               |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `CLAUDE.md`                             | **The master system prompt.** Always in Claude Code's context. Product definition, locked stack, architecture principles, coding standards, build order, Definition of Done.            | Every session, automatically                   |
-| `docs/01-architecture.md`               | System shape, request lifecycle, module boundaries, events, real-time, offline, tenancy                                                                                                 | Phase 0, and whenever a design question arises |
-| `docs/02-tech-stack-decision.md`        | Every technology choice with the reasoning — including **why PostgreSQL 17 and not Supabase-as-platform**, and what to use instead                                                      | Before arguing about the stack                 |
-| `docs/03-database-conventions.md`       | Schemas, table rules, RLS, numbering, audit, outbox, partitioning, migrations, performance rules                                                                                        | Every time a table is created                  |
-| `docs/04-security-compliance.md`        | Regulatory map (DPDP Rules 2025, ABDM, NABH, NABL, AERB, PC-PNDT, NDPS, BMW, GST, CERT-In…), security controls, **clinical safety engineering**, per-module checklist                   | Every module                                   |
-| `docs/05-rbac-roles-and-logins.md`      | 64 role templates, login model for every user type, permission naming, segregation of duties                                                                                            | Phase 0 and any auth work                      |
-| `docs/06-ui-ux-design-system.md`        | Both themes with real tokens, layout system, 44 clinical components, keyboard/barcode standards, accessibility, i18n, screen archetypes                                                 | Any UI work                                    |
-| `docs/07-performance-scalability.md`    | Workload model for 2000 beds, performance budgets, frontend/backend playbooks, scaling plan, load tests, SLOs                                                                           | Any performance decision                       |
-| `docs/08-integration-catalogue.md`      | ~75 external integrations with protocol, failure mode, retry, fallback, owner module, credentials needed                                                                                | Any integration work                           |
-| `docs/09-quality-gates-and-testing.md`  | Test pyramid, 32 e2e golden journeys, clinical safety suite, data-integrity invariants, CI stages, release process                                                                      | Every phase's exit gate                        |
-| `docs/10-deployment-devops.md`          | Environments, cloud & on-prem topologies, sizing tables by bed count, CI/CD, backups, DR, on-prem runbook, support SLAs                                                                 | Go-live planning                               |
-| `docs/11-market-analysis.md`            | Indian HMS market 2026, competitor deep-dive on your five brochures, differentiation bets, ROI model, pricing & packaging, GTM, risks                                                   | Commercial decisions                           |
-| `docs/12-module-index.md`               | **The module registry** — 177 modules with IDs, phases, priorities, origin                                                                                                              | Constantly                                     |
-| `docs/13-data-migration-and-golive.md`  | Migration methodology, cutover timeline, training plan, readiness checklist, hypercare                                                                                                  | Before each hospital go-live                   |
-| `docs/modules/**`                       | **177 module specifications**, one file each, 16 sections: workflows, data model, rules, APIs, events, screens, integrations, reports, permissions, acceptance criteria, open questions | Whenever building that module                  |
-| `docs/prompts/phase-00…13`              | **14 paste-ready build prompts.** One phase per Claude Code session.                                                                                                                    | The main loop                                  |
-| `docs/templates/`                       | Module spec template, UAT script template                                                                                                                                               | Adding a module                                |
-| `docs/adr/`                             | Architecture decision records                                                                                                                                                           | When changing a locked decision                |
-| `docs/PROGRESS.md`, `docs/DECISIONS.md` | Living state of the build — Claude Code updates these every session                                                                                                                     | Every session                                  |
+Requires **Node 22.13.0** (`.nvmrc`), **pnpm 9.15.9**, and Docker.
+
+```bash
+pnpm install
+pnpm infra:up          # Postgres 17 + Redis on :5433 / :6380
+pnpm db:migrate:deploy # 70 migrations
+pnpm seed:demo         # 2 hospitals, 3 branches, 64 roles, a user per role
+pnpm dev               # web :3000, api :4000
+```
+
+Then open http://localhost:3000. The seeded demo logins are listed in
+[docs/05-rbac-roles-and-logins.md](docs/05-rbac-roles-and-logins.md).
+
+`pnpm infra:nuke` destroys the volumes when you want to start clean.
 
 ---
 
-## The shape of what you are building
+## Repository layout
 
-- **177 modules** across 8 domains: OPD Clinical (40) · Trauma & Ortho (11) · Inpatient (25) ·
-  Non-Clinical/ERP (35) · Enablers & Integrations (42) · Revenue Cycle (8) · Patient Engagement (8) · AI (8).
-  This extends your 151-module master sheet and the 86-module FAMI CARE proposal — the cross-walk is in
-  `docs/11-market-analysis.md` §9.
-- **Stack:** Next.js 15 PWA + NestJS 11 (modular monolith) + **PostgreSQL 17** + Redis + S3/MinIO + Orthanc PACS,
-  deployable to cloud _or_ inside the hospital. TypeScript everywhere, one contracts package shared by both ends.
-- **64 login roles**, one login screen, role-aware workspaces, RBAC + ABAC + Postgres row-level security.
-- **India-first compliance built in**, global-ready by configuration.
-- **PWA first** (desktop, laptop, tablet, phone, TV, kiosk), native React Native apps in Phase 13.
+```
+apps/
+  web/                Next.js 15 App Router PWA — every staff workspace, the patient landing page
+  tv-kiosk/           Waiting-room queue boards and self-service kiosks
+services/
+  api/                NestJS 11 + Fastify. Modular monolith, 53 modules, one pg.Pool
+  worker/             BullMQ jobs — ledger posting, PDFs, SMS/WhatsApp, report runs
+  realtime/           Socket.IO over Redis pub/sub — queues, dashboards, critical alerts
+  integration-hub/    HL7 v2 (MLLP), ASTM, FHIR R4, ABDM, payment and messaging gateways
+packages/
+  contracts/          Zod schemas + the RBAC permission catalogue, shared by both ends
+  db/                 Prisma schema (101 files), 70 migrations, seeds
+  ui/                 Design tokens and the clinical component library
+  testing/            Testcontainers harness and the synthetic Indian patient generator
+  i18n/  flags/  print-templates/
+infra/docker/         Dev and on-prem compose files
+docs/                 Specifications — see below
+```
 
-## The rules that keep it fast and safe
+### A note on the API module pattern
 
-Multi-layer by construction (UI → API → service → repository → SQL). Every list paginated and indexed. Dashboards
-read from materialised views, never live joins. Heavy work goes to queues. Real-time pushes diffs, not snapshots.
-Clinical hard-stops that configuration can never disable. Every mutation audited. Nothing clinical or financial is
-ever hard-deleted. Every phase ends with a gate you can verify yourself.
-
-## Where your answers are still needed
-
-Each module spec ends with **§16 Open Questions for the Hospital**. The commercially significant ones to settle
-early: the drug-knowledge-base licence (CIMS / First Databank / in-house) in `EN-029`, the SMS/WhatsApp and payment
-gateway vendors, ABDM sandbox credentials and the STQC audit slot, whether finance runs as a full GL or exports to
-Tally, and the audit-log retention decision flagged in `docs/07` §1.3.
+Modules export `X_CONTROLLERS` / `X_PROVIDERS` arrays that are **spread into `AppModule`**, rather than
+declaring their own `@Module`. A nested module builds a second injector and therefore a second
+`pg.Pool` against the same database, and then needs a `forwardRef` back through `app.module.ts` to
+reach the shared guards. If you add a module, follow the existing pattern.
 
 ---
 
-_Prepared for VIMS ENTERPRISE. Sources analysed: the 151-module master sheet, the ₹343.75L / 2713 man-day FAMI CARE
-costed proposal, and the Aosta BackBone, MocDoc, SMART HMIS, SmartHospital India and PCS Prodoc brochures, plus
-2026 market and regulatory research._
+## The rule this codebase is built on
+
+**A rule worth having is a shape in the database, not a check in a service.**
+
+Triggers, CHECK constraints, partial unique indexes, GiST exclusions and `SECURITY DEFINER`
+functions — not validation in a controller. A check in a service protects only the callers that
+remember to ask, and the caller that forgets is always the batch job written eighteen months later.
+
+Some of what that looks like in practice:
+
+- **Double-entry is a deferred constraint.** A journal is built line by line and is unbalanced until
+  the last line lands, so `trg_a_journal_balances` is `DEFERRABLE INITIALLY DEFERRED` and fires at
+  COMMIT. An unbalanced journal is refused there and stores nothing.
+- **A commitment cannot exceed its budget line.** Refused by a trigger against
+  `revised − committed − actual`. Both halves matter: a control that watched only money already
+  spent would approve a year's spending in a week, because no purchase order has been paid yet.
+- **Clinical documents are append-only.** An "edit" is a new version with a reason. Finalised
+  documents are immutable and hash-chained.
+- **A derived value has no request field.** A corporate invoice reads its amounts from the bills it
+  names; there is no field for the caller to state a different number.
+- **Tenancy is row-level security**, not a `WHERE` clause somebody has to remember —
+  `hospital_id` / `branch_id` with `tenant_isolation` policies on all 1,264 tables across 15 schemas.
+
+Money is `numeric(14,2)` in the database and a **string** on the wire, because IEEE doubles lose
+paise. Totals are summed in SQL, never in JavaScript.
+
+---
+
+## Build status
+
+| Phase | Scope                                                                                | State       |
+| ----- | ------------------------------------------------------------------------------------ | ----------- |
+| 0     | Monorepo, CI, RLS, auth, RBAC, tenancy, numbering, audit, outbox, design system, PWA | Built       |
+| 1     | Patient master, ABHA M1, appointments, queue/token, TV boards, cash counter          | Built       |
+| 2     | OPD clinical — vitals, CPOE, e-Rx with rules CDSS, orders, timeline                  | Built       |
+| 3     | LIS and RIS/PACS — order → sample → result → validate → report, HL7/ASTM, Orthanc    | Built       |
+| 4     | Pharmacy and stores — drug master, dispensing, batches/FEFO, purchase, GRN           | Built       |
+| 5     | Billing and RCM — tariff engine, GST, discounts, refunds, packages, pre-auth         | Built       |
+| 6     | Emergency, trauma and ortho — ESI/START triage, MLC, fracture registry, implants     | Built       |
+| 7     | Inpatient — admission, beds, MAR, NEWS2, handover, OT, ICU, blood bank, CSSD         | Built       |
+| 8     | 20+ specialty consoles — dialysis, oncology, labour, ophtha, dental, telemedicine    | Built       |
+| 9A    | Finance — general ledger, statements and close, corporate AR, budget control         | Built       |
+| 9B–9E | HR/payroll, assets/biomedical, housekeeping/waste, quality/NABH/CRM                  | Not started |
+| 10    | Patient, corporate, TPA and referral portals; feedback; kiosk                        | Not started |
+| 11    | BI/MIS, report builder, FHIR APIs, ABDM M2/M3, NHCX                                  | Not started |
+| 12    | AI — CDSS+, voice notes, coding assist, predictive                                   | Not started |
+| 13    | React Native apps                                                                    | Not started |
+
+Phase-by-phase detail, including what was tested and what was deferred, is appended to
+[docs/PROGRESS.md](docs/PROGRESS.md) every session. Architectural decisions are numbered in
+[docs/DECISIONS.md](docs/DECISIONS.md) (272 entries) and the significant ones expanded in
+[docs/adr/](docs/adr/).
+
+---
+
+## Testing
+
+```bash
+pnpm typecheck                # tsc --noEmit, strict, across every workspace
+pnpm lint                     # eslint --max-warnings=0
+pnpm test                     # unit — 147 spec files
+pnpm test:integration         # 61 suites against real Postgres via Testcontainers
+pnpm test:safety              # the clinical safety suite
+pnpm test:e2e                 # 12 Playwright golden journeys
+```
+
+Integration tests start a real PostgreSQL container and replay all 70 migrations — they are slow and
+they are the ones that catch constraint drift. There is no mocked database anywhere in this
+repository, deliberately: the rules live in the database, so a test against a mock tests nothing.
+
+Three further checks run in CI and are worth running before a push:
+
+```bash
+pnpm permissions:check        # every @Permission key exists in the catalogue
+pnpm tokens:check             # no raw hex colours outside the token files
+pnpm charts:check             # charts use the approved palette
+```
+
+---
+
+## Known gaps
+
+Stated plainly, because a README that only lists what works is not much use to whoever picks this up
+next.
+
+- **k6 load scripts have never been run.** Two scripts exist in [perf/](perf/) and k6 is not
+  installed. The performance budgets in [docs/07](docs/07-performance-scalability.md) are therefore
+  design targets, not measurements.
+- **The emergency red-flag list in the public assistant needs clinical sign-off.** It was written by
+  an engineer, it is hard-coded, and it should be configurable master data reviewed by an emergency
+  physician before any public deployment.
+- **Blocked on credentials, not on code:** ABDM M2/M3 and NHCX need sandbox credentials; the landing
+  page assistant needs an LLM key (`ASSISTANT_LLM_BASE_URL` / `ASSISTANT_LLM_API_KEY`) and falls back
+  to a scripted flow without one.
+- **Capex requests and budget forecasting** are specified in NC-022 but not built — they need the
+  approval matrices from 9C and the spend data from 9B/9C respectively. The commitment machinery
+  already accepts `source_kind = 'capex_request'`.
+- **GRN → realised commitment** is not wired to the event. The route exists and is tested; nothing
+  calls it yet.
+
+---
+
+## Specifications
+
+`docs/` is the source of truth. When [CLAUDE.md](CLAUDE.md) and a `docs/` file disagree, the more
+specific `docs/` file wins.
+
+| Path                                                                         | What it is                                                                                    |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| [CLAUDE.md](CLAUDE.md)                                                       | Master system prompt — product definition, locked stack, standards, Definition of Done        |
+| [docs/01-architecture.md](docs/01-architecture.md)                           | Request lifecycle, module boundaries, events, real-time, offline, tenancy                     |
+| [docs/02-tech-stack-decision.md](docs/02-tech-stack-decision.md)             | Every technology choice with reasoning, including why PostgreSQL and not Supabase-as-platform |
+| [docs/03-database-conventions.md](docs/03-database-conventions.md)           | Schemas, RLS, numbering, audit, outbox, partitioning, migration rules                         |
+| [docs/04-security-compliance.md](docs/04-security-compliance.md)             | Regulatory map, security controls, clinical safety engineering, per-module checklist          |
+| [docs/05-rbac-roles-and-logins.md](docs/05-rbac-roles-and-logins.md)         | 64 role templates, login model per user type, segregation of duties                           |
+| [docs/06-ui-ux-design-system.md](docs/06-ui-ux-design-system.md)             | Both themes with real tokens, 44 clinical components, keyboard/barcode standards, i18n        |
+| [docs/07-performance-scalability.md](docs/07-performance-scalability.md)     | Workload model for 2000 beds, budgets, scaling plan, SLOs                                     |
+| [docs/08-integration-catalogue.md](docs/08-integration-catalogue.md)         | ~75 external integrations with protocol, failure mode, retry, fallback                        |
+| [docs/09-quality-gates-and-testing.md](docs/09-quality-gates-and-testing.md) | Test pyramid, 32 e2e golden journeys, data-integrity invariants, CI stages                    |
+| [docs/10-deployment-devops.md](docs/10-deployment-devops.md)                 | Cloud and on-prem topologies, sizing by bed count, backups, DR, runbook                       |
+| [docs/11-market-analysis.md](docs/11-market-analysis.md)                     | Market, competitors, differentiation, ROI model, pricing, GTM                                 |
+| [docs/12-module-index.md](docs/12-module-index.md)                           | The module registry — 177 modules with IDs, phases, priorities                                |
+| [docs/13-data-migration-and-golive.md](docs/13-data-migration-and-golive.md) | Migration methodology, cutover, training, hypercare                                           |
+| [docs/modules/](docs/modules/)                                               | 178 module specifications, 16 sections each                                                   |
+| [docs/prompts/](docs/prompts/)                                               | 14 phase build prompts — one per session                                                      |
+| [docs/PROGRESS.md](docs/PROGRESS.md), [docs/DECISIONS.md](docs/DECISIONS.md) | Living state of the build                                                                     |
+
+Every module spec ends with **§16 Open Questions for the Hospital**. The commercially significant
+ones still open: the drug-knowledge-base licence (CIMS / First Databank / in-house) in `EN-029`, the
+SMS/WhatsApp and payment gateway vendors, the ABDM sandbox credentials and STQC audit slot, whether
+finance runs as a full GL or exports to Tally, and the audit-log retention decision in
+[docs/07](docs/07-performance-scalability.md) §1.3.
+
+---
+
+## Contributing
+
+Conventional commits **with a scope** — commitlint rejects a bare `chore:`, so write `chore(repo):`.
+Husky runs Prettier and ESLint on staged files.
+
+Before you open a PR: `pnpm lint && pnpm typecheck && pnpm test`, and run the integration suite for
+anything that touches the database.
+
+---
+
+_© VIMS ENTERPRISE. Sources analysed during specification: the 151-module master sheet, the
+₹343.75L / 2713 man-day FAMI CARE costed proposal, and the Aosta BackBone, MocDoc, SMART HMIS,
+SmartHospital India and PCS Prodoc brochures, plus 2026 market and regulatory research._
