@@ -99,6 +99,9 @@ model FinCostCentre {
   @@unique([hospitalId, code])
   @@index([hospitalId, branchId, active])
   @@index([hospitalId, parentId])
+  /// NC-009: journal lines carry the cost centre a posting belongs to.
+  journalLines FinJournalLine[]
+
   @@map("cost_centres")
   @@schema("finance")
 }

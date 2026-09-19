@@ -1,0 +1,242 @@
+/// NC-009 §3.1–3.2 · The general ledger.
+///
+/// See `migrations/20261001100000_nc009_general_ledger/migration.sql` for the
+/// rule this exists to keep: a journal that does not balance cannot be
+/// committed, enforced by a `DEFERRABLE INITIALLY DEFERRED` constraint trigger
+/// rather than by any code in `services/api`.
+///
+/// `finance.cost_centres` is NOT modelled here — Phase 4 already owns it.
+
+/// The entity whose books these are. A group runs one per registered company.
+model FinLegalEntity {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  code       String  @db.VarChar(24)
+  name       String  @db.VarChar(200)
+  /// Checked against `stateCode`: a GSTIN encodes its own state in the first
+  /// two characters, and a mismatch computes the wrong place of supply.
+  gstin      String? @db.VarChar(15)
+  pan        String? @db.VarChar(10)
+  cin        String? @db.VarChar(21)
+  stateCode  String? @map("state_code") @db.VarChar(2)
+  baseCurrency String @default("INR") @map("base_currency") @db.Char(3)
+  active     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  books FinBook[]
+
+  @@unique([hospitalId, code], map: "uq_legal_entity_code")
+  @@map("legal_entities")
+  @@schema("finance")
+}
+
+/// One set of books.
+model FinBook {
+  id            String  @id @db.Uuid
+  hospitalId    String  @map("hospital_id") @db.Uuid
+  branchId      String? @map("branch_id") @db.Uuid
+  legalEntityId String  @map("legal_entity_id") @db.Uuid
+  code          String  @db.VarChar(24)
+  name          String  @db.VarChar(200)
+  /// `full_ledger` — this is the general ledger.
+  /// `sub_ledger`  — an incumbent Tally/SAP is, and this reconciles to it.
+  /// NC-009 §3.10 requires both to work; the sub-ledger path must still
+  /// balance internally or a reconciliation difference cannot be told from a bug.
+  mode          String  @default("full_ledger") @db.VarChar(16)
+  baseCurrency  String  @default("INR") @map("base_currency") @db.Char(3)
+  active        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  legalEntity  FinLegalEntity  @relation(fields: [legalEntityId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  fiscalYears  FinFiscalYear[]
+  journals     FinJournal[]
+
+  @@unique([hospitalId, code], map: "uq_book_code")
+  @@map("books")
+  @@schema("finance")
+}
+
+/// April–March in India, which is why the calendar is data.
+model FinFiscalYear {
+  id         String   @id @db.Uuid
+  hospitalId String   @map("hospital_id") @db.Uuid
+  bookId     String   @map("book_id") @db.Uuid
+  code       String   @db.VarChar(16)
+  startsOn   DateTime @map("starts_on") @db.Date
+  endsOn     DateTime @map("ends_on") @db.Date
+  status     String   @default("open") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  book    FinBook           @relation(fields: [bookId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  periods FinFiscalPeriod[]
+
+  @@unique([bookId, code], map: "uq_fiscal_year_code")
+  @@map("fiscal_years")
+  @@schema("finance")
+}
+
+/// The month a journal lands in, and the lock that stops it landing there once
+/// the books are closed. A GiST exclusion stops two periods covering one day.
+model FinFiscalPeriod {
+  id           String   @id @db.Uuid
+  hospitalId   String   @map("hospital_id") @db.Uuid
+  bookId       String   @map("book_id") @db.Uuid
+  fiscalYearId String   @map("fiscal_year_id") @db.Uuid
+  periodNo     Int      @map("period_no") @db.SmallInt
+  startsOn     DateTime @map("starts_on") @db.Date
+  endsOn       DateTime @map("ends_on") @db.Date
+  /// open → closed (reversible by a controller) → locked (final; what a filed
+  /// return rests on).
+  status       String   @default("open") @db.VarChar(16)
+  closedBy     String?  @map("closed_by") @db.Uuid
+  closedAt     DateTime? @map("closed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  fiscalYear FinFiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  journals   FinJournal[]
+
+  @@unique([fiscalYearId, periodNo], map: "uq_fiscal_period_no")
+  @@index([bookId, startsOn, endsOn], map: "fiscal_periods_range_idx")
+  @@map("fiscal_periods")
+  @@schema("finance")
+}
+
+/// The chart of accounts. `normalBalance` is derived from `accountType` by a
+/// trigger, never typed: there is one right answer per type, and a wrong one
+/// produces a balance sheet no downstream constraint can catch.
+model FinAccount {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  bookId     String  @map("book_id") @db.Uuid
+  parentId   String? @map("parent_id") @db.Uuid
+  code       String  @db.VarChar(32)
+  name       String  @db.VarChar(200)
+  /// asset | liability | equity | income | expense
+  accountType String @map("account_type") @db.VarChar(16)
+  /// DR | CR — derived, do not set.
+  normalBalance String @default("DR") @map("normal_balance") @db.Char(2)
+  /// A heading. Postings go to leaves only, so a balance is the sum of its
+  /// children and never partly its own.
+  isGroup    Boolean @default(false) @map("is_group")
+  isBankOrCash Boolean @default(false) @map("is_bank_or_cash")
+  requiresCostCentre Boolean @default(false) @map("requires_cost_centre")
+  active     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  parent   FinAccount?  @relation("AccountTree", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  children FinAccount[] @relation("AccountTree")
+  lines    FinJournalLine[]
+  rules    FinPostingRule[]
+
+  @@unique([bookId, code], map: "uq_account_code")
+  @@index([bookId, parentId], map: "accounts_tree_idx")
+  @@map("accounts")
+  @@schema("finance")
+}
+
+/// A journal. Immutable once posted; corrected only by a counter-entry.
+model FinJournal {
+  id             String   @id @db.Uuid
+  hospitalId     String   @map("hospital_id") @db.Uuid
+  branchId       String?  @map("branch_id") @db.Uuid
+  bookId         String   @map("book_id") @db.Uuid
+  fiscalPeriodId String   @map("fiscal_period_id") @db.Uuid
+  journalNo      String?  @map("journal_no") @db.VarChar(32)
+  journalDate    DateTime @map("journal_date") @db.Date
+  /// automatic | manual | reversal | opening | closing
+  kind           String   @default("automatic") @db.VarChar(16)
+  narration      String?  @db.VarChar(500)
+  /// An automatic journal must name all three; a unique index on them is what
+  /// makes an at-least-once event delivery safe to replay.
+  sourceModule   String?  @map("source_module") @db.VarChar(40)
+  sourceEvent    String?  @map("source_event") @db.VarChar(80)
+  sourceRefId    String?  @map("source_ref_id") @db.Uuid
+  reversesJournalId String? @map("reverses_journal_id") @db.Uuid
+  status         String   @default("posted") @db.VarChar(16)
+  postedBy       String?  @map("posted_by") @db.Uuid
+  postedAt       DateTime @default(now()) @map("posted_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  book         FinBook         @relation(fields: [bookId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  fiscalPeriod FinFiscalPeriod @relation(fields: [fiscalPeriodId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  reverses     FinJournal?     @relation("JournalReversal", fields: [reversesJournalId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  reversedBy   FinJournal[]    @relation("JournalReversal")
+  lines        FinJournalLine[]
+
+  @@index([bookId, journalDate], map: "journals_book_date_idx")
+  @@index([fiscalPeriodId], map: "journals_period_idx")
+  @@map("journals")
+  @@schema("finance")
+}
+
+/// One leg. Debit and credit are separate columns because that is how an
+/// accountant reads a journal and how every export is shaped; a CHECK makes
+/// exactly one of them non-zero.
+model FinJournalLine {
+  id           String  @id @db.Uuid
+  hospitalId   String  @map("hospital_id") @db.Uuid
+  journalId    String  @map("journal_id") @db.Uuid
+  lineNo       Int     @map("line_no") @db.SmallInt
+  accountId    String  @map("account_id") @db.Uuid
+  costCentreId String? @map("cost_centre_id") @db.Uuid
+  debit        Decimal @default(0) @db.Decimal(16, 2)
+  credit       Decimal @default(0) @db.Decimal(16, 2)
+  narration    String? @db.VarChar(500)
+  partyKind    String? @map("party_kind") @db.VarChar(24)
+  partyId      String? @map("party_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  journal FinJournal @relation(fields: [journalId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  account FinAccount @relation(fields: [accountId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  /// Phase 4's table. Modelled as a relation rather than a bare column so the
+  /// foreign key the migration creates is visible to Prisma and does not read
+  /// as drift.
+  costCentre FinCostCentre? @relation(fields: [costCentreId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([journalId, lineNo], map: "uq_journal_line_no")
+  @@index([accountId], map: "journal_lines_account_idx")
+  @@map("journal_lines")
+  @@schema("finance")
+}
+
+/// Event → journal. A map rather than a `switch`, so a controller can decide
+/// which account service revenue lands in without an engineering ticket.
+model FinPostingRule {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  bookId     String  @map("book_id") @db.Uuid
+  eventType  String  @map("event_type") @db.VarChar(80)
+  legNo      Int     @map("leg_no") @db.SmallInt
+  side       String  @db.Char(2)
+  accountId  String  @map("account_id") @db.Uuid
+  /// The event-payload field this leg is measured from. The poster refuses a
+  /// key the event does not carry rather than quietly posting zero.
+  amountKey  String  @map("amount_key") @db.VarChar(40)
+  narrationTemplate String? @map("narration_template") @db.VarChar(200)
+  active     Boolean @default(true)
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account FinAccount @relation(fields: [accountId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([bookId, eventType, legNo, effectiveFrom], map: "uq_posting_rule_leg")
+  @@index([bookId, eventType, active], map: "posting_rules_lookup_idx")
+  @@map("posting_rules")
+  @@schema("finance")
+}
