@@ -1,0 +1,157 @@
+/// NC-012 + RC-005 · Corporate credit, consolidated invoices, and collections.
+///
+/// See `migrations/20261005100000_nc012_rc005_corporate_ar/migration.sql`.
+/// Ageing is a view, not a column: a stored bucket is right on the day it is
+/// written and wrong every day afterwards.
+
+/// A company the hospital extends credit to. One per `billing.ins_payers` row.
+model FinCorporateAccount {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  payerId    String  @map("payer_id") @db.Uuid
+  code       String  @db.VarChar(32)
+  name       String  @db.VarChar(200)
+  /// Zero means cash-only. There is deliberately no null: "unlimited credit"
+  /// must not be something a blank field decides.
+  creditLimit Decimal @default(0) @map("credit_limit") @db.Decimal(16, 2)
+  paymentTermsDays Int @default(30) @map("payment_terms_days") @db.SmallInt
+  /// Stops new invoices. Never read by anything clinical.
+  onHold     Boolean @default(false) @map("on_hold")
+  holdReason String? @map("hold_reason") @db.VarChar(300)
+  tdsApplicable Boolean @default(true) @map("tds_applicable")
+  active     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  invoices FinCorporateInvoice[]
+
+  @@unique([hospitalId, code], map: "uq_corporate_account_code")
+  @@unique([hospitalId, payerId], map: "uq_corporate_account_payer")
+  @@map("corporate_accounts")
+  @@schema("finance")
+}
+
+/// A consolidated invoice: many patient bills, one document the client pays.
+model FinCorporateInvoice {
+  id         String   @id @db.Uuid
+  hospitalId String   @map("hospital_id") @db.Uuid
+  branchId   String?  @map("branch_id") @db.Uuid
+  accountId  String   @map("account_id") @db.Uuid
+  invoiceNo  String   @map("invoice_no") @db.VarChar(40)
+  invoiceDate DateTime @map("invoice_date") @db.Date
+  dueOn      DateTime @map("due_on") @db.Date
+  periodFrom DateTime? @map("period_from") @db.Date
+  periodTo   DateTime? @map("period_to") @db.Date
+
+  grossAmount Decimal @default(0) @map("gross_amount") @db.Decimal(16, 2)
+  taxAmount   Decimal @default(0) @map("tax_amount") @db.Decimal(16, 2)
+  netAmount   Decimal @default(0) @map("net_amount") @db.Decimal(16, 2)
+  paidAmount  Decimal @default(0) @map("paid_amount") @db.Decimal(16, 2)
+  /// Tax the client deducted at source. Not a shortfall — the hospital claims
+  /// it — so an outstanding figure that ignores it chases money already had.
+  tdsDeducted Decimal @default(0) @map("tds_deducted") @db.Decimal(16, 2)
+  /// Derived by a trigger from `ar_write_offs`; do not set.
+  writtenOff  Decimal @default(0) @map("written_off") @db.Decimal(16, 2)
+
+  /// Derived from the money by a trigger, except for the three that are
+  /// decisions: cancelled, disputed, written_off.
+  status     String  @default("open") @db.VarChar(16)
+  disputedReason String? @map("disputed_reason") @db.VarChar(500)
+  cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelledBy String?  @map("cancelled_by") @db.Uuid
+  cancelReason String? @map("cancel_reason") @db.VarChar(300)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  account   FinCorporateAccount    @relation(fields: [accountId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  lines     FinCorporateInvoiceLine[]
+  followups FinArFollowup[]
+  writeOffs FinArWriteOff[]
+
+  @@unique([hospitalId, invoiceNo], map: "uq_corporate_invoice_no")
+  @@index([hospitalId, status, dueOn], map: "corporate_invoices_ageing_idx")
+  @@map("corporate_invoices")
+  @@schema("finance")
+}
+
+/// One patient bill on a consolidated invoice. A partial unique index on
+/// `billId` means a bill reaches a corporate invoice exactly once.
+model FinCorporateInvoiceLine {
+  id          String  @id @db.Uuid
+  hospitalId  String  @map("hospital_id") @db.Uuid
+  invoiceId   String  @map("invoice_id") @db.Uuid
+  billId      String  @map("bill_id") @db.Uuid
+  patientId   String? @map("patient_id") @db.Uuid
+  employeeRef String? @map("employee_ref") @db.VarChar(64)
+  billNo      String? @map("bill_no") @db.VarChar(40)
+  serviceDate DateTime? @map("service_date") @db.Date
+
+  grossAmount Decimal @default(0) @map("gross_amount") @db.Decimal(16, 2)
+  taxAmount   Decimal @default(0) @map("tax_amount") @db.Decimal(16, 2)
+  netAmount   Decimal @default(0) @map("net_amount") @db.Decimal(16, 2)
+
+  /// Disputing the line keeps the rest of the invoice collectable.
+  disputed      Boolean @default(false)
+  disputeReason String? @map("dispute_reason") @db.VarChar(300)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invoice FinCorporateInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([invoiceId], map: "corporate_invoice_lines_invoice_idx")
+  @@index([billId], map: "corporate_invoice_lines_bill_idx")
+  @@map("corporate_invoice_lines")
+  @@schema("finance")
+}
+
+/// Every attempt to collect. Append-only: a log that can be tidied is
+/// worthless in the dispute it exists for.
+model FinArFollowup {
+  id         String   @id @db.Uuid
+  hospitalId String   @map("hospital_id") @db.Uuid
+  invoiceId  String   @map("invoice_id") @db.Uuid
+  at         DateTime @default(now()) @db.Timestamptz(6)
+  byUserId   String?  @map("by_user_id") @db.Uuid
+  /// call | email | letter | visit | legal_notice | agency_referral
+  channel    String   @db.VarChar(24)
+  /// Stored, not derived at read time: the ladder can be reconfigured and the
+  /// history must still say what stage this attempt was.
+  dunningStage Int    @default(0) @map("dunning_stage") @db.SmallInt
+  /// no_answer | promised | disputed | paid | refused | escalated
+  outcome    String   @db.VarChar(24)
+  promisedOn DateTime? @map("promised_on") @db.Date
+  promisedAmount Decimal? @map("promised_amount") @db.Decimal(16, 2)
+  note       String?  @db.VarChar(1000)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invoice FinCorporateInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([invoiceId, at], map: "ar_followups_invoice_idx")
+  @@map("ar_followups")
+  @@schema("finance")
+}
+
+/// Bad debt, and the second person who agreed to it. `approvedBy` is NOT NULL
+/// and a CHECK refuses the case where it equals `requestedBy`.
+model FinArWriteOff {
+  id          String   @id @db.Uuid
+  hospitalId  String   @map("hospital_id") @db.Uuid
+  invoiceId   String   @map("invoice_id") @db.Uuid
+  amount      Decimal  @db.Decimal(16, 2)
+  reason      String   @db.VarChar(500)
+  requestedBy String   @map("requested_by") @db.Uuid
+  approvedBy  String   @map("approved_by") @db.Uuid
+  approvedAt  DateTime @default(now()) @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invoice FinCorporateInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([invoiceId], map: "ar_write_offs_invoice_idx")
+  @@map("ar_write_offs")
+  @@schema("finance")
+}
