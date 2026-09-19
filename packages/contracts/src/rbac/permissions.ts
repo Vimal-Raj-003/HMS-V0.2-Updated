@@ -12277,6 +12277,75 @@ const NC012 = group('NC-012', 9, [
   ),
 ]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NC-022 — Budgets and commitment control
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Setting a budget and moving one are separated because they are different
+// acts: `budget.manage` draws up the year, `budget.virement` reallocates it
+// mid-year, and the second is where one department's money becomes another's.
+// Like the write-off above, the virement's second person is a CHECK constraint
+// (`approved_by <> requested_by`) rather than `requiresSecondPerson`, which
+// would make the key unusable as a route decorator.
+//
+// There is deliberately no `budget.override` key. A commitment that exceeds
+// its line is refused by a trigger, and an override permission would be a way
+// to make the refusal optional — which is the same as not having it.
+const NC022 = group('NC-022', 9, [
+  p(
+    'finance.budget.read',
+    'fin_budget_line',
+    'read',
+    'financial',
+    'low',
+    'See budget cycles, lines, what is committed against them and what is left.',
+  ),
+  p(
+    'finance.budget.manage',
+    'fin_budget_cycle',
+    'manage',
+    'financial',
+    'high',
+    'Open a budget cycle and set its lines. The cycle decides how much a department may spend before the system stops it.',
+    { requiresReason: true },
+  ),
+  p(
+    'finance.budget.revise',
+    'fin_budget_revision',
+    'create',
+    'financial',
+    'high',
+    'Raise or lower a single budget line, with a reason. The history is append-only.',
+    { requiresReason: true },
+  ),
+  p(
+    'finance.budget.virement',
+    'fin_budget_virement',
+    'approve',
+    'financial',
+    'critical',
+    'Move budget from one line to another. The legs must net to zero, operating and capital are not interchangeable, and the approver may not be the person who requested it.',
+    { requiresReason: true, sensitiveGrant: true },
+  ),
+  p(
+    'finance.budget.commit',
+    'fin_budget_commitment',
+    'create',
+    'financial',
+    'medium',
+    'Reserve budget for an indent or purchase order. Refused by the database if the line has no room left.',
+  ),
+  p(
+    'finance.budget.release',
+    'fin_budget_commitment',
+    'update',
+    'financial',
+    'medium',
+    'Release a reservation when the order it held money for is cancelled or superseded.',
+    { requiresReason: true },
+  ),
+]);
+
 export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.freeze([
   ...EN007,
   ...EN024,
@@ -12398,6 +12467,7 @@ export const PERMISSION_CATALOGUE: readonly PermissionDefinition[] = Object.free
   ...NC033,
   ...NC009,
   ...NC012,
+  ...NC022,
 ]);
 
 const byKey = new Map<string, PermissionDefinition>(PERMISSION_CATALOGUE.map((d) => [d.key, d]));

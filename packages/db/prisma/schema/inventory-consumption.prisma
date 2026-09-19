@@ -101,6 +101,9 @@ model FinCostCentre {
   @@index([hospitalId, parentId])
   /// NC-009: journal lines carry the cost centre a posting belongs to.
   journalLines FinJournalLine[]
+  /// NC-022: and a budget is set per cost centre, which is what makes a
+  /// department's overspend that department's.
+  budgetLines  FinBudgetLine[]
 
   @@map("cost_centres")
   @@schema("finance")

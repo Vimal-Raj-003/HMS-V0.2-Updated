@@ -22,8 +22,11 @@
 //    index, and the reason a line failed is a column rather than a recomputation
 //    that may disagree with what the buyer saw.
 //
-// Budget checking (NC-022) is a Phase-9 module; `budget_line_ref` is the hook
-// `phase-04 §4.3` asks to be left, and nothing in this phase reads it.
+// Budget checking arrived in Phase 9 (NC-022) and closed the hook this phase
+// left: `budget_line_id` resolves to a real `finance.budget_lines` row, and a
+// commitment against it is refused by a trigger if it would take the line past
+// `revised − committed − actual`. `budget_line_ref` is the old free-text field,
+// kept so rows written before Phase 9 keep whatever the buyer typed.
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum PurUrgency {
@@ -156,8 +159,12 @@ model PurIndent {
   storeId       String  @map("store_id") @db.Uuid
   departmentKey String? @map("department_key") @db.Uuid
   costCentreId  String? @map("cost_centre_id") @db.Uuid
-  /// NC-022 hook. Left deliberately un-enforced in Phase 4.
+  /// Superseded by `budgetLineId`. Free text, kept for rows written before
+  /// Phase 9; nothing reads it.
   budgetLineRef String? @map("budget_line_ref") @db.VarChar(64)
+  /// NC-022. The budget this indent spends against. Committing to it is
+  /// refused by a trigger once the line has no room left.
+  budgetLineId  String? @map("budget_line_id") @db.Uuid
   urgency       PurUrgency @default(routine)
   requiredBy    DateTime? @map("required_by") @db.Date
   justification String? @db.Text
@@ -178,11 +185,13 @@ model PurIndent {
   version   Int      @default(0)
 
   lines PurIndentLine[]
+  budgetLine FinBudgetLine? @relation("IndentBudget", fields: [budgetLineId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@unique([hospitalId, indentNo])
   @@index([hospitalId, branchId, status, createdAt])
   @@index([hospitalId, storeId, status])
   @@index([hospitalId, source, status])
+  @@index([budgetLineId], map: "pur_indents_budget_line_idx")
   @@map("pur_indents")
   @@schema("inventory")
 }
@@ -434,7 +443,12 @@ model PurPurchaseOrder {
   rateContractId String? @map("rate_contract_id") @db.Uuid
   rfqId         String? @map("rfq_id") @db.Uuid
   indentIds     String[] @default([]) @map("indent_ids") @db.Uuid
+  /// Superseded by `budgetLineId`. Free text, kept for rows written before
+  /// Phase 9; nothing reads it.
   budgetLineRef String? @map("budget_line_ref") @db.VarChar(64)
+  /// NC-022. The budget this order spends against. Committing to it is
+  /// refused by a trigger once the line has no room left.
+  budgetLineId  String? @map("budget_line_id") @db.Uuid
   status        PurPoStatus @default(draft)
   approvalInstanceId String? @map("approval_instance_id") @db.Uuid
   approvedBy    String[] @default([]) @map("approved_by") @db.Uuid
@@ -455,12 +469,14 @@ model PurPurchaseOrder {
   lines      PurPoLine[]
   amendments PurPoAmendment[]
   grns       PurGrn[]
+  budgetLine FinBudgetLine? @relation("PoBudget", fields: [budgetLineId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@unique([hospitalId, poNo, poVersion])
   @@index([hospitalId, branchId, status, createdAt])
   @@index([hospitalId, vendorId, status])
   @@index([hospitalId, shipToStoreId, status])
   @@index([hospitalId, expectedDelivery, status])
+  @@index([budgetLineId], map: "pur_purchase_orders_budget_line_idx")
   @@map("pur_purchase_orders")
   @@schema("inventory")
 }

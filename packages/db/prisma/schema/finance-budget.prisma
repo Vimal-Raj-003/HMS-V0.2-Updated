@@ -1,0 +1,151 @@
+/// NC-022 · Budgets, and the commitment that cannot exceed one.
+///
+/// See `migrations/20261007100000_nc022_budget_commitment_control/migration.sql`.
+/// `available` is not modelled, because it is not stored: a budget's remaining
+/// balance is `revised − committed − actual`, and a cached copy is wrong the
+/// moment a purchase order is raised in another session. Read
+/// `finance.v_budget_position` for it.
+
+/// A budgeting period — usually the financial year, occasionally a project.
+model FinBudgetCycle {
+  id           String    @id @db.Uuid
+  hospitalId   String    @map("hospital_id") @db.Uuid
+  bookId       String    @map("book_id") @db.Uuid
+  fiscalYearId String?   @map("fiscal_year_id") @db.Uuid
+  code         String    @db.VarChar(24)
+  name         String    @db.VarChar(200)
+  startsOn     DateTime  @map("starts_on") @db.Date
+  endsOn       DateTime  @map("ends_on") @db.Date
+  /// draft → active → closed. Only `active` accepts commitments; a draft is
+  /// still being argued over and a closed one is history.
+  status       String    @default("draft") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  book      FinBook @relation(fields: [bookId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  lines     FinBudgetLine[]
+  virements FinBudgetVirement[]
+
+  @@unique([bookId, code], map: "uq_budget_cycle_code")
+  @@map("budget_cycles")
+  @@schema("finance")
+}
+
+/// One line of a budget: this cost centre, this account, this much.
+model FinBudgetLine {
+  id           String @id @db.Uuid
+  hospitalId   String @map("hospital_id") @db.Uuid
+  cycleId      String @map("cycle_id") @db.Uuid
+  costCentreId String @map("cost_centre_id") @db.Uuid
+  accountId    String @map("account_id") @db.Uuid
+  code         String @db.VarChar(64)
+  /// `operating` pays for the year's running; `capital` buys something that
+  /// lasts. A virement between the two is refused — that is a board decision.
+  budgetKind   String @default("operating") @map("budget_kind") @db.VarChar(16)
+
+  /// Survives every revision, so variance can ask what was *planned*.
+  originalAmount  Decimal @default(0) @map("original_amount") @db.Decimal(16, 2)
+  /// Moved only by a `FinBudgetRevision`; a trigger keeps the two in step.
+  revisedAmount   Decimal @default(0) @map("revised_amount") @db.Decimal(16, 2)
+  /// Derived from the open commitments by a trigger. Do not set.
+  committedAmount Decimal @default(0) @map("committed_amount") @db.Decimal(16, 2)
+  actualAmount    Decimal @default(0) @map("actual_amount") @db.Decimal(16, 2)
+
+  /// Worth a warning past this much used. It blocks nothing — the hard limit
+  /// does the blocking.
+  alertThresholdPct Int     @default(80) @map("alert_threshold_pct") @db.SmallInt
+  active            Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  cycle       FinBudgetCycle       @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  costCentre  FinCostCentre        @relation(fields: [costCentreId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  account     FinAccount           @relation(fields: [accountId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  revisions   FinBudgetRevision[]
+  commitments FinBudgetCommitment[]
+  /// The Phase 4 hook, closed: procurement documents now point at a real line.
+  indents        PurIndent[]        @relation("IndentBudget")
+  purchaseOrders PurPurchaseOrder[] @relation("PoBudget")
+
+  @@unique([cycleId, code], map: "uq_budget_line_code")
+  @@unique([cycleId, costCentreId, accountId, budgetKind], map: "uq_budget_line_dimensions")
+  @@map("budget_lines")
+  @@schema("finance")
+}
+
+/// Every change to a line's amount, and why. Append-only: a trigger refuses
+/// UPDATE and DELETE outright.
+model FinBudgetRevision {
+  id         String   @id @db.Uuid
+  hospitalId String   @map("hospital_id") @db.Uuid
+  lineId     String   @map("line_id") @db.Uuid
+  revisionNo Int      @map("revision_no") @db.SmallInt
+  fromAmount Decimal  @map("from_amount") @db.Decimal(16, 2)
+  toAmount   Decimal  @map("to_amount") @db.Decimal(16, 2)
+  reason     String   @db.VarChar(500)
+  approvedBy String   @map("approved_by") @db.Uuid
+  approvedAt DateTime @default(now()) @map("approved_at") @db.Timestamptz(6)
+  /// Set when this revision is one leg of a virement.
+  virementId String?  @map("virement_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  line     FinBudgetLine      @relation(fields: [lineId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  virement FinBudgetVirement? @relation(fields: [virementId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([lineId, revisionNo], map: "uq_budget_revision_no")
+  @@index([virementId], map: "budget_revisions_virement_idx")
+  @@map("budget_revisions")
+  @@schema("finance")
+}
+
+/// A transfer of budget between lines. Its legs are `FinBudgetRevision` rows,
+/// and a deferred constraint refuses the transaction unless they net to zero.
+model FinBudgetVirement {
+  id          String   @id @db.Uuid
+  hospitalId  String   @map("hospital_id") @db.Uuid
+  cycleId     String   @map("cycle_id") @db.Uuid
+  reference   String?  @db.VarChar(40)
+  reason      String   @db.VarChar(500)
+  requestedBy String   @map("requested_by") @db.Uuid
+  /// Must differ from `requestedBy`: moving money between departments is the
+  /// moment somebody's budget shrinks.
+  approvedBy  String   @map("approved_by") @db.Uuid
+  approvedAt  DateTime @default(now()) @map("approved_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  cycle FinBudgetCycle      @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  legs  FinBudgetRevision[]
+
+  @@index([cycleId], map: "budget_virements_cycle_idx")
+  @@map("budget_virements")
+  @@schema("finance")
+}
+
+/// Money promised and not yet spent. An indent reserves it, a PO firms the
+/// reservation up, a GRN turns it into an actual and releases the commitment.
+model FinBudgetCommitment {
+  id         String  @id @db.Uuid
+  hospitalId String  @map("hospital_id") @db.Uuid
+  lineId     String  @map("line_id") @db.Uuid
+  sourceKind String  @map("source_kind") @db.VarChar(24)
+  sourceId   String  @map("source_id") @db.Uuid
+  sourceRef  String? @map("source_ref") @db.VarChar(64)
+  amount     Decimal @db.Decimal(16, 2)
+  /// open → released (superseded or cancelled) | realised (became an actual)
+  status     String  @default("open") @db.VarChar(16)
+  releasedReason String? @map("released_reason") @db.VarChar(300)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  line FinBudgetLine @relation(fields: [lineId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([lineId, status], map: "budget_commitments_line_idx")
+  @@map("budget_commitments")
+  @@schema("finance")
+}

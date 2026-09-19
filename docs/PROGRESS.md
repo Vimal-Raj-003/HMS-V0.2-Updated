@@ -401,6 +401,94 @@ been hiding.
 **Gates** — 20/20 packages typecheck, lint and test (2,849 tests); 506 routes
 across 54 controllers; catalogue 922 keys; event registry 677.
 
+### 2026-10-07 · Phase 9A · The books, what companies owe, and the budget that says no
+
+Phase 9's first arc, in five steps, all of which end at the same place: a rule
+worth having is a shape in the database, not a check in a service.
+
+**Built**
+
+- **9A.1–9A.2 · NC-009, the general ledger.** Legal entities, books, fiscal
+  years and periods, a 37-account Indian chart, journals and journal lines.
+  The signature rule is a `DEFERRABLE INITIALLY DEFERRED` constraint trigger:
+  a journal is built line by line and is unbalanced until the last one lands,
+  so the balance check belongs at COMMIT. An unbalanced journal is refused
+  there and stores nothing.
+- **9A.3 · Statements and period close.** `v_profit_and_loss`,
+  `v_balance_sheet`, and two triggers — a period cannot close while anything
+  is unsettled, and a locked period stays locked.
+- **9A.4 · NC-012 + RC-005, corporate credit and collections.** Credit limits
+  that refuse the invoice rather than warning about it, consolidated invoices
+  whose amounts come from the bills they name, an append-only follow-up log, a
+  dunning ladder stamped onto each attempt, and write-offs that cannot approve
+  themselves.
+- **9A.5 · NC-022, budgets and commitment control** — and with it the hook
+  Phase 4 deliberately left open. `pur_indents.budget_line_ref` and
+  `pur_purchase_orders.budget_line_ref` had been free-text `VARCHAR(64)` since
+  August, pointing at nothing, beside an `estimated_value` nobody compared to
+  anything. Both tables now carry `budget_line_id` with a real foreign key, and
+  a commitment against a line is refused by a trigger when it would take that
+  line past `revised − committed − actual`. Cycles, lines, an append-only
+  revision history, and virements whose legs are summed at COMMIT and refused
+  unless they net to zero.
+
+**Tested**
+
+Every rule was exercised against a live database before it was believed, not
+asserted from the migration text:
+
+- An unbalanced journal refused at COMMIT with 0 rows stored; trial balance
+  foots to 0.00; balance sheet `out_by = 0.00`; a ₹693 bill posted as
+  DR 693 / CR 675 / CR CGST 9 / CR SGST 9.
+- A credit limit refused ₹13,000 against a ₹10,000 limit.
+- **The three-part budget sum, both halves.** ₹40,000 refused against a
+  ₹100,000 line already committed ₹70,000; and — the case that matters —
+  ₹35,000 refused against a ₹50,000 line with ₹20,000 already _spent_ and
+  nothing committed. A control that watched commitments alone would have
+  passed the second.
+- A one-legged virement, an unbalanced one (+15,000 / −10,000), an
+  operating→capital one, and a self-approved one: all four refused, the
+  deferred ones at COMMIT with 0 revisions stored. A balanced one accepted and
+  moved both lines.
+- `budget_revisions` refused both UPDATE and DELETE.
+- 17 API integration tests for NC-022; 42 across the three finance suites.
+
+**Found and fixed while building**
+
+- `ON DELETE CASCADE` on the budget history was a lie: the append-only trigger
+  refused the cascaded delete and Postgres blamed `budget_revisions` for a
+  statement that named `budget_cycles`. Changed to `RESTRICT`, so the
+  constraint declares what is actually true (D-272).
+- `$2` type deduction failed inconsistently again (third occurrence in this
+  phase) — explicit `::text` casts.
+- Prisma modelled five of my foreign keys as drift because I had written the
+  columns without relations; every other FK in the repo is a modelled
+  relation, so these are now too.
+
+**Deferred**
+
+- **Capex requests** are not built. NC-022 lists them beside budgets, and the
+  commitment machinery already accepts `source_kind = 'capex_request'`, but
+  the approval workflow they need belongs with the rest of Phase 9's approval
+  matrices rather than in the ledger arc. Tracked as part of 9C.
+- **Forecasting** is likewise not built: `v_budget_position` gives the run-rate
+  inputs, but a forecast worth showing needs the HR and asset spend that 9B
+  and 9C bring.
+- The worker does not yet turn a GRN into a realised commitment. The route
+  exists (`PATCH /commitments/:id/release` with `becomes: 'realised'`) and is
+  tested; wiring it to the GRN event belongs with the ledger poster.
+
+**Open questions raised**
+
+- None blocking. The budget alert threshold defaults to 80% and is per line;
+  whether a hospital wants a group-wide default is a configuration question,
+  not an architectural one.
+
+**Next step**
+
+9B (People/HR), then 9C (assets and facilities), which is also where capex
+requests and forecasting land.
+
 ### 2026-10-01 · PE-009 · The half of the loop that was missing
 
 The assistant captured enquiries into `engage.appointment_requests` from the day

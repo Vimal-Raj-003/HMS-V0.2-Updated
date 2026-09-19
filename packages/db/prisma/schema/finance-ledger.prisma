@@ -54,6 +54,8 @@ model FinBook {
   legalEntity  FinLegalEntity  @relation(fields: [legalEntityId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   fiscalYears  FinFiscalYear[]
   journals     FinJournal[]
+  /// NC-022: a budget is drawn up against the book it will be measured in.
+  budgetCycles FinBudgetCycle[]
 
   @@unique([hospitalId, code], map: "uq_book_code")
   @@map("books")
@@ -137,6 +139,8 @@ model FinAccount {
   children FinAccount[] @relation("AccountTree")
   lines    FinJournalLine[]
   rules    FinPostingRule[]
+  /// NC-022: a budget line budgets one account, in one cost centre.
+  budgetLines FinBudgetLine[]
 
   @@unique([bookId, code], map: "uq_account_code")
   @@index([bookId, parentId], map: "accounts_tree_idx")
